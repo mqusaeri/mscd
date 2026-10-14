@@ -1,0 +1,89 @@
+# MSCD project guide for Claude Code
+
+Read this file first. It replaces the old instructions in `README.md`, which date from the Claude Design hand-off and are out of date.
+
+## What MSCD is
+
+MSCD (Management System Compliance Dashboard) is a platform that helps an organisation reach and keep ISO certification. It covers ISO/IEC 27001 (ISMS), ISO 9001 (QMS), ISO 22301 (BCMS) and ISO 37001 (ABMS). It traces each risk to its controls, documents and evidence, and tracks progress toward the certification audit. It runs on-premise with Docker Compose or on Kubernetes with Helm.
+
+## Status
+
+- All 39 work packages of `docs/platform/BUILD-PLAN.md` are built and verified. The working branch is `mscd-platform`.
+- The full stack runs with Docker Compose. A demo with sample data starts with `deploy/scripts/deploy-demo.sh`.
+- Open product questions and follow-ups are listed at the end of this file.
+
+## Repository layout
+
+| Path | Content |
+|---|---|
+| `apps/web` | React 18 and Vite web app. Views in `src/views` are generated from the design template |
+| `apps/server` | NestJS 11 on Fastify. Run modes: api, worker, storage-gateway, migrate. Kysely on PostgreSQL 16 |
+| `packages/shared` | zod API contract shared by web and server, OpenAPI generation |
+| `packages/pack-tools` | signing and checking of framework packs and licences |
+| `packs/sources` | framework pack sources per standard (clauses, controls, documents, activities) |
+| `tools/mock-providers` | mock Microsoft 365, Google Drive and identity providers for tests and the demo |
+| `tools/smoke` | full-stack smoke test (`npm run test:smoke`) |
+| `deploy` | Dockerfiles, NGINX, Compose files, installer scripts, Helm chart |
+| `docs` | architecture, development, on-premise install guide, build plan, hand-off notes |
+| `project` | the original design prototypes from Claude Design (source of the generated views) |
+
+## Key documents
+
+- `docs/ARCHITECTURE.md`: system design.
+- `docs/platform/BUILD-PLAN.md`: the plan of record. Rules R-01 to R-13, contracts, business rules (BR-xx), role matrix (F.6), acceptance per work package.
+- `docs/platform/ui-contract.md`: what every screen shows and which API feeds it.
+- `docs/platform/handoff/WP-xx.md`: what each work package built, its deviations and follow-ups.
+- `docs/DEVELOPMENT.md`: local development.
+- `docs/INSTALL-ONPREM.md`: install guide for operators.
+- `docs/product/USER-FLOWS.md`: user flows and terminology for the product owner.
+
+## Commands
+
+```bash
+npm ci
+npm run typecheck && npm run lint && npm test     # unit tests, all workspaces
+npm run test:int                                  # server integration tests (needs Docker)
+npm run test:e2e                                  # web E2E in sample mode
+npm run test:e2e:api                              # web E2E against a real API stack (needs Docker)
+npm run test:smoke                                # full stack in Compose, 11-step journey
+npm run check:text                                # writing rules on docs
+bash deploy/scripts/deploy-demo.sh                # demo stack on a test server
+```
+
+Behind a TLS-inspecting proxy, pass the proxy CA to image builds: `--secret id=build_ca,src=<ca file>` (scripts read `MSCD_BUILD_CA`).
+
+## Rules that are easy to break
+
+- **Generated views.** Do not edit `apps/web/src/views/*.jsx` by hand. Edit `project/MSCD Mockup.dc.html` (or `apps/web/scripts/convert-template.mjs`), then run `npm run gen:views -w @mscd/web`. `npm run gen:views:check -w @mscd/web` fails when they drift.
+- **Accessibility.** No text under 12px, WCAG AA contrast in light and dark themes. `apps/web/e2e/contrast.spec.js` enforces both.
+- **Demo material.** Files in `deploy/compose/config/demo-secrets/`, `packages/pack-tools/dev-keys/` and the seed data are public development values. They must never reach a release. `deploy/scripts/check-release-artefacts.sh` checks bundles and images.
+- **Writing rules** for docs and UI text: plain English, no em dash, no centre dot. `npm run check:text` checks docs.
+- **Demo login.** Password `Mscd-Demo-2026!` for every demo user; TOTP code from `node tools/scripts/demo-totp.mjs <handle>`.
+
+## Working with the product owner
+
+- Answer in simple English, even when the message is in Indonesian.
+- No em dashes, no centre dots, no "X, not Y" sentences, no meta commentary, no small or low-contrast text in anything you produce.
+- The product owner is not an ISO auditor. Use correct audit terms and explain them in plain words.
+
+## Open product questions (defaults are built)
+
+1. Google Drive repositories in a personal My Drive: allowed (default) or Shared Drives only.
+2. Pending work per person: MS Manager and Programme Owner see detail, Top Management sees totals only (built).
+3. Internal Auditors verifying items and seeing everyone's pending list: no (default).
+4. Phase lock: phases shown in order, hard block only at critical gates (default).
+5. Licence user count: active members without guests (default).
+6. Programme Owner keeps verify and approve rights: yes (default).
+7. New SaaS organisations: SSO-only login is not the default.
+8. Moved or changed files count as "cannot be verified" in evidence lists without lowering the item status (default).
+9. Terminology changes proposed in `docs/product/USER-FLOWS.md` are waiting for approval.
+
+## Open follow-ups
+
+- Installer scripts: save the Compose project name so an install made with `COMPOSE_PROJECT_NAME` can be removed without it; optionally accept a default organisation with `install.sh --yes`.
+- Server: a command to grant `platform_operator` and an offline `mscd-server diagnostics` command.
+- Helm chart: a Job or documented values for `tenant create` and `admin create-user`.
+- Bundle: a third-party notices file (the common-passwords list carries the SecLists notice).
+- `docs/DEVELOPMENT.md`: a section for the API E2E project and the current default data source (`api`).
+- Smoke test: make the strict picker layout check the default now that the picker scrolls.
+- Web E2E stack (`apps/web/e2e-api/stack.mjs`): only remove leftover containers whose expiry label has passed.
