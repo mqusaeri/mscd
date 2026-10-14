@@ -834,7 +834,9 @@ export function cycleItems(d: ScreenData, cycleId: string | undefined): CycleIte
   const id = cycleId ?? d.system.bundle.latestCycleId;
   if (cycleId && !rows.some((r) => r.cycleId === cycleId)) throw new NotFoundError('Unknown certification cycle');
   if (!id || isAuditor(d)) return [];
-  const own = d.scope.kind === 'own';
+  // Own-scoped roles see their own rows; Top Management too, since a row's due date cannot be blanked (F.7, Q-8,
+  // the CYCLE_ITEMS rule of ScopePolicyService.projectSnapshot).
+  const own = d.scope.kind === 'own' || d.scope.kind === 'top_management';
   return rows
     .filter((r) => r.cycleId === id && (!own || r.owner === d.scope.handle))
     .sort((a, b) => a.position - b.position)

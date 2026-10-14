@@ -4,8 +4,9 @@
 // - a Domain Owner sees the records they own, and a `restricted` document only when they own it;
 // - the guest auditor gets the G.5 projection on every GET route: no holder names, no `web_url`, evidence only
 //   through ready evidence packs;
-// - Top Management gets pending data as aggregates only: no holder or due date of anyone else's pending work in
-//   `GET /ui/ms/{ms}`, with the counts of the full view (WP-30 fix of `ScopePolicyService.projectSnapshot`).
+// - Top Management gets pending data as aggregates only: no holder or due date of anyone else's pending work on any
+//   GET route of the system (`GET /ui/ms/{ms}`, the per-screen endpoints and the register lists), with the counts of
+//   the full view (WP-30 fixes of `ScopePolicyService.projectSnapshot` and of the D-04 list reads).
 import { API_ROUTES, pathParamNames, type RouteDef, type UiMsSnapshot, type UiOrgSnapshot } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -45,6 +46,88 @@ function holdersIn(body: unknown, out: string[] = [], key = ''): string[] {
       if ((k === 'owner' || k === 'holder' || k === 'h' || k === 'approver') && typeof v === 'string') out.push(`${k}=${v}`);
       else if (k === 'holder' && v && typeof v === 'object' && typeof (v as { handle?: unknown }).handle === 'string') out.push(`holder=${(v as { handle: string }).handle}`);
       holdersIn(v, out, k);
+    }
+  }
+  return out;
+}
+
+/** Keys naming the person who holds pending work, and keys of the dates that work is due. */
+const HOLDER_KEYS: ReadonlySet<string> = new Set(['owner', 'holder', 'h', 'approver', 'auditee']);
+const DUE_KEYS: ReadonlySet<string> = new Set(['due', 'dueAt', 'daysToDue', 'next', 'nextReviewAt', 'nextDueAt', 'targetFixAt', 'targetDate']);
+
+/**
+ * Per-person pending data of people other than `self` (Q-8): a holder key naming someone else, or a due date on a
+ * record whose holder is not `self`. Values `none` and null name nobody. The system card of `/ui/ms` (`ms`, with
+ * the manager and the gate approver) is kept for every reader.
+ */
+function pendingOfOthers(body: unknown, self: string, out: string[] = [], path = ''): string[] {
+  if (Array.isArray(body)) body.forEach((v, i) => pendingOfOthers(v, self, out, `${path}[${i}]`));
+  else if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    const handles: string[] = [];
+    for (const [k, v] of Object.entries(o)) {
+      if (!HOLDER_KEYS.has(k)) continue;
+      if (typeof v === 'string') handles.push(v);
+      else if (v && typeof v === 'object' && typeof (v as { handle?: unknown }).handle === 'string') handles.push((v as { handle: string }).handle);
+    }
+    for (const h of handles) if (h !== 'none' && h !== self) out.push(`${path} names ${h}`);
+    const held = handles.includes(self);
+    const hasHolder = [...HOLDER_KEYS].some((k) => k in o);
+    if (hasHolder && !held) {
+      for (const k of DUE_KEYS) if (o[k] !== undefined && o[k] !== null) out.push(`${path}.${k} = ${String(o[k])} without holder`);
+    }
+    for (const [k, v] of Object.entries(o)) if (!(path === '' && k === 'ms')) pendingOfOthers(v, self, out, `${path}.${k}`);
+  }
+  return out;
+}
+
+/**
+ * Keys that may name a person other than Top Management, and date keys that may stay on a record whose holder is
+ * hidden: past facts, not pending work (the product owner decision recorded in the WP-30 handoff, Q-8). Any other
+ * key naming someone, or any other date on such a record, fails the every-GET-route check below, so a later change
+ * that exposes a pending holder or due date under a new name does not pass unnoticed.
+ */
+const PAST_PERSON_KEYS: ReadonlySet<string> = new Set(['implementedBy', 'verifiedBy']);
+const PAST_DATE_KEYS: ReadonlySet<string> = new Set([
+  'implementedAt', 'verifiedAt', 'heldAt', 'raisedAt', 'detectedAt', 'assessedAt', 'updatedAt', 'scheduledAt', 'plannedAt',
+]);
+/** `date` of a phase activity is its verification date when the activity is verified, else its due date. */
+const pastDate = (o: Record<string, unknown>, k: string) => PAST_DATE_KEYS.has(k) || (k === 'date' && (o.st === 'verified' || o.status === 'verified'));
+const DATE_VALUE = /^\d{4}-\d{2}-\d{2}/;
+
+/** Handles of people named under a holder key anywhere in a body. */
+function handlesIn(body: unknown, out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(body)) for (const v of body) handlesIn(v, out);
+  else if (body && typeof body === 'object') {
+    for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+      if (HOLDER_KEYS.has(k) && typeof v === 'string' && v !== 'none') out.add(v);
+      else if (HOLDER_KEYS.has(k) && v && typeof v === 'object' && typeof (v as { handle?: unknown }).handle === 'string') out.add((v as { handle: string }).handle);
+      handlesIn(v, out);
+    }
+  }
+  return out;
+}
+
+/**
+ * Person and date keys outside the pinned lists: a key other than a holder key whose value is the handle of someone
+ * other than `self`, and on a record whose holder is hidden or someone else, a date under a key that is neither a
+ * due key nor a pinned past fact. Found keys are returned as `key` strings (one per key name).
+ */
+function unpinnedKeys(body: unknown, self: string, handles: ReadonlySet<string>, out: Set<string> = new Set(), parentKey = '', path = ''): Set<string> {
+  if (Array.isArray(body)) body.forEach((v, i) => unpinnedKeys(v, self, handles, out, parentKey, `${path}[${i}]`));
+  else if (typeof body === 'string') {
+    if (parentKey !== '' && !HOLDER_KEYS.has(parentKey) && !PAST_PERSON_KEYS.has(parentKey) && body !== self && handles.has(body)) out.add(`person ${parentKey}`);
+  } else if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    const holders = [...HOLDER_KEYS].filter((k) => k in o).map((k) => {
+      const v = o[k];
+      return v && typeof v === 'object' ? (v as { handle?: unknown }).handle : v;
+    });
+    const hidden = holders.length > 0 && !holders.includes(self);
+    for (const [k, v] of Object.entries(o)) {
+      if (path === '' && k === 'ms') continue;
+      if (hidden && typeof v === 'string' && DATE_VALUE.test(v) && !DUE_KEYS.has(k) && !pastDate(o, k)) out.add(`date ${k}`);
+      unpinnedKeys(v, self, handles, out, k, `${path}.${k}`);
     }
   }
   return out;
@@ -208,6 +291,91 @@ describe('J.5 owner scope and read projections on every GET route', () => {
     expect(problems).toEqual([]);
   });
 
+  it('gives Top Management no holder or due date of anyone else on every GET route of the system (Q-8)', async () => {
+    const hendra = await demoSession(full, db, 'hendra', 'ndt');
+    const problems: string[] = [];
+    let checked = 0;
+    let named = 0;
+    const unpinned = new Map<string, Set<string>>();
+    const handles = new Set<string>();
+    const replies: [string, unknown][] = [];
+    for (const def of MS_READS) {
+      await resetRateLimits(db);
+      const input = await readInput(db, def, 'ndt', 'isms');
+      if (!input) continue;
+      const reply = await callRoute(hendra, def, input);
+      problems.push(...reply.violations);
+      if (reply.status === 403 || reply.status === 404) continue;
+      if (reply.status !== 200) {
+        problems.push(`${def.id}: ${reply.status} ${reply.text.slice(0, 160)}`);
+        continue;
+      }
+      checked += 1;
+      problems.push(...pendingOfOthers(reply.body, 'hendra').map((p) => `${def.id}: ${p}`));
+      // The same route of the MS Manager names other people, so the check above is not empty by accident.
+      const manager = await callRoute(rina, def, input);
+      if (manager.status === 200 && pendingOfOthers(manager.body, 'hendra').length > 0) named += 1;
+      if (manager.status === 200) handlesIn(manager.body, handles);
+      replies.push([def.id, reply.body]);
+    }
+    // Person and date keys beyond the holder and due keys must be pinned past facts.
+    for (const [id, body] of replies) for (const key of unpinnedKeys(body, 'hendra', handles)) unpinned.set(key, (unpinned.get(key) ?? new Set()).add(id));
+    expect(Object.fromEntries([...unpinned].map(([k, ids]) => [k, [...ids]]))).toEqual({});
+    expect(checked).toBeGreaterThan(15);
+    expect(named).toBeGreaterThan(5);
+    expect(problems).toEqual([]);
+  });
+
+  it('gives Top Management the register lists with the full counts but no owner or due date of anyone else (Q-8)', async () => {
+    const hendra = await demoSession(full, db, 'hendra', 'ndt');
+    type Row = { code?: string; conditionCode?: string; owner: string | null; dueAt?: string | null; targetFixAt?: string | null; nextReviewAt?: string | null };
+    const lists: [string, string][] = [
+      ['findings', '/api/v1/ms/isms/findings?pageSize=200'],
+      ['corrective-actions', '/api/v1/ms/isms/corrective-actions?pageSize=200'],
+      ['self-assessment', '/api/v1/ms/isms/self-assessments?pageSize=200'],
+      ['risks', '/api/v1/ms/isms/registers/risks?pageSize=200'],
+    ];
+    let hidden = 0;
+    for (const [name, url] of lists) {
+      const top = await hendra.get<{ items: Row[]; total: number }>(url);
+      const manager = await rina.get<{ items: Row[]; total: number }>(url);
+      expect([top.status, manager.status], name).toEqual([200, 200]);
+      // The same rows and the same total: counts are those of the full data.
+      expect(top.body.total, name).toBe(manager.body.total);
+      expect(top.body.items.map((r) => r.code ?? r.conditionCode), name).toEqual(manager.body.items.map((r) => r.code ?? r.conditionCode));
+      top.body.items.forEach((row, i) => {
+        const full = manager.body.items[i]!;
+        if (full.owner === 'hendra') {
+          expect(row, `${name} ${row.code}`).toEqual(full);
+          return;
+        }
+        if (full.owner !== null && full.owner !== 'none') hidden += 1;
+        expect([row.owner, row.dueAt ?? null, row.targetFixAt ?? null, row.nextReviewAt ?? null], `${name} ${row.code ?? row.conditionCode}`).toEqual([
+          name === 'self-assessment' ? null : 'none', null, null, null,
+        ]);
+      });
+    }
+    expect(hidden).toBeGreaterThan(5);
+    // Neither the owner filter nor the search finds rows by the name of someone else.
+    const [someone] = (await rina.get<{ items: Row[] }>('/api/v1/ms/isms/registers/risks?pageSize=200')).body.items.filter((r) => r.owner !== 'hendra' && r.owner !== 'none');
+    expect(someone).toBeDefined();
+    expect((await hendra.get<{ total: number }>(`/api/v1/ms/isms/registers/risks?owner=${someone!.owner}`)).body.total).toBe(0);
+    expect((await hendra.get<{ total: number }>(`/api/v1/ms/isms/registers/risks?q=${someone!.owner}`)).body.total).toBe(0);
+    expect((await rina.get<{ total: number }>(`/api/v1/ms/isms/registers/risks?owner=${someone!.owner}`)).body.total).toBeGreaterThan(0);
+    // `owner=none` lists the rows that are really unowned, the same rows for every role (a hidden owner matches no
+    // owner filter).
+    let othersOwned = 0;
+    for (const register of ['risks', 'assets', 'metrics']) {
+      const url = `/api/v1/ms/isms/registers/${register}?pageSize=200&owner=none`;
+      const all = (await rina.get<{ items: Row[] }>(`/api/v1/ms/isms/registers/${register}?pageSize=200`)).body.items;
+      const unowned = all.filter((r) => r.owner === 'none').map((r) => r.code);
+      othersOwned += all.filter((r) => r.owner !== 'none' && r.owner !== 'hendra').length;
+      expect((await rina.get<{ items: Row[] }>(url)).body.items.map((r) => r.code), register).toEqual(unowned);
+      expect((await hendra.get<{ items: Row[] }>(url)).body.items.map((r) => r.code), register).toEqual(unowned);
+    }
+    expect(othersOwned).toBeGreaterThan(0);
+  });
+
   it('gives Top Management pending data as aggregates only in GET /ui/ms/{ms} (Q-8)', async () => {
     const hendra = await demoSession(full, db, 'hendra', 'ndt');
     const top = (await hendra.get<UiMsSnapshot>('/api/v1/ui/ms/isms')).body;
@@ -239,7 +407,7 @@ describe('J.5 owner scope and read projections on every GET route', () => {
     for (const item of hiddenItems) {
       if (item.kind === 'req') {
         const r = top.bundle.reqs.find((x) => x.id === item.id);
-        if (r) { joined += 1; expect([r.owner, r.due ?? null], item.key).toEqual([undefined, null]); }
+        if (r) { joined += 1; expect([r.owner, r.due ?? null, r.note], item.key).toEqual([undefined, null, undefined]); }
       } else if (item.kind === 'doc') {
         const doc = top.bundle.docs.find((x) => x.id === item.id);
         if (doc) { joined += 1; expect([doc.owner, doc.approver, doc.rev], item.key).toEqual([undefined, undefined, '']); }
@@ -251,9 +419,20 @@ describe('J.5 owner scope and read projections on every GET route', () => {
     expect(joined).toBeGreaterThan(0);
     // No bundle record of anyone else names a holder or a date.
     for (const r of top.bundle.reqs) if (r.owner !== undefined) expect(r.owner, r.id).toBe('hendra');
+    // Requirements of other people carry no blocker note, the same rule as the blocker text of phase activities
+    // (the readiness export prints the note of blocked controls).
+    for (const r of top.bundle.reqs) if (r.owner === undefined) expect(r.note, r.id).toBeUndefined();
     for (const doc of top.bundle.docs) if (doc.owner !== undefined || doc.approver !== undefined) expect(doc.owner, doc.id).toBe('hendra');
     for (const e of top.bundle.evs) if (e.owner !== undefined) expect(e.owner, e.code).toBe('hendra');
     for (const e of top.bundle.evs) if (e.owner === undefined) expect(e.next, e.code).toBeNull();
+    // Phase activities of other people: no holder, no blocker text, no due date; the activity counts stay.
+    expect(top.bundle.phases.map((p) => p.acts.length)).toEqual(manager.bundle.phases.map((p) => p.acts.length));
+    expect(manager.bundle.phases.flatMap((p) => p.acts).filter((a) => others(a.owner)).length).toBeGreaterThan(0);
+    for (const act of top.bundle.phases.flatMap((p) => p.acts)) {
+      if (act.owner !== 'hendra') expect([act.owner, act.blocker, act.st === 'verified' ? null : act.date], act.key).toEqual(['none', null, null]);
+    }
+    // A document Top Management owns keeps its owner but not the approver, unless that is Top Management too.
+    for (const doc of top.bundle.docs) if (doc.approver !== undefined) expect(doc.approver, doc.id).toBe('hendra');
     // Rows of PREP, CYCLE_ITEMS and DRIFT carry a due date, so only the caller's own rows are sent.
     expect(manager.PREP.length + manager.CYCLE_ITEMS.length).toBeGreaterThan(0);
     for (const row of top.PREP) expect(row[1]).toBe('hendra');

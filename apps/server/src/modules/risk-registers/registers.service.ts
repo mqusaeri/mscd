@@ -170,13 +170,27 @@ export class RegistersService {
                          and l.management_system_id = ${system.id} and l.deleted_at is null)
          order by t.position, t.code`.execute(trx);
       const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      // Top Management: pending data as aggregates only (F.7, Q-8): rows of other people carry no owner and no next
+      // review date, and the owner filter and the search match only what the caller sees.
       const items = rows
-        .map((row) => ({ row, item: this.itemOf(kind, row, row.owner_handle, row.links ?? []), ownerUserId: row.owner_user_id }))
-        .filter(({ row, item }) => {
-          if (query.owner !== undefined && item.owner !== query.owner) return false;
+        .map((row) => {
+          const item = this.itemOf(kind, row, row.owner_handle, row.links ?? []);
+          const shown = this.scope.holderShown(readScope, { ownerUserId: row.owner_user_id });
+          const hidden: RegisterItem = { ...item, owner: 'none' };
+          if (hidden.nextReviewAt !== undefined) hidden.nextReviewAt = null;
+          return { row, shown, item: shown ? item : hidden, ownerUserId: row.owner_user_id };
+        })
+        .filter(({ row, item, shown }) => {
+          // The owner filter matches the real owner, and only when it is shown: `owner=none` lists the rows that are
+          // really unowned, and a hidden owner matches no owner filter (so the filter means the same for every role).
+          if (query.owner !== undefined) {
+            const realOwner = row.owner_handle ?? 'none';
+            if ((!shown && realOwner !== 'none') || realOwner !== query.owner) return false;
+          }
           if (query.status !== undefined && item.status !== query.status) return false;
           if (words.length === 0) return true;
-          const haystack = [row.code, row.title, row.owner_name, row.owner_handle].filter(Boolean).join(' ').toLowerCase();
+          const person = shown ? [row.owner_name, row.owner_handle] : [];
+          const haystack = [row.code, row.title, ...person].filter(Boolean).join(' ').toLowerCase();
           return words.every((w) => haystack.includes(w));
         });
       const visible = this.scope.filter(readScope, items);

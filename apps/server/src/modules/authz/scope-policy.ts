@@ -140,7 +140,7 @@ export class ScopePolicyService implements ScopePolicy {
       case 'full':
         return { kind: 'full' };
       case 'top_management':
-        return { kind: 'top_management' };
+        return { kind: 'top_management', userId: principal.user.id };
       case 'own':
         return { kind: 'own', userId: principal.user.id };
       case 'external_auditor':
@@ -160,6 +160,17 @@ export class ScopePolicyService implements ScopePolicy {
       default:
         // External auditors see records only through the projection, which needs the pack context.
         return [];
+    }
+  }
+
+  holderShown(scope: ReadScope, record: ScopedRecord): boolean {
+    switch (scope.kind) {
+      case 'top_management':
+        return isOwnedBy(record, scope.userId);
+      case 'external_auditor':
+        return false;
+      default:
+        return true;
     }
   }
 
@@ -319,12 +330,20 @@ export class ScopePolicyService implements ScopePolicy {
       for (let i = 0; i < reqs.length; i += 1) {
         const r = reqs[i]!;
         if (shown(r.owner)) continue;
-        const { owner: _owner, ...rest } = r;
+        // Same rule as the phase activities below: no holder, no due date and no blocker note of other people.
+        const { owner: _owner, note: _note, ...rest } = r;
         reqs[i] = r.due === undefined ? rest : { ...rest, due: null };
       }
       for (let i = 0; i < docs.length; i += 1) {
         const d = docs[i]!;
-        if (shown(d.owner)) continue;
+        if (shown(d.owner)) {
+          // The caller's own document: the approver is someone else's pending review unless the caller approves it.
+          if (d.approver !== undefined && !shown(d.approver)) {
+            const { approver: _approver, ...rest } = d;
+            docs[i] = rest;
+          }
+          continue;
+        }
         const { owner: _owner, approver: _approver, ...rest } = d;
         docs[i] = { ...rest, rev: '' };
       }
@@ -333,6 +352,15 @@ export class ScopePolicyService implements ScopePolicy {
         if (shown(e.owner)) continue;
         const { owner: _owner, ...rest } = e;
         evs[i] = { ...rest, next: null };
+      }
+      // Phase activities of other people: no holder, no blocker text and no due date (a verified activity keeps
+      // its verification date, which is history, not pending work).
+      for (let i = 0; i < phases.length; i += 1) {
+        const phase = phases[i]!;
+        phases[i] = {
+          ...phase,
+          acts: phase.acts.map((a) => (shown(a.owner) ? a : { ...a, owner: NONE_HANDLE, blocker: null, date: a.st === 'verified' ? a.date : null })),
+        };
       }
       const ownRows = <T>(rows: T[], holder: (row: T) => string) => rows.filter((row) => shown(holder(row)));
       PREP.splice(0, PREP.length, ...ownRows(PREP, (row) => row[1]));

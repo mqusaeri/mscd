@@ -53,7 +53,8 @@ export class AuditActivitiesService {
          where a.audit_event_id = ${event.id} and a.management_system_id = ${system.id} and a.deleted_at is null
          order by a.position, a.template_code nulls last, a.title`.execute(trx);
       const items = rows.map((row) => ({ holderUserId: row.auditee_user_id, item: itemOf(row, row.auditee) }));
-      return this.scope.filter(readScope, items).map((v) => v.item);
+      // Top Management: pending data as aggregates only (F.7, Q-8), so no auditee other than the caller.
+      return this.scope.filter(readScope, items).map((v) => (this.scope.holderShown(readScope, v) ? v.item : { ...v.item, auditee: null }));
     });
   }
 

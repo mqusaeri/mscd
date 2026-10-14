@@ -33,7 +33,13 @@ describe('J.5 records of another system of the same organisation', () => {
     const known = foreign.get(table);
     if (known) return known;
     let id: string | undefined;
-    if (DIRECT.has(table)) {
+    if (table === 'entity_ms_link') {
+      // A QMS link of a record that has no ISMS link: a manager of ISMS may manage the links of records linked to ISMS.
+      id = (await rowsIn<{ id: string }>(db, ORG, sql`select l.id from entity_ms_link l where l.management_system_id = ${qms} and l.deleted_at is null
+        and not exists (select 1 from entity_ms_link p where p.entity_type = l.entity_type and p.entity_id = l.entity_id
+                          and p.management_system_id = ${isms} and p.deleted_at is null)
+        order by l.id limit 1`))[0]?.id;
+    } else if (DIRECT.has(table)) {
       id = (await rowsIn<{ id: string }>(db, ORG, sql`select id from ${sql.table(table)} where management_system_id = ${qms} and deleted_at is null order by id limit 1`))[0]?.id;
     } else {
       id = (await rowsIn<{ id: string }>(db, ORG, sql`select x.id from ${sql.table(table)} x where x.deleted_at is null

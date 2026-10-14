@@ -88,7 +88,8 @@ export class ManagementReviewsService {
          order by r.planned_at desc nulls last, r.code`.execute(trx);
       const inputs = await this.inputsOf(trx, rows.map((r) => r.id));
       const items = rows.map((row) => ({ ownerUserId: row.owner_user_id, item: itemOf(row, row.owner_handle, row.linked ?? [], inputs.get(row.id) ?? []) }));
-      return this.scope.filter(readScope, items).map((v) => v.item);
+      // Top Management: pending data as aggregates only (F.7, Q-8), so no owner of other people's reviews.
+      return this.scope.filter(readScope, items).map((v) => (this.scope.holderShown(readScope, v) ? v.item : { ...v.item, owner: 'none' }));
     });
   }
 

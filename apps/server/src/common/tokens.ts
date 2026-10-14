@@ -179,7 +179,7 @@ export type ReadScope =
   | { kind: 'full' }
   | { kind: 'own'; userId: string }
   | { kind: 'external_auditor'; userId: string }
-  | { kind: 'top_management' };
+  | { kind: 'top_management'; userId: string };
 
 /** A record as `ScopePolicy.filter` needs it. */
 export interface ScopedRecord {
@@ -192,6 +192,12 @@ export interface ScopePolicy {
   readScope(trx: Trx, principal: Principal, ms: string, authz: AuthzState): Promise<ReadScope>;
   /** The records the scope may see (owner scoping keeps records whose owner or holder is the user). */
   filter<T extends ScopedRecord>(scope: ReadScope, records: readonly T[]): T[];
+  /**
+   * True when the caller may see who holds a record and when its pending work is due (F.7, Q-8): Top Management
+   * only for records whose owner or holder is the caller (pending data as aggregates only), external auditors
+   * never, everyone else always. List reads blank the holder and the due dates of a record when this is false.
+   */
+  holderShown(scope: ReadScope, record: ScopedRecord): boolean;
   /** F.7 `canReadObject`: the object must be referenced by a record of `ms` the caller can see. */
   canReadObject(trx: Trx, principal: Principal, ms: string, storageObjectId: string, authz: AuthzState): Promise<boolean>;
 }

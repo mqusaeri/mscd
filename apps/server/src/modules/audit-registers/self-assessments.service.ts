@@ -72,12 +72,19 @@ export class SelfAssessmentsService {
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
       const rows = await this.conditions(trx, system.id, null);
       const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      // Top Management: pending data as aggregates only (F.7, Q-8): no owner or target date of other people's gaps,
+      // and the search does not match their names.
       const items = rows
-        .map((row) => ({ row, item: itemOf(row) }))
-        .filter(({ row, item }) => {
+        .map((row) => {
+          const item = itemOf(row);
+          const shown = this.scope.holderShown(readScope, { ownerUserId: row.owner_user_id });
+          return { row, shown, item: shown ? item : { ...item, owner: null, targetFixAt: null } };
+        })
+        .filter(({ row, item, shown }) => {
           if (query.status !== undefined && item.status !== query.status) return false;
           if (words.length === 0) return true;
-          const haystack = [row.code, row.text, row.requirement_code, row.owner_name, row.owner_handle, row.note].filter(Boolean).join(' ').toLowerCase();
+          const person = shown ? [row.owner_name, row.owner_handle] : [];
+          const haystack = [row.code, row.text, row.requirement_code, ...person, row.note].filter(Boolean).join(' ').toLowerCase();
           return words.every((w) => haystack.includes(w));
         })
         .map(({ row, item }) => ({ ownerUserId: row.owner_user_id, item }));

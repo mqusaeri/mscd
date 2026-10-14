@@ -89,8 +89,11 @@ describe('self-assessment and audit activities', () => {
       const [finding] = await rowsOf<Record<string, unknown>>(db, 'tst', sql`select * from finding where id = ${raised.body.ref!.id}`);
       expect(finding).toMatchObject({ source: 'self_assessment', title: condition.text, clause_ref: condition.requirement_code, due_at: '2026-12-01', status: 'open' });
       expect((await maya.post(`/api/v1/ms/isms/self-assessments/${id}/raise-finding`, { classification: 'minor' })).status).toBe(409);
-      const page = await hendra.get<Page<SelfAssessmentItem>>(`${SELF('isms')}?status=gap`);
+      const page = await rina.get<Page<SelfAssessmentItem>>(`${SELF('isms')}?status=gap`);
       expect(page.body.items).toEqual([expect.objectContaining({ conditionCode: condition.code, owner: 'bagus', targetFixAt: '2026-12-01', findingCode: 'SA-2026-01' })]);
+      // Top Management gets the row without its owner and target date (F.7, Q-8, WP-30).
+      const top = await hendra.get<Page<SelfAssessmentItem>>(`${SELF('isms')}?status=gap`);
+      expect(top.body.items).toEqual([expect.objectContaining({ conditionCode: condition.code, owner: null, targetFixAt: null, findingCode: 'SA-2026-01' })]);
       // The gap's owner (a Domain Owner, own scope) sees the row; others do not.
       expect((await bagus.get<Page<SelfAssessmentItem>>(SELF('isms'))).body.items.map((i) => i.conditionCode)).toEqual([condition.code]);
     });
@@ -158,8 +161,10 @@ describe('self-assessment and audit activities', () => {
       expect(planned.status).toBe(200);
       expect((await rina.patch(patchUrl, { auditeeHandle: 'sari' })).body).toMatchObject({ status: 422, rule: 'NOT-A-MEMBER' });
       expect((await rina.patch(patchUrl, { status: 'done' })).status).toBe(200);
-      const after = (await hendra.get<AuditActivityItem[]>(url())).body[0];
+      const after = (await rina.get<AuditActivityItem[]>(url())).body[0];
       expect(after).toMatchObject({ auditee: 'bagus', scheduledAt: '2027-02-10', status: 'done', note: 'Bring the scope statement' });
+      // Top Management sees the activity without its auditee (F.7, Q-8, WP-30).
+      expect((await hendra.get<AuditActivityItem[]>(url())).body[0]).toMatchObject({ auditee: null, status: 'done' });
       expect((await auditOf(db, 'tst', first!.ref.id)).map((a) => a.action)).toEqual(['audit_activity.updated', 'audit_activity.updated', 'audit_activity.updated']);
       // The auditee (own scope) sees the activity they hold.
       expect((await bagus.get<AuditActivityItem[]>(url())).body.map((a) => a.ref.id)).toEqual([first!.ref.id]);

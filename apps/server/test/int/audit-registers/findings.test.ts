@@ -75,7 +75,7 @@ describe('findings and corrective actions', () => {
     expect(row).toMatchObject({ status: 'open', raised_at: TODAY, source: 'certification_audit', audit_event_id: eventId });
     expect(await auditOf(db, 'tst', ids.major)).toEqual([expect.objectContaining({ action: 'finding.created', actor: 'rina' })]);
 
-    const page = await hendra.get<Page<FindingItem>>(`${FINDINGS('isms')}?classification=major&q=privileged`);
+    const page = await rina.get<Page<FindingItem>>(`${FINDINGS('isms')}?classification=major&q=privileged`);
     expect(page.status).toBe(200);
     expect(pageOf(FindingItem).safeParse(page.body).success).toBe(true);
     expect(page.body.items).toEqual([
@@ -137,9 +137,13 @@ describe('findings and corrective actions', () => {
       systemic_check_text: 'Checked every platform with privileged groups', action_text: 'Quarterly review task with a named owner', implemented_at: TODAY,
     });
 
-    const list = await hendra.get<Page<CorrectiveActionItem>>(CAS('isms'));
+    const list = await rina.get<Page<CorrectiveActionItem>>(CAS('isms'));
     expect(pageOf(CorrectiveActionItem).safeParse(list.body).success).toBe(true);
     expect(list.body.items.find((a) => a.code === 'CA-JA-01')).toMatchObject({ implementedBy: 'rina', owner: 'bagus', findings: [{ code: 'JA-2026-01' }, { code: 'JA-2026-02' }] });
+    // Top Management gets the action without its owner and due date (F.7, Q-8, WP-30).
+    const top = await hendra.get<Page<CorrectiveActionItem>>(CAS('isms'));
+    expect(pageOf(CorrectiveActionItem).safeParse(top.body).success).toBe(true);
+    expect(top.body.items.find((a) => a.code === 'CA-JA-01')).toMatchObject({ owner: 'none', dueAt: null, findings: [{ code: 'JA-2026-01' }, { code: 'JA-2026-02' }] });
     const findings = await hendra.get<Page<FindingItem>>(FINDINGS('isms'));
     expect(findings.body.items.find((f) => f.code === 'JA-2026-02')?.correctiveActions).toEqual([expect.objectContaining({ code: 'CA-JA-01', status: 'effectiveness_verification' })]);
   });

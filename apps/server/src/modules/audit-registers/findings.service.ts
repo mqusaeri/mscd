@@ -99,13 +99,20 @@ export class FindingsService {
            and (${query.source ?? null}::text is null or f.source = ${query.source ?? null})
          order by f.position, f.code`.execute(trx);
       const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      // Top Management: pending data as aggregates only (F.7, Q-8): no owner or due date of other people's findings,
+      // and the search does not match their names.
+      const shown = (row: FindingRow) => this.scope.holderShown(readScope, { ownerUserId: row.owner_user_id });
       const items = rows
         .filter((row) => {
           if (words.length === 0) return true;
-          const haystack = [row.code, row.title, row.clause_ref, row.owner_name, row.owner_handle, row.status_note].filter(Boolean).join(' ').toLowerCase();
+          const person = shown(row) ? [row.owner_name, row.owner_handle] : [];
+          const haystack = [row.code, row.title, row.clause_ref, ...person, row.status_note].filter(Boolean).join(' ').toLowerCase();
           return words.every((w) => haystack.includes(w));
         })
-        .map((row) => ({ ownerUserId: row.owner_user_id, item: itemOf(row, row.owner_handle, row.event_label, row.actions ?? []) }));
+        .map((row) => {
+          const item = itemOf(row, row.owner_handle, row.event_label, row.actions ?? []);
+          return { ownerUserId: row.owner_user_id, item: shown(row) ? item : { ...item, owner: 'none', dueAt: null } };
+        });
       const visible = this.scope.filter(readScope, items);
       const start = (query.page - 1) * query.pageSize;
       return { items: visible.slice(start, start + query.pageSize).map((v) => v.item), page: query.page, pageSize: query.pageSize, total: visible.length };

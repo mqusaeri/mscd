@@ -102,7 +102,10 @@ export class CorrectiveActionsService {
            and (${query.status ?? null}::text is null or c.status = ${query.status ?? null})
          order by c.code`.execute(trx);
       const items = rows.map((row) => ({ ownerUserId: row.owner_user_id, holderUserId: row.implemented_by_user_id, item: itemOf(row) }));
-      const visible = this.scope.filter(readScope, items);
+      // Top Management: pending data as aggregates only (F.7, Q-8), so no owner or due date of other people's actions.
+      const visible = this.scope
+        .filter(readScope, items)
+        .map((v) => (this.scope.holderShown(readScope, v) ? v : { ...v, item: { ...v.item, owner: 'none', dueAt: null } }));
       const start = (query.page - 1) * query.pageSize;
       return { items: visible.slice(start, start + query.pageSize).map((v) => v.item), page: query.page, pageSize: query.pageSize, total: visible.length };
     });
