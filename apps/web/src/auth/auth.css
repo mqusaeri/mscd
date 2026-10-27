@@ -43,8 +43,10 @@ body:has(.au-root[data-theme="dark"]),body:has(.au-boot[data-theme="dark"]){back
 .au-chain{display:block;overflow:visible;margin-bottom:34px;width:100%;height:auto}
 /* The chain scales with the hero (100cqw wide, at most its 520-unit viewBox), so a label renders at
    font-size x 100cqw / 520. The second font-size is the chord of 12px x 520 / width between 300px and 520px; it lies
-   above that curve, so no label renders below 12px at any hero width the layout shows (about 360px and up). */
-.au-chain text{font-family:var(--au-ffm);font-size:12px;font-size:max(12px,calc(32.8px - 4cqw));fill:#b9b2a6}
+   above that curve, so no label renders below 12px at any hero width the layout shows (about 360px and up).
+   The labels sit clear of the chain line at every hero width (CHAIN_LABELS in ui.tsx); a thin halo in the panel
+   colour, painted under the glyphs, keeps them clean over the threads and the node light. */
+.au-chain text{font-family:var(--au-ffm);font-size:12px;font-size:max(12px,calc(32.8px - 4cqw));fill:#b9b2a6;paint-order:stroke;stroke:#0f0e0c;stroke-width:3px;stroke-linejoin:round}
 /* The signal: one short bright dash the motion moves along the chain (pathLength 1); hidden between runs. */
 .au-chain-signal{opacity:0;stroke-linecap:round;pointer-events:none}
 .au-chain-signal-glow{stroke:rgba(255,190,130,.3);stroke-width:4.5}

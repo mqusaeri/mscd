@@ -31,16 +31,21 @@ export function Icon({ d, size = 16, color = 'currentColor', strokeWidth = 2 }: 
 // Brand panel
 // ---------------------------------------------------------------------------------------------------------------
 
-// The six nodes of the chain (positions in ./motion/threads.ts, which the motion shares) and their label rows.
-const CHAIN_LABELS: { ty: number; key: keyof typeof TEXT }[] = [
+// The six nodes of the chain (positions in ./motion/threads.ts, which the motion shares) and their labels: the
+// baseline `ty` and, for the two nodes on the steep parts of the curve, a centre `tx` left of the node. A label grows
+// with the font size of auth.css (12 to about 17.8 viewBox units as the hero narrows), so Risk sits high on the open
+// side of the rising curve and Document low on the open side of the falling one. Every label box keeps at least
+// 4.8 units between itself and the signal stroke at every hero width, in English and Indonesian, so no line of the
+// chain runs through a label.
+const CHAIN_LABELS: { tx?: number; ty: number; key: keyof typeof TEXT }[] = [
   { ty: 138, key: 'chainIssue' },
-  { ty: 60, key: 'chainRisk' },
+  { tx: 112, ty: 44, key: 'chainRisk' },
   { ty: 22, key: 'chainControl' },
-  { ty: 108, key: 'chainDocument' },
+  { tx: 310, ty: 122, key: 'chainDocument' },
   { ty: 138, key: 'chainEvidence' },
   { ty: 22, key: 'chainFinding' },
 ];
-const CHAIN_NODES = CHAIN_POINTS.map(([x, y], i) => ({ x, y, ...CHAIN_LABELS[i], filled: i === EVIDENCE }));
+const CHAIN_NODES = CHAIN_POINTS.map(([x, y], i) => ({ x, y, tx: CHAIN_LABELS[i].tx ?? x, ty: CHAIN_LABELS[i].ty, key: CHAIN_LABELS[i].key, filled: i === EVIDENCE }));
 /** One short dash per path length (pathLength 1) with a longer gap: the signal the motion moves along the chain. */
 const SIGNAL_DASH = `${SIGNAL.dash} 1.2`;
 
@@ -98,7 +103,7 @@ export function BrandPanel({ lang, facts }: { lang: Lang; facts: string[] }) {
           {CHAIN_NODES.map((n) => (
             <g key={n.key}>
               <circle className="au-chain-dot" cx={n.x} cy={n.y} r="7" fill={n.filled ? '#e8731a' : '#0f0e0c'} stroke="#e8731a" strokeWidth="2.5" />
-              <text x={n.x} y={n.ty} textAnchor="middle">{li(TEXT[n.key], lang)}</text>
+              <text x={n.tx} y={n.ty} textAnchor="middle">{li(TEXT[n.key], lang)}</text>
             </g>
           ))}
         </svg>
