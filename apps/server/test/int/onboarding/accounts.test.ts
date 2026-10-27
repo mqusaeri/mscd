@@ -1,7 +1,8 @@
 // Accounts across organisations (Milestone 2 D.1, D.2): an existing active account invited by another organisation
 // (the same 202 as for a new address, the email and the `membership_invited` notification in its home organisation),
-// the pending memberships of `GET /me` with accept and decline, new recovery codes (old codes stop working, ten new
-// ones, audit and security email), the security overview and `POST /notifications/read-all`.
+// the pending memberships of `GET /me` (the time of the invitation, not of the last change of its row) with accept and
+// decline, new recovery codes (old codes stop working, ten new ones, audit and security email), the security overview
+// and `POST /notifications/read-all`.
 import { API_ROUTES, Me, MeSecurity, type RecoveryCodesResponse } from '@mscd/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Clock } from '../../../src/common/clock';
@@ -20,6 +21,21 @@ import { devLicence } from '../packs/fixtures';
 import { addPerson, createOnboardingApp, inPlatform, inTenant, platformAudit, resetRateLimits, sessionIn, type Client, type Person } from './helpers';
 
 const route = (id: string) => API_ROUTES.find((r) => r.id === id)!;
+
+/** The time of the latest `user.invited` entry of an organisation for a user, as `Me.pendingMemberships` shows it. */
+async function invitedEntryAt(db: Parameters<typeof inPlatform>[0], orgId: string, userId: string): Promise<string> {
+  const row = await inPlatform(db, (trx) =>
+    trx
+      .selectFrom('platform.audit_log')
+      .select('occurred_at')
+      .where('action', '=', 'user.invited')
+      .where('organization_id', '=', orgId)
+      .where('entity_id', '=', userId)
+      .orderBy('seq', 'desc')
+      .executeTakeFirstOrThrow(),
+  );
+  return new Date(row.occurred_at).toISOString();
+}
 
 async function until<T>(read: () => Promise<T | undefined | null>, timeoutMs = 10_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -124,9 +140,21 @@ describe('accounts across organisations (Milestone 2 D.1, D.2)', () => {
     it('lists the pending membership in GET /me with the organisation, the inviter and the time', async () => {
       const current = await me(dinaClient);
       expect(current.org?.slug).toBe('home');
-      expect(current.pendingMemberships).toEqual([{ org: 'other', name: 'PT Other', invitedBy: otherAdmin.displayName, invitedAt: expect.any(String) }]);
-      expect(Number.isNaN(Date.parse(current.pendingMemberships![0]!.invitedAt))).toBe(false);
+      const invitedAt = await invitedEntryAt(db, other.id, dina.id);
+      expect(current.pendingMemberships).toEqual([{ org: 'other', name: 'PT Other', invitedBy: otherAdmin.displayName, invitedAt }]);
       expect(current.orgs.map((o) => o.id)).toEqual(['home']);
+
+      // A later change of the invited row (its admin roles) moves its updated_at, not the time of the invitation.
+      const changeRoles = (roles: ('tenant_admin' | 'storage_admin')[]) =>
+        inPlatform(db, (trx) => trx.updateTable('platform.org_membership').set({ admin_roles: roles }).where('user_id', '=', dina.id).where('organization_id', '=', other.id).execute());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await changeRoles(['storage_admin']);
+      const changed = await inPlatform(db, (trx) =>
+        trx.selectFrom('platform.org_membership').select('updated_at').where('user_id', '=', dina.id).where('organization_id', '=', other.id).executeTakeFirstOrThrow(),
+      );
+      expect(new Date(changed.updated_at).toISOString() > invitedAt).toBe(true);
+      expect((await me(dinaClient)).pendingMemberships).toEqual([expect.objectContaining({ org: 'other', invitedAt })]);
+      await changeRoles([]);
     });
 
     it('accepts the membership: it leaves the pending list and becomes switchable', async () => {
@@ -175,7 +203,13 @@ describe('accounts across organisations (Milestone 2 D.1, D.2)', () => {
     it('lets the organisation invite the account again after a decline', async () => {
       const again = await otherTa.post('/api/v1/admin/users', { email: eko.email, displayName: eko.displayName, adminRoles: [] });
       expect(again.status, again.text).toBe(202);
-      expect((await me(ekoClient)).pendingMemberships).toEqual([expect.objectContaining({ org: 'other' })]);
+      // The membership row is the one declined before (its created_at is older); the time shown is the new invitation's.
+      const invitedAt = await invitedEntryAt(db, other.id, eko.id);
+      const row = await inPlatform(db, (trx) =>
+        trx.selectFrom('platform.org_membership').select('created_at').where('user_id', '=', eko.id).where('organization_id', '=', other.id).executeTakeFirstOrThrow(),
+      );
+      expect(new Date(row.created_at).toISOString() < invitedAt).toBe(true);
+      expect((await me(ekoClient)).pendingMemberships).toEqual([expect.objectContaining({ org: 'other', invitedAt })]);
     });
   });
 
