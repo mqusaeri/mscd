@@ -120,6 +120,29 @@ export async function msIdOf(db: TestDatabase, org: DemoOrg, ms: string): Promis
 }
 
 /**
+ * A new audit event of a system (Milestone 2 D.2 checks depend on its type), dated 2026-01-15, before the demo date
+ * of the test profile, so it never becomes the next audit of the system.
+ */
+export async function addAuditEvent(db: TestDatabase, org: DemoOrg, ms: string, eventType: string): Promise<string> {
+  const msId = await msIdOf(db, org, ms);
+  const [row] = await rowsIn<{ id: string }>(db, org, sql`
+    insert into audit_event (management_system_id, event_type, name_en, name_id, short_label, scheduled_at)
+    values (${msId}, ${eventType}, 'Fixture audit', 'Audit fixture', 'Fixture', date '2026-01-15')
+    returning id`);
+  return row!.id;
+}
+
+/** A new audit activity of an audit event, in the system of the event. */
+export async function addAuditActivity(db: TestDatabase, org: DemoOrg, auditEventId: string): Promise<string> {
+  const [row] = await rowsIn<{ id: string }>(db, org, sql`
+    insert into audit_activity (audit_event_id, management_system_id, title)
+    select id, management_system_id, 'Fixture activity' from audit_event where id = ${auditEventId}
+    returning id`);
+  if (!row) throw new Error(`No audit event ${auditEventId} in ${org}`);
+  return row.id;
+}
+
+/**
  * A person with an active membership in `org` and exactly the given roles: business roles in the named systems,
  * organisation roles in the membership, and optionally the platform operator role.
  */

@@ -63,8 +63,11 @@ describe('Kysely types and the migrated schema (C.7)', () => {
       for (const c of listed) if (!columns.includes(c)) columnDiffs.push(`${table}.${c} is not in the database`);
     }
     expect(columnDiffs).toEqual([]);
-    // 112 tables of Milestone 1, then Milestone 2: tenant 0008 adds three, platform 0005 two (M2-02).
-    expect(declared.size).toBe(112 + 3 + 2);
+    // 112 tables of Milestone 1, then Milestone 2: tenant 0008 adds three, platform 0005 two (M2-02); the ref migration
+    // of M2-03 adds its own. The comparison above already ties the list to the database, so a later table needs no edit.
+    expect(declared.size).toBeGreaterThanOrEqual(112 + 3 + 2);
+    const milestone2 = ['document_code_link', 'competence_record', 'import_run', 'platform.organization_status_event', 'platform.entitlement'];
+    expect(milestone2.filter((t) => !declared.has(t))).toEqual([]);
   });
 
   it('keeps the kysely_migration type of the platform schema in line with the Kysely Migrator', async () => {

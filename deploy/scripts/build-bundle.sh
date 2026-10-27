@@ -376,15 +376,35 @@ build_image() {
     run_logged "$log" docker "${args[@]}" "$@" "$REPO_DIR"
 }
 
-# os_updates_result LOG: what happened to the Alpine updates in that build.
+# os_updates_result LOG: what happened to the Alpine updates in that build:
+# skipped, applied, not-applied, cached or unknown. BuildKit's plain progress
+# prints a step as "#<n> [<stage> i/k] RUN <command>" and the step's output as
+# "#<n> <seconds> <text>". The command of the update step holds the words of its
+# own warning, so only output lines of that step count. A step taken from the
+# build cache prints no output: with --os-updates true its layer passed the
+# update (the build fails otherwise), with auto the earlier result is not in
+# this log (cached).
 os_updates_result() {
+    local log=$1 steps id result=applied
     if [[ $OS_UPDATES == false ]]; then
         echo skipped
-    elif grep -q 'apk update failed' "$1"; then
-        echo not-applied
-    else
-        echo applied
+        return 0
     fi
+    steps=$(sed -nE 's/^#([0-9]+) \[[^]]*\] RUN .*apk update failed.*/\1/p' "$log" | sort -u)
+    if [[ -z $steps ]]; then
+        echo unknown
+        return 0
+    fi
+    for id in $steps; do
+        if grep -Eq "^#$id [0-9]+(\.[0-9]+)? WARNING: apk update failed" "$log"; then
+            echo not-applied
+            return 0
+        fi
+        if [[ $OS_UPDATES != true ]] && grep -Eq "^#$id CACHED\$" "$log"; then
+            result=cached
+        fi
+    done
+    echo "$result"
 }
 
 build_images() {
@@ -416,6 +436,9 @@ build_images() {
     if [[ $OS_RESULT_WEB == not-applied || $OS_RESULT_SERVER == not-applied ]]; then
         warn "Alpine updates were NOT applied (the mirrors could not be reached); the scan decides whether the base is current enough"
         detail "Build with --os-updates true on a machine that reaches the Alpine mirrors for a release."
+    elif [[ $OS_RESULT_WEB == cached || $OS_RESULT_SERVER == cached ]]; then
+        warn "The Alpine update step came from the build cache (web $OS_RESULT_WEB, server $OS_RESULT_SERVER), so this build cannot show whether the updates were applied"
+        detail "Build with --os-updates true for a release: a cached layer then always holds the updates."
     fi
 }
 
@@ -524,6 +547,8 @@ scan_images() {
     elif [[ $SCAN == auto ]]; then
         if [[ $OS_RESULT_WEB == not-applied || $OS_RESULT_SERVER == not-applied || $OS_UPDATES == false ]]; then
             warn "The Alpine updates were not applied, so the scan only reports (--scan auto). This bundle is a test build."
+        elif [[ $OS_RESULT_WEB == cached || $OS_RESULT_SERVER == cached ]]; then
+            warn "The Alpine updates cannot be confirmed (cached step), so the scan only reports (--scan auto). This bundle is a test build."
         else
             gate=true
         fi

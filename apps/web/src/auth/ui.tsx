@@ -1,9 +1,12 @@
 // Building blocks of the sign-in pages (BUILD-PLAN H.6): the page frame with the brand panel of
 // project/MSCD Login.dc.html, notes, provider buttons, fields and the busy button.
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { AuthProvider, SystemProfile } from '@mscd/shared';
 import { TEXT, fill, li } from './i18n';
 import type { Lang, Pair } from './i18n';
+import { mountBrandMotion } from './motion/BrandMotion';
+import type { BrandMotion } from './motion/BrandMotion';
+import { CHAIN_PATH, CHAIN_POINTS, CHAIN_VIEW, EVIDENCE, SIGNAL } from './motion/threads';
 
 /** Path of the logo in `apps/web/public/assets`. */
 export const LOGO_SRC = '/assets/cyberlentera-logo.png';
@@ -28,15 +31,18 @@ export function Icon({ d, size = 16, color = 'currentColor', strokeWidth = 2 }: 
 // Brand panel
 // ---------------------------------------------------------------------------------------------------------------
 
-const CHAIN_PATH = 'M20 110 C 120 110, 120 40, 220 40 S 320 110, 420 110 S 480 60, 500 40';
-const CHAIN_NODES: { x: number; y: number; ty: number; key: keyof typeof TEXT; delay: string; filled?: boolean }[] = [
-  { x: 20, y: 110, ty: 138, key: 'chainIssue', delay: '.5s' },
-  { x: 120, y: 80, ty: 60, key: 'chainRisk', delay: '.9s' },
-  { x: 220, y: 40, ty: 22, key: 'chainControl', delay: '1.2s' },
-  { x: 320, y: 80, ty: 108, key: 'chainDocument', delay: '1.6s' },
-  { x: 420, y: 110, ty: 138, key: 'chainEvidence', delay: '2s', filled: true },
-  { x: 500, y: 40, ty: 22, key: 'chainFinding', delay: '2.4s' },
+// The six nodes of the chain (positions in ./motion/threads.ts, which the motion shares) and their label rows.
+const CHAIN_LABELS: { ty: number; key: keyof typeof TEXT }[] = [
+  { ty: 138, key: 'chainIssue' },
+  { ty: 60, key: 'chainRisk' },
+  { ty: 22, key: 'chainControl' },
+  { ty: 108, key: 'chainDocument' },
+  { ty: 138, key: 'chainEvidence' },
+  { ty: 22, key: 'chainFinding' },
 ];
+const CHAIN_NODES = CHAIN_POINTS.map(([x, y], i) => ({ x, y, ...CHAIN_LABELS[i], filled: i === EVIDENCE }));
+/** One short dash per path length (pathLength 1) with a longer gap: the signal the motion moves along the chain. */
+const SIGNAL_DASH = `${SIGNAL.dash} 1.2`;
 
 /** Footer facts of the brand panel: version, deployment label with region, TLS and MFA (H.6). */
 export function brandFacts(profile: SystemProfile | null, lang: Lang, deployOverride?: 'saas' | 'onprem' | null): string[] {
@@ -49,19 +55,49 @@ export function brandFacts(profile: SystemProfile | null, lang: Lang, deployOver
   return facts;
 }
 
+/**
+ * The dark brand panel of every sign-in page (MILESTONE-2 MOT-02): logo, the traceability chain, headline, facts and
+ * the footer facts over a living background. The canvas draws fine threads that gather behind the Evidence node and
+ * a signal of light that runs the chain (./motion). The chain and all text are complete without the motion: with
+ * reduced motion the canvas shows one still frame, and the canvas is hidden where the panel collapses.
+ */
 export function BrandPanel({ lang, facts }: { lang: Lang; facts: string[] }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const glowRef = useRef<SVGPathElement>(null);
+  const coreRef = useRef<SVGPathElement>(null);
+  const motion = useRef<BrandMotion | null>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    const canvas = canvasRef.current;
+    if (!panel || !canvas) return undefined;
+    const signal = glowRef.current && coreRef.current ? { glow: glowRef.current, core: coreRef.current } : null;
+    const handle = mountBrandMotion(panel, canvas, signal);
+    motion.current = handle;
+    return () => {
+      motion.current = null;
+      handle.destroy();
+    };
+  }, []);
+  // New text (language, footer facts) moves the quiet zones of the motion.
+  const factsKey = facts.join('\n');
+  useEffect(() => {
+    motion.current?.relayout();
+  }, [lang, factsKey]);
   return (
-    <div className="au-brand">
+    <div className="au-brand" ref={panelRef}>
       <div className="au-grid" aria-hidden="true" />
-      <div className="au-mesh" aria-hidden="true"><span className="au-mesh-a" /><span className="au-mesh-b" /></div>
+      <canvas className="au-threads" ref={canvasRef} aria-hidden="true" data-motion="off" />
       <div className="au-logo"><img src={LOGO_SRC} alt="CyberLentera" /><span>MSCD</span></div>
       <div className="au-hero">
-        <svg className="au-chain" viewBox="0 0 520 150" role="img" aria-label={CHAIN_NODES.map((n) => li(TEXT[n.key], lang)).join(', ')}>
+        <svg className="au-chain" viewBox={`0 0 ${CHAIN_VIEW.width} ${CHAIN_VIEW.height}`} role="img" aria-label={CHAIN_NODES.map((n) => li(TEXT[n.key], lang)).join(', ')}>
           <path d={CHAIN_PATH} fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="2" />
-          <path className="au-chain-draw" d={CHAIN_PATH} fill="none" stroke="#e8731a" strokeWidth="2.5" strokeDasharray="400" strokeDashoffset="400" />
+          <path className="au-chain-line" d={CHAIN_PATH} fill="none" stroke="#e8731a" strokeWidth="2.5" />
+          <path ref={glowRef} className="au-chain-signal au-chain-signal-glow" d={CHAIN_PATH} pathLength={1} fill="none" strokeDasharray={SIGNAL_DASH} strokeDashoffset={SIGNAL.dash} />
+          <path ref={coreRef} className="au-chain-signal au-chain-signal-core" d={CHAIN_PATH} pathLength={1} fill="none" strokeDasharray={SIGNAL_DASH} strokeDashoffset={SIGNAL.dash} />
           {CHAIN_NODES.map((n) => (
             <g key={n.key}>
-              <circle className="au-chain-dot" cx={n.x} cy={n.y} r="7" fill={n.filled ? '#e8731a' : '#0f0e0c'} stroke="#e8731a" strokeWidth="2.5" style={{ animationDelay: n.delay }} />
+              <circle className="au-chain-dot" cx={n.x} cy={n.y} r="7" fill={n.filled ? '#e8731a' : '#0f0e0c'} stroke="#e8731a" strokeWidth="2.5" />
               <text x={n.x} y={n.ty} textAnchor="middle">{li(TEXT[n.key], lang)}</text>
             </g>
           ))}

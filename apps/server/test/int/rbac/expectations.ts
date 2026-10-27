@@ -5,6 +5,7 @@
 import {
   EXTERNAL_AUDITOR, effectiveGrant, machinePermissions, permissionCase, type Permission, type PermissionCheckScope, type RouteDef,
 } from '@mscd/shared';
+import type { TestDatabase } from '../../setup/test-db';
 import { BUSINESS_ROLE, ORG_ROLE, type RoleKey, type RouteInput } from '../contract/harness';
 import { RBAC_EXPECTATIONS as M2_05 } from './expectations/M2-05';
 import { RBAC_EXPECTATIONS as M2_06 } from './expectations/M2-06';
@@ -21,10 +22,19 @@ import { RBAC_EXPECTATIONS as M2_S11 } from './expectations/M2-S11';
  *   cannot reach the handler (for example a record id the route needs);
  * - `serviceRefusals`: requests the guard admits and the service refuses with 403, because the rule depends on the
  *   record (for example an Internal Auditor on an audit event that is not an internal audit, Milestone 2 D.2).
+ *   `setup` prepares the record in the demo organisation `tst` (system `isms`) and returns the members that replace
+ *   those of the route's first sweep input (path parameters merged, body and query replaced).
  */
+export interface ServiceRefusal {
+  route: string;
+  role: RoleKey;
+  reason: string;
+  setup?: (db: TestDatabase) => Promise<RouteInput>;
+}
+
 export interface RbacExpectations {
   inputs: Readonly<Record<string, RouteInput>>;
-  serviceRefusals: readonly { route: string; role: RoleKey; reason: string }[];
+  serviceRefusals: readonly ServiceRefusal[];
 }
 
 /** The RBAC expectations of the Milestone 2 building packages, by package. */

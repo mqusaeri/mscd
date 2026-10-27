@@ -114,28 +114,52 @@ BEGIN
     END IF;
   END LOOP;
   EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA platform TO mscd_app';
-  -- Organisation-scoped platform tables: forced RLS with an explicit platform scope (F.10).
+  -- Organisation-scoped platform tables: forced RLS with an explicit platform scope (F.10). A table with a write
+  -- expression is written by the platform operator only (operator routes and commands run in platform scope): the
+  -- organisation reads its own rows (policy platform_isolation, SELECT) and writes none (policy platform_scope_write).
   FOR g IN SELECT * FROM (VALUES
-      ('org_membership', format('organization_id = %s OR user_id = %s OR %s', org_expr, user_expr, scope_expr)),
-      ('session', format('user_id = %s OR %s', user_expr, scope_expr)),
-      ('identity_provider', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('verified_domain', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('invitation', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('licence', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('tenant_key', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('audit_log', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('idempotency_key', format('organization_id = %s', org_expr)),
-      ('organization_status_event', format('organization_id = %s OR %s', org_expr, scope_expr)),
-      ('entitlement', format('organization_id = %s OR %s', org_expr, scope_expr))
-    ) AS v(tbl, expr)
+      ('org_membership', format('organization_id = %s OR user_id = %s OR %s', org_expr, user_expr, scope_expr), NULL::text),
+      ('session', format('user_id = %s OR %s', user_expr, scope_expr), NULL),
+      ('identity_provider', format('organization_id = %s OR %s', org_expr, scope_expr), NULL),
+      ('verified_domain', format('organization_id = %s OR %s', org_expr, scope_expr), scope_expr),
+      ('invitation', format('organization_id = %s OR %s', org_expr, scope_expr), NULL),
+      ('licence', format('organization_id = %s OR %s', org_expr, scope_expr), NULL),
+      ('tenant_key', format('organization_id = %s OR %s', org_expr, scope_expr), NULL),
+      ('audit_log', format('organization_id = %s OR %s', org_expr, scope_expr), NULL),
+      ('idempotency_key', format('organization_id = %s', org_expr), NULL),
+      ('organization_status_event', format('organization_id = %s OR %s', org_expr, scope_expr), scope_expr),
+      ('entitlement', format('organization_id = %s OR %s', org_expr, scope_expr), scope_expr)
+    ) AS v(tbl, expr, write_expr)
   LOOP
     IF to_regclass('platform.' || g.tbl) IS NOT NULL THEN
       EXECUTE format('ALTER TABLE platform.%I ENABLE ROW LEVEL SECURITY', g.tbl);
       EXECUTE format('ALTER TABLE platform.%I FORCE ROW LEVEL SECURITY', g.tbl);
       EXECUTE format('DROP POLICY IF EXISTS platform_isolation ON platform.%I', g.tbl);
-      EXECUTE format('CREATE POLICY platform_isolation ON platform.%I USING (%s) WITH CHECK (%s)', g.tbl, g.expr, g.expr);
+      EXECUTE format('DROP POLICY IF EXISTS platform_scope_write ON platform.%I', g.tbl);
+      IF g.write_expr IS NULL THEN
+        EXECUTE format('CREATE POLICY platform_isolation ON platform.%I USING (%s) WITH CHECK (%s)', g.tbl, g.expr, g.expr);
+      ELSE
+        EXECUTE format('CREATE POLICY platform_isolation ON platform.%I FOR SELECT USING (%s)', g.tbl, g.expr);
+        EXECUTE format('CREATE POLICY platform_scope_write ON platform.%I USING (%s) WITH CHECK (%s)', g.tbl, g.write_expr, g.write_expr);
+      END IF;
     END IF;
   END LOOP;
 END $$;
 
 SELECT platform.secure_platform_schema();
+
+-- The api changes the status of an organisation in platform scope only (J.8: the operator's route). mscd_app holds the
+-- column grant for that route, and platform.organization has no row-level security. The owner of the table (the
+-- migrator: operator commands and maintenance) is not limited.
+CREATE FUNCTION platform.require_platform_scope() RETURNS trigger LANGUAGE plpgsql
+  SET search_path = pg_catalog, platform AS $$
+BEGIN
+  IF coalesce(current_setting('app.platform_scope', true), '') <> 'on'
+     AND NOT pg_has_role(current_user, (SELECT c.relowner FROM pg_class c WHERE c.oid = TG_RELID), 'USAGE') THEN
+    RAISE EXCEPTION 'Changing %.% (%) needs the platform scope', TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER organization_status_platform_scope BEFORE UPDATE OF status ON platform.organization
+  FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION platform.require_platform_scope();

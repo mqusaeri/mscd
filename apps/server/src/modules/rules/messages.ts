@@ -269,8 +269,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     defaults: { code: { en: 'This entry', id: 'Entri ini' } },
   },
   'PACK-ROW-REMOVED': {
-    en: 'This pack version drops {codes} without marking them retired. Codes of an installed version can only be retired, never removed.',
-    id: 'Versi paket ini menghapus {codes} tanpa menandainya sebagai tidak berlaku lagi. Kode dari versi terpasang hanya dapat ditandai tidak berlaku, tidak dapat dihapus.',
+    en: 'This pack version drops {codes} without marking them retired. Mark these codes as retired in the new version and keep them in the pack.',
+    id: 'Versi paket ini menghapus {codes} tanpa menandainya sebagai tidak berlaku lagi. Tandai kode tersebut sebagai tidak berlaku lagi di versi baru dan tetap simpan di dalam paket.',
     defaults: { codes: { en: 'codes of the installed version', id: 'kode dari versi terpasang' } },
   },
   'AUD-INDEP': {

@@ -1,7 +1,8 @@
 // Area `audit-registers` (owner from wave 10: WP-37): findings, corrective actions, self-assessment, the audit activity
 // planner and management reviews (D.2, D.3 "Registers and workflows: audit side", C.13). Milestone 2 (D.2): findings
 // carry the clause or control code they concern (`targetCode`, stored by M2-05), audit activities may be planned by
-// Internal Auditors on internal audits, and a planned or held management review can be changed (M2-07).
+// Internal Auditors on internal audits and carry an auditor and a target code (`auditorHandle`, `targetCode`, stored by
+// M2-05), and a planned or held management review can be changed (M2-07).
 import { z } from 'zod';
 import {
   AuditActivityStatus, CorrectiveActionStatus, FindingClassification, FindingSource, FindingStatus, ManagementReviewStatus,
@@ -206,18 +207,27 @@ export const AuditActivityItem = named(
   z.object({
     ref: RecordRef, templateCode: z.string().nullable(), title: z.string(), clauseRef: z.string().nullable(), keyQuestions: z.string().nullable(),
     evidenceToRequest: z.string().nullable(), auditee: PersonId.nullable(), scheduledAt: IsoDate.nullable(), status: AuditActivityStatus, note: z.string().nullable(),
+    auditor: PersonId.nullable().optional(), targetCode: z.string().nullable().optional(),
   }),
-  'Audit Activity Planner row of one audit event (PRD 8.1)',
-  { valid: [EXAMPLE_ACTIVITY], invalid: [{ ...EXAMPLE_ACTIVITY, status: 'open' }] },
+  'Audit Activity Planner row of one audit event (PRD 8.1); auditor and targetCode (clause or control) are the Milestone 2 D.2 members, filled by M2-05',
+  {
+    valid: [EXAMPLE_ACTIVITY, { ...EXAMPLE_ACTIVITY, auditor: 'dewi', targetCode: '4.3' }, { ...EXAMPLE_ACTIVITY, auditor: null, targetCode: null }],
+    invalid: [{ ...EXAMPLE_ACTIVITY, status: 'open' }, { ...EXAMPLE_ACTIVITY, auditor: 'Dewi' }],
+  },
 );
 export type AuditActivityItem = z.infer<typeof AuditActivityItem>;
 
 export const AuditActivityPatch = named(
   'AuditActivityPatch',
-  z.strictObject({ auditeeHandle: PersonId.optional(), scheduledAt: IsoDate.nullable().optional(), status: AuditActivityStatus.optional(), note: Note.nullable().optional() })
-    .refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
-  'PATCH /ms/{ms}/audit-activities/{id} body',
-  { valid: [{ auditeeHandle: 'bagus', scheduledAt: '2027-02-10' }, { status: 'done' }], invalid: [{}, { status: 'open' }] },
+  z.strictObject({
+    auditeeHandle: PersonId.optional(), scheduledAt: IsoDate.nullable().optional(), status: AuditActivityStatus.optional(), note: Note.nullable().optional(),
+    auditorHandle: PersonId.optional(), targetCode: Code.nullable().optional(),
+  }).refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
+  'PATCH /ms/{ms}/audit-activities/{id} body; auditorHandle (none clears it) and targetCode (a clause or control code, null clears it) are the Milestone 2 D.2 members, stored by M2-05 with the AUD-INDEP warning',
+  {
+    valid: [{ auditeeHandle: 'bagus', scheduledAt: '2027-02-10' }, { status: 'done' }, { auditorHandle: 'dewi', targetCode: 'A.5.18' }, { targetCode: null }],
+    invalid: [{}, { status: 'open' }, { auditorHandle: 'Dewi' }, { targetCode: '' }],
+  },
 );
 export type AuditActivityPatch = z.infer<typeof AuditActivityPatch>;
 

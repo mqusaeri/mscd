@@ -10,10 +10,10 @@ import {
 } from '@mscd/shared';
 import { sql } from 'kysely';
 import { assertIfMatch } from '../../common/etag';
-import { NotFoundError, ProblemError, TransitionNotAllowedError, ValidationError } from '../../common/problems';
+import { ForbiddenError, NotFoundError, ProblemError, TransitionNotAllowedError, ValidationError } from '../../common/problems';
 import {
-  AUDIT_WRITER, MEMBERSHIP_SERVICE, NOTIFICATION_WRITER, RECORD_RESOLVER, type AuditWriter, type AuthzState, type MembershipService, type MsRef,
-  type NotificationWriter, type Principal, type RecordResolver, type Trx,
+  AUDIT_WRITER, MEMBERSHIP_SERVICE, NOTIFICATION_WRITER, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type AuthzState, type MembershipService,
+  type MsRef, type NotificationWriter, type PermissionEvaluator, type Principal, type RecordResolver, type Trx,
 } from '../../common/tokens';
 import { ReadModelService } from '../read-model';
 import { RuleEngine, ruleMessages } from '../rules';
@@ -103,6 +103,7 @@ export class AuditEventCommandsService {
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(NOTIFICATION_WRITER) private readonly notifications: NotificationWriter,
+    @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -152,9 +153,15 @@ export class AuditEventCommandsService {
   async updateEvent(principal: Principal, ms: string, id: string, patch: AuditEventPatch, ifMatch: string | undefined): Promise<CommandResult> {
     const org = orgOf(principal);
     const actor = principal.user.id;
+    // Milestone 2 D.2: the guard also admits holders of internal_audit.manage. Without audit_event.manage the caller
+    // may change internal audits only, and keeps them internal audits (M2-05 builds the rest of the rule).
+    const managesEvents = (await this.evaluator.evaluate(principal, 'audit_event.manage', { scope: 'ms', ms })) !== null;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const event = await this.event(trx, system, id);
+      if (!managesEvents && (event.event_type !== 'internal_audit' || (patch.eventType !== undefined && patch.eventType !== 'internal_audit'))) {
+        throw new ForbiddenError('You can change internal audits only, and you cannot change their event type');
+      }
       const currentRef = refOf(EVENT, id, event.short_label, event.updated_at);
       assertIfMatch(ifMatch, event.updated_at, currentRef);
       const set: Record<string, unknown> = {};

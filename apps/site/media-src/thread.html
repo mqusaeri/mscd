@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Golden thread film renderer</title>
+<style>html,body{margin:0;background:#0e0d0b}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Renders one frame of the hero film. render.mjs drives it frame by frame.
+// Every motion term is periodic in the loop length, so the last frame meets the first.
+const params = new URLSearchParams(location.search);
+const W = Number(params.get('w') || 1920);
+const H = Number(params.get('h') || 1080);
+const FRAMES = Number(params.get('frames') || 288);
+const canvas = document.getElementById('c');
+canvas.width = W; canvas.height = H;
+const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: false });
+
+const vert = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+const frag = `
+precision highp float;
+uniform vec2 res;
+uniform float t;      // 0..1 over the loop
+const float TAU = 6.28318530718;
+const float A = 16.0/9.0;
+
+float hash(float n){ return fract(sin(n*127.1)*43758.5453123); }
+
+// Centre line of the thread in height units (X: 0..A, Y: 0..1 from the top).
+float baseY(float X){
+  float x = X / A;
+  float s = smoothstep(0.30, 1.08, x);
+  float y = mix(0.84, 0.24, s);
+  y += 0.022 * sin(TAU * (0.85 * x) - TAU * t);          // slow travelling swell
+  y += 0.008 * sin(TAU * (2.1 * x) + TAU * 2.0 * t + 1.3);
+  return y;
+}
+// One strand of the three-strand braid.
+float strandY(float X, float k, out float depth){
+  float x = X / A;
+  float th = TAU * (2.6 * x) - TAU * t + k * TAU / 3.0;
+  depth = cos(th);
+  float amp = 0.020 * (0.50 + 0.50 * smoothstep(0.0, 0.6, x));
+  return baseY(X) + amp * sin(th);
+}
+
+void main(){
+  vec2 uv = gl_FragCoord.xy / res;
+  float X = uv.x * A;
+  float Y = 1.0 - uv.y;
+  float px = 1.0 / res.y;
+
+  vec3 bg = vec3(0.0549, 0.0510, 0.0431);               // #0e0d0b
+  vec3 col = bg * mix(0.82, 1.0, smoothstep(0.0, 0.7, Y));
+
+  // Faint warm haze where the thread rises.
+  vec2 hz = vec2(X, Y) - vec2(0.80 * A, 0.56);
+  col += vec3(0.35, 0.14, 0.03) * 0.15 * exp(-dot(hz, hz) / 0.26);
+
+  // Light pulse travelling along the thread once per loop, off screen at both ends.
+  float pc = -0.25 + 1.5 * t;
+  float pulse = exp(-pow((X / A - pc) / 0.07, 2.0));
+
+  vec3 light = vec3(0.0);
+  for (int i = 0; i < 3; i++){
+    float k = float(i);
+    float depth;
+    float y0 = strandY(X, k, depth);
+    float d1; float y1 = strandY(X + 0.002, k, d1);
+    float slope = (y1 - y0) / 0.002;
+    float d = abs(Y - y0) / sqrt(1.0 + slope * slope);
+    float front = 0.5 + 0.5 * depth;
+    float wCore = (1.1 + 0.9 * front) * px;
+    float core = exp(-pow(d / wCore, 2.0));
+    float glow = exp(-pow(d / (0.010 + 0.004 * front), 2.0));
+    float halo = 0.010 / (d + 0.010);
+    float b = (0.45 + 0.55 * front) * (1.0 + 2.2 * pulse);
+    light += b * (core * vec3(1.00, 0.90, 0.74) * 1.35
+                + glow * vec3(0.91, 0.45, 0.10) * 0.40
+                + halo * vec3(0.60, 0.24, 0.04) * 0.045);
+  }
+  // Thread fades in from the left edge.
+  light *= smoothstep(-0.02, 0.18, X / A);
+  col += light;
+
+  // Dust motes drifting in small closed orbits, lit by the thread.
+  for (int j = 0; j < 46; j++){
+    float n = float(j) + 1.0;
+    vec2 base = vec2(hash(n) * A, 0.18 + 0.78 * hash(n + 7.3));
+    float r = mix(0.0012, 0.010, pow(hash(n + 3.1), 2.2));
+    float dir = hash(n + 9.9) > 0.5 ? 1.0 : -1.0;
+    float ph = hash(n + 5.7) * TAU;
+    vec2 orbit = vec2(cos(TAU * t * dir + ph), sin(TAU * t * dir + ph)) * vec2(0.035, 0.018) * (0.4 + hash(n + 2.2));
+    vec2 pos = base + orbit;
+    float near = exp(-pow((pos.y - baseY(pos.x)) / 0.16, 2.0));
+    float dd = length(vec2(X, Y) - pos);
+    float disc = 1.0 - smoothstep(r * 0.55, r, dd);
+    float a = disc * (0.05 + 0.55 * near) * mix(1.0, 0.35, smoothstep(0.003, 0.010, r));
+    col += a * vec3(1.0, 0.70, 0.38);
+  }
+
+  // A few large out-of-focus discs close to the camera, near the thread.
+  for (int j = 0; j < 9; j++){
+    float n = float(j) + 101.0;
+    float bx = (0.38 + 0.62 * hash(n)) * A;
+    vec2 base = vec2(bx, baseY(bx) + (hash(n + 4.4) - 0.5) * 0.30);
+    float r = mix(0.018, 0.042, hash(n + 1.7));
+    float ph = hash(n + 8.1) * TAU;
+    vec2 pos = base + vec2(cos(TAU * t + ph), sin(TAU * t + ph)) * vec2(0.020, 0.012);
+    float dd = length(vec2(X, Y) - pos);
+    float disc = 1.0 - smoothstep(r * 0.82, r, dd);
+    col += disc * (0.016 + 0.010 * hash(n + 2.9)) * vec3(1.0, 0.62, 0.30);
+  }
+
+  // Vignette.
+  vec2 v = uv - 0.5;
+  col *= 1.0 - 0.38 * dot(v * vec2(1.0, 1.3), v * vec2(1.0, 1.3));
+
+  // Soft tone map, then a tiny dither so 8-bit gradients do not band.
+  col = 1.0 - exp(-col * 1.25);
+  col += (hash(gl_FragCoord.x * 13.1 + gl_FragCoord.y * 71.7 + t * 97.0) - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function compile(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vert));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, frag));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+gl.viewport(0, 0, W, H);
+gl.uniform2f(gl.getUniformLocation(prog, 'res'), W, H);
+const tLoc = gl.getUniformLocation(prog, 't');
+
+window.renderFrame = (i) => {
+  gl.uniform1f(tLoc, (i % FRAMES) / FRAMES);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  return canvas.toDataURL('image/png');
+};
+window.ready = true;
+</script>
+</body>
+</html>

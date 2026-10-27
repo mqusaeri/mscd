@@ -144,7 +144,7 @@ Rule S-4 of the plan applies to every SaaS workflow, and `tools/scripts/check-wo
 
 1. The workflow sets `permissions` at the top level (and never `write-all`); jobs add what they need.
 2. Every action from outside this repository (GitHub's own included) is pinned to a full 40-character commit SHA with the tag in a comment: `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. A `docker://` image needs a digest.
-3. No secret in script text: `${{ secrets.X }}` and `${{ github.token }}` go into `env:`, and the script uses the variable. A value written into script text can end up in logs and in the process list.
+3. No secret in script text: `${{ secrets.X }}` and `${{ github.token }}` go into `env:`, and the script uses the variable. A value written into script text can end up in logs and in the process list. GitHub reads context names in any case, so the check also finds `${{ SECRETS.X }}` and `${{ GITHUB.TOKEN }}`.
 4. A job of the environment `production` or `staging`, or of an environment chosen by an expression, has a concurrency group with `cancel-in-progress: false`, so two deploys never run at once and a running deploy is never cancelled half way. GitHub applies the workflow-level and the job-level `concurrency` both, so each one that is set needs a group and a literal `cancel-in-progress: false`. At least one group must be a name that runs share: a group with `github.run_id`, `github.run_number` or `github.run_attempt` holds one run only.
 
 YAML anchors and aliases are allowed: the checker follows each alias, so aliased steps get every check. Merge keys (`<<: *base`) are refused, because the keys they bring in would not be checked.

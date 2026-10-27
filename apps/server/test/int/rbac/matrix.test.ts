@@ -10,8 +10,8 @@ import { API_ROUTES, permissionCase, type RouteDef } from '@mscd/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
 import {
-  ROLE_KEYS, addRoleUsers, callRoute, createFullApp, exampleInput, examplesOf, guardDenials, resetRateLimits, sessionFor,
-  type Client, type FullApp, type RoleKey, type RouteInput,
+  ROLE_KEYS, addAuditActivity, addAuditEvent, addRoleUsers, callRoute, createFullApp, exampleInput, examplesOf, guardDenials, resetRateLimits,
+  sessionFor, type Client, type FullApp, type RoleKey, type RouteInput,
 } from '../contract/harness';
 import { M2_INPUTS, M2_SERVICE_REFUSALS, expectedAllowed } from './expectations';
 
@@ -115,8 +115,17 @@ describe('J.5 generated RBAC tests: every route and every role of F.6', () => {
         continue;
       }
       const [first] = inputsOf(def);
+      const prepared = refusal.setup ? await refusal.setup(db) : {};
+      const input: RouteInput = {
+        ...first!.input,
+        ...prepared,
+        params: { ...first!.input.params, ...(prepared.params ?? {}) },
+      };
+      if (!expectedAllowed(def, refusal.role, first!.member, namesSystem(def, input))) {
+        problems.push(`${def.id} ${refusal.role}: the matrix does not admit it, so it is no service refusal (${refusal.reason})`);
+      }
       const before = await guardDenials(full, def.id);
-      const call = await callRoute(clients[refusal.role], def, first!.input);
+      const call = await callRoute(clients[refusal.role], def, input);
       if ((await guardDenials(full, def.id)) > before) problems.push(`${def.id} ${refusal.role}: the guard denied it (${refusal.reason})`);
       if (call.status !== 403) problems.push(`${def.id} ${refusal.role}: answered ${call.status}, expected 403 (${refusal.reason})`);
       problems.push(...call.violations);
@@ -146,4 +155,19 @@ describe('J.5 generated RBAC tests: every route and every role of F.6', () => {
       expect(violations).toEqual([]);
     });
   }
+
+  // Runs after the sweep, so the records it adds change no input of the sweep.
+  it('lets an Internal Auditor change an internal audit and plan its activities (Milestone 2 D.2)', async () => {
+    await resetRateLimits(db);
+    const route = (id: string) => API_ROUTES.find((r) => r.id === id)!;
+    const eventId = await addAuditEvent(db, 'tst', 'isms', 'internal_audit');
+    const calls = [
+      await callRoute(clients.IA, route('audit-events.update'), { params: { ms: 'isms', id: eventId }, body: { expectedFocus: 'Access control and supplier security' } }),
+      await callRoute(clients.IA, route('audit-events.update'), { params: { ms: 'isms', id: eventId }, body: { eventType: 'internal_audit', auditDays: 2 } }),
+      await callRoute(clients.IA, route('audit-activities.generate'), { params: { ms: 'isms', id: eventId } }),
+      await callRoute(clients.IA, route('audit-activities.update'), { params: { ms: 'isms', id: await addAuditActivity(db, 'tst', eventId) }, body: { status: 'done' } }),
+    ];
+    expect(calls.map((c) => c.status)).toEqual([200, 200, 200, 200]);
+    expect(calls.flatMap((c) => c.violations)).toEqual([]);
+  });
 });

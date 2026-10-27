@@ -5,6 +5,7 @@ import { sql, type Kysely } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
 import type { DB } from '../../../src/db/types';
+import { TABLE_COLUMNS as REF_TABLE_COLUMNS } from '../../../src/db/types/ref';
 import { createTenant } from '../../setup/global-db';
 import { useTestDatabase } from '../../setup/test-db';
 import {
@@ -530,7 +531,8 @@ describe('tenant isolation and privileges (J.5)', () => {
                      where has_table_privilege('mscd_pack_installer', c.oid, p)) as pack
         from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = 'ref' and c.relkind = 'r' and c.relname not like 'kysely\\_%' order by c.relname`.execute(admin);
-      expect(rows).toHaveLength(19);
+      // Every ref table of the Kysely types (19 in Milestone 1; ref migrations of later packages add theirs).
+      expect(rows.map((r) => r.relname).sort()).toEqual(Object.keys(REF_TABLE_COLUMNS).map((t) => t.replace(/^ref\./, '')).sort());
       for (const row of rows) {
         expect([row.relname, row.app, row.pack]).toEqual([row.relname, ['SELECT'], ['SELECT', 'INSERT', 'UPDATE']]);
       }

@@ -1,11 +1,12 @@
 // The schema of Milestone 2 (docs/platform/MILESTONE-2.md D.3, J.7): tenant migration 0008 and platform migration 0005,
 // written by M2-02. The CHECK lists, the one-open-cycle index, the committed-import index, nullable readiness,
 // competence records shared through entity_ms_link, RLS of the new tables, the append-only status history, verified
-// domains (one organisation per verified domain; the migration stops on duplicates) and per-organisation entitlements.
+// domains (one organisation per verified domain; the migration stops on duplicates), per-organisation entitlements,
+// and the platform scope that writes domains, entitlements, status history and the organisation status.
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { sql, type Kysely } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateAll } from '../../../src/cli/migrate';
 import { MIGRATIONS_ROOT } from '../../../src/db/migrator';
@@ -278,6 +279,59 @@ describe('Milestone 2 platform schema (platform 0005)', () => {
         '23514',
       );
     }
+  });
+
+  it('lets only the platform scope write domains, entitlements and status history; the organisation reads its own (F.10)', async () => {
+    const own = { orgId: beta.id, userId: operator };
+    await inScope(db.app, { platformScope: true, userId: operator }, async (trx) => {
+      await trx.insertInto('platform.verified_domain').values({ organization_id: beta.id, domain: 'beta-own.co.id', verified_by: 'operator' }).execute();
+      await trx.updateTable('platform.verified_domain').set({ last_checked_at: new Date() }).where('domain', '=', 'beta-own.co.id').execute();
+      await trx.insertInto('platform.organization_status_event')
+        .values({ organization_id: beta.id, from_status: 'active', to_status: 'suspended', reason: 'Owner request', actor_user_id: operator }).execute();
+    });
+    const read = await inScope(db.app, own, async (trx) => ({
+      domains: await trx.selectFrom('platform.verified_domain').select(['organization_id', 'domain']).execute(),
+      events: (await trx.selectFrom('platform.organization_status_event').select('organization_id').execute()).map((r) => r.organization_id),
+      entitlements: (await trx.selectFrom('platform.entitlement').select('organization_id').execute()).map((r) => r.organization_id),
+    }));
+    expect(read.domains.map((r) => r.domain)).toContain('beta-own.co.id');
+    expect(new Set(read.domains.map((r) => r.organization_id))).toEqual(new Set([beta.id]));
+    expect({ events: read.events, entitlements: read.entitlements }).toEqual({ events: [beta.id], entitlements: [beta.id] });
+    // Writes of the organisation's own rows without the platform scope: inserts fail, updates and deletes see no row.
+    const inserts: ((trx: Transaction<DB>) => Promise<unknown>)[] = [
+      (trx) => trx.insertInto('platform.verified_domain').values({ organization_id: beta.id, domain: 'beta-jit.co.id', verified_by: 'self' }).execute(),
+      (trx) => trx.insertInto('platform.organization_status_event').values({ organization_id: beta.id, from_status: 'suspended', to_status: 'active', reason: 'Self' }).execute(),
+      (trx) =>
+        trx.insertInto('platform.entitlement')
+          .values({ organization_id: beta.id, plan: 'x', source: 'manual', max_users: 1, max_management_systems: 1, valid_from: '2026-10-01' })
+          .onConflict((oc) => oc.column('organization_id').doUpdateSet({ max_users: 9999 })).execute(),
+    ];
+    for (const insert of inserts) await expectPgError(rolledBack(db.app, own, insert), '42501', /row-level security/);
+    const changed = await rolledBack(db.app, own, async (trx) => [
+      Number((await trx.updateTable('platform.verified_domain').set({ last_checked_at: new Date() }).where('organization_id', '=', beta.id).executeTakeFirst()).numUpdatedRows),
+      Number((await trx.deleteFrom('platform.verified_domain').where('organization_id', '=', beta.id).executeTakeFirst()).numDeletedRows),
+      Number((await trx.updateTable('platform.entitlement').set({ max_users: 9999 }).where('organization_id', '=', beta.id).executeTakeFirst()).numUpdatedRows),
+    ]);
+    expect(changed).toEqual([0, 0, 0]);
+  });
+
+  it('lets the app role change the status of an organisation in platform scope only (J.8)', async () => {
+    await expectPgError(
+      rolledBack(db.app, { orgId: alpha.id, userId: operator }, (trx) => trx.updateTable('platform.organization').set({ status: 'suspended' }).where('id', '=', alpha.id).execute()),
+      '42501',
+      /needs the platform scope/,
+    );
+    // Other organisation settings and an unchanged status stay writable for the organisation.
+    await rolledBack(db.app, { orgId: alpha.id, userId: operator }, (trx) =>
+      trx.updateTable('platform.organization').set({ name: 'Alpha renamed', status: 'active' }).where('id', '=', alpha.id).execute(),
+    );
+    const moved = await rolledBack(db.app, { platformScope: true, userId: operator }, async (trx) => {
+      await trx.updateTable('platform.organization').set({ status: 'suspended' }).where('id', '=', alpha.id).execute();
+      return (await trx.selectFrom('platform.organization').select('status').where('id', '=', alpha.id).executeTakeFirstOrThrow()).status;
+    });
+    expect(moved).toBe('suspended');
+    // The owner of the table (the migrator: operator commands, maintenance) is not limited.
+    await rolledBack(db.migrator, {}, (trx) => trx.updateTable('platform.organization').set({ status: 'suspended' }).where('id', '=', alpha.id).execute());
   });
 });
 

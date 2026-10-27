@@ -1,6 +1,7 @@
-/* Sign-in and account pages (BUILD-PLAN H.6): a port of project/MSCD Login.dc.html. Layout, spacing and the brand
-   panel animations follow the design; colours use the app's accessible accent (--acc of styles.css) so text and
-   controls meet WCAG AA in the light and the dark theme. No text is smaller than 12px. */
+/* Sign-in and account pages (BUILD-PLAN H.6): a port of project/MSCD Login.dc.html. Layout and spacing follow the
+   design; the living background of the brand panel is MILESTONE-2 MOT-02 (./motion). Colours use the app's accessible
+   accent (--acc of styles.css) so text and controls meet WCAG AA in the light and the dark theme. No text is smaller
+   than 12px. */
 
 .au-root{
   --au-bg:#f4f2ee;--au-sur:#ffffff;--au-bd:#e6e1d7;--au-field:#8f877a;--au-tx:#1c1a17;--au-tx2:#4a453d;--au-tx3:#6b655a;
@@ -24,35 +25,35 @@ body:has(.au-root[data-theme="dark"]),body:has(.au-boot[data-theme="dark"]){back
 .au-root :focus-visible{outline:2px solid var(--au-acc);outline-offset:2px}
 
 @keyframes au-up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-@keyframes au-meshA{0%{transform:translate(-10%,-10%) scale(1)}50%{transform:translate(12%,8%) scale(1.15)}100%{transform:translate(-10%,-10%) scale(1)}}
-@keyframes au-meshB{0%{transform:translate(10%,0) scale(1.1)}50%{transform:translate(-12%,-14%) scale(.95)}100%{transform:translate(10%,0) scale(1.1)}}
-@keyframes au-drawLoop{0%{stroke-dashoffset:400;opacity:0}6%{opacity:1}55%{stroke-dashoffset:0;opacity:1}85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
-@keyframes au-dotLoop{0%,10%{opacity:0;transform:scale(.4)}20%,85%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.4)}}
 @keyframes au-spin{to{transform:rotate(360deg)}}
 
-/* left: brand panel (dark in both themes, as the design) */
-.au-brand{position:relative;background:#0f0e0c;color:#f2eee7;padding:40px 48px;display:flex;flex-direction:column;justify-content:space-between;gap:32px;overflow:hidden}
-.au-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:56px 56px;-webkit-mask-image:radial-gradient(ellipse 80% 70% at 30% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(ellipse 80% 70% at 30% 40%,#000 20%,transparent 80%)}
-.au-mesh{position:absolute;inset:0;overflow:hidden;pointer-events:none}
-.au-mesh>span{position:absolute;border-radius:50%}
-.au-mesh-a{left:-20%;bottom:-30%;width:90%;height:80%;background:radial-gradient(circle,rgba(232,115,26,.4),transparent 60%);filter:blur(40px);animation:au-meshA 18s ease-in-out infinite}
-.au-mesh-b{right:-30%;top:-20%;width:80%;height:70%;background:radial-gradient(circle,rgba(122,79,211,.28),transparent 60%);filter:blur(50px);animation:au-meshB 22s ease-in-out infinite}
-.au-logo{position:relative;display:inline-flex;align-items:center;gap:12px;color:#f2eee7}
+/* left: brand panel (dark in both themes, as the design). The living background of MILESTONE-2 MOT-02: a static
+   ambient light and grain, the faint grid, then the canvas of ./motion (threads that gather behind the Evidence node,
+   motes and the light of the chain signal). The canvas keeps only a small part of its light behind every line of text
+   (quiet zones), so the text keeps WCAG AA contrast at the brightest frame. Nothing here waits for an animation. */
+.au-brand{position:relative;isolation:isolate;background-color:#0f0e0c;background-image:radial-gradient(ellipse 75% 55% at 8% 104%,rgba(232,115,26,.15),transparent 70%),radial-gradient(ellipse 60% 40% at 92% -4%,rgba(242,238,231,.045),transparent 70%);color:#f2eee7;padding:40px 48px;display:flex;flex-direction:column;justify-content:space-between;gap:32px;overflow:hidden}
+.au-brand::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.05;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.au-grid{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:56px 56px;-webkit-mask-image:radial-gradient(ellipse 80% 70% at 30% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(ellipse 80% 70% at 30% 40%,#000 20%,transparent 80%)}
+.au-threads{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;opacity:0;transition:opacity 1.4s cubic-bezier(.22,1,.36,1)}
+.au-threads[data-ready]{opacity:1}
+.au-logo{position:relative;z-index:1;display:inline-flex;align-items:center;gap:12px;color:#f2eee7}
 .au-logo img{height:28px;width:auto;display:block;filter:brightness(0) invert(1)}
 .au-logo span{font-weight:700;letter-spacing:.04em;font-size:14px}
-.au-hero{position:relative;max-width:520px;container-type:inline-size;animation:au-up .8s ease .1s both}
+.au-hero{position:relative;z-index:1;max-width:520px;container-type:inline-size;animation:au-up .8s ease .1s both}
 .au-chain{display:block;overflow:visible;margin-bottom:34px;width:100%;height:auto}
 /* The chain scales with the hero (100cqw wide, at most its 520-unit viewBox), so a label renders at
    font-size x 100cqw / 520. The second font-size is the chord of 12px x 520 / width between 300px and 520px; it lies
    above that curve, so no label renders below 12px at any hero width the layout shows (about 360px and up). */
 .au-chain text{font-family:var(--au-ffm);font-size:12px;font-size:max(12px,calc(32.8px - 4cqw));fill:#b9b2a6}
-.au-chain-draw{animation:au-drawLoop 7s cubic-bezier(.2,.7,.2,1) .4s infinite}
-.au-chain-dot{animation:au-dotLoop 7s ease infinite;transform-box:fill-box;transform-origin:center}
-.au-hero h1{margin:0;font-size:40px;line-height:1.1;letter-spacing:-.03em;font-weight:600;color:#f2eee7}
-.au-facts{margin-top:22px;display:flex;flex-direction:column;gap:12px;font-size:15px;color:#e6e0d4}
+/* The signal: one short bright dash the motion moves along the chain (pathLength 1); hidden between runs. */
+.au-chain-signal{opacity:0;stroke-linecap:round;pointer-events:none}
+.au-chain-signal-glow{stroke:rgba(255,190,130,.3);stroke-width:4.5}
+.au-chain-signal-core{stroke:#ffd9b8;stroke-width:2}
+.au-hero h1{margin:0;font-size:40px;line-height:1.1;letter-spacing:-.03em;font-weight:600;color:#f2eee7;text-shadow:0 2px 24px rgba(15,14,12,.7)}
+.au-facts{margin-top:22px;display:flex;flex-direction:column;gap:12px;font-size:15px;color:#e6e0d4;text-shadow:0 1px 14px rgba(15,14,12,.8)}
 .au-fact{display:flex;gap:12px;align-items:center}
 .au-fact-icon{width:30px;height:30px;border-radius:9px;background:rgba(232,115,26,.18);color:#e8731a;display:inline-flex;align-items:center;justify-content:center;flex:none}
-.au-meta{position:relative;display:flex;flex-wrap:wrap;gap:8px 28px;font-size:12.5px;color:#a39b8c;font-family:var(--au-ffm)}
+.au-meta{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:8px 28px;font-size:12.5px;color:#b3ab9d;font-family:var(--au-ffm)}
 
 /* right: the form */
 .au-main{display:flex;align-items:center;justify-content:center;padding:48px 32px;background:var(--au-bg)}
@@ -144,5 +145,5 @@ body:has(.au-root[data-theme="dark"]),body:has(.au-boot[data-theme="dark"]){back
 }
 @media (prefers-reduced-motion:reduce){
   .au-root *,.au-root *::before,.au-root *::after{animation:none!important;transition:none!important}
-  .au-chain-draw{stroke-dashoffset:0}
+  .au-chain-signal{opacity:0!important}
 }

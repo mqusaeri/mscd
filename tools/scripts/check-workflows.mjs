@@ -6,7 +6,8 @@
 //      the tag in a comment (`uses: owner/repo@<sha> # v1.2.3`), or a `docker://` image without a digest.
 //      Third party means every `uses:` outside this repository (`./...`), GitHub's own actions included;
 //   3. puts a secret into script text: `${{ secrets.* }}` or `${{ github.token }}` inside `run:` (or the
-//      `script:` input of actions/github-script). Secrets reach scripts only through `env`;
+//      `script:` input of actions/github-script), in any case (`SECRETS.X`, `GITHUB.TOKEN`), because context
+//      names in expressions ignore case. Secrets reach scripts only through `env`;
 //   4. has a job whose environment is `production` or `staging`, or is chosen by an expression, without a
 //      concurrency group with `cancel-in-progress: false`, so two deploys never run at once and a running
 //      deploy is never cancelled. GitHub applies the workflow-level and the job-level concurrency both, so
@@ -40,11 +41,14 @@ export const SAAS_WORKFLOWS = ['release.yml', 'security-scan.yml', 'bootstrap-pr
 /** Environments whose jobs must never run twice at once or be cancelled half way. */
 const SERIALISED_ENVIRONMENTS = new Set(['production', 'staging']);
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
-/** Context values that differ in every run: a concurrency group that names one never holds two runs. */
-const RUN_UNIQUE = /\bgithub\s*\.\s*(?:run_id|run_number|run_attempt)\b/;
+/**
+ * Context values that differ in every run: a concurrency group that names one never holds two runs. Context and
+ * property names in expressions ignore case, so the patterns below do too.
+ */
+const RUN_UNIQUE = /\bgithub\s*\.\s*(?:run_id|run_number|run_attempt)\b/i;
 const IMAGE_DIGEST = /@sha256:[0-9a-f]{64}$/;
-/** An expression `${{ ... }}` that names the secrets context or the job token. */
-const SECRET_EXPRESSION = /\$\{\{(?:(?!\}\}).)*?\b(?:secrets\b|github\s*\.\s*token\b|github\s*\[\s*['"]token['"]\s*\])(?:(?!\}\}).)*\}\}/gs;
+/** An expression `${{ ... }}` that names the secrets context or the job token, in any case (`SECRETS.X`, `GITHUB.TOKEN`). */
+const SECRET_EXPRESSION = /\$\{\{(?:(?!\}\}).)*?\b(?:secrets\b|github\s*\.\s*token\b|github\s*\[\s*['"]token['"]\s*\])(?:(?!\}\}).)*\}\}/gis;
 
 const USAGE = `Usage: node tools/scripts/check-workflows.mjs [--saas [--require-all]] [<workflow file>...]
        node tools/scripts/check-workflows.mjs --self-test
@@ -310,6 +314,10 @@ const SELF_TESTS = [
   { name: 'secret by index in run', text: GOOD.replace('run: echo "$TOKEN" | wc -c', "run: echo ${{ secrets['TOKEN'] }}"), expect: ["contains ${{ secrets['TOKEN'] }}"] },
   { name: 'all secrets in run', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo ${{ toJSON(secrets) }}'), expect: ['contains ${{ toJSON(secrets) }}'] },
   { name: 'job token in run', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo ${{ github.token }} | gh auth login --with-token'), expect: ['contains ${{ github.token }}'] },
+  { name: 'secrets context in capitals', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo "${{ SECRETS.TOKEN }}"'), expect: ['contains ${{ SECRETS.TOKEN }}'] },
+  { name: 'secrets context in mixed case', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo "${{ Secrets.TOKEN }}"'), expect: ['contains ${{ Secrets.TOKEN }}'] },
+  { name: 'job token in capitals', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo "${{ GITHUB.TOKEN }}"'), expect: ['contains ${{ GITHUB.TOKEN }}'] },
+  { name: 'job token in mixed case', text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: echo "${{ github.Token }}"'), expect: ['contains ${{ github.Token }}'] },
   {
     name: 'secret in a block scalar run',
     text: GOOD.replace('run: echo "$TOKEN" | wc -c', 'run: |\n          set -e\n          curl -u "x:${{ secrets.TOKEN }}" https://example.test'),
@@ -388,6 +396,11 @@ const SELF_TESTS = [
     name: 'a group of one run never serialises',
     text: GOOD.replace('group: deploy', 'group: deploy-${{ github.run_id }}'),
     expect: ['names github.run_id, which differs in every run'],
+  },
+  {
+    name: 'a group of one run in capitals',
+    text: GOOD.replace('group: deploy', 'group: deploy-${{ GITHUB.RUN_ID }}'),
+    expect: ['names GITHUB.RUN_ID, which differs in every run'],
   },
   {
     name: 'a group of one run next to a shared job group',

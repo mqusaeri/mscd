@@ -4,9 +4,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuditActivityItem, AuditActivityPatch, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
+import { ForbiddenError } from '../../common/problems';
 import {
-  AUDIT_WRITER, MEMBERSHIP_SERVICE, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService, type Principal,
-  type RecordResolver, type ScopePolicy,
+  AUDIT_WRITER, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService,
+  type PermissionEvaluator, type Principal, type RecordResolver, type ScopePolicy,
 } from '../../common/tokens';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { auditEventOf, bump, commandResult, editionOf, nextPosition, refOf } from './support';
@@ -37,7 +38,18 @@ export class AuditActivitiesService {
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(SCOPE_POLICY) private readonly scope: ScopePolicy,
+    @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
   ) {}
+
+  /**
+   * Milestone 2 D.2: the guard also admits holders of internal_audit.manage, who may plan the activities of internal
+   * audits only (M2-05 builds the rest of the rule). Throws 403 for any other event type without audit_event.manage.
+   */
+  private async assertMayPlan(principal: Principal, ms: string, eventType: string): Promise<void> {
+    if (eventType === 'internal_audit') return;
+    if ((await this.evaluator.evaluate(principal, 'audit_event.manage', { scope: 'ms', ms })) !== null) return;
+    throw new ForbiddenError('You can plan the activities of internal audits only');
+  }
 
   // -------------------------------------------------------------------------------------------------------------
   // GET /ms/{ms}/audit-events/{id}/activities
@@ -67,6 +79,7 @@ export class AuditActivitiesService {
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const event = await auditEventOf(trx, system, eventId, true);
+      await this.assertMayPlan(principal, ms, event.event_type);
       const edition = await editionOf(trx, system.id);
       const { rows: templates } = await sql<{
         code: string; clause_ref: string | null; title: string; key_questions: string | null; evidence_to_request: string | null;
@@ -111,6 +124,8 @@ export class AuditActivitiesService {
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const record = await this.records.resolve(trx, ms, ENTITY, id, { forUpdate: true });
       const row = record.row as unknown as ActivityRow;
+      const { rows: events } = await sql<{ event_type: string }>`select event_type from audit_event where id = ${row.audit_event_id}`.execute(trx);
+      await this.assertMayPlan(principal, ms, events[0]?.event_type ?? '');
       const code = row.template_code ?? row.title;
       const set: Record<string, unknown> = {};
       const before: Record<string, unknown> = {};

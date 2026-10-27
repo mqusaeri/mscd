@@ -97,6 +97,8 @@ describe('secure functions (C.4)', () => {
       'entity_link_has_primary',
       'forbid_change',
       'prep_task_before_audit',
+      // Milestone 2 platform 0005: organisation status changes need the platform scope (J.8).
+      'require_platform_scope',
       'secure_platform_schema',
       'secure_tenant_schema',
       'set_updated_at',

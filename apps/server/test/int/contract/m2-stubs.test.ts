@@ -198,6 +198,11 @@ describe('the platform operator in multi tenancy without a membership (D.2)', ()
     const def = BY_ID.get('admin.onboarding')!;
     const call = await callRoute(operator, def, exampleInput(def));
     expect(call.status).toBe(403);
-    expect((await callRoute(admin, def, exampleInput(def))).status).toBe(501);
+    // The guard admits the Tenant Admin: the stub answers 501 until M2-06 builds the route, then the route answers 200.
+    const before = await guardDenials(full, def.id);
+    const own = await callRoute(admin, def, exampleInput(def));
+    expect(await guardDenials(full, def.id)).toBe(before);
+    expect(own.violations).toEqual([]);
+    expect(own.status).toBe(PENDING_ROUTES.has(def.id) ? 501 : 200);
   });
 });

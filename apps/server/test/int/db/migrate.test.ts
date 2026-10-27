@@ -2,6 +2,7 @@
 // external server of MSCD_TEST_DATABASE_URL): the `migrate` command from a bootstrapped database (C.3 steps 1, 2
 // and 4), tenant schemas created by the provisioner, a new tenant migration reaching every schema, --dry-run, and
 // the checks the DDL of C.2 to C.6 promises (C.12).
+import { readdirSync } from 'node:fs';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,19 +29,30 @@ import {
   type BareDatabase,
 } from './helpers';
 
-// Milestone 2 (M2-02) adds platform 0005 and tenant 0008; the ref migration 0002 of M2-03 follows in wave 1b.
-const PLATFORM = ['0001_foundation', '0002_identity', '0003_licensing_packs_keys', '0004_operations', '0005_milestone2_saas'];
-const REF = ['0001_framework_content'];
-const TENANT = [
-  '0001_core',
-  '0002_storage',
-  '0003_registers',
-  '0004_documents_applicability_evidence',
-  '0005_audit_cycle_phases',
-  '0006_workflow',
-  '0007_registers_workflow',
-  '0008_milestone2',
-];
+/** The migrations of one folder in the order the migrator applies them (file name order). */
+function folderMigrations(folder: 'platform' | 'ref' | 'tenant'): string[] {
+  return readdirSync(path.join(MIGRATIONS_ROOT, folder)).filter((f) => f.endsWith('.sql')).map((f) => f.slice(0, -'.sql'.length)).sort();
+}
+
+// The migrations each folder must start with: Milestone 1, then Milestone 2 (M2-02: platform 0005 and tenant 0008).
+// Later files (the ref migration 0002 of M2-03, a correction migration between waves) follow without an edit here.
+const KNOWN = {
+  platform: ['0001_foundation', '0002_identity', '0003_licensing_packs_keys', '0004_operations', '0005_milestone2_saas'],
+  ref: ['0001_framework_content'],
+  tenant: [
+    '0001_core',
+    '0002_storage',
+    '0003_registers',
+    '0004_documents_applicability_evidence',
+    '0005_audit_cycle_phases',
+    '0006_workflow',
+    '0007_registers_workflow',
+    '0008_milestone2',
+  ],
+} as const;
+const PLATFORM = folderMigrations('platform');
+const REF = folderMigrations('ref');
+const TENANT = folderMigrations('tenant');
 
 /** A packs.dir that does not exist: C.3 step 5 (WP-12) installs nothing, whether packs/dist was built or not. */
 const NO_PACKS_DIR = path.join(MIGRATIONS_ROOT, 'no-packs');
@@ -93,6 +105,14 @@ describe(`migrations on ${EXTERNAL_SERVER ? 'the server of MSCD_TEST_DATABASE_UR
     }
   });
 
+  it('keeps every known migration, in order, at the start of its folder', () => {
+    expect({
+      platform: PLATFORM.slice(0, KNOWN.platform.length),
+      ref: REF.slice(0, KNOWN.ref.length),
+      tenant: TENANT.slice(0, KNOWN.tenant.length),
+    }).toEqual(KNOWN);
+  });
+
   it('lists every platform, ref and tenant file as pending in a dry run and changes nothing', async () => {
     const pending = await pendingMigrations({ connectionString: bare.urls.migrator });
     expect(pending.map((p) => `${p.target}/${p.name}`)).toEqual([...PLATFORM.map((n) => `platform/${n}`), ...REF.map((n) => `ref/${n}`)]);
@@ -131,7 +151,7 @@ describe(`migrations on ${EXTERNAL_SERVER ? 'the server of MSCD_TEST_DATABASE_UR
     expect(singletons.rows[0]).toEqual({ installations: '1', marks: '1' });
   });
 
-  it('creates two tenant schemas with all eight tenant migrations', async () => {
+  it('creates two tenant schemas with every tenant migration', async () => {
     alpha = await createTenant({ urls: bare.urls }, 'alpha');
     beta = await createTenant({ urls: bare.urls }, 'beta');
     for (const tenant of [alpha, beta]) {
