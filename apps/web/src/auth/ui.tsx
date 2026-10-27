@@ -58,8 +58,8 @@ export function brandFacts(profile: SystemProfile | null, lang: Lang, deployOver
 /**
  * The dark brand panel of every sign-in page (MILESTONE-2 MOT-02): logo, the traceability chain, headline, facts and
  * the footer facts over a living background. The canvas draws fine threads that gather behind the Evidence node and
- * a signal of light that runs the chain (./motion). The chain and all text are complete without the motion: with
- * reduced motion the canvas shows one still frame, and the canvas is hidden where the panel collapses.
+ * a signal of light that runs the chain (./motion). The chain and all text are complete without the motion. With
+ * reduced motion, and in the logo bar where the panel collapses, the canvas shows one still frame.
  */
 export function BrandPanel({ lang, facts }: { lang: Lang; facts: string[] }) {
   const panelRef = useRef<HTMLDivElement>(null);

@@ -1,0 +1,69 @@
+# MOT-02 handoff: sign-in brand panel motion
+
+MOT-02 replaces the static brand panel of every sign-in page with a living background built through the `motionsites-web-builder` skill. Fine warm threads cross the dark panel, gather into a waist behind the Evidence node of the traceability chain and open again towards the right edge. Every 11 seconds a short signal of light runs the chain from Issue to Finding, and each node glows as it passes. The form column is unchanged.
+
+## What was built
+
+| File | Content |
+|---|---|
+| `apps/web/src/auth/motion/threads.ts` | Pure scene maths, no DOM: the chain geometry shared with the SVG (`CHAIN_PATH`, `CHAIN_POINTS`, arc-length sampler, node positions along the path), the seeded threads (34, mulberry32 seed 2026), the loom curve (`threadY`: edges spread over the height, waist behind Evidence, slow waves of 38 to 72 seconds), stateless motes, the signal schedule (`signalHead`, `nodeGlow`), the quiet zones (`quietFactor`, `KEEP`) and `threadLight` for the brightness model of the tests |
+| `apps/web/src/auth/motion/engine.ts` | The canvas renderer and its lifecycle. States in `data-motion`: `off`, `running`, `paused`, `still`. Starts in an idle callback, 30 frames per second at most, device pixel ratio at most 2 and at most 2.6 million backing pixels, a clock that counts running time only. Pauses when the tab is hidden or the canvas is off screen; draws one still frame with reduced motion and in the narrow logo bar. Every browser API comes through `MotionEnv`, so the unit tests drive it with fakes |
+| `apps/web/src/auth/motion/BrandMotion.ts` | DOM glue: measures the line boxes of the brand text (logo, headline, facts, footer facts, chain labels) as quiet zones and the position of the chain SVG, mounts the engine, measures again after fonts load, after the entrance of the hero and when the language or footer facts change |
+| `apps/web/src/auth/ui.tsx` | `BrandPanel` only (plus its imports): a decorative `canvas.au-threads` (`aria-hidden`, `data-motion="off"` in the server markup), the chain drawn in full at rest, two signal paths over the chain (`pathLength="1"`, one short dash moved by the engine), the effect that mounts the motion. The six nodes and labels, the headline, the facts and the footer facts are as before. `AuthLayout` is unchanged |
+| `apps/web/src/auth/auth.css` | Brand panel rules only: static ambient light and grain on the panel (the two animated mesh blobs, one of them purple, are gone), the faint grid ignores pointer events, the canvas layer and its 1.4 second fade in, the signal stroke, text shadows on the headline and facts, footer facts colour `#b3ab9d` (was `#a39b8c`), reduced motion hides the signal. The narrow layout keeps the canvas in the logo bar |
+| `apps/web/test/auth/motion.test.tsx` | 22 unit tests: scene maths, the WCAG model of the brightest light behind every line of brand text, the engine lifecycle (idle start, frame cap, hidden tab, off screen, reduced motion, narrow still frame, no size, backing limits, destroy, no 2D context), the brand panel markup, and the section L rules on the stylesheet and sources |
+| `apps/web/e2e/auth-motion.spec.js` | 5 browser tests (see "How the browser spec works") |
+| `docs/platform/handoff/MOT-02.md` | This note |
+
+### The design (skill workflow)
+
+- Closest examples studied: `securify-hero` (data security SaaS), `intelligence-layer` (dark infrastructure, restraint) and `stillmind` (calm). The media shelf was reviewed; no clip fits a compliance brand in orange, so the background is drawn (type and motion led, option 4 of the skill), which also keeps the sign-in page free of any media download.
+- Signature: many records, one chain. The threads gather behind Evidence; the signal makes the chain itself the moving light.
+- Values: threads alpha 0.075 to 0.175 (45% accent `#e8731a`, the rest warm white `#f2eee7`), stroke 1 CSS px, additive blending; waist half spread 26 px; motes 7 at a time, 12 to 18 seconds across, peak alpha 0.55; signal first run 1.2 seconds after start, 3.4 seconds along the chain, period 11 seconds; node halo radius 30 viewBox units, peak 0.66, rise 0.12 seconds, decay 1.1 seconds; steady Evidence glow 0.2; canvas fade in 1.4 seconds `cubic-bezier(.22,1,.36,1)`.
+- Text protection: every line of brand text is a quiet zone (padding 14 px, soft edge 28 px). Threads, motes, the waist light and the head light keep 8% of their light behind small text and 30% behind the headline. Node halos are drawn after the quiet zones because they are centred on the nodes and fade out before the labels.
+- Look and fix: five rounds of screenshots at 1440 x 900, 1280 x 720, 1000 x 800 (Indonesian), 800 and 390 wide, reduced motion and an early frame, scored with the skill's `references/review.md`. Round 1 averaged about 7 (threads too faint, signature weak). Round 3 moved the node halos out of the quiet zones of the labels. Round 4 thinned the signal stroke where it passed close to the Risk and Document labels. Round 5 added the still woven band to the narrow logo bar. Final scores: 8 on all ten criteria.
+
+### Rules L-1 to L-5
+
+| Rule | How it is met | Checked by |
+|---|---|---|
+| L-1 | No media, font or script from anywhere: the motion is drawn on a canvas by code in the auth chunk (about 11 kB minified, 5 kB gzip); the only data URI is the grain SVG in CSS (`img-src 'self' data:` allows it) | Unit test on CSS and sources; the browser spec records every request (same origin only) and every `securitypolicyviolation` under the release policy |
+| L-2 | Reduced motion: one still frame, no loop, no transition, signal hidden; the chain, its nodes and all text are complete without any animation (the old draw loop hid the chain at the start of every cycle) | Unit test (still state, one draw, no frame requested); browser spec (`data-motion="still"`, pixels unchanged, no running animation, follows the setting when it changes) |
+| L-3 | Text sizes unchanged (chain labels keep the 12px rule of WP-38). Contrast measured over the brightest frame: worst ratios 6.86 (footer facts), 7.2 (chain labels), 10.9 (headline), 12.9 (facts) | Browser spec: text made transparent, screenshots across the first signal run, brightest pixel under every text box, both themes; unit model of the brightest light |
+| L-4 | Paused while the tab is hidden or the canvas is off screen; one still frame in the narrow layout; no layout shift (the canvas is absolutely positioned in the panel); median frame cost about 0.5 ms | Unit tests; browser spec (hidden tab, 800 and 390 wide, frame cost) |
+| L-5 | Accent `#e8731a`, IBM Plex Sans and Mono as before, the CyberLentera logo of `project/assets/` as before | Visual review |
+
+The nginx Content-Security-Policy needs no change: the browser spec serves the build with the policy of `deploy/nginx/security-headers.conf` and fails on any violation, and the page has no inline script.
+
+### How the browser spec works
+
+The sample build that Playwright serves on 4173 has no sign-in pages. `e2e/auth-motion.spec.js` therefore builds the API bundle once per worker (`VITE_DATA_SOURCE=api vite build` into a temporary folder, about 6 seconds), removes the Google Fonts lines from `index.html` as `deploy/docker/web.Dockerfile` does, and serves it on a free port with the release Content-Security-Policy and a small fake api (system profile, `GET /me` 401, sign-in methods). Tests: the motion runs behind the form and the form works (focus, typing, no clicks taken by the canvas, frame cost); WCAG AA and 12px over the brightest frame in the light and dark theme; pause on a hidden tab and the still logo bar at 800 and 390 wide; reduced motion. The spec also runs in the API project (it uses its own server and `apiSession: null`).
+
+## Deviations
+
+1. `test/auth/motion.test.tsx` runs once `apps/web/vitest.config.js` includes `.tsx` files (C.7, owned by M2-01 in wave 1b). Until then `npm test -w @mscd/web -- test/auth` runs the six existing files and skips this one without a failure. The file was run with a configuration equal to the planned change: 22 tests pass, and the whole `test/auth` folder passes with it (111 tests).
+2. No media file: the background is drawn, so `apps/web/public/motion/` was not created. Reduced motion shows the still frame of the same drawing, which needs no poster.
+3. Narrow layout (900px and below): the panel collapses to the logo bar as before (hero and footer facts hidden); the canvas stays in the bar and shows one still frame of the woven threads. The animation stops there as the brief asks, and the brand signature stays visible on phones.
+4. Footer facts colour `#a39b8c` became `#b3ab9d`, for contrast headroom over the motion. The two animated mesh blobs were removed (the craft rules of the skill ban glow blobs and purple, and the canvas is now the animated background).
+
+## Follow-ups
+
+- M2-01: the `.tsx` include of `vitest.config.js` makes `test/auth/motion.test.tsx` part of `npm test -w @mscd/web -- test/auth`.
+- M2-S11 (owns `apps/web/src/auth/**` in wave 3b): keep the refs and the effect of `BrandPanel` and the `canvas.au-threads` element. New brand text in the panel needs its selector in `TEXT_SELECTOR` of `motion/BrandMotion.ts`, so it gets a quiet zone; the contrast test of the browser spec fails otherwise.
+
+## Acceptance
+
+| Command | Result |
+|---|---|
+| `npm test -w @mscd/web -- test/auth` | Pass (6 files, 89 tests; `motion.test.tsx` waits for the `.tsx` include, deviation 1) |
+| `vitest run` of `test/auth` with the planned `.tsx` include | Pass (7 files, 111 tests, of which 22 in `motion.test.tsx`) |
+| `CI=1 npm run test:e2e -w @mscd/web -- e2e/auth-motion.spec.js e2e/contrast.spec.js e2e/shell.spec.js` | Pass (17 tests); `e2e/auth-motion.spec.js` also passed 15 of 15 with `--repeat-each=3` |
+| `npm run build -w @mscd/web` | Pass |
+| `npm run typecheck` | Pass |
+| `npm run lint` | Pass |
+| `npm test` | Pass |
+| `npm run check:text` | Pass |
+| `npm run gen:views:check -w @mscd/web` | Pass |
+| `CI=1 npm run test:e2e -w @mscd/web` | Pass (268 tests, the five of `e2e/auth-motion.spec.js` included) |
+| `MSCD_TEST_CONTAINER_PREFIX=mot-02- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | Pass (6 files, 49 tests) |
+| `CI=1 npm run test:e2e:api -w @mscd/web -- e2e/api-only/sign-in.spec.js e2e/auth-motion.spec.js` (API stack, brief: keep the sign-in spec green) | Pass (10 tests: the five sign-in tests and the five motion tests) |

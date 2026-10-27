@@ -19,7 +19,7 @@ import { PROFILE } from './helpers';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../../src/auth');
-const FORBIDDEN = /[—·]/;
+const FORBIDDEN = /[\u2014\u00b7]/;
 
 // ---------------------------------------------------------------------------------------------------------------
 // A layout as the browser measures it at 1440 x 900 (panel 754 x 900, hero 520 wide): the quiet zones of the logo,

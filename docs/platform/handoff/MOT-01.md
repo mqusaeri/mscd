@@ -57,12 +57,12 @@ Average after round 3: 8.2, nothing under 7.
 
 | Command | Result |
 |---|---|
-| `node apps/site/check.mjs` | pending |
-| `node tools/scripts/check-text.mjs apps/site docs/site.md` | pending |
-| `node apps/site/apply-config.mjs --check` | pending |
-| `npm run typecheck` | pending |
-| `npm run lint` | pending |
-| `npm test` | pending |
-| `npm run check:text` | pending |
-| `MSCD_TEST_CONTAINER_PREFIX=mot-01- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | pending |
-| `CI=1 npm run test:e2e -w @mscd/web` | pending |
+| `node apps/site/check.mjs` | Pass: 14 runs (2 languages, 2 sizes, 2 themes, reduced motion, no JavaScript), "Site check passed.", about 3 minutes |
+| `node tools/scripts/check-text.mjs apps/site docs/site.md` | Pass: 11 files, no em dash or centre dot |
+| `node apps/site/apply-config.mjs --check` | Pass: pages match `site.config.mjs` |
+| `npm run typecheck` | Pass |
+| `npm run lint` | Pass (`apps/site` is linted with the root configuration) |
+| `npm test` | Pass, every workspace |
+| `npm run check:text` | Pass |
+| `MSCD_TEST_CONTAINER_PREFIX=mot-01- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | Pass: 6 files, 49 tests; no `mot-01-` container left |
+| `CI=1 npm run test:e2e -w @mscd/web` | Pass: 268 tests |
