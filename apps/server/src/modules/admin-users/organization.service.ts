@@ -101,7 +101,7 @@ export class OrganizationService {
             .forUpdate()
             .executeTakeFirst();
           if (!current) throw new NotFoundError('No current organisation');
-          // The last attempt writes in any case; two hour boundaries within one change do not happen.
+          // The last attempt writes without the check, so the PATCH always ends.
           if (patch.timeZone !== undefined && attempt < ATTEMPTS && (await beganInEarlierHour(trx))) throw new BeganInEarlierHour();
 
           if (patch.localLogin !== undefined && current.local_login !== patch.localLogin) {
