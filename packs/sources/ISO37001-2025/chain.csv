@@ -1,7 +1,7 @@
 stage_key,position,label_en,label_id,question_en,question_id,source,entity_type,risk_profile_code,is_mandatory,clause_at_risk,overview_clause,gate_type_label_en,gate_type_label_id
-context,1,Context issue,Isu konteks,,,entity,context_issue,,true,4.1,4,,
-brisk,2,Bribery risk,Risiko penyuapan,,,entity,risk,bribery,true,,4,,
-control,3,Control / requirement,Kontrol / persyaratan,,,applicability,,,true,6.1.3 d),8,,
-associate,4,Position / associate,Posisi / mitra,,,entity,business_associate,,true,,8,,
-document,5,Document,Dokumen,,,document,,,true,7.5,7,,
-evidence,6,Evidence,Bukti,,,evidence,,,true,8.1 / 9.1,8,,
+context,1,Context issue,Isu konteks,Which internal and external issues affect the bribery risks of the organisation?,Isu internal dan eksternal mana yang memengaruhi risiko penyuapan organisasi?,entity,context_issue,,true,4.1,4,,
+brisk,2,Bribery risk,Risiko penyuapan,"Show how this bribery risk was assessed, by position, transaction or business associate.","Tunjukkan bagaimana risiko penyuapan ini dinilai, berdasarkan posisi, transaksi atau mitra bisnis.",entity,risk,bribery,true,4.5,4,,
+control,3,Control / requirement,Kontrol / persyaratan,"Which control addresses this bribery risk, and is it proportionate?","Kontrol mana yang menangani risiko penyuapan ini, dan apakah kontrol itu proporsional?",applicability,,,true,8.1,8,,
+associate,4,Position / associate,Posisi / mitra,"Was due diligence done on this position or business associate, and is it current?","Apakah uji tuntas sudah dilakukan atas posisi atau mitra bisnis ini, dan apakah masih berlaku?",entity,business_associate,,true,8.2,8,,
+document,5,Document,Dokumen,"Where is the control written down, and is that version current?","Di mana kontrol ini didokumentasikan, dan apakah versinya masih berlaku?",document,,,true,7.5,7,,
+evidence,6,Evidence,Bukti,Show records that the control operated in this cycle.,Tunjukkan rekaman bahwa kontrol ini berjalan pada siklus ini.,evidence,,,true,8.1 / 9.1,8,,

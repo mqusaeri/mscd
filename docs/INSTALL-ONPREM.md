@@ -150,7 +150,7 @@ The installer checks the server and the bundle, then asks for:
 - the certificate: self-signed, or files from your certificate authority,
 - the short name (slug) and the display name of your organisation.
 
-Press Enter to accept the value in brackets. Every answer is checked, and the question repeats when an answer is not valid. The installer then shows a summary and asks for confirmation.
+Press Enter to accept the value in brackets. Every answer is checked, and the question repeats when an answer is not valid. The installer then shows a summary. For a new organisation it reminds you that the slug cannot be changed and asks you to confirm it, then it asks for confirmation of the whole summary. Answering no to either question changes nothing.
 
 To install without questions, give the answers as options:
 
@@ -161,7 +161,7 @@ sudo ./install.sh --yes --domain mscd.example.co.id --self-signed \
   --smtp-host smtp.acme.co.id --mail-from "MSCD <mscd@acme.co.id>"
 ```
 
-The organisation slug names your organisation inside MSCD and the database. It cannot change later. Use a lower-case letter, then 2 to 40 lower-case letters, digits or `_`.
+The organisation slug names your organisation inside MSCD and the database. The slug cannot be changed after the organisation is created. Use a lower-case letter, then 2 to 40 lower-case letters, digits or `_`. With `--yes` the installer prints this reminder and asks nothing.
 
 A successful run ends like this:
 
@@ -182,14 +182,13 @@ MSCD 1.0.0 is running.
   Logs          cd /opt/mscd && sudo docker compose logs api web
   Uninstall     sudo /opt/mscd/uninstall.sh
 
-  First administrator: send this one-time link (valid 72 hours) to ana.wijaya@acme.co.id:
-    admin create-user: created user ana.wijaya (ana.wijaya@acme.co.id) to organisation acme as tenant_admin
-    Invitation link (single use, valid until 2026-10-05T07:49:57.028Z):
-    https://mscd.example.co.id/invite#token=<one-time token>
+  First administrator: the invitation (valid 72 hours) was emailed to ana.wijaya@acme.co.id.
 
   Keep a copy of /opt/mscd/secrets in a safe place: without it the database
   and the encrypted files cannot be opened.
 ```
+
+When MSCD cannot send email (the SMTP relay is not reachable), the summary shows the one-time invitation link instead, to send to the administrator yourself through a trusted channel.
 
 The first start takes a few minutes: the database is created, every database change is applied and the framework packs are installed before the application starts.
 
@@ -300,14 +299,16 @@ The installer checks the format, that the key matches, the expiry date (it warns
 
 ## 5. First administrator
 
-If you passed `--admin-email`, the installer printed a one-time invitation link. Otherwise create it now (from the install directory):
+If you passed `--admin-email`, the installer already invited the first administrator. Otherwise invite the administrator now (from the install directory):
 
 ```bash
 cd /opt/mscd
 sudo docker compose run --rm cli admin create-user --email ana.wijaya@acme.co.id --tenant-admin
 ```
 
-The command prints a one-time link that is valid for 72 hours. Send it to the administrator through a trusted channel. The administrator opens it, sets a password and enrols an authenticator app (TOTP). Multi-factor sign-in is always on for local accounts.
+The command emails the invitation and prints `Invitation sent to ana.wijaya@acme.co.id`. When MSCD cannot send email, it prints a one-time link instead. The link is valid for 72 hours: send it to the administrator through a trusted channel. The administrator opens it, sets a password and enrols an authenticator app (TOTP). Multi-factor sign-in is always on for local accounts.
+
+An address that already has an MSCD account (for example a person who works for another organisation on the same installation) gets an invitation to accept or decline after signing in, by email and as a notification in MSCD.
 
 The administrator (role Tenant Admin) then installs the licence (section 6), invites the other users (section 8) and grants their roles per management system.
 
@@ -319,10 +320,10 @@ Until a licence is installed, the organisation has its first Tenant Admin and no
 
    ```bash
    cd /opt/mscd
-   sudo docker compose exec postgres psql -U postgres -d mscd -tAc "select id from platform.installation"
+   sudo docker compose run --rm cli license show-id
    ```
 
-   With your own PostgreSQL (section 11), ask your database administrator to run the same query in the MSCD database.
+   The command prints only the id, so a script can use it. It works with the bundled and with your own PostgreSQL (section 11).
 
 2. Send the installation id and your organisation name to CyberLentera. You receive the licence file.
 
@@ -670,7 +671,26 @@ The chart `helm/mscd-<version>.tgz` runs web, api, worker and storage-gateway as
 
    The `migrate` Job runs first and applies every database change and the framework packs. `helm test` prints `Phase: Succeeded`.
 
-7. Create the organisation and the first administrator. The commands run in the worker pod, which reaches the database and the storage gateway; the migrator address is passed for this one command only:
+7. Create the organisation and the first administrator. The simplest way is the admin Job of the chart: add this to `my-values.yaml` before step 6, and the Job runs once after the install (a `post-install` hook):
+
+   ```yaml
+   adminJob:
+     enabled: true
+     tenantCreate:
+       enabled: true
+       slug: acme                  # cannot be changed later
+       name: PT Acme Indonesia
+       timeZone: Asia/Jakarta
+       siteCount: 1
+     createUser:
+       enabled: true
+       email: ana.wijaya@acme.co.id
+       tenantAdmin: true           # the first administrator
+   ```
+
+   The steps run in this order: `tenantCreate` (`tenant create`), `createUser` (`admin create-user`, which emails the invitation) and `createOperator` (`admin create-operator`, for a SaaS installation). Install with `--wait`, so the storage gateway is ready when the organisation's data key is created. Read the result with `kubectl -n mscd logs job/mscd-admin --all-containers`; when MSCD cannot send email, the one-time invitation link is in that log, so treat the log as confidential. The Job is kept until the next install or upgrade replaces it, and for `adminJob.ttlSecondsAfterFinished` seconds at most (one day by default). When a step fails, Kubernetes runs the Job again from the first step (`adminJob.backoffLimit` times); the Job runs `tenant create --if-missing`, which passes without changes when the organisation exists, so a retry continues with the step that failed. Leave `adminJob.hook` at `post-install`: on every upgrade the Job would run `admin create-user` again, which sends a new invitation, and it fails once the person has accepted.
+
+   Without the admin Job, run the same commands in the worker pod, which reaches the database and the storage gateway; the migrator address is passed for this one command only:
 
    ```bash
    MIGRATOR_URL=$(kubectl -n mscd get secret mscd-migrate -o jsonpath='{.data.db-migrator\.url}' | base64 -d)
@@ -681,7 +701,7 @@ The chart `helm/mscd-<version>.tgz` runs web, api, worker and storage-gateway as
    unset MIGRATOR_URL
    ```
 
-   The second command prints the one-time invitation link (section 5). For the licence, the installation id is in the table `platform.installation` of your database (section 6).
+   The second command emails the invitation, or prints the one-time link when MSCD cannot send email (section 5). For the licence, print the installation id with `kubectl -n mscd exec deploy/mscd-worker -- node apps/server/dist/main.js license show-id` (section 6).
 
 Upgrades: push the new images, then `helm upgrade mscd helm/mscd-<new version>.tgz -n mscd -f ../my-values.yaml --wait --timeout 15m`. The `migrate` Job runs before any pod is replaced. Roll back with `helm history mscd -n mscd` and `helm rollback mscd <revision> -n mscd`.
 
@@ -837,7 +857,11 @@ Run these in the install directory (`cd /opt/mscd`):
 | Restart | `sudo docker compose restart` |
 | Stop and start | `sudo docker compose stop`, `sudo docker compose up -d --wait` |
 | Change a setting | Run `sudo ./install.sh` again from the bundle directory with the new option |
-| Invite a Tenant Admin | `sudo docker compose run --rm cli admin create-user --email <email> --tenant-admin` |
+| Invite a Tenant Admin | `sudo docker compose run --rm cli admin create-user --email <email> --tenant-admin` (emails the invitation; prints the one-time link only when email does not work) |
+| Installation id for a licence request | `sudo docker compose run --rm cli license show-id` |
+| Create an organisation only when its slug is not used yet (scripts and jobs that may run again) | `sudo docker compose run --rm cli tenant create --slug <slug> --name <name> --if-missing` (prints "already exists" and changes nothing when the organisation exists) |
+| Make an account a platform operator | `sudo docker compose run --rm cli admin create-operator --email <email>` (a new account gets a one-time link to set its password by email and sets up an authenticator app at the first sign-in) |
+| End the platform operator role of an account | `sudo docker compose run --rm cli admin revoke-operator --email <email>` (its sessions end; its memberships stay) |
 | Verify an email domain for automatic accounts | `sudo docker compose run --rm cli tenant verify-domain --org <slug> --domain <domain> --by "<your name>"` |
 | Server version | `sudo docker compose run --rm cli --version` |
 

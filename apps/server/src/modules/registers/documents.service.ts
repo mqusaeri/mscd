@@ -3,18 +3,27 @@
 // confirmation for shared documents), and move it through review: start a review (draft or expired), approve it
 // (never by the author of the version in review, BR-16) or return it to draft with a note. Approval makes the version
 // in review the current one, supersedes the earlier approved version and ends the review (WP-21 follow-up).
+//
+// Milestone 2 (D.1, D.2, M2-07): a document is internal (default) or external, an external one naming its source
+// (who issued it) and optionally the issuer's reference and the date it was received; `DocumentVersionsService` lists
+// the versions of a document newest first, with the scope policy of the document (owner scope and classification).
+// Every document command queues `readiness.recompute` and `cycle.derive` (D.6) for the systems the document counts
+// in (its linked systems; every active system for an organisation-wide document), in the command's transaction.
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import type { CommandResult, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest } from '@mscd/shared';
+import type { CommandResult, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest, DocumentVersionItem } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { addDays } from '../../common/dates';
 import { assertIfMatch } from '../../common/etag';
-import { ConflictError, ForbiddenError } from '../../common/problems';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../common/problems';
 import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type AuthzState, type LicenceGate,
-  type MembershipService, type PermissionEvaluator, type Principal, type RecordResolver, type Trx,
+  type MembershipService, type PermissionEvaluator, type Principal, type RecordResolver, type TenantInfo, type Trx,
 } from '../../common/tokens';
+import { ScopePolicyService } from '../authz/scope-policy';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { assertRequires, commandResult, linkedSystems, orgOf, personOf, pickTransition, refOf, todayOf, unprocessable, writeRow } from './command-support';
@@ -41,6 +50,10 @@ interface DocumentRow {
   pending_holder_user_id: string | null;
   pending_due_at: string | null;
   review_started_at: string | null;
+  origin: 'internal' | 'external';
+  external_source: string | null;
+  external_ref: string | null;
+  received_at: string | null;
 }
 
 interface VersionRow {
@@ -62,6 +75,7 @@ export class DocumentCommandsService {
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
     @Inject(LICENCE_GATE) private readonly licence: LicenceGate,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -126,6 +140,7 @@ export class DocumentCommandsService {
       if (body.note) after.note = body.note;
       const updatedAt = await writeRow(trx, ENTITY, id, set, actor);
       await this.audit.record(trx, { action: 'document.transition', msId: record.ms.id, entityType: ENTITY, entityId: id, entityCode: doc.doc_code, before, after });
+      await this.queueDerived(trx, org, doc.is_org_wide, msIds, actor);
       return commandResult(systems.length > 0 ? systems.map((s) => s.slug) : [record.ms.slug], { ref: refOf(ENTITY, id, doc.doc_code, updatedAt) });
     });
   }
@@ -159,12 +174,14 @@ export class DocumentCommandsService {
       const owner = await this.members.resolveHandle(trx, body.ownerHandle);
       const approver = body.approverHandle ? await this.members.resolveHandle(trx, body.approverHandle) : null;
       const id = randomUUID();
+      const origin = body.origin ?? 'internal';
       const position = await sql<{ next: number }>`select coalesce(max(position), -1)::int + 1 as next from document`.execute(trx);
       const { rows } = await sql<{ updated_at: Date }>`
         insert into document (id, doc_code, title, doc_type, status, classification, owner_user_id, approver_user_id, next_review_at,
-                              is_org_wide, position, created_by, updated_by)
+                              is_org_wide, position, origin, external_source, external_ref, received_at, created_by, updated_by)
         values (${id}, ${body.docCode}, ${body.title}, ${body.docType}, 'draft', ${body.classification}, ${owner}, ${approver},
-                ${body.nextReviewAt ?? null}::date, ${body.orgWide}, ${position.rows[0]?.next ?? 0}, ${actor}, ${actor})
+                ${body.nextReviewAt ?? null}::date, ${body.orgWide}, ${position.rows[0]?.next ?? 0}, ${origin}, ${body.externalSource ?? null},
+                ${body.externalRef ?? null}, ${body.receivedAt ?? null}::date, ${actor}, ${actor})
         returning updated_at`.execute(trx);
       for (const [i, s] of systems.entries()) {
         await sql`insert into entity_ms_link (entity_type, entity_id, management_system_id, is_primary, created_by, updated_by)
@@ -186,8 +203,17 @@ export class DocumentCommandsService {
           ...(body.nextReviewAt ? { next_review_at: body.nextReviewAt } : {}),
           is_org_wide: body.orgWide,
           systems: systems.map((s) => s.slug),
+          ...(origin === 'external'
+            ? {
+                origin,
+                external_source: body.externalSource,
+                ...(body.externalRef ? { external_ref: body.externalRef } : {}),
+                ...(body.receivedAt ? { received_at: body.receivedAt } : {}),
+              }
+            : {}),
         },
       });
+      await this.queueDerived(trx, org, body.orgWide, systems.map((s) => s.id), actor);
       return commandResult(systems.map((s) => s.slug), { ref: refOf(ENTITY, id, body.docCode, rows[0]!.updated_at) });
     });
   }
@@ -197,6 +223,7 @@ export class DocumentCommandsService {
   // -------------------------------------------------------------------------------------------------------------
 
   async update(principal: Principal, ms: string, id: string, patch: DocumentPatch, ifMatch: string | undefined): Promise<CommandResult> {
+    const org = orgOf(principal);
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const record = await this.records.resolve(trx, ms, ENTITY, id, { forUpdate: true });
@@ -225,6 +252,27 @@ export class DocumentCommandsService {
         const approver = patch.approverHandle === null ? null : await this.members.resolveHandle(trx, patch.approverHandle);
         change('approver_user_id', approver, { before: (await personOf(trx, doc.approver_user_id))?.handle ?? null, after: patch.approverHandle });
       }
+      // Milestone 2 D.2: origin and the external facts. An internal document keeps none of them; an external one names
+      // its source.
+      const origin = patch.origin ?? doc.origin;
+      if (patch.origin !== undefined) change('origin', patch.origin);
+      if (origin === 'internal') {
+        if ([patch.externalSource, patch.externalRef, patch.receivedAt].some((v) => v !== undefined && v !== null)) {
+          throw unprocessable('documents.external_fields_internal', 'Source, reference and date received describe an external document',
+            'Sumber, referensi dan tanggal diterima menjelaskan dokumen eksternal');
+        }
+        change('external_source', null);
+        change('external_ref', null);
+        change('received_at', null);
+      } else {
+        if (patch.externalSource !== undefined) change('external_source', patch.externalSource);
+        if (patch.externalRef !== undefined) change('external_ref', patch.externalRef);
+        if (patch.receivedAt !== undefined) change('received_at', patch.receivedAt);
+        const source = patch.externalSource !== undefined ? patch.externalSource : doc.external_source;
+        if (!source) {
+          throw unprocessable('documents.external_source_required', 'An external document names its source', 'Dokumen eksternal menyebutkan sumbernya');
+        }
+      }
       const updatedAt = await writeRow(trx, ENTITY, id, set, actor);
       if (Object.keys(after).length > 0) {
         await this.audit.record(trx, {
@@ -236,6 +284,7 @@ export class DocumentCommandsService {
           before,
           after: { ...after, ...(systems.length > 1 ? { systems: systems.map((s) => s.slug) } : {}) },
         });
+        await this.queueDerived(trx, org, doc.is_org_wide, systems.length > 0 ? systems.map((s) => s.id) : [record.ms.id], actor);
       }
       return commandResult(systems.length > 0 ? systems.map((s) => s.slug) : [record.ms.slug], { ref: refOf(ENTITY, id, doc.doc_code, updatedAt) });
     });
@@ -244,6 +293,17 @@ export class DocumentCommandsService {
   // -------------------------------------------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------------------------------------------
+
+  /**
+   * Queues `readiness.recompute` and `cycle.derive` (D.6) for every system the document counts in: its linked systems,
+   * or every active system of the organisation for an organisation-wide document (readiness reads those too).
+   */
+  private async queueDerived(trx: Trx, org: Pick<TenantInfo, 'id'>, orgWide: boolean, msIds: string[], actor: string): Promise<void> {
+    const targets = orgWide
+      ? (await sql<{ id: string }>`select id from management_system where deleted_at is null and status <> 'archived' order by id`.execute(trx)).rows.map((r) => r.id)
+      : [...new Set(msIds)];
+    for (const msId of targets) await enqueueDerived(this.queue, trx, org, msId, actor);
+  }
 
   /** 422 unless `docType` is a `doc_type` lookup of the system's edition (`ref.lookup_value`). */
   private async assertDocType(trx: Trx, msId: string, docType: string): Promise<void> {
@@ -266,5 +326,77 @@ export class DocumentCommandsService {
   private async version(trx: Trx, versionId: string): Promise<VersionRow | null> {
     const { rows } = await sql<VersionRow>`select id, version_label, status, submitted_by from document_version where id = ${versionId}`.execute(trx);
     return rows[0] ?? null;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// GET /ms/{ms}/documents/{id}/versions (Milestone 2 D.1, M2-07)
+// ---------------------------------------------------------------------------------------------------------------
+
+interface VersionListRow {
+  id: string;
+  version_label: string;
+  status: DocumentVersionItem['status'];
+  storage_object_id: string;
+  submitted_by: string | null;
+  submitted_by_id: string | null;
+  submitted_at: Date | null;
+  approved_by: string | null;
+  approved_by_id: string | null;
+  approved_at: string | null;
+  rejection_note: string | null;
+  change_summary: string | null;
+}
+
+/**
+ * The versions of a document, newest first. The document must be visible to the caller under the scope policy of
+ * the system (F.7, D-34): own-scoped roles see only their own documents, `restricted` documents only their owner and
+ * the managers, `confidential` ones no guest auditor; otherwise 404, as for a document of another system. Top
+ * Management and guest auditors see no submitter or approver of other people (Q-8, G.5).
+ */
+@Injectable()
+export class DocumentVersionsService {
+  constructor(
+    private readonly tenancy: TenantScope,
+    private readonly policy: ScopePolicyService,
+    @Inject(RECORD_RESOLVER) private readonly records: RecordResolver,
+  ) {}
+
+  async list(principal: Principal, ms: string, id: string): Promise<DocumentVersionItem[]> {
+    return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
+      const record = await this.records.resolve(trx, ms, ENTITY, id);
+      const doc = record.row as unknown as DocumentRow;
+      const scope = await this.policy.scopeContext(trx, principal, ms);
+      const systems = await linkedSystems(trx, ENTITY, id, record.ms.id);
+      const visible = this.policy.recordVisible(scope, {
+        ownerUserId: doc.owner_user_id,
+        holderUserId: doc.pending_holder_user_id,
+        classification: doc.classification as 'public' | 'internal' | 'confidential' | 'restricted',
+        linkedMsIds: systems.map((s) => s.id),
+      });
+      if (!visible) throw new NotFoundError();
+      const { rows } = await sql<VersionListRow>`
+        select v.id, v.version_label, v.status, v.storage_object_id, s.handle as submitted_by, v.submitted_by as submitted_by_id, v.submitted_at,
+               a.handle as approved_by, v.approved_by as approved_by_id, v.approved_at, v.rejection_note, v.change_summary
+          from document_version v
+          left join platform.app_user s on s.id = v.submitted_by
+          left join platform.app_user a on a.id = v.approved_by
+         where v.document_id = ${id} and v.deleted_at is null
+         order by v.created_at desc, v.id desc`.execute(trx);
+      const shown = (userId: string | null) =>
+        scope.kind === 'external_auditor' ? false : scope.kind === 'top_management' ? userId === scope.userId : true;
+      return rows.map((v) => ({
+        id: v.id,
+        label: v.version_label,
+        status: v.status,
+        storageObjectId: v.storage_object_id,
+        submittedBy: shown(v.submitted_by_id) ? v.submitted_by : null,
+        submittedAt: v.submitted_at ? new Date(v.submitted_at).toISOString() : null,
+        approvedBy: shown(v.approved_by_id) ? v.approved_by : null,
+        approvedAt: v.approved_at,
+        rejectionNote: v.rejection_note,
+        changeSummary: v.change_summary,
+      }));
+    });
   }
 }

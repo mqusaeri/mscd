@@ -543,7 +543,9 @@
     "bia": "8.2.2",
     "drisk": "8.2.3",
     "strategy": "8.3",
-    "exercise": "8.5"
+    "exercise": "8.5",
+    "brisk": "4.5",
+    "associate": "8.2"
    },
    "EXAMPLES": {
     "8.8": "Scanner PDF report showing scan date and remediation status",
@@ -6260,7 +6262,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -6296,7 +6298,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "rina",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-11-05",
          "pno": 2
@@ -6400,8 +6402,8 @@
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": "PRC-05",
-         "doc": "isms:doc:PRC-05",
+         "out": "PRC-04",
+         "doc": null,
          "date": "2025-01-14",
          "pno": 4
         },
@@ -6496,7 +6498,7 @@
          "st": "blocked",
          "blocker": "R-031",
          "owner": "rina",
-         "out": null,
+         "out": "PLN-01",
          "doc": null,
          "date": "2026-10-08",
          "pno": 4
@@ -6764,7 +6766,7 @@
         {
          "key": "isms:act:6.7",
          "no": "6.7",
-         "title": "Approve tier 1–2 documents",
+         "title": "Approve policies and standards",
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
@@ -6776,7 +6778,7 @@
         {
          "key": "isms:act:6.8",
          "no": "6.8",
-         "title": "Approve tier 3–4 documents",
+         "title": "Approve procedures, plans and registers",
          "st": "verified",
          "blocker": null,
          "owner": "andi",
@@ -8809,11 +8811,11 @@
         {
          "key": "qms:act:2.3",
          "no": "2.3",
-         "title": "Define scope and boundaries",
+         "title": "Define QMS scope and boundaries",
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": null,
+         "out": "SCO-Q01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -8833,11 +8835,11 @@
         {
          "key": "qms:act:2.5",
          "no": "2.5",
-         "title": "Approve scope statement",
+         "title": "Approve QMS scope statement",
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
-         "out": null,
+         "out": "SCO-Q01",
          "doc": null,
          "date": "2024-11-01",
          "pno": 2
@@ -8861,12 +8863,12 @@
         {
          "key": "qms:act:3.1",
          "no": "3.1",
-         "title": "Draft policy",
+         "title": "Draft quality policy",
          "st": "verified",
          "blocker": null,
          "owner": "sari",
-         "out": "POL-01",
-         "doc": null,
+         "out": "QM-01",
+         "doc": "qms:doc:QM-01",
          "date": "2024-11-30",
          "pno": 3
         },
@@ -8897,12 +8899,12 @@
         {
          "key": "qms:act:3.4",
          "no": "3.4",
-         "title": "Approve and communicate policy",
+         "title": "Approve and communicate quality policy",
          "st": "verified",
          "blocker": null,
          "owner": "dewi",
-         "out": "POL-01",
-         "doc": null,
+         "out": "QM-01",
+         "doc": "qms:doc:QM-01",
          "date": "2024-12-12",
          "pno": 3
         }
@@ -9477,8 +9479,8 @@
          "st": "complete",
          "blocker": null,
          "owner": "dewi",
-         "out": "PRC-08",
-         "doc": null,
+         "out": "PRC-Q03",
+         "doc": "qms:doc:PRC-Q03",
          "date": "2026-10-29",
          "pno": 9
         },
@@ -9932,22 +9934,6 @@
       {
        "id": "Cl. 10.1",
        "key": "10.1",
-       "title": "Improvement: general",
-       "theme": "Clause 10",
-       "st": "ns",
-       "owner": "tono",
-       "doc": "POL-B01",
-       "freq": "annual",
-       "note": "",
-       "gate": false,
-       "just": "Requirement within scope",
-       "risks": [],
-       "integ": "pending",
-       "loc": "gd"
-      },
-      {
-       "id": "Cl. 10.2",
-       "key": "10.2",
        "title": "Nonconformity and corrective action",
        "theme": "Clause 10",
        "st": "ns",
@@ -9962,8 +9948,8 @@
        "loc": "gd"
       },
       {
-       "id": "Cl. 10.3",
-       "key": "10.3",
+       "id": "Cl. 10.2",
+       "key": "10.2",
        "title": "Continual improvement",
        "theme": "Clause 10",
        "st": "ns",
@@ -10763,8 +10749,8 @@
         "kind": "req",
         "id": "Cl. 10.1",
         "title": [
-         "Improvement: general",
-         "Improvement: general"
+         "Nonconformity and corrective action",
+         "Nonconformity and corrective action"
         ],
         "act": [
          "Assign and start",
@@ -10777,7 +10763,7 @@
         "gate": false,
         "up": [],
         "down": [
-         "POL-B01"
+         "IMS-03"
         ],
         "ref": "bcms:req:Cl. 10.1",
         "q": "Which strategies and solutions were selected?"
@@ -10788,8 +10774,8 @@
         "kind": "req",
         "id": "Cl. 10.2",
         "title": [
-         "Nonconformity and corrective action",
-         "Nonconformity and corrective action"
+         "Continual improvement",
+         "Continual improvement"
         ],
         "act": [
          "Assign and start",
@@ -10802,34 +10788,9 @@
         "gate": false,
         "up": [],
         "down": [
-         "IMS-03"
-        ],
-        "ref": "bcms:req:Cl. 10.2",
-        "q": "Which strategies and solutions were selected?"
-       },
-       {
-        "key": "bcms:req:Cl. 10.3",
-        "stage": "strategy",
-        "kind": "req",
-        "id": "Cl. 10.3",
-        "title": [
-         "Continual improvement",
-         "Continual improvement"
-        ],
-        "act": [
-         "Assign and start",
-         "Tugaskan dan mulai"
-        ],
-        "h": "tono",
-        "due": "2026-11-14",
-        "st": "pending",
-        "after": false,
-        "gate": false,
-        "up": [],
-        "down": [
          "POL-B01"
         ],
-        "ref": "bcms:req:Cl. 10.3",
+        "ref": "bcms:req:Cl. 10.2",
         "q": "Which strategies and solutions were selected?"
        },
        {
@@ -10933,7 +10894,7 @@
        "product": 8,
        "bia": 8,
        "drisk": 11,
-       "strategy": 27,
+       "strategy": 26,
        "document": 8,
        "exercise": 3,
        "evidence": 11
@@ -11080,11 +11041,11 @@
         {
          "key": "bcms:act:2.3",
          "no": "2.3",
-         "title": "Define scope and boundaries",
+         "title": "Define BCMS scope and boundaries",
          "st": "verified",
          "blocker": null,
          "owner": "tono",
-         "out": null,
+         "out": "SCO-B01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -11104,11 +11065,11 @@
         {
          "key": "bcms:act:2.5",
          "no": "2.5",
-         "title": "Approve scope statement",
+         "title": "Approve BCMS scope statement",
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": null,
+         "out": "SCO-B01",
          "doc": null,
          "date": "2024-11-01",
          "pno": 2
@@ -11132,12 +11093,12 @@
         {
          "key": "bcms:act:3.1",
          "no": "3.1",
-         "title": "Draft policy",
+         "title": "Draft business continuity policy",
          "st": "verified",
          "blocker": null,
          "owner": "bagus",
-         "out": "POL-01",
-         "doc": null,
+         "out": "POL-B01",
+         "doc": "bcms:doc:POL-B01",
          "date": "2024-11-30",
          "pno": 3
         },
@@ -11168,12 +11129,12 @@
         {
          "key": "bcms:act:3.4",
          "no": "3.4",
-         "title": "Approve and communicate policy",
+         "title": "Approve and communicate business continuity policy",
          "st": "verified",
          "blocker": null,
          "owner": "dewi",
-         "out": "POL-01",
-         "doc": null,
+         "out": "POL-B01",
+         "doc": "bcms:doc:POL-B01",
          "date": "2024-12-12",
          "pno": 3
         }
@@ -11336,8 +11297,8 @@
          "st": "locked",
          "blocker": null,
          "owner": "tono",
-         "out": "PRC-13",
-         "doc": null,
+         "out": "PLN-B02",
+         "doc": "bcms:doc:PLN-B02",
          "date": null,
          "pno": 5
         },
@@ -12099,7 +12060,7 @@
       {
        "id": "Cl. 10.1",
        "key": "10.1",
-       "title": "Improvement: general",
+       "title": "Continual improvement",
        "theme": "Clause 10",
        "st": "ns",
        "owner": "lina",
@@ -12116,22 +12077,6 @@
        "id": "Cl. 10.2",
        "key": "10.2",
        "title": "Nonconformity and corrective action",
-       "theme": "Clause 10",
-       "st": "ns",
-       "owner": "lina",
-       "doc": "POL-A01",
-       "freq": "annual",
-       "note": "",
-       "gate": false,
-       "just": "Requirement within scope",
-       "risks": [],
-       "integ": "ok",
-       "loc": "vault"
-      },
-      {
-       "id": "Cl. 10.3",
-       "key": "10.3",
-       "title": "Continual improvement",
        "theme": "Clause 10",
        "st": "ns",
        "owner": "lina",
@@ -12997,8 +12942,8 @@
         "kind": "req",
         "id": "Cl. 10.1",
         "title": [
-         "Improvement: general",
-         "Improvement: general"
+         "Continual improvement",
+         "Continual improvement"
         ],
         "act": [
          "Assign and start",
@@ -13039,31 +12984,6 @@
          "POL-A01"
         ],
         "ref": "abms:req:Cl. 10.2",
-        "q": ""
-       },
-       {
-        "key": "abms:req:Cl. 10.3",
-        "stage": "control",
-        "kind": "req",
-        "id": "Cl. 10.3",
-        "title": [
-         "Continual improvement",
-         "Continual improvement"
-        ],
-        "act": [
-         "Assign and start",
-         "Tugaskan dan mulai"
-        ],
-        "h": "lina",
-        "due": "2026-12-29",
-        "st": "pending",
-        "after": false,
-        "gate": false,
-        "up": [],
-        "down": [
-         "POL-A01"
-        ],
-        "ref": "abms:req:Cl. 10.3",
         "q": ""
        },
        {
@@ -13147,7 +13067,7 @@
       "recs": {
        "context": 0,
        "brisk": 0,
-       "control": 32,
+       "control": 31,
        "associate": 0,
        "document": 5,
        "evidence": 2
@@ -13266,11 +13186,11 @@
         {
          "key": "abms:act:2.3",
          "no": "2.3",
-         "title": "Define scope and boundaries",
+         "title": "Define ABMS scope and boundaries",
          "st": "locked",
          "blocker": null,
          "owner": "andi",
-         "out": null,
+         "out": "SCO-A01",
          "doc": null,
          "date": null,
          "pno": 2
@@ -13290,11 +13210,11 @@
         {
          "key": "abms:act:2.5",
          "no": "2.5",
-         "title": "Approve scope statement",
+         "title": "Approve ABMS scope statement",
          "st": "locked",
          "blocker": null,
          "owner": "dewi",
-         "out": null,
+         "out": "SCO-A01",
          "doc": null,
          "date": null,
          "pno": 2
@@ -13318,12 +13238,12 @@
         {
          "key": "abms:act:3.1",
          "no": "3.1",
-         "title": "Draft policy",
+         "title": "Draft anti-bribery policy",
          "st": "locked",
          "blocker": null,
          "owner": "hendra",
-         "out": "POL-01",
-         "doc": null,
+         "out": "POL-A01",
+         "doc": "abms:doc:POL-A01",
          "date": null,
          "pno": 3
         },
@@ -13354,12 +13274,12 @@
         {
          "key": "abms:act:3.4",
          "no": "3.4",
-         "title": "Approve and communicate policy",
+         "title": "Approve and communicate anti-bribery policy",
          "st": "locked",
          "blocker": null,
          "owner": "andi",
-         "out": "POL-01",
-         "doc": null,
+         "out": "POL-A01",
+         "doc": "abms:doc:POL-A01",
          "date": null,
          "pno": 3
         }
@@ -15754,7 +15674,9 @@
     "bia": "8.2.2",
     "drisk": "8.2.3",
     "strategy": "8.3",
-    "exercise": "8.5"
+    "exercise": "8.5",
+    "brisk": "4.5",
+    "associate": "8.2"
    },
    "EXAMPLES": {
     "8.8": "Scanner PDF report showing scan date and remediation status",
@@ -21430,7 +21352,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -21466,7 +21388,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "rina",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-11-05",
          "pno": 2
@@ -21570,8 +21492,8 @@
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": "PRC-05",
-         "doc": "isms:doc:PRC-05",
+         "out": "PRC-04",
+         "doc": null,
          "date": "2025-01-14",
          "pno": 4
         },
@@ -21666,7 +21588,7 @@
          "st": "blocked",
          "blocker": "R-031",
          "owner": "rina",
-         "out": null,
+         "out": "PLN-01",
          "doc": null,
          "date": "2026-10-08",
          "pno": 4
@@ -21934,7 +21856,7 @@
         {
          "key": "isms:act:6.7",
          "no": "6.7",
-         "title": "Approve tier 1–2 documents",
+         "title": "Approve policies and standards",
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
@@ -21946,7 +21868,7 @@
         {
          "key": "isms:act:6.8",
          "no": "6.8",
-         "title": "Approve tier 3–4 documents",
+         "title": "Approve procedures, plans and registers",
          "st": "verified",
          "blocker": null,
          "owner": "andi",
@@ -23979,11 +23901,11 @@
         {
          "key": "qms:act:2.3",
          "no": "2.3",
-         "title": "Define scope and boundaries",
+         "title": "Define QMS scope and boundaries",
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": null,
+         "out": "SCO-Q01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -24003,11 +23925,11 @@
         {
          "key": "qms:act:2.5",
          "no": "2.5",
-         "title": "Approve scope statement",
+         "title": "Approve QMS scope statement",
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
-         "out": null,
+         "out": "SCO-Q01",
          "doc": null,
          "date": "2024-11-01",
          "pno": 2
@@ -24031,12 +23953,12 @@
         {
          "key": "qms:act:3.1",
          "no": "3.1",
-         "title": "Draft policy",
+         "title": "Draft quality policy",
          "st": "verified",
          "blocker": null,
          "owner": "sari",
-         "out": "POL-01",
-         "doc": null,
+         "out": "QM-01",
+         "doc": "qms:doc:QM-01",
          "date": "2024-11-30",
          "pno": 3
         },
@@ -24067,12 +23989,12 @@
         {
          "key": "qms:act:3.4",
          "no": "3.4",
-         "title": "Approve and communicate policy",
+         "title": "Approve and communicate quality policy",
          "st": "verified",
          "blocker": null,
          "owner": "dewi",
-         "out": "POL-01",
-         "doc": null,
+         "out": "QM-01",
+         "doc": "qms:doc:QM-01",
          "date": "2024-12-12",
          "pno": 3
         }
@@ -24647,8 +24569,8 @@
          "st": "complete",
          "blocker": null,
          "owner": "dewi",
-         "out": "PRC-08",
-         "doc": null,
+         "out": "PRC-Q03",
+         "doc": "qms:doc:PRC-Q03",
          "date": "2026-10-29",
          "pno": 9
         },
@@ -26149,7 +26071,9 @@
     "bia": "8.2.2",
     "drisk": "8.2.3",
     "strategy": "8.3",
-    "exercise": "8.5"
+    "exercise": "8.5",
+    "brisk": "4.5",
+    "associate": "8.2"
    },
    "EXAMPLES": {
     "8.8": "Scanner PDF report showing scan date and remediation status",
@@ -31796,7 +31720,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-10-24",
          "pno": 2
@@ -31832,7 +31756,7 @@
          "st": "verified",
          "blocker": null,
          "owner": "rina",
-         "out": null,
+         "out": "SCO-01",
          "doc": null,
          "date": "2024-11-05",
          "pno": 2
@@ -31936,8 +31860,8 @@
          "st": "verified",
          "blocker": null,
          "owner": "hendra",
-         "out": "PRC-05",
-         "doc": "isms:doc:PRC-05",
+         "out": "PRC-04",
+         "doc": null,
          "date": "2025-01-14",
          "pno": 4
         },
@@ -32032,7 +31956,7 @@
          "st": "blocked",
          "blocker": "R-031",
          "owner": "rina",
-         "out": null,
+         "out": "PLN-01",
          "doc": null,
          "date": "2026-10-08",
          "pno": 4
@@ -32300,7 +32224,7 @@
         {
          "key": "isms:act:6.7",
          "no": "6.7",
-         "title": "Approve tier 1–2 documents",
+         "title": "Approve policies and standards",
          "st": "verified",
          "blocker": null,
          "owner": "yusuf",
@@ -32312,7 +32236,7 @@
         {
          "key": "isms:act:6.8",
          "no": "6.8",
-         "title": "Approve tier 3–4 documents",
+         "title": "Approve procedures, plans and registers",
          "st": "verified",
          "blocker": null,
          "owner": "andi",
@@ -33438,8 +33362,8 @@
       "Define record retention",
       "Publish document register",
       "Train document owners",
-      "Approve tier 1–2 documents",
-      "Approve tier 3–4 documents"
+      "Approve policies and standards",
+      "Approve procedures, plans and registers"
      ]
     },
     {
@@ -33496,18 +33420,18 @@
      "acts": [
       "Identify internal and external issues",
       "Identify interested parties and requirements",
-      "Define scope and boundaries",
+      "Define QMS scope and boundaries",
       "Map processes and interfaces",
-      "Approve scope statement"
+      "Approve QMS scope statement"
      ]
     },
     {
      "n": "Leadership & policy",
      "acts": [
-      "Draft policy",
+      "Draft quality policy",
       "Define roles, responsibilities and authorities",
       "Set measurable objectives",
-      "Approve and communicate policy"
+      "Approve and communicate quality policy"
      ]
     },
     {
@@ -33601,18 +33525,18 @@
      "acts": [
       "Identify internal and external issues",
       "Identify interested parties and requirements",
-      "Define scope and boundaries",
+      "Define BCMS scope and boundaries",
       "Map processes and interfaces",
-      "Approve scope statement"
+      "Approve BCMS scope statement"
      ]
     },
     {
      "n": "Leadership & policy",
      "acts": [
-      "Draft policy",
+      "Draft business continuity policy",
       "Define roles, responsibilities and authorities",
       "Set measurable objectives",
-      "Approve and communicate policy"
+      "Approve and communicate business continuity policy"
      ]
     },
     {
@@ -33687,18 +33611,18 @@
      "acts": [
       "Identify internal and external issues",
       "Identify interested parties and requirements",
-      "Define scope and boundaries",
+      "Define ABMS scope and boundaries",
       "Map processes and interfaces",
-      "Approve scope statement"
+      "Approve ABMS scope statement"
      ]
     },
     {
      "n": "Leadership & policy",
      "acts": [
-      "Draft policy",
+      "Draft anti-bribery policy",
       "Define roles, responsibilities and authorities",
       "Set measurable objectives",
-      "Approve and communicate policy"
+      "Approve and communicate anti-bribery policy"
      ]
     },
     {
@@ -33828,8 +33752,40 @@
     "SOA-01"
    ],
    [
+    "QMS scope",
+    "SCO-Q01"
+   ],
+   [
+    "BCMS scope",
+    "SCO-B01"
+   ],
+   [
+    "ABMS scope",
+    "SCO-A01"
+   ],
+   [
+    "ISMS scope",
+    "SCO-01"
+   ],
+   [
+    "scope statement",
+    "SCO-01"
+   ],
+   [
     "information security policy",
     "POL-01"
+   ],
+   [
+    "quality policy",
+    "QM-01"
+   ],
+   [
+    "business continuity policy",
+    "POL-B01"
+   ],
+   [
+    "anti-bribery policy",
+    "POL-A01"
    ],
    [
     "policy",
@@ -33853,11 +33809,19 @@
    ],
    [
     "risk assessment methodology",
-    "PRC-05"
+    "PRC-04"
+   ],
+   [
+    "risk treatment plan",
+    "PLN-01"
    ],
    [
     "backup",
     "PRC-11"
+   ],
+   [
+    "response structure",
+    "PLN-B02"
    ],
    [
     "incident",
@@ -33866,6 +33830,10 @@
    [
     "access control",
     "PRC-07"
+   ],
+   [
+    "supplier controls",
+    "PRC-Q03"
    ],
    [
     "supplier",

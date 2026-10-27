@@ -1,0 +1,28 @@
+code,requirement_code,kind,title,template_code,sort_order
+DI-01,4.3,maintain,Scope of the quality management system,SCO-Q01,1
+DI-02,4.4.2,maintain,Information that supports the operation of processes,QM-01,2
+DI-03,4.4.2,retain,Records showing processes are carried out as planned,,3
+DI-04,5.2.2,maintain,Quality policy,QM-01,4
+DI-05,6.2.1,maintain,Quality objectives,REG-Q02,5
+DI-06,7.1.5.1,retain,Fitness for purpose of monitoring and measuring resources,REC-Q01,6
+DI-07,7.1.5.2,retain,Basis used for calibration or verification,REC-Q01,7
+DI-08,7.2,retain,Evidence of competence,REG-Q03,8
+DI-09,7.5.3.2,maintain,Documented information of external origin,IMS-01,9
+DI-10,8.1,retain,Records showing processes and outputs conform to requirements,,10
+DI-11,8.2.3.2,retain,Results of the review of requirements and any new requirements,REC-Q02,11
+DI-12,8.3.2,retain,Records showing design and development requirements are met,REC-Q03,12
+DI-13,8.3.3,retain,Design and development inputs,REC-Q03,13
+DI-14,8.3.4,retain,Design and development control activities,REC-Q03,14
+DI-15,8.3.5,retain,Design and development outputs,REC-Q03,15
+DI-16,8.3.6,retain,"Design and development changes, reviews and authorisations",REC-Q03,16
+DI-17,8.4.1,retain,"Evaluation, selection, monitoring and re-evaluation of external providers",REG-Q04,17
+DI-18,8.5.1,maintain,Characteristics of products and services and the results to be achieved,STD-Q01,18
+DI-19,8.5.2,retain,Unique identification of outputs where traceability is required,REC-Q04,19
+DI-20,8.5.3,retain,"Customer or external provider property lost, damaged or unsuitable",REC-Q04,20
+DI-21,8.5.6,retain,Results of the review of changes and the actions decided,REC-Q05,21
+DI-22,8.6,retain,Release of products and services with the authorising person,REC-Q06,22
+DI-23,8.7.2,retain,"Nonconforming outputs, actions taken and concessions",REC-Q07,23
+DI-24,9.1.1,retain,Results of monitoring and measurement,REC-Q08,24
+DI-25,9.2.2,retain,Audit programme and audit results,REC-Q09,25
+DI-26,9.3.3,retain,Results of management reviews,REC-Q10,26
+DI-27,10.2.2,retain,"Nonconformities, actions taken and corrective action results",REC-Q07,27

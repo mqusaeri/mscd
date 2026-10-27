@@ -1,7 +1,8 @@
 // Shared steps of the risk-side register commands (build plan D.1, D.3 "Registers and workflows: risk side", C.13,
 // F.7): the organisation and its date, the C.13 row a caller performs, record refs with their new ETag, command
 // results, problems of the 422 kind, live system links of shareable records (A-29), the `updated_at` bump that
-// changes the ETag, and the `freshness.recompute` job sent in the command's transaction (E.2).
+// changes the ETag, and the `freshness.recompute` job sent in the command's transaction (E.2), with
+// `readiness.recompute` and `cycle.derive` next to it (Milestone 2 D.6).
 import {
   rejectionFor, transitionsVia, type CommandResult, type MachineEntity, type Pair, type RecordModule, type RecordRef, type Transition,
   type Warning,
@@ -13,6 +14,7 @@ import type { JobQueue } from '../../common/jobs/job-queue';
 import { BusinessRuleError, ForbiddenError, NotFoundError, ProblemError, TransitionNotAllowedError } from '../../common/problems';
 import { currentRequestId } from '../../common/request-context';
 import type { AuthzState, Principal, TenantInfo, Trx } from '../../common/tokens';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { ruleMessageKey, ruleMessages } from '../rules';
 
 /** The organisation of the caller's session (every route of this module is ms-scoped, so there is one). */
@@ -175,6 +177,8 @@ export async function enqueueFreshness(
     { singletonKey: `fr:${org.id}:${msId}`, startAfterSeconds: 5, retryLimit: 3 },
     trx,
   );
+  // Milestone 2 D.6: the same changes feed clause readiness and the derived cycle items (M2-05).
+  await enqueueDerived(queue, trx, org, msId, requestedBy);
 }
 
 /** Maps a unique violation of the code index to 409 `conflict`; rethrows anything else. */

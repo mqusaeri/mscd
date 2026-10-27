@@ -1,4 +1,5 @@
-// The user, organisation policy and role grant routes of D.3 "Administration" owned by WP-39.
+// The user, organisation settings and role grant routes of D.3 "Administration" (WP-39), with the organisation settings
+// read and the extended organisation update of Milestone 2 (D.1, D.2, M2-06).
 import { Controller, Req, Res } from '@nestjs/common';
 import {
   adminOrganizationGetRoute,
@@ -13,6 +14,7 @@ import {
   adminUsersResetMfaRoute,
   adminUsersUpdateRoute,
   type CommandResult,
+  type OrganizationSettings,
   type OrgPolicyPatch,
   type Page,
   type RoleGrant,
@@ -25,7 +27,6 @@ import {
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ApiRoute, CurrentAuthz, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
 import type { AuthzState, Principal } from '../../common/tokens';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
@@ -109,9 +110,8 @@ export class AdminUsersController {
     return this.grants.revoke(request, reply, principal, params.id, params.roleId);
   }
 
-  // Milestone 2 D.1 stub (M2-02); M2-06 replaces it with the organisation settings read.
   @ApiRoute(adminOrganizationGetRoute)
-  organizationSettings(): never {
-    return routeStub(adminOrganizationGetRoute);
+  organizationSettings(@CurrentPrincipal() principal: Principal): Promise<OrganizationSettings> {
+    return this.organization.get(principal);
   }
 }

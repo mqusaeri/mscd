@@ -1,14 +1,81 @@
 // Loaders of the read model (build plan WP-17, D-05): the rows of one or every system of the transaction's
 // organisation in a fixed number of queries, one per table group, never one per record (no N+1). Everything runs in
 // the caller's tenant transaction (D-03); person columns come back as handles.
+//
+// Milestone 2 (M2-07):
+// - clause entries (requirement rows) of a catalogue system are marked (`catalogueSystem`), so their read model key is
+//   `cl-<code>` (D2-09, `entryKey` of `derive/requirements.ts`) and never equals the key of the Annex A control of the
+//   same number; the evidence examples of those clause rows are keyed the same way;
+// - documents carry their origin and the change summary of their current version (D.2, D.3);
+// - the clause readiness rows come with the four dimensions and `computed_at`, and a null readiness or dimension
+//   stays null (D.3, D.6); the certification cycles come with the certificate expiry (D.4), both for M2-05;
+// - an activity's output resolves to the document linked to its pack code when no document has that code
+//   (`document_code_link`, BR-40);
+// - the competence records a person owns with a renewal action are open tasks of that person (D-29).
 import { sql, type RawBuilder } from 'kysely';
 import type { Trx } from '../../../common/tokens';
+import { COMPETENCE_RENEWAL_ACTION, competenceCode } from '../../risk-registers/competence';
 import type { AuditEventRow, CycleItemRow, FindingRow, PrepTaskRow } from '../derive/audit';
 import type { DriftResultRow, DriftRuleDefRow } from '../derive/drift';
 import type { ThresholdRow } from '../derive/freshness';
 import type { ActivityRow, ChainRecordRow, DocumentRow, EntryRow, EvidenceRow, FrequencyDef, StageDef, StorageObjectRow } from '../derive/inputs';
 import type { AlertRow, PackLabels, VersionInfo } from '../derive/ms-fields';
 import type { CatalogEntry } from '../derive/org-formats';
+
+/**
+ * A stored `clause_readiness` row (Milestone 2 D.3, D.6): the readiness and the four dimensions as stored, a null
+ * value passed through as null (not computed, or the group has no rows of that kind), and when `readiness.recompute`
+ * wrote it (null for seeded and manual rows).
+ */
+export interface ClauseReadinessRow {
+  readiness: number | null;
+  documented: number | null;
+  implemented: number | null;
+  evidenced: number | null;
+  measured: number | null;
+  computedAt: Date | null;
+  source: 'seeded' | 'manual' | 'computed';
+}
+
+/** A certification cycle of a system with its certificate (Milestone 2 D.3, D.4), newest first. */
+export interface CertificationCycleRow {
+  id: string;
+  status: 'planned' | 'active' | 'certified' | 'suspended' | 'withdrawn' | 'expired' | 'closed';
+  cycleStart: string;
+  cycleEnd: string;
+  certificateNo: string | null;
+  certifiedAt: string | null;
+  certificateExpiresAt: string | null;
+  certificationBody: string | null;
+  certifiedScope: string | null;
+}
+
+/**
+ * An applicability entry as the loader gives it: `catalogueSystem` when the system's edition has a catalogue (D2-09),
+ * `retired` when its catalogue item or requirement is no longer in the standard (Milestone 2 E.1; the snapshot does not
+ * carry it yet, see the M2-07 handoff).
+ */
+export interface LoadedEntryRow extends EntryRow {
+  catalogueSystem: boolean;
+  retired: boolean;
+}
+
+/** A document as the loader gives it: its origin and the change summary of its current version (Milestone 2 D.2). */
+export interface LoadedDocumentRow extends DocumentRow {
+  origin: 'internal' | 'external';
+  changeSummary: string | null;
+}
+
+/**
+ * The Milestone 2 members of a document of `bundle.docs` (D.2, D.3): `origin` only for an external document and
+ * `changeSummary` only when the current version has one, so the documents of Milestone 1 stay as they were.
+ */
+export function documentOriginFields(doc: Pick<LoadedDocumentRow, 'origin' | 'changeSummary'>): { origin?: 'external'; changeSummary?: string } {
+  return {
+    ...(doc.origin === 'external' ? { origin: 'external' as const } : {}),
+    ...(doc.changeSummary ? { changeSummary: doc.changeSummary } : {}),
+  };
+}
 
 /** The core of one system: everything `GET /ui/org` needs (G.5 `MS[]`, `STAGES`, `CHAINS`, `TITLES`, ...). */
 export interface SystemCore {
@@ -32,7 +99,10 @@ export interface SystemCore {
   driftDefs: DriftRuleDefRow[];
   primaryManager: string | null;
   alerts: AlertRow[];
-  readiness: Map<number, number>;
+  /** Clause readiness per group 4 to 10 as stored (Milestone 2 D.6: nulls and the four dimensions passed through). */
+  readiness: Map<number, ClauseReadinessRow>;
+  /** Certification cycles with their certificate, newest first (Milestone 2 D.4). */
+  cycles: CertificationCycleRow[];
   findings: FindingRow[];
   events: AuditEventRow[];
   defaultRoute: { mode: 'stored' | 'pass_through' | 'link' | 'zero_transit'; note: string | null; repositoryName: string } | null;
@@ -48,8 +118,8 @@ export interface SystemCore {
 
 /** The bundle rows of one system (`GET /ui/ms/{ms}`). */
 export interface SystemBundleRows {
-  entries: EntryRow[];
-  documents: DocumentRow[];
+  entries: LoadedEntryRow[];
+  documents: LoadedDocumentRow[];
   evidence: EvidenceRow[];
   activities: ActivityRow[];
   prepTasks: PrepTaskRow[];
@@ -106,6 +176,26 @@ function group<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
 
 function num(value: unknown): number {
   return typeof value === 'number' ? value : Number(value);
+}
+
+/** A number, or null for null (D.6: a readiness or dimension that is not computed stays null, never 0). */
+function numOrNull(value: unknown): number | null {
+  return value === null || value === undefined ? null : num(value);
+}
+
+function readinessOf(r: {
+  readiness_pct: number | null; documented_pct: number | null; implemented_pct: number | null; evidenced_pct: number | null; measured_pct: number | null;
+  computed_at: Date | null; source: ClauseReadinessRow['source'];
+}): ClauseReadinessRow {
+  return {
+    readiness: numOrNull(r.readiness_pct),
+    documented: numOrNull(r.documented_pct),
+    implemented: numOrNull(r.implemented_pct),
+    evidenced: numOrNull(r.evidenced_pct),
+    measured: numOrNull(r.measured_pct),
+    computedAt: r.computed_at ? new Date(r.computed_at) : null,
+    source: r.source,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -223,13 +313,17 @@ export async function loadOrgData(trx: Trx, options: LoadOptions): Promise<OrgDa
       select framework_version_id, code, label_en, label_id, source_kind, source_stage, predicate, sort_order
       from ref.drift_rule_def where framework_version_id = any(${uuids(activeIds)}) order by sort_order, code`.execute(trx)
   ).rows;
+  // EXAMPLES keys are the read model keys: `5.23` for A.5.23, `8.4` for a requirement, `cl-4.1` for a clause row of a
+  // catalogue edition (D2-09), so a clause example never replaces the example of the control of the same number.
   const exampleRows = (
     await sql<{ framework_version_id: string; key: string; example: string }>`
       select framework_version_id, regexp_replace(item_code, '^A\\.', '') as key, evidence_example as example
       from ref.catalogue_item where framework_version_id = any(${uuids(activeIds)}) and coalesce(evidence_example, '') <> ''
       union all
-      select framework_version_id, requirement_code as key, evidence_example as example
-      from ref.requirement where framework_version_id = any(${uuids(activeIds)}) and coalesce(evidence_example, '') <> ''`.execute(trx)
+      select r.framework_version_id, case when fv.applicability_target = 'catalogue_item' then 'cl-' || r.requirement_code else r.requirement_code end as key,
+             r.evidence_example as example
+      from ref.requirement r join ref.framework_version fv on fv.id = r.framework_version_id
+      where r.framework_version_id = any(${uuids(activeIds)}) and coalesce(r.evidence_example, '') <> ''`.execute(trx)
   ).rows;
 
   // Stored rows of the systems.
@@ -247,9 +341,25 @@ export async function loadOrgData(trx: Trx, options: LoadOptions): Promise<OrgDa
       where management_system_id = any(${uuids(msIds)}) and resolved_at is null and deleted_at is null`.execute(trx)
   ).rows;
   const readinessRows = (
-    await sql<{ management_system_id: string; clause_group: number; readiness_pct: number }>`
-      select management_system_id, clause_group, readiness_pct from clause_readiness
+    await sql<{
+      management_system_id: string; clause_group: number; readiness_pct: number | null; documented_pct: number | null; implemented_pct: number | null;
+      evidenced_pct: number | null; measured_pct: number | null; computed_at: Date | null; source: ClauseReadinessRow['source'];
+    }>`
+      select management_system_id, clause_group, readiness_pct, documented_pct, implemented_pct, evidenced_pct, measured_pct, computed_at, source
+      from clause_readiness
       where management_system_id = any(${uuids(msIds)}) and deleted_at is null`.execute(trx)
+  ).rows;
+  const cycleRows = (
+    await sql<{
+      id: string; management_system_id: string; status: CertificationCycleRow['status']; cycle_start: string; cycle_end: string;
+      certificate_no: string | null; certified_at: string | null; certificate_expires_at: string | null; certification_body: string | null;
+      certified_scope: string | null;
+    }>`
+      select id, management_system_id, status, cycle_start, cycle_end, certificate_no, certified_at, certificate_expires_at, certification_body,
+             certified_scope
+      from certification_cycle
+      where management_system_id = any(${uuids(msIds)}) and deleted_at is null
+      order by cycle_start desc, created_at desc`.execute(trx)
   ).rows;
   const findingRows = (
     await sql<{
@@ -310,6 +420,7 @@ export async function loadOrgData(trx: Trx, options: LoadOptions): Promise<OrgDa
   const managersByMs = new Map(managers.map((m) => [m.management_system_id, m.handle]));
   const alertsByMs = group(alertRows, (r) => r.management_system_id);
   const readinessByMs = group(readinessRows, (r) => r.management_system_id);
+  const cyclesByMs = group(cycleRows, (r) => r.management_system_id);
   const findingsByMs = group(findingRows, (r) => r.management_system_id);
   const eventsByMs = group(eventRows, (r) => r.management_system_id);
   const routesByMs = group(routeRows, (r) => r.management_system_id);
@@ -318,7 +429,8 @@ export async function loadOrgData(trx: Trx, options: LoadOptions): Promise<OrgDa
   const chainsByMs = group(chainRows, (r) => r.management_system_id);
   const approverByMs = new Map(approverRows.map((r) => [r.management_system_id, r.handle]));
 
-  const bundles = options.bundle ? await loadBundles(trx, systemRows) : new Map<string, SystemBundleRows>();
+  const catalogueVersions = new Set(versions.filter((v) => v.row.applicability_target === 'catalogue_item').map((v) => v.row.id));
+  const bundles = options.bundle ? await loadBundles(trx, systemRows, catalogueVersions) : new Map<string, SystemBundleRows>();
 
   const systems: SystemData[] = systemRows.map((s) => {
     const active = versionById.get(s.framework_version_id);
@@ -387,7 +499,18 @@ export async function loadOrgData(trx: Trx, options: LoadOptions): Promise<OrgDa
       })),
       primaryManager: managersByMs.get(s.id) ?? null,
       alerts: (alertsByMs.get(s.id) ?? []).map((a) => ({ kind: a.kind, tone: a.tone, textEn: a.text_en, textId: a.text_id, raisedAt: a.raised_at })),
-      readiness: new Map((readinessByMs.get(s.id) ?? []).map((r) => [num(r.clause_group), num(r.readiness_pct)])),
+      readiness: new Map((readinessByMs.get(s.id) ?? []).map((r) => [num(r.clause_group), readinessOf(r)])),
+      cycles: (cyclesByMs.get(s.id) ?? []).map((c) => ({
+        id: c.id,
+        status: c.status,
+        cycleStart: c.cycle_start,
+        cycleEnd: c.cycle_end,
+        certificateNo: c.certificate_no,
+        certifiedAt: c.certified_at,
+        certificateExpiresAt: c.certificate_expires_at,
+        certificationBody: c.certification_body,
+        certifiedScope: c.certified_scope,
+      })),
       findings: (findingsByMs.get(s.id) ?? []).map((f) => ({
         id: f.id,
         code: f.code,
@@ -555,7 +678,7 @@ function objectOf(r: ObjectColumns): StorageObjectRow | null {
   };
 }
 
-async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map<string, SystemBundleRows>> {
+async function loadBundles(trx: Trx, systems: readonly SystemRow[], catalogueVersions: ReadonlySet<string>): Promise<Map<string, SystemBundleRows>> {
   const msIds = systems.map((s) => s.id);
   const entryRows = (
     await sql<{
@@ -564,9 +687,9 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
       gate_reason: string | null; is_applicable: boolean | null; inclusion_justification: string | null; exclusion_justification: string | null;
       owner: string | null; status_note: string | null; frequency: string | null; completed_by: string | null; action_due_at: string | null;
       justification_holder: string | null; justification_due_at: string | null; position: number; document_codes: string[] | null;
-      risk_codes: string[] | null;
+      risk_codes: string[] | null; retired: boolean;
     }>`
-      select e.id, e.management_system_id, e.updated_at, e.target_type,
+      select e.id, e.management_system_id, e.updated_at, e.target_type, coalesce(ci.retired, rq.retired, false) as retired,
              coalesce(ci.item_code, rq.requirement_code) as code, coalesce(ci.title_short, rq.title_short) as title,
              ci.theme_code, rq.clause_group, e.implementation_status, e.holds_gate, e.gate_reason, e.is_applicable,
              e.inclusion_justification, e.exclusion_justification, ${handleOf('e.owner_user_id')} as owner, e.status_note,
@@ -592,11 +715,13 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
       id: string; ms_id: string; updated_at: Date; doc_code: string; title: string; doc_type: string; status: DocumentRow['status'];
       classification: DocumentRow['classification']; owner: string | null; approver: string | null; approved_at: string | null;
       next_review_at: string | null; is_org_wide: boolean; linked_ms_ids: string[] | null; version_label: string | null;
-      pending_holder: string | null; pending_due_at: string | null; position: number;
+      pending_holder: string | null; pending_due_at: string | null; position: number; origin: LoadedDocumentRow['origin'];
+      change_summary: string | null;
     }>`
       select s.ms_id, d.id, d.updated_at, d.doc_code, d.title, d.doc_type, d.status, d.classification,
              ${handleOf('d.owner_user_id')} as owner, ${handleOf('d.approver_user_id')} as approver, d.approved_at, d.next_review_at,
-             d.is_org_wide, d.position, ${handleOf('d.pending_holder_user_id')} as pending_holder, d.pending_due_at,
+             d.is_org_wide, d.position, ${handleOf('d.pending_holder_user_id')} as pending_holder, d.pending_due_at, d.origin,
+             v.change_summary,
              (select array_agg(l.management_system_id order by m.position, m.slug) from entity_ms_link l
                 join management_system m on m.id = l.management_system_id and m.deleted_at is null
               where l.entity_type = 'document' and l.entity_id = d.id and l.deleted_at is null) as linked_ms_ids,
@@ -641,7 +766,18 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
     }>`
       select a.id, a.management_system_id, a.updated_at, a.phase_no, a.activity_no, t.phase_name_en as phase_name, a.is_gate_phase,
              a.title, a.status, ${handleOf('a.owner_user_id')} as owner, a.output_document_code,
-             (select d.doc_code from document d where d.id = a.output_document_id and d.deleted_at is null) as linked_document_code,
+             coalesce(
+               (select d.doc_code from document d where d.id = a.output_document_id and d.deleted_at is null),
+               -- BR-40 (Milestone 2): the pack code resolves to the document the customer linked to it, when no document has the code.
+               case when a.output_document_code is not null and not exists (
+                      select 1 from document d where d.doc_code = a.output_document_code and d.deleted_at is null
+                        and (d.is_org_wide or exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = d.id
+                                                        and l.management_system_id = a.management_system_id and l.deleted_at is null)))
+                    then (select d.doc_code from document_code_link k join document d on d.id = k.document_id and d.deleted_at is null
+                           where k.management_system_id = a.management_system_id and k.pack_code = a.output_document_code and k.deleted_at is null
+                             and (d.is_org_wide or exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = d.id
+                                                             and l.management_system_id = a.management_system_id and l.deleted_at is null)))
+               end) as linked_document_code,
              a.blocker_gate_item_ref, a.due_at, a.verified_at, ${handleOf('a.completed_by_user_id')} as completed_by
       from implementation_activity_progress a
       left join ref.activity_template t on t.id = a.activity_template_id
@@ -697,8 +833,9 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
 
   const out = new Map<string, SystemBundleRows>();
   for (const s of systems) {
+    const catalogueSystem = catalogueVersions.has(s.framework_version_id);
     out.set(s.id, {
-      entries: (entriesByMs.get(s.id) ?? []).map((e) => ({
+      entries: (entriesByMs.get(s.id) ?? []).map((e): LoadedEntryRow => ({
         id: e.id,
         updatedAt: e.updated_at,
         targetType: e.target_type,
@@ -722,8 +859,10 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
         justificationHolder: e.justification_holder,
         justificationDueAt: e.justification_due_at,
         position: num(e.position),
+        catalogueSystem,
+        retired: e.retired,
       })),
-      documents: (docsByMs.get(s.id) ?? []).map((d) => ({
+      documents: (docsByMs.get(s.id) ?? []).map((d): LoadedDocumentRow => ({
         id: d.id,
         updatedAt: d.updated_at,
         code: d.doc_code,
@@ -742,6 +881,8 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
         pendingHolder: d.pending_holder,
         pendingDueAt: d.pending_due_at,
         position: num(d.position),
+        origin: d.origin,
+        changeSummary: d.change_summary,
       })),
       evidence: (evsByMs.get(s.id) ?? [])
         .map((e) => ({
@@ -816,7 +957,11 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[]): Promise<Map
   return out;
 }
 
-/** Open stored tasks of a person in the given systems (D-29). */
+/**
+ * Open stored tasks of a person in the given systems (D-29), then the renewal actions of the competence records the
+ * person owns (Milestone 2 M2-07: `tasks.overdue` sets them 30 days before `valid_until`), listed under the record's
+ * id in the record's primary system among those given.
+ */
 export async function loadOpenTasks(trx: Trx, userId: string, msIds: readonly string[]): Promise<{
   id: string; msId: string; entityType: string; entityId: string; entityCode: string | null; titleEn: string; titleId: string; dueAt: string | null;
 }[]> {
@@ -827,14 +972,36 @@ export async function loadOpenTasks(trx: Trx, userId: string, msIds: readonly st
       where owner_user_id = ${userId}::uuid and status = 'open' and deleted_at is null and management_system_id = any(${uuids(msIds)})
       order by due_at nulls last, created_at`.execute(trx)
   ).rows;
-  return rows.map((r) => ({
-    id: r.id,
-    msId: r.management_system_id,
-    entityType: r.entity_type,
-    entityId: r.entity_id,
-    entityCode: r.entity_code,
-    titleEn: r.title_en,
-    titleId: r.title_id,
-    dueAt: r.due_at,
-  }));
+  const competence = (
+    await sql<{ id: string; ms_id: string; pending_action: string; action_due_at: string | null; role_title: string }>`
+      select c.id, c.pending_action, c.action_due_at, c.role_title,
+             (select l.management_system_id from entity_ms_link l
+               where l.entity_type = 'competence_record' and l.entity_id = c.id and l.deleted_at is null and l.management_system_id = any(${uuids(msIds)})
+               order by l.is_primary desc, l.created_at limit 1) as ms_id
+      from competence_record c
+      where c.owner_user_id = ${userId}::uuid and c.deleted_at is null and c.pending_action is not null
+      order by c.action_due_at nulls last, c.created_at`.execute(trx)
+  ).rows.filter((r) => r.ms_id !== null);
+  return [
+    ...rows.map((r) => ({
+      id: r.id,
+      msId: r.management_system_id,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      entityCode: r.entity_code,
+      titleEn: r.title_en,
+      titleId: r.title_id,
+      dueAt: r.due_at,
+    })),
+    ...competence.map((r) => ({
+      id: r.id,
+      msId: r.ms_id,
+      entityType: 'competence_record',
+      entityId: r.id,
+      entityCode: competenceCode(r.id),
+      titleEn: r.pending_action === COMPETENCE_RENEWAL_ACTION ? `${COMPETENCE_RENEWAL_ACTION}: ${r.role_title}` : r.pending_action,
+      titleId: r.pending_action === COMPETENCE_RENEWAL_ACTION ? `Perbarui bukti kompetensi sebelum kedaluwarsa: ${r.role_title}` : r.pending_action,
+      dueAt: r.action_due_at,
+    })),
+  ];
 }

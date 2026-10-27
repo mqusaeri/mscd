@@ -5,7 +5,8 @@
 // with the step's text; entering the effectiveness verification records the implementer and the date; the
 // verification (by someone other than the implementer and the owner, BR-09, on another day than the
 // implementation, BR-08) closes it when effective and returns it to the action step when not. The CHECK
-// constraints of `corrective_action` are the database backstop of BR-08 and BR-09.
+// constraints of `corrective_action` are the database backstop of BR-08 and BR-09. Milestone 2 (D.6, D.4, M2-05):
+// every command queues `readiness.recompute` and `cycle.derive` (`corrective_actions_closed`) for the system.
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type {
@@ -20,6 +21,8 @@ import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService, type Principal,
   type RecordResolver, type ScopePolicy, type Trx,
 } from '../../common/tokens';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import type { Br08Input, Br09Input } from './rules';
@@ -79,6 +82,7 @@ export class CorrectiveActionsService {
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(SCOPE_POLICY) private readonly scope: ScopePolicy,
+    @Inject(JOB_QUEUE) private readonly jobs: JobQueue,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -148,6 +152,7 @@ export class CorrectiveActionsService {
           findings: findings.map((f) => f.code),
         },
       });
+      await enqueueDerived(this.jobs, trx, orgOf(principal), system.id, actor);
       return commandResult([system.slug], { ref: refOf(ENTITY, id, body.code, updatedAt!), data: { findings: findings.map((f) => f.ref) } });
     });
   }
@@ -211,6 +216,7 @@ export class CorrectiveActionsService {
           throw mapActionCheck(error, ref, 'BR-09');
         }
         await this.audit.record(trx, { action: 'register.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
+        await enqueueDerived(this.jobs, trx, orgOf(principal), record.ms.id, actor);
       }
       return commandResult([record.ms.slug], {
         ref: refOf(ENTITY, row.id, row.code, updatedAt),
@@ -286,6 +292,7 @@ export class CorrectiveActionsService {
       await this.audit.record(trx, {
         action: 'corrective_action.transition', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after,
       });
+      await enqueueDerived(this.jobs, trx, orgOf(principal), record.ms.id, actor);
       const result: { ref: RecordRef; message?: [string, string] } = { ref: refOf(ENTITY, row.id, row.code, updatedAt) };
       if (from === 'effectiveness_verification' && to === 'action') {
         result.message = ['Not effective: the corrective action returns to the action step', 'Tidak efektif: tindakan korektif kembali ke langkah tindakan'];

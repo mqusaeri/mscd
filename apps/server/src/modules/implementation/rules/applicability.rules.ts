@@ -1,7 +1,8 @@
 // Rules of the applicability commands (digest 6.2, A.4 5.2, E.3): BR-01 (evidence of the current period with a
 // valid link before an entry is implemented), BR-02 (applicable entries need a risk-based justification in the
-// frameworks whose pack activates it, ISO 27001 and ISO 37001) and BR-03 (warning for an exclusion justification
-// that says nothing, with the phrase list of the pack's rule parameters).
+// frameworks whose pack activates it, ISO 27001 and ISO 37001), BR-03 (warning for an exclusion justification
+// that says nothing, with the phrase list of the pack's rule parameters) and the platform rule APPL-ASSESS
+// (Milestone 2 D.2, D2-09: a clause row whose pack row is not assessable can never be marked not applicable).
 import { Injectable } from '@nestjs/common';
 import { BusinessRule, type BusinessRuleHandler, type RuleCheck, type RuleViolation } from '../../rules';
 import { evidenceStateOfEntry } from '../evidence-state';
@@ -91,5 +92,24 @@ export class Br03ExclusionJustificationRule implements BusinessRuleHandler<Br03I
     const parts = text.split(/\s*[-/,;]\s+|\s+[-/,;]\s*/).map(normaliseJustification).filter((p) => p !== '');
     if (parts.length > 1 && parts.every((p) => phrases.has(p))) return {};
     return null;
+  }
+}
+
+export interface ApplAssessInput {
+  /** `ref.requirement.applicability_assessable` of the entry's row; catalogue items are always assessable. */
+  assessable: boolean;
+  /** Business id of the entry (`Cl. 5.1`), named in the message. */
+  code: string;
+}
+
+/**
+ * APPL-ASSESS (Milestone 2 D.2, D2-09, platform rule): an entry whose pack row has `applicability_assessable = false`
+ * (the clause requirements, which always apply) is never set to not applicable, by a transition or by a change.
+ */
+@Injectable()
+@BusinessRule('APPL-ASSESS', { severity: 'error' })
+export class ApplAssessRule implements BusinessRuleHandler<ApplAssessInput> {
+  check({ input }: RuleCheck<ApplAssessInput>): RuleViolation | null {
+    return input.assessable ? null : { vars: { code: input.code }, data: { code: input.code } };
   }
 }

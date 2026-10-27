@@ -1,0 +1,25 @@
+code,title,doc_type,requirement_code
+SCO-A01,Scope of the anti-bribery management system,policy,4.3
+PRC-A01,Bribery risk assessment method,procedure,4.5.1
+REG-A01,Bribery risk register,register,4.5.3
+POL-A01,Anti-bribery policy,policy,5.2
+PRC-A02,Terms of reference of the anti-bribery compliance function,procedure,5.3.2
+REG-A02,Anti-bribery objectives register,register,6.2
+PLN-A01,Plan for changes to the anti-bribery management system,plan,6.3
+PRC-A03,Employment and screening procedure,procedure,7.2.2
+REG-A03,Competence and training register,register,7.3
+IMS-01,Document control procedure,procedure,7.5.3
+PRC-A04,Due diligence procedure,procedure,8.2
+PRC-A05,Financial controls procedure,procedure,8.3
+PRC-A06,Non-financial controls procedure,procedure,8.4
+FRM-A01,Anti-bribery commitment form for business associates,form,8.6
+REG-A04,"Gifts, hospitality and donations register",register,8.7
+PRC-A07,Raising concerns procedure,procedure,8.9
+PRC-A08,Investigation procedure,procedure,8.10
+REC-A01,Monitoring and measurement report,record,9.1
+IMS-02,Internal audit procedure,procedure,9.2
+REC-A02,Internal audit programme and report,record,9.2
+IMS-04,Management review procedure,procedure,9.3
+REC-A03,Management and governing body review minutes,record,9.3
+REC-A04,Compliance function report,record,9.4
+IMS-03,Corrective action procedure,procedure,10.2

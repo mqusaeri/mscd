@@ -1,7 +1,8 @@
 // Shared steps of the register, document, audit event and reminder commands (build plan D.1, D.3, F.7, WP-35):
 // the caller's organisation and date, record refs with their new ETag, the `CommandResult`, the own-scope check of
 // own-only grants, the next audit date of a system (BR-41), row writes that move `updated_at` forward (so every
-// successful command changes the ETag), and `freshness.recompute` queued in the command's transaction (E.2).
+// successful command changes the ETag), and `freshness.recompute` queued in the command's transaction (E.2), with
+// `readiness.recompute` and `cycle.derive` next to it (Milestone 2 D.6).
 import {
   rejectionFor, transitionsVia, type CommandResult, type MachineEntity, type Pair, type Permission, type RecordModule, type RecordRef,
   type Transition, type Warning,
@@ -15,6 +16,7 @@ import {
 } from '../../common/problems';
 import { currentRequestId } from '../../common/request-context';
 import type { AuthzState, Principal, TenantInfo, Trx } from '../../common/tokens';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { ruleMessageKey, ruleMessages } from '../rules';
 
 /** Module of a record ref by table (ARCHITECTURE 13, as the read model's `REF_MODULE` names them). */
@@ -139,6 +141,8 @@ export async function enqueueFreshness(
     { singletonKey: `fr:${org.id}:${msId}`, startAfterSeconds: 5, retryLimit: 3 },
     trx,
   );
+  // Milestone 2 D.6: the same changes feed clause readiness and the derived cycle items (M2-05).
+  await enqueueDerived(queue, trx, org, msId, requestedBy);
 }
 
 /** The user's handle and display name (texts that name a person). */

@@ -1,9 +1,10 @@
 // The routes of the session user (build plan D.3 "System, session and identity", WP-39 rows): `GET /me`,
-// `PUT /me/org` with the D-26 pin rule, `POST /me/memberships/{org}/accept` and the demo persona switch (D-20).
+// `PUT /me/org` with the D-26 pin rule, `POST /me/memberships/{org}/accept` and the demo persona switch (D-20);
+// Milestone 2 (D.1, M2-06): `POST /me/memberships/{org}/decline` and `GET /me/security`.
 // Session changes go through the identity module's `SessionService` (F.1 rotation): a switch of organisation and a
 // persona switch give the browser a new session id.
 import { Inject, Injectable } from '@nestjs/common';
-import { DEMO_PERSONAS, type Me, type ReauthMethods, type UiRole } from '@mscd/shared';
+import { DEMO_PERSONAS, type Me, type MeSecurity, type ReauthMethods, type UiRole } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ForbiddenError,
@@ -14,6 +15,7 @@ import {
 } from '../../common/problems';
 import { ME_ASSEMBLER, type MeAssembler, type Principal, type TenantInfo, type Trx } from '../../common/tokens';
 import { localLoginAllowed, providerMethods } from '../identity/local-login-policy';
+import { RecoveryCodesService } from '../identity/recovery-codes.service';
 import { SessionService, type CurrentSession, type IssuedSession } from '../identity/session.service';
 import { tenantContextOf } from '../tenancy/tenant-scope';
 import { AuthzInfra } from './authz-infra';
@@ -52,6 +54,7 @@ export class MeService {
     private readonly infra: AuthzInfra,
     private readonly sessions: SessionService,
     @Inject(ME_ASSEMBLER) private readonly me: MeAssembler,
+    private readonly recovery: RecoveryCodesService,
   ) {}
 
   /** `GET /me`. */
@@ -134,6 +137,58 @@ export class MeService {
     });
     if (!accepted) throw new NotFoundError('No invitation of this organisation');
     return this.me.assemble(principal, { csrfToken });
+  }
+
+  /**
+   * `POST /me/memberships/{org}/decline` (Milestone 2 D.1): an invited membership of the user is removed (soft
+   * delete, so the Tenant Admin can invite again) and its open invitation links stop working; audited
+   * `membership.declined` in the organisation's platform audit log. 404 when there is no such invitation.
+   */
+  async declineMembership(principal: Principal, slug: string): Promise<void> {
+    const target = await this.infra.tenants.resolveBySlug(slug);
+    if (!target || target.status === 'archived' || principal.user.kind === 'guest') throw new NotFoundError('No invitation of this organisation');
+    const userId = principal.user.id;
+    const now = this.infra.now();
+    const declined = await this.infra.scope.withTenant({ orgId: target.id, schema: target.schema, userId }, async (trx) => {
+      const membership = await trx
+        .selectFrom('platform.org_membership')
+        .select(['status', 'deleted_at', 'admin_roles'])
+        .where('organization_id', '=', target.id)
+        .where('user_id', '=', userId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!membership || membership.status !== 'invited' || membership.deleted_at !== null) return false;
+      await trx
+        .updateTable('platform.org_membership')
+        .set({ deleted_at: now })
+        .where('organization_id', '=', target.id)
+        .where('user_id', '=', userId)
+        .execute();
+      const revoked = await trx
+        .updateTable('platform.invitation')
+        .set({ revoked_at: now })
+        .where('organization_id', '=', target.id)
+        .where('user_id', '=', userId)
+        .where('used_at', 'is', null)
+        .where('revoked_at', 'is', null)
+        .executeTakeFirst();
+      await this.infra.audit.record(trx, {
+        action: 'membership.declined',
+        organizationId: target.id,
+        entityType: 'org_membership',
+        entityId: userId,
+        entityCode: principal.user.handle,
+        before: { status: 'invited', adminRoles: membership.admin_roles },
+        after: { status: 'declined', invitationsRevoked: Number(revoked.numUpdatedRows) },
+      });
+      return true;
+    });
+    if (!declined) throw new NotFoundError('No invitation of this organisation');
+  }
+
+  /** `GET /me/security` (Milestone 2 D.1): the security overview of the session user. */
+  security(principal: Principal): Promise<MeSecurity> {
+    return this.recovery.overview(principal.user.id);
   }
 
   /** `POST /auth/demo/persona` (D-20): a demo user signs in as the demo persona of a UI role; 404 outside demo mode. */

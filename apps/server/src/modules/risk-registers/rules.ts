@@ -51,7 +51,8 @@ export interface Br23Input {
 /**
  * BR-23 (warning, TS 6.3): the evidence targets requirements of different systems that a framework mapping marks
  * as not reusable (`ref.requirement_mapping.evidence_reusable = false`), in either direction; a catalogue item
- * counts as the requirement it belongs to.
+ * counts as the requirement it belongs to, and since Milestone 2 (ref 0002) a mapping may also start at a catalogue
+ * item (`source_catalogue_item_id`).
  */
 @Injectable()
 @BusinessRule('BR-23', { severity: 'warning' })
@@ -61,7 +62,11 @@ export class Br23NonReusableMappingRule implements BusinessRuleHandler<Br23Input
   }
 }
 
-/** True when two live targets of the evidence in different systems are joined by a non-reusable mapping. */
+/**
+ * True when two live targets of the evidence in different systems are joined by a non-reusable mapping. A mapping's
+ * source is a requirement or a catalogue item (ref 0002, `source_catalogue_item_id`), its target a requirement; a
+ * catalogue item target counts as the requirement it belongs to.
+ */
 export async function crossSystemNonReusable(trx: Trx, evidenceId: string): Promise<boolean> {
   const { rows } = await sql<{ found: boolean }>`
     select exists (
@@ -71,8 +76,10 @@ export async function crossSystemNonReusable(trx: Trx, evidenceId: string): Prom
         left join ref.catalogue_item ca on ca.id = a.catalogue_item_id
         left join ref.catalogue_item cb on cb.id = b.catalogue_item_id
         join ref.requirement_mapping m
-          on (m.source_requirement_id = coalesce(a.requirement_id, ca.requirement_id) and m.target_requirement_id = coalesce(b.requirement_id, cb.requirement_id))
-          or (m.target_requirement_id = coalesce(a.requirement_id, ca.requirement_id) and m.source_requirement_id = coalesce(b.requirement_id, cb.requirement_id))
+          on ((m.source_requirement_id = coalesce(a.requirement_id, ca.requirement_id) or m.source_catalogue_item_id = a.catalogue_item_id)
+              and m.target_requirement_id = coalesce(b.requirement_id, cb.requirement_id))
+          or ((m.source_requirement_id = coalesce(b.requirement_id, cb.requirement_id) or m.source_catalogue_item_id = b.catalogue_item_id)
+              and m.target_requirement_id = coalesce(a.requirement_id, ca.requirement_id))
        where a.evidence_id = ${evidenceId} and a.deleted_at is null and m.evidence_reusable = false
     ) as found`.execute(trx);
   return rows[0]?.found === true;

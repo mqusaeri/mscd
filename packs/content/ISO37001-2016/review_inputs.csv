@@ -1,0 +1,12 @@
+code,title,mandatory,sort_order,review_kind
+MR-01,Status of actions from previous management reviews,true,1,management
+MR-02,Changes in external and internal issues,true,2,management
+MR-03,Trends in nonconformities and corrective actions,true,3,management
+MR-04,Trends in monitoring and measurement results,true,4,management
+MR-05,Trends in audit results,true,5,management
+MR-06,Reports of bribery,true,6,management
+MR-07,Investigations,true,7,management
+MR-08,Nature and extent of the bribery risks faced,true,8,management
+MR-09,Effectiveness of actions taken on bribery risks,true,9,management
+MR-10,Opportunities for continual improvement,true,10,management
+GB-01,Results of the top management review and reports of the compliance function,true,11,governing_body

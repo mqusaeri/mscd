@@ -1,0 +1,6 @@
+code,requirement_code,title,derivation,sort_order
+BIA,8.2.2,Business impact analysis approved,"{""kind"":""bia_approved""}",1
+RISK_ASSESSMENT,8.2.3,Disruption risk assessment approved,"{""kind"":""risk_assessment_current"",""months"":12}",2
+EXERCISE_PROGRAMME,8.5,Exercise programme executed,"{""kind"":""exercise_performed""}",3
+INTERNAL_AUDIT,9.2,Internal audit of the BCMS,"{""kind"":""internal_audit_done""}",4
+MGMT_REVIEW,9.3,Management review,"{""kind"":""management_review_closed""}",5

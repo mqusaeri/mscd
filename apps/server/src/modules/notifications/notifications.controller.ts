@@ -1,10 +1,9 @@
-// Routes of D.3 owned by WP-24 for in-app notifications (E.6).
+// Routes of D.3 owned by WP-24 for in-app notifications (E.6), and `notifications.read-all` (Milestone 2 D.1, M2-06).
 import { Controller } from '@nestjs/common';
 import {
   notificationsListRoute, notificationsReadAllRoute, notificationsReadRoute, type IdParams, type Notification, type NotificationsQuery, type Page,
 } from '@mscd/shared';
 import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
 import type { Principal } from '../../common/tokens';
 import { NotificationsService } from './notifications.service';
 
@@ -22,9 +21,8 @@ export class NotificationsController {
     await this.notifications.markRead(principal, params.id);
   }
 
-  // Milestone 2 D.1 stub (M2-02); M2-06 replaces it.
   @ApiRoute(notificationsReadAllRoute)
-  readAll(): never {
-    return routeStub(notificationsReadAllRoute);
+  async readAll(@CurrentPrincipal() principal: Principal): Promise<void> {
+    await this.notifications.markAllRead(principal);
   }
 }

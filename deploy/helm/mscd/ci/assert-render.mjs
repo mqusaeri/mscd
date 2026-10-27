@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 // Assertions on the output of `helm template` for the mscd chart (build plan J.1, I.4).
 //
-//   node deploy/helm/mscd/ci/assert-render.mjs [--secrets-create] <rendered.yaml>
+//   node deploy/helm/mscd/ci/assert-render.mjs [--secrets-create] [--admin-job] <rendered.yaml>
 //
 // --secrets-create says the render used secrets.create: true (values-ci.yaml), so Secret objects are expected.
+// --admin-job says the render used adminJob.enabled with the steps tenantCreate and createUser (validate.sh).
 // Checks:
 //   - the migrate Job is a pre-install,pre-upgrade hook with weight -5, backoffLimit 1, ttlSecondsAfterFinished 3600,
 //     and mounts only the migrate Secret;
+//   - the admin Job (Milestone 2, M2-06) is rendered only with --admin-job: a post-install hook that runs
+//     "tenant create --if-missing" then "admin create-user" (an init container, then the container), mounts the api Secret, only
+//     db-migrator.url of the migrate Secret and the api client certificate, never the gateway Secret, reads the
+//     profile of the pods, and has NetworkPolicies to the database, the storage gateway (which accepts it on 8443) and
+//     SMTP;
 //   - every container (init containers included) runs with runAsNonRoot, a read-only root filesystem, no privilege
 //     escalation, capabilities drop [ALL] and the RuntimeDefault seccomp profile;
 //   - a default-deny NetworkPolicy covers every pod of the release, and the api accepts ingress only from web pods
@@ -23,9 +29,10 @@ import { parseAllDocuments, parse as parseYaml } from 'yaml';
 
 const args = process.argv.slice(2);
 const secretsCreate = args.includes('--secrets-create');
+const adminJobExpected = args.includes('--admin-job');
 const files = args.filter((a) => !a.startsWith('--'));
 if (files.length !== 1) {
-  process.stderr.write('usage: assert-render.mjs [--secrets-create] <rendered.yaml>\n');
+  process.stderr.write('usage: assert-render.mjs [--secrets-create] [--admin-job] <rendered.yaml>\n');
   process.exit(2);
 }
 const file = files[0];
@@ -107,6 +114,47 @@ for (const job of migrateJobs) {
   check(args.includes('migrate'), `${nameOf(job)}: the container does not run "migrate"`);
   const mounted = [...secretsOf(job.spec.template.spec)];
   check(mounted.length === 1, `${nameOf(job)}: mounts Secrets [${mounted.join(', ')}], expected only the migrate Secret`);
+}
+
+// 1b. The admin Job (Milestone 2, M2-06).
+const adminJobs = byKind('Job').filter((j) => componentOf(j.metadata?.labels) === 'admin');
+if (!adminJobExpected) {
+  check(adminJobs.length === 0, `an admin Job was rendered without adminJob.enabled: ${adminJobs.map(nameOf).join(', ')}`);
+} else {
+  check(adminJobs.length === 1, `expected one admin Job, found ${adminJobs.length}`);
+  for (const job of adminJobs) {
+    const a = job.metadata.annotations ?? {};
+    const where = nameOf(job);
+    check(String(a['helm.sh/hook'] ?? '').split(',')[0] === 'post-install', `${where}: helm.sh/hook is "${a['helm.sh/hook']}", expected post-install`);
+    check((job.spec?.backoffLimit ?? 0) > 0, `${where}: backoffLimit is ${job.spec?.backoffLimit}, expected retries`);
+    const spec = job.spec?.template?.spec ?? {};
+    check(spec.restartPolicy === 'Never', `${where}: restartPolicy is ${spec.restartPolicy}, expected Never`);
+    const steps = [...(spec.initContainers ?? []), ...(spec.containers ?? [])].map((c) => (c.args ?? []).slice(0, 2).join(' '));
+    check(JSON.stringify(steps) === JSON.stringify(['tenant create', 'admin create-user']), `${where}: steps are ${JSON.stringify(steps)}, expected tenant create then admin create-user`);
+    const tenant = (spec.initContainers ?? [])[0]?.args ?? [];
+    check(tenant.includes('--slug') && tenant[tenant.indexOf('--slug') + 1] === 'acme', `${where}: tenant create has no --slug acme`);
+    // A retried pod runs every step again: tenant create must pass when the organisation exists.
+    check(tenant.includes('--if-missing'), `${where}: tenant create has no --if-missing, so a retry after a partial run fails`);
+    const user = (spec.containers ?? [])[0]?.args ?? [];
+    check(user.includes('--tenant-admin') && user[user.indexOf('--org') + 1] === 'acme', `${where}: admin create-user is not a Tenant Admin of acme`);
+    const mounted = secretsOf(spec);
+    check(mounted.has(`${fullname}-api`), `${where}: does not mount the api Secret`);
+    check(mounted.has(`${fullname}-migrate`), `${where}: does not mount the migrate Secret`);
+    check(!mounted.has(`${fullname}-gateway`) && !mounted.has(`${fullname}-worker`), `${where}: mounts the gateway or worker Secret`);
+    check([...mounted].every((n) => [`${fullname}-api`, `${fullname}-migrate`, `${fullname}-api-tls`].includes(n)), `${where}: mounts Secrets [${[...mounted].join(', ')}]`);
+    const sources = (spec.volumes ?? []).flatMap((v) => v.projected?.sources ?? []);
+    const migrate = sources.find((src) => src.secret?.name === `${fullname}-migrate`);
+    check(JSON.stringify((migrate?.secret?.items ?? []).map((i) => i.key)) === JSON.stringify(['db-migrator.url']), `${where}: takes more than db-migrator.url from the migrate Secret`);
+    check((spec.volumes ?? []).some((v) => v.configMap?.name === `${fullname}-profile`), `${where}: does not read the profile ConfigMap of the pods`);
+  }
+  const adminLabels = adminJobs[0]?.spec?.template?.metadata?.labels ?? {};
+  const gatewayLabels = byKind('Deployment').find((d) => componentOf(d.metadata?.labels) === 'gateway')?.spec?.template?.metadata?.labels ?? {};
+  const policiesOf = (labels) => byKind('NetworkPolicy').filter((p) => Object.entries(p.spec?.podSelector?.matchLabels ?? {}).every(([k, v]) => labels[k] === v) && Object.keys(p.spec?.podSelector?.matchLabels ?? {}).length > 0);
+  const adminEgress = policiesOf(adminLabels).flatMap((p) => p.spec?.egress ?? []);
+  check(adminEgress.some((r) => (r.ports ?? []).some((p) => p.port === 8443) && (r.to ?? []).some((t) => componentOf(t.podSelector?.matchLabels) === 'gateway')), 'the admin Job may not reach the storage gateway on 8443');
+  check(adminEgress.some((r) => (r.ports ?? []).some((p) => p.port === 5432)), 'the admin Job may not reach the database');
+  const gatewayIngress = policiesOf(gatewayLabels).flatMap((p) => p.spec?.ingress ?? []);
+  check(gatewayIngress.some((r) => (r.from ?? []).some((f) => componentOf(f.podSelector?.matchLabels) === 'admin') && (r.ports ?? []).some((p) => p.port === 8443)), 'the storage gateway does not accept the admin Job on 8443');
 }
 
 // 2. Container hardening.

@@ -8,7 +8,11 @@
 //   `MS[].banner.kind`, `MS[].audit.prepWindowDays`, `PACKS[].status`, `REPOS[].ref`, `REPOS[].adapter`,
 //   `REPOS[].ownershipType`, `REPOS[].actions`, and the clock-dependent `generatedAt`);
 // - `GateItem.type` is compared as a pair on both sides; `TITLES` as "every sample entry is present and equal";
-//   `LOC` compares only `[0]`, `[1]`, `[2]` for the slugs present in the API.
+//   `LOC` compares only `[0]`, `[1]`, `[2]` for the slugs present in the API;
+// - a chain item question (`ChainItem.q`) the sample leaves empty takes the API's question when that is the one
+//   question of its stage: the ISO 37001 packs ask an auditor question per stage (Milestone 2 E.2, M2-04), while the
+//   sample's ABMS stages keep empty questions until the extractor's Indonesian question table holds them. Items of a
+//   stage that ask different questions, or a question the sample has and the API changes, still differ.
 import type { SampleOrgSnapshot } from '../../../src/seed/snapshot';
 
 type Json = unknown;
@@ -117,6 +121,7 @@ export function normaliseMs(api: Json, sample: Obj): NormalisedPair {
     drop(item, ['ref']);
   }
   for (const item of aItems) drop(item, ['refKey']);
+  alignStageQuestions(aItems, sItems, wireMismatches);
   const aActs = new Map<string, Obj>();
   for (const phase of (ab?.phases as Obj[] | undefined) ?? []) for (const act of (phase.acts as Obj[]) ?? []) aActs.set(act.key as string, act);
   for (const phase of (sb?.phases as Obj[] | undefined) ?? []) {
@@ -133,6 +138,30 @@ export function normaliseMs(api: Json, sample: Obj): NormalisedPair {
   for (const act of aActs.values()) drop(act, ['docId']);
   for (const gate of [...((ab?.gates as Obj[] | undefined) ?? []), ...((sb?.gates as Obj[] | undefined) ?? [])]) gate.type = pair(gate.type);
   return { api: prune(a), sample: prune(s), wireMismatches };
+}
+
+/**
+ * Gives a chain item without a sample question the API's question when the API asks one question per stage (see the
+ * normalisation rules above). A stage whose API items ask different questions is reported as a mismatch.
+ */
+function alignStageQuestions(apiItems: Obj[], sampleItems: Obj[], mismatches: string[]): void {
+  const perStage = new Map<string, Set<string>>();
+  for (const item of apiItems) {
+    const q = typeof item.q === 'string' ? item.q : '';
+    if (q === '') continue;
+    const stage = String(item.stage);
+    perStage.set(stage, (perStage.get(stage) ?? new Set()).add(q));
+  }
+  const apiByKey = new Map(apiItems.map((i) => [i.key as string, i]));
+  for (const item of sampleItems) {
+    if (typeof item.q === 'string' && item.q !== '') continue;
+    const apiItem = apiByKey.get(item.key as string);
+    const asked = typeof apiItem?.q === 'string' ? apiItem.q : '';
+    if (!apiItem || asked === '') continue;
+    const questions = perStage.get(String(apiItem.stage)) ?? new Set<string>();
+    if (questions.size !== 1) mismatches.push(`${String(item.key)}: stage ${String(apiItem.stage)} asks ${questions.size} questions`);
+    else item.q = asked;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------

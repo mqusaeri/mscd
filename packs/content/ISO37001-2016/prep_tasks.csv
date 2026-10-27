@@ -1,0 +1,6 @@
+code,title,days_before_audit,skip_on_first_audit,sort_order
+PREP-01,Approve the bribery risk assessment,60,false,1
+PREP-02,Confirm due diligence on business associates in scope,45,false,2
+PREP-03,Issue the internal audit report for the cycle,30,false,3
+PREP-04,Hold the management review and the governing body review,21,false,4
+PREP-05,Brief auditees on expected sampling focus,3,false,5

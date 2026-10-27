@@ -9,8 +9,9 @@
 # secrets that are missing (database passwords, the two key-encryption keys,
 # the gateway token, the audit anchor key pair, an internal CA with the
 # certificates of the storage gateway, api and worker), starts the stack (the
-# database migrations run first), creates the organisation and prints how to
-# invite the first administrator.
+# database migrations run first), creates the organisation (its slug cannot be
+# changed later, so a new slug is confirmed first) and invites the first
+# administrator or prints how to do it.
 #
 # Safe to run again: existing settings and secrets are kept unless you pass new
 # values. An installation of the web-only package (MSCD 1.0) is extended to the
@@ -45,8 +46,9 @@ Options:
   --org-slug SLUG          Short name of your organisation: a lower-case letter, then 2 to 40
                            lower-case letters, digits or _ (it cannot change once created)
   --org-name NAME          Display name of your organisation
-  --admin-email EMAIL      Invite this person as the first administrator and print the
-                           one-time invitation link (default: print the command to do it)
+  --admin-email EMAIL      Invite this person as the first administrator: the invitation is
+                           emailed, or its one-time link printed when email does not work
+                           (default: print the command to do it)
   --smtp-host HOST         SMTP relay for outgoing email (default: smtp)
   --smtp-port PORT         SMTP port (default: 25)
   --smtp-user USER         SMTP login, when the relay needs one
@@ -559,6 +561,19 @@ start_stack() {
     die "Installation did not finish. Fix the problem shown above and run ./install.sh again (see: cd $INSTALL_DIR && docker compose ps -a && docker compose logs)."
 }
 
+# confirm_new_slug: the slug of a new organisation names its database schema and can
+# never be changed. Asked before anything is installed, so "no" changes nothing; with
+# --yes only the notice is printed.
+confirm_new_slug() {
+    [[ -z $SAVED_ORG_SLUG ]] || return 0
+    printf '\n  The organisation slug %s cannot be changed after the organisation is created:\n' "$ORG_SLUG"
+    printf '  it names the database schema of the organisation.\n'
+    if [[ $INTERACTIVE == true ]] && ! confirm "Create the organisation with the slug $ORG_SLUG?"; then
+        echo "Cancelled. Nothing was changed. Run ./install.sh again and choose the slug you want (--org-slug)."
+        exit 0
+    fi
+}
+
 # create_organisation: "mscd-server tenant create" in a one-off cli container
 # (schema, tenant migrations, data key from the gateway, Managed Vault).
 create_organisation() {
@@ -575,12 +590,19 @@ create_organisation() {
     die "The organisation could not be created. Fix the problem shown above and run ./install.sh again."
 }
 
-# invite_admin EMAIL: invites the first administrator and prints the link.
+# invite_admin EMAIL: invites the first administrator. The command emails the
+# invitation; when email does not work it prints the one-time link, which is kept
+# for the summary.
 invite_admin() {
     local out
     if out=$(compose_in "$INSTALL_DIR" run --rm --no-deps cli admin create-user --email "$1" --tenant-admin 2>&1); then
-        pass "Invitation created for $1"
-        INVITATION=$(printf '%s\n' "$out" | grep -v '^ *Container ' || true)
+        if [[ $out == *"Invitation sent to"* ]]; then
+            pass "Invitation emailed to $1"
+            INVITATION_EMAILED=true
+        else
+            pass "Invitation created for $1"
+            INVITATION=$(printf '%s\n' "$out" | grep -v '^ *Container ' || true)
+        fi
         return 0
     fi
     printf '%s\n' "$out" | tail -n 20 | sed 's/^/        /'
@@ -599,11 +621,14 @@ print_done() {
         "Status" "cd $INSTALL_DIR && ${sudo}docker compose ps" \
         "Logs" "cd $INSTALL_DIR && ${sudo}docker compose logs api web" \
         "Uninstall" "$sudo$INSTALL_DIR/uninstall.sh"
-    if [[ -n ${INVITATION:-} ]]; then
+    if [[ ${INVITATION_EMAILED:-false} == true ]]; then
+        printf '\n  First administrator: the invitation (valid 72 hours) was emailed to %s.\n' "$OPT_ADMIN_EMAIL"
+    elif [[ -n ${INVITATION:-} ]]; then
         printf '\n  First administrator: send this one-time link (valid 72 hours) to %s:\n' "$OPT_ADMIN_EMAIL"
         printf '%s\n' "$INVITATION" | sed 's/^/    /'
     else
-        printf '\n  Invite the first administrator (prints a one-time link, valid 72 hours):\n'
+        printf '\n  Invite the first administrator (emails the invitation, or prints a one-time link\n'
+        printf '  valid 72 hours when email does not work):\n'
         printf '    cd %s && %sdocker compose run --rm cli admin create-user --email <email> --tenant-admin\n' "$INSTALL_DIR" "$sudo"
     fi
     printf '\n  Keep a copy of %s/secrets in a safe place: without it the database\n' "$INSTALL_DIR"
@@ -665,6 +690,7 @@ main() {
     step "Checking settings"
     check_settings
     abort_if_failed
+    confirm_new_slug
 
     if [[ $INTERACTIVE == true ]] && ! confirm "Install MSCD $BUNDLE_VERSION with these settings?"; then
         echo "Cancelled. Nothing was changed."
@@ -696,7 +722,7 @@ main() {
 
     step "Organisation"
     create_organisation
-    INVITATION=''
+    INVITATION='' INVITATION_EMAILED=false
     if [[ -n $OPT_ADMIN_EMAIL ]]; then
         invite_admin "$OPT_ADMIN_EMAIL"
     fi

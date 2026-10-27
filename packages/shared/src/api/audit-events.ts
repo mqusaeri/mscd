@@ -20,6 +20,10 @@ const auditEventShape = {
   leadAuditorName: z.string().trim().min(1).max(150).optional(),
   expectedFocus: z.string().trim().max(4000).optional(),
   prepWindowDays: z.int().min(0).max(365).optional(),
+  /** Milestone 2 D.2: what an internal audit covers (scope, criteria, sample). */
+  scopeText: z.string().trim().min(1).max(4000).optional(),
+  /** Milestone 2 D.2: the audit report, a registered document of type record of the system. */
+  reportDocumentId: Uuid.optional(),
 };
 
 export const AuditEventCreateRequest = named(
@@ -29,9 +33,13 @@ export const AuditEventCreateRequest = named(
   {
     valid: [
       { eventType: 'stage1', nameEn: 'Stage 1 audit', nameId: 'Audit tahap 1', shortLabel: 'Stage 1', scheduledAt: '2027-02-10', auditDays: 1, prepWindowDays: 60 },
-      { eventType: 'internal_audit', nameEn: 'Internal audit 2026', nameId: 'Audit internal 2026', shortLabel: 'IA 2026', scheduledAt: '2026-12-08', auditDays: 2, prepWindowDays: 30 },
+      { eventType: 'internal_audit', nameEn: 'Internal audit 2026', nameId: 'Audit internal 2026', shortLabel: 'IA 2026', scheduledAt: '2026-12-08', auditDays: 2, prepWindowDays: 30, scopeText: 'Clauses 4 to 10 and Annex A themes 5 and 8, Jakarta office' },
     ],
-    invalid: [{ eventType: 'stage3', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10' }, { eventType: 'stage1', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10', prepWindowDays: 400 }],
+    invalid: [
+      { eventType: 'stage3', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10' },
+      { eventType: 'stage1', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10', prepWindowDays: 400 },
+      { eventType: 'internal_audit', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10', reportDocumentId: 'report' },
+    ],
   },
 );
 export type AuditEventCreateRequest = z.infer<typeof AuditEventCreateRequest>;
@@ -50,9 +58,14 @@ export const AuditEventPatch = named(
     prepWindowDays: auditEventShape.prepWindowDays,
     outcome: AuditOutcome.nullable().optional(),
     outcomeSummary: z.string().trim().max(4000).nullable().optional(),
+    scopeText: auditEventShape.scopeText.nullable(),
+    reportDocumentId: Uuid.nullable().optional(),
   }).refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
-  'PATCH /ms/{ms}/audit-events/{id} body; moving the date flags violating preparation tasks and notifies their holders (BR-42, A-26)',
-  { valid: [{ scheduledAt: '2026-11-19' }, { outcome: 'recommended', outcomeSummary: 'Certified, 1 OFI' }], invalid: [{}, { outcome: 'passed' }] },
+  'PATCH /ms/{ms}/audit-events/{id} body; moving the date flags violating preparation tasks and notifies their holders (BR-42, A-26); reportDocumentId attaches the audit report (null removes it, Milestone 2 D.2)',
+  {
+    valid: [{ scheduledAt: '2026-11-19' }, { outcome: 'recommended', outcomeSummary: 'Certified, 1 OFI' }, { reportDocumentId: '0b7e8c2a-1d3f-4e5a-8b6c-7d8e9f0a1b2c' }, { scopeText: null }],
+    invalid: [{}, { outcome: 'passed' }, { reportDocumentId: 'IA-REPORT' }],
+  },
 );
 export type AuditEventPatch = z.infer<typeof AuditEventPatch>;
 

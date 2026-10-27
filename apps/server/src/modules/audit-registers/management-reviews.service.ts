@@ -4,15 +4,19 @@
 // `review_input_def` of that system's edition; the mandatory ones are created with the review), and a review moves
 // from planned to held to closed. Closing checks BR-13 for every linked system and BR-14, and queues `cycle.derive`
 // for every linked system in the same transaction (E.2).
+//
+// Milestone 2 (D.1, M2-07): `ManagementReviewEditService` changes the title, planned date, owner and linked systems of
+// a review while it is planned or held (`management-reviews.update`), with `If-Match`.
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type {
-  CommandResult, ManagementReviewCreate, ManagementReviewInputRequest, ManagementReviewItem, ManagementReviewTransition,
+  CommandResult, ManagementReviewCreate, ManagementReviewInputRequest, ManagementReviewItem, ManagementReviewPatch, ManagementReviewTransition,
 } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
+import { assertIfMatch } from '../../common/etag';
 import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
-import { ConflictError, ForbiddenError, NotFoundError } from '../../common/problems';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../common/problems';
 import { currentRequestId } from '../../common/request-context';
 import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState,
@@ -305,4 +309,121 @@ function itemOf(row: ReviewRow, ownerHandle: string | null, linked: readonly str
       defCode: i.def_code, title: i.title, mandatory: i.mandatory, ms: i.ms_slug, complete: typeof i.content === 'string' && i.content.trim() !== '', content: i.content,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// PATCH /ms/{ms}/management-reviews/{id} (Milestone 2 D.1, M2-07)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Changes a planned or held management review: title, planned date, owner (`none` leaves it unassigned) and the
+ * linked systems. The path system stays linked; a joint review needs `integrated_mode` and `management_review.manage`
+ * in every system it gains or loses (as on create), the primary link stays unless its system is removed (then the
+ * path system becomes primary), and a newly linked system gets the empty mandatory inputs of its edition. A closed
+ * review answers 409. One `register.updated` entry records the change (J.5 has no action of its own for it).
+ */
+@Injectable()
+export class ManagementReviewEditService {
+  constructor(
+    private readonly tenancy: TenantScope,
+    @Inject(RECORD_RESOLVER) private readonly records: RecordResolver,
+    @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
+    @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
+    @Inject(LICENCE_GATE) private readonly licence: LicenceGate,
+    @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
+  ) {}
+
+  async update(principal: Principal, ms: string, id: string, patch: ManagementReviewPatch, ifMatch: string | undefined): Promise<CommandResult> {
+    const org = orgOf(principal);
+    const actor = principal.user.id;
+    return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
+      const record = await this.records.resolve(trx, ms, ENTITY, id, { forUpdate: true });
+      const row = record.row as unknown as ReviewRow;
+      const ref = refOf(ENTITY, row.id, row.code, row.updated_at);
+      assertIfMatch(ifMatch, row.updated_at, ref);
+      if (row.status === 'closed') throw new ConflictError(`${row.code} is closed and no longer changes`, { messageKey: 'audit.review_closed', ref });
+      const links = await linksOf(trx, ENTITY, row.id);
+
+      const set: Record<string, unknown> = {};
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      if (patch.title !== undefined && patch.title !== row.title) {
+        set.title = patch.title;
+        before.title = row.title;
+        after.title = patch.title;
+      }
+      if (patch.plannedAt !== undefined && patch.plannedAt !== row.planned_at) {
+        set.planned_at = patch.plannedAt;
+        before.planned_at = row.planned_at;
+        after.planned_at = patch.plannedAt;
+      }
+      if (patch.ownerHandle !== undefined) {
+        const owner = await this.members.resolveHandle(trx, patch.ownerHandle);
+        if (owner !== row.owner_user_id) {
+          set.owner_user_id = owner;
+          before.owner = (await sql<{ handle: string }>`select handle from platform.app_user where id = ${row.owner_user_id}`.execute(trx)).rows[0]?.handle ?? 'none';
+          after.owner = patch.ownerHandle;
+        }
+      }
+
+      let linked = links.map((l) => l.slug);
+      if (patch.linkedMs !== undefined) {
+        const slugs = patch.linkedMs;
+        if (new Set(slugs).size !== slugs.length) throw new ValidationError([{ path: 'body.linkedMs', message: 'A system is listed twice' }]);
+        if (!slugs.includes(ms)) {
+          throw unprocessable('audit.path_system_not_linked', `The review must stay linked to ${ms}, the system of the request`,
+            `Tinjauan harus tetap ditautkan ke ${ms}, sistem dari permintaan ini`);
+        }
+        const wanted: MsRef[] = [];
+        for (const slug of slugs) wanted.push(slug === ms ? record.ms : await this.records.resolveMs(trx, slug));
+        const current = new Set(links.map((l) => l.msId));
+        const added = wanted.filter((s) => !current.has(s.id));
+        const removed = links.filter((l) => !wanted.some((s) => s.id === l.msId));
+        // Changing what another system's review covers needs the right there, as on create and transition.
+        for (const other of [...added.map((s) => s.slug), ...removed.map((l) => l.slug)]) {
+          if (other === ms) continue;
+          if ((await this.evaluator.evaluate(principal, 'management_review.manage', { scope: 'ms', ms: other })) !== 'full') {
+            throw new ForbiddenError(`Linking a management review to ${other} or unlinking it needs management_review.manage there`);
+          }
+        }
+        if (wanted.length > 1 && added.length > 0) await this.licence.assertFeature(org.id, 'integrated_mode', trx);
+        if (added.length > 0 || removed.length > 0) {
+          const primaryRemoved = removed.some((l) => l.isPrimary);
+          for (const link of removed) {
+            await sql`update entity_ms_link set deleted_at = now(), is_primary = false, updated_at = now(), updated_by = ${actor}
+                       where entity_type = 'management_review' and entity_id = ${row.id} and management_system_id = ${link.msId} and deleted_at is null`.execute(trx);
+          }
+          if (primaryRemoved) {
+            await sql`update entity_ms_link set is_primary = true, updated_at = now(), updated_by = ${actor}
+                       where entity_type = 'management_review' and entity_id = ${row.id} and management_system_id = ${record.ms.id} and deleted_at is null`.execute(trx);
+          }
+          for (const system of added) {
+            await sql`insert into entity_ms_link (entity_type, entity_id, management_system_id, is_primary, created_by, updated_by)
+                      values ('management_review', ${row.id}, ${system.id}, false, ${actor}, ${actor})`.execute(trx);
+            // The mandatory inputs of the new system's edition (one per definition), as on create.
+            await sql`
+              insert into management_review_input (management_review_id, review_input_def_id, management_system_id, created_by, updated_by)
+              select ${row.id}, d.id, m.id, ${actor}, ${actor}
+                from management_system m join ref.review_input_def d on d.framework_version_id = m.framework_version_id and d.mandatory
+               where m.id = ${system.id}
+                 and not exists (select 1 from management_review_input i where i.management_review_id = ${row.id} and i.review_input_def_id = d.id
+                                   and i.management_system_id = m.id and i.deleted_at is null)`.execute(trx);
+          }
+          before.linked_ms = links.map((l) => l.slug).sort();
+          after.linked_ms = wanted.map((s) => s.slug).sort();
+          linked = wanted.map((s) => s.slug);
+        }
+      }
+
+      const changed = Object.keys(after).length > 0;
+      const updatedAt = changed ? await bump(trx, ENTITY, row.id, { ...set, updated_by: actor }) : new Date(row.updated_at);
+      if (changed) {
+        await this.audit.record(trx, { action: 'register.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
+      }
+      return commandResult([...new Set([...links.map((l) => l.slug), ...linked])], {
+        ref: refOf(ENTITY, row.id, row.code, updatedAt),
+        ...(changed ? {} : { message: ['Nothing to change', 'Tidak ada yang diubah'] }),
+      });
+    });
+  }
 }

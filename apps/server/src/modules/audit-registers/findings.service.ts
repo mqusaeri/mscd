@@ -2,7 +2,10 @@
 // WP-37): the finding register of a system with its linked corrective actions, raising a finding, changing it
 // (including its RCA and systemic check texts), and its status moves. Closing checks BR-06 and BR-07 for major
 // findings and BR-08 for major and minor findings (a linked corrective action closed and effective); OFI, signal and
-// "not a finding" close with a close note. A reopen needs a reason, which becomes the status note.
+// "not a finding" close with a close note. A reopen needs a reason, which becomes the status note. Milestone 2 (D.2,
+// M2-05): a finding names the clause or control code of the edition it concerns (`targetCode`, stored in
+// `finding.target_code` next to the free-text `clauseRef`), and the register filters by it. Finding commands queue
+// `readiness.recompute` and `cycle.derive` for the system (D.6).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type {
@@ -16,8 +19,11 @@ import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService, type MsRef,
   type Principal, type RecordResolver, type ScopePolicy, type Trx,
 } from '../../common/tokens';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
+import { targetOf } from './internal-audit.service';
 import type { Br06Input, Br07Input, Br08Input } from './rules';
 import {
   assertRequires, auditEventOf, bump, commandResult, constraintOf, duplicateCode, editionOf, filled, isPgError, nextPosition, orgOf, pickTransition, refOf, ruleError,
@@ -50,6 +56,7 @@ export interface FindingRow {
   closed_at: string | null;
   closed_by_user_id: string | null;
   close_note: string | null;
+  target_code: string | null;
 }
 
 /** What a new finding row holds (the create route and raising a finding from a self-assessment gap). */
@@ -63,6 +70,8 @@ export interface NewFinding {
   ownerUserId: string | null;
   ownerHandle: string;
   dueAt: string | null;
+  /** Clause or control code of the edition (D.2); checked by the caller. */
+  targetCode?: string | null;
 }
 
 @Injectable()
@@ -75,6 +84,7 @@ export class FindingsService {
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(SCOPE_POLICY) private readonly scope: ScopePolicy,
+    @Inject(JOB_QUEUE) private readonly jobs: JobQueue,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -97,6 +107,7 @@ export class FindingsService {
            and (${query.status ?? null}::text is null or f.status = ${query.status ?? null})
            and (${query.classification ?? null}::text is null or f.classification = ${query.classification ?? null})
            and (${query.source ?? null}::text is null or f.source = ${query.source ?? null})
+           and (${query.targetCode ?? null}::text is null or f.target_code = ${query.targetCode ?? null})
          order by f.position, f.code`.execute(trx);
       const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
       // Top Management: pending data as aggregates only (F.7, Q-8): no owner or due date of other people's findings,
@@ -129,9 +140,10 @@ export class FindingsService {
       // An audit event named by the finding must be linked to the path system (404 otherwise, F.7).
       const auditEventId = body.auditEventId ? (await auditEventOf(trx, system, body.auditEventId)).id : null;
       const owner = await this.members.resolveHandle(trx, body.ownerHandle);
+      const targetCode = body.targetCode ? (await targetOf(trx, system.id, body.targetCode)).code : null;
       const created = await this.insert(trx, principal, system, {
         code: body.code, title: body.title, classification: body.classification, clauseRef: body.clauseRef ?? null, source: body.source,
-        auditEventId, ownerUserId: owner, ownerHandle: body.ownerHandle, dueAt: body.dueAt ?? null,
+        auditEventId, ownerUserId: owner, ownerHandle: body.ownerHandle, dueAt: body.dueAt ?? null, targetCode,
       });
       return commandResult([system.slug], { ref: created });
     });
@@ -162,6 +174,7 @@ export class FindingsService {
           owner_user_id: finding.ownerUserId,
           raised_at: today,
           due_at: finding.dueAt,
+          target_code: finding.targetCode ?? null,
           position,
           created_by: actor,
           updated_by: actor,
@@ -180,9 +193,11 @@ export class FindingsService {
       entityCode: finding.code,
       after: {
         finding_code: finding.code, title: finding.title, classification: finding.classification, clause_ref: finding.clauseRef, source: finding.source,
-        owner: finding.ownerHandle, raised_at: today, due_at: finding.dueAt, ...(finding.auditEventId ? { audit_event_id: finding.auditEventId } : {}), ...extraAudit,
+        owner: finding.ownerHandle, raised_at: today, due_at: finding.dueAt, ...(finding.auditEventId ? { audit_event_id: finding.auditEventId } : {}),
+        ...(finding.targetCode ? { target_code: finding.targetCode } : {}), ...extraAudit,
       },
     });
+    await enqueueDerived(this.jobs, trx, orgOf(principal), system.id, actor);
     return refOf(ENTITY, id, finding.code, updatedAt!);
   }
 
@@ -213,6 +228,9 @@ export class FindingsService {
       if (patch.rcaText !== undefined) change('rca_text', patch.rcaText);
       if (patch.systemicCheckText !== undefined) change('systemic_check_text', patch.systemicCheckText);
       if (patch.statusNote !== undefined) change('status_note', patch.statusNote);
+      if (patch.targetCode !== undefined && patch.targetCode !== row.target_code) {
+        change('target_code', patch.targetCode === null ? null : (await targetOf(trx, record.ms.id, patch.targetCode)).code);
+      }
 
       // A closed major finding keeps its RCA and systemic check (BR-06, BR-07; the CHECK constraint is the backstop).
       if (row.status === 'closed') {
@@ -232,6 +250,7 @@ export class FindingsService {
           throw mapFindingCheck(error, refOf(ENTITY, row.id, row.code, row.updated_at));
         }
         await this.audit.record(trx, { action: 'finding.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
+        await enqueueDerived(this.jobs, trx, orgOf(principal), record.ms.id, actor);
       }
       return commandResult([record.ms.slug], {
         ref: refOf(ENTITY, row.id, row.code, updatedAt),
@@ -287,6 +306,7 @@ export class FindingsService {
         throw mapFindingCheck(error, ref);
       }
       await this.audit.record(trx, { action: 'finding.transition', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
+      await enqueueDerived(this.jobs, trx, orgOf(principal), record.ms.id, actor);
       return commandResult([record.ms.slug], { ref: refOf(ENTITY, row.id, row.code, updatedAt) });
     });
   }
@@ -312,6 +332,7 @@ function itemOf(row: FindingRow, ownerHandle: string | null, eventLabel: string 
     owner: ownerHandle ?? 'none',
     raisedAt: row.raised_at,
     dueAt: row.due_at,
+    targetCode: row.target_code,
     auditEvent: row.audit_event_id && eventLabel !== null ? { id: row.audit_event_id, shortLabel: eventLabel } : null,
     correctiveActions: actions.map((a) => ({ ref: refOf('corrective_action', a.id, a.code, a.updated_at), code: a.code, status: a.status })),
   };

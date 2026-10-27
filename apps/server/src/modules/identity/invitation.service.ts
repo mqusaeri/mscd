@@ -6,12 +6,17 @@
 // unless the platform operator asks for a link (`admin create-user`); such a link is redeemed with the account's
 // current password and never replaces it. The provider path (signing in through one of the inviting organisation's
 // identity providers with `?invitation=`) is WP-16's.
-import { Injectable } from '@nestjs/common';
+//
+// Milestone 2 (D.2, J.4): an existing active account that gets an invited membership is told by the account email
+// `membership_invited` and by the in-app notification `membership_invited` in the organisation the account signs in
+// to, so the invitation does not wait unseen.
+import { Injectable, Logger } from '@nestjs/common';
 import type { InvitationAcceptRequest, LoginResponse, OrgRole } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { sql } from 'kysely';
 import { ConflictError, NotFoundError, ProblemError, UnauthenticatedError, ValidationError } from '../../common/problems';
 import { SYSTEM_USER_ID, type Trx } from '../../common/tokens';
+import { afterCommit } from '../../common/transaction-hooks';
 import { AccountMailer } from './account-mailer';
 import { AuthService, invalidCredentials, invalidLinkToken, normaliseEmail } from './auth.service';
 import { checkPassword } from './credentials';
@@ -87,8 +92,37 @@ export function handleBase(email: string): string {
   return base;
 }
 
+/** What `notifyInvitedAccount` needs: the account, the inviting organisation and who invited. */
+export interface InvitedAccountNotice {
+  userId: string;
+  email: string;
+  orgId: string;
+  orgName: string;
+  /** Display name of the person who invited; null for an operator command. */
+  invitedBy: string | null;
+  /** `created_by` of the notification (default: the system user). */
+  actorUserId?: string | null;
+}
+
+/** The texts of the `membership_invited` notification (J.4). */
+export function membershipInvitedTexts(orgName: string, invitedBy: string | null): { title: [string, string]; body: [string, string] } {
+  return {
+    title: [`Invitation to ${orgName}`, `Undangan ke ${orgName}`],
+    body: [
+      invitedBy
+        ? `${invitedBy} invited you to join ${orgName}. You can accept or decline the invitation in MSCD.`
+        : `You were invited to join ${orgName}. You can accept or decline the invitation in MSCD.`,
+      invitedBy
+        ? `${invitedBy} mengundang Anda untuk bergabung dengan ${orgName}. Anda dapat menerima atau menolak undangan di MSCD.`
+        : `Anda diundang untuk bergabung dengan ${orgName}. Anda dapat menerima atau menolak undangan di MSCD.`,
+    ],
+  };
+}
+
 @Injectable()
 export class InvitationService {
+  private readonly logger = new Logger('Invitations');
+
   constructor(
     private readonly infra: IdentityInfra,
     private readonly sessions: SessionService,
@@ -101,6 +135,73 @@ export class InvitationService {
   /** The invitation link of a token. */
   invitationLink(token: string): string {
     return this.mailer.appLink(`/invite#token=${token}`);
+  }
+
+  /**
+   * Tells an existing active account about an invited membership (Milestone 2 D.2, J.4), after `trx` commits: the
+   * account email `membership_invited`, and the notification `membership_invited` in the organisation the account
+   * signs in to (its default active membership, else its first active one; none when it has no other active
+   * membership). The notification is stored with `email_status = 'skipped'`, because the account email already
+   * carries the message. Failures are logged and never undo the invitation.
+   */
+  notifyInvitedAccount(trx: Trx, notice: InvitedAccountNotice): void {
+    this.mailer.sendAfterCommit(trx, {
+      to: { email: notice.email, userId: notice.userId },
+      template: { name: 'membership_invited', link: this.mailer.appLink('/'), organisation: notice.orgName, invitedBy: notice.invitedBy },
+    });
+    afterCommit(trx, async () => {
+      try {
+        await this.writeInvitedNotification(notice);
+      } catch (error) {
+        this.logger.error(
+          { userId: notice.userId, orgId: notice.orgId },
+          `Could not write the membership_invited notification: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
+  }
+
+  /** The notification of `notifyInvitedAccount` in the account's home organisation; returns its id, or null. */
+  private async writeInvitedNotification(notice: InvitedAccountNotice): Promise<string | null> {
+    const home = await this.infra.scope.withPlatform(
+      async (trx) => {
+        const { rows } = await sql<{ id: string; schema_name: string }>`
+          select o.id, o.schema_name
+            from platform.org_membership m
+            join platform.organization o on o.id = m.organization_id
+           where m.user_id = ${notice.userId} and m.status = 'active' and m.deleted_at is null
+             and m.organization_id <> ${notice.orgId}
+             and o.deleted_at is null and o.status in ('active', 'offboarding')
+           order by m.is_default desc, o.position, o.name
+           limit 1`.execute(trx);
+        return rows[0] ?? null;
+      },
+      { scope: 'auth', userId: notice.userId },
+    );
+    if (!home) return null;
+    const texts = membershipInvitedTexts(notice.orgName, notice.invitedBy);
+    const actor = notice.actorUserId ?? SYSTEM_USER_ID;
+    return this.infra.scope.withTenant({ orgId: home.id, schema: home.schema_name, userId: actor }, async (trx) => {
+      const row = await trx
+        .insertInto('notification')
+        .values({
+          recipient_user_id: notice.userId,
+          management_system_id: null,
+          kind: 'membership_invited',
+          title_en: texts.title[0],
+          title_id: texts.title[1],
+          body_en: texts.body[0],
+          body_id: texts.body[1],
+          entity_ref: null,
+          digest: false,
+          email_status: 'skipped',
+          created_by: actor,
+          updated_by: actor,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return row.id;
+    });
   }
 
   /** Writes an invitation for an existing user and membership (72 hours, single use). */

@@ -98,8 +98,15 @@ const EXAMPLE_CYCLE = {
   id: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d', status: 'certified', cycleStart: '2025-03-14', cycleEnd: '2028-03-13', certificateNo: 'ISMS-2025-0147',
   certifiedAt: '2025-03-14', certificateExpiresAt: '2028-03-13', certificationBody: 'PT Sertifikasi Nusantara',
   certifiedScope: 'Data centre and managed services operations: Jakarta and Surabaya',
-  events: [{ id: '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e', eventType: 'stage2', shortLabel: 'Stage 2', scheduledAt: '2025-02-20', outcome: 'recommended' }],
+  events: [
+    { id: '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e', eventType: 'stage2', shortLabel: 'Stage 2', scheduledAt: '2025-02-20', outcome: 'recommended', scopeText: null, reportDocumentId: null },
+    {
+      id: '8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f', eventType: 'internal_audit', shortLabel: 'IA 2025', scheduledAt: '2025-11-12', outcome: null,
+      scopeText: 'Clauses 4 to 10 and Annex A themes 5 and 8, Jakarta office', reportDocumentId: '0b7e8c2a-1d3f-4e5a-8b6c-7d8e9f0a1b2c',
+    },
+  ],
   items: { total: 12, done: 12 },
+  etag: 'W/"1790000000000"',
 } as const;
 
 export const CertificationCycleItem = named(
@@ -114,13 +121,25 @@ export const CertificationCycleItem = named(
     certificateExpiresAt: IsoDate.nullable(),
     certificationBody: z.string().nullable(),
     certifiedScope: z.string().nullable(),
-    events: z.array(z.object({ id: Uuid, eventType: AuditEventType, shortLabel: z.string(), scheduledAt: IsoDate, outcome: AuditOutcome.nullable() })),
+    events: z.array(z.object({
+      id: Uuid,
+      eventType: AuditEventType,
+      shortLabel: z.string(),
+      scheduledAt: IsoDate,
+      outcome: AuditOutcome.nullable(),
+      /** What an internal audit covered (D.2), null when not given. */
+      scopeText: z.string().nullable(),
+      /** The audit report (D.2), null when none is attached; the client finds its code among the documents the scope policy shows. */
+      reportDocumentId: Uuid.nullable(),
+    })),
     items: z.object({ total: z.int().min(0), done: z.int().min(0) }),
+    /** The cycle's weak ETag, sent as `If-Match` on `ms.cycles.transition` (R-18). */
+    etag: z.string(),
   }),
-  'A certification cycle of a system with its dates, certificate and audit events (Milestone 2 D.1, D.4)',
+  'A certification cycle of a system with its dates, certificate, audit events (with the scope and report of an internal audit) and the ETag for its transitions (Milestone 2 D.1, D.2, D.4)',
   {
     valid: [EXAMPLE_CYCLE, { ...EXAMPLE_CYCLE, status: 'active', certificateNo: null, certifiedAt: null, certificateExpiresAt: null, certificationBody: null, certifiedScope: null, events: [], items: { total: 12, done: 3 } }],
-    invalid: [{ ...EXAMPLE_CYCLE, status: 'lapsed' }, { ...EXAMPLE_CYCLE, items: { total: -1, done: 0 } }],
+    invalid: [{ ...EXAMPLE_CYCLE, status: 'lapsed' }, { ...EXAMPLE_CYCLE, items: { total: -1, done: 0 } }, { ...EXAMPLE_CYCLE, etag: undefined }],
   },
 );
 export type CertificationCycleItem = z.infer<typeof CertificationCycleItem>;
@@ -240,7 +259,7 @@ export const msCertificationRoute = defineRoute({
 export const msCyclesTransitionRoute = defineRoute({
   ...cert, id: 'ms.cycles.transition', method: 'POST', path: '/api/v1/ms/:ms/certification-cycles/:id/transitions',
   summary: 'Suspend, reinstate or withdraw a certificate, or close an active cycle, with a reason (J.8; audited certification_cycle.transitioned)',
-  permission: 'ms.transition', params: MsRecordParams, body: CycleTransitionRequest, response: CommandResult, errors: [404, 409, 422],
+  permission: 'ms.transition', params: MsRecordParams, body: CycleTransitionRequest, response: CommandResult, errors: [404, 409, 412, 422], ifMatch: true,
 });
 
 export const routes: RouteDef[] = [

@@ -1,33 +1,53 @@
 requirement_code,parent_code,title_short,clause_group,is_hs_common,documented_info_mandatory,applicability_assessable,default_frequency_code,evidence_example,sort_order,retired
-4.1,,Understanding the organization and its context,4,true,false,false,annual,,1,false
-4.2,,Needs and expectations of interested parties,4,true,false,false,annual,,2,false
-4.3,,Scope of the management system,4,true,true,false,annual,,3,false
-4.4,,Management system and its processes,4,true,false,false,annual,,4,false
-4.5,,Bribery risk assessment,4,false,false,false,annual,,5,false
-5.1,,Leadership and commitment,5,true,false,false,annual,,6,false
-5.2,,Policy,5,true,true,false,annual,,7,false
-5.3,,"Roles, responsibilities and authorities",5,true,false,false,annual,,8,false
-6.1,,Actions to address risks and opportunities,6,true,false,false,annual,,9,false
-6.2,,Objectives and planning to achieve them,6,true,true,false,annual,,10,false
-6.3,,Planning of changes,6,true,false,false,annual,,11,false
-7.1,,Resources,7,true,false,false,annual,,12,false
-7.2,,Competence,7,true,true,false,annual,,13,false
-7.3,,Awareness,7,true,false,false,annual,,14,false
-7.4,,Communication,7,true,false,false,annual,,15,false
-7.5,,Documented information,7,true,false,false,annual,,16,false
-8.1,,Operational planning and control,8,true,true,false,annual,,17,false
-8.2,,Due diligence,8,false,false,false,annual,,18,false
-8.3,,Financial controls,8,false,false,false,annual,,19,false
-8.4,,Non-financial controls,8,false,false,false,annual,,20,false
-8.5,,Anti-bribery controls by controlled organizations and business associates,8,false,false,false,annual,,21,false
-8.6,,Anti-bribery commitments,8,false,false,false,annual,,22,false
-8.7,,"Gifts, hospitality, donations and similar benefits",8,false,false,false,annual,,23,false
-8.8,,Managing inadequacy of anti-bribery controls,8,false,false,false,annual,,24,false
-8.9,,Raising concerns,8,false,false,false,annual,,25,false
-8.10,,Investigating and dealing with bribery,8,false,false,false,annual,,26,false
-9.1,,"Monitoring, measurement, analysis and evaluation",9,true,true,false,annual,,27,false
-9.2,,Internal audit,9,true,true,false,annual,,28,false
-9.3,,Management review,9,true,true,false,annual,,29,false
-10.1,,Improvement: general,10,true,false,false,annual,,30,false
-10.2,,Nonconformity and corrective action,10,true,true,false,annual,,31,false
-10.3,,Continual improvement,10,true,false,false,annual,,32,false
+4.1,,Understanding the organization and its context,4,true,false,false,annual,Register of issues affecting the anti-bribery objectives,1,false
+4.2,,Needs and expectations of interested parties,4,true,false,false,annual,Register of interested parties and their anti-bribery requirements,2,false
+4.3,,Scope of the management system,4,true,true,false,annual,Approved ABMS scope statement,3,false
+4.4,,Management system and its processes,4,true,false,false,annual,ABMS process map with owners and interactions,4,false
+4.5,,Bribery risk assessment,4,false,true,false,annual,,5,false
+4.5.1,4.5,"Identifying, analysing and evaluating bribery risks",4,false,false,false,annual,"Bribery risk assessment by position, transaction, business associate and region",6,false
+4.5.2,4.5,Reviewing the bribery risk assessment,4,false,false,false,annual,Records of periodic and event-driven reviews of the risk assessment,7,false
+4.5.3,4.5,Records of the bribery risk assessment,4,false,true,false,annual,Retained bribery risk assessment results with approval,8,false
+5.1,,Leadership and commitment,5,true,false,false,annual,,9,false
+5.1.1,5.1,Governing body,5,false,false,false,annual,Governing body minutes approving the policy and reviewing the ABMS,10,false
+5.1.2,5.1,Top management,5,true,false,false,annual,Top management records of resources and support for the ABMS,11,false
+5.2,,Policy,5,true,true,false,annual,Approved anti-bribery policy with evidence of communication,12,false
+5.3,,"Roles, responsibilities and authorities",5,true,false,false,annual,,13,false
+5.3.1,5.3,Roles and responsibilities,5,true,false,false,annual,Role descriptions with anti-bribery responsibilities,14,false
+5.3.2,5.3,Anti-bribery compliance function,5,false,false,false,annual,Appointment letter and reporting line of the compliance function,15,false
+5.3.3,5.3,Delegated decision-making,5,false,false,false,annual,Delegation of authority matrix with conflict of interest controls,16,false
+6.1,,Actions to address risks and opportunities,6,true,false,false,annual,Register of ABMS risks and opportunities with planned actions,17,false
+6.2,,Objectives and planning to achieve them,6,true,true,false,annual,Anti-bribery objectives register with measurable targets,18,false
+6.3,,Planning of changes,6,true,false,false,annual,,19,true
+7.1,,Resources,7,true,false,false,annual,Approved resources for the ABMS and the compliance function,20,false
+7.2,,Competence,7,true,true,false,annual,,21,false
+7.2.1,7.2,Competence: general,7,true,true,false,annual,Competence records of personnel in anti-bribery roles,22,false
+7.2.2,7.2,Employment process,7,false,false,false,annual,,23,false
+7.2.2.1,7.2.2,Conditions of employment for all personnel,7,false,false,false,annual,Employment contracts with anti-bribery clauses and policy acknowledgement,24,false
+7.2.2.2,7.2.2,Positions exposed to more than a low bribery risk,7,false,false,false,annual,Screening records and declarations for positions above a low bribery risk,25,false
+7.3,,Awareness,7,true,true,false,annual,"Anti-bribery training records with content, dates and attendees",26,false
+7.4,,Communication,7,true,false,false,annual,"Communication plan for the policy, internally and to business associates",27,false
+7.5,,Documented information,7,true,false,false,annual,,28,false
+7.5.1,7.5,Documented information: general,7,true,false,false,annual,Document register listing the documented information of the ABMS,29,false
+7.5.2,7.5,Creating and updating documented information,7,true,false,false,annual,"Document showing identification, version, review and approval",30,false
+7.5.3,7.5,Control of documented information,7,true,false,false,annual,"Access, distribution and retention settings of controlled documents",31,false
+8.1,,Operational planning and control,8,true,false,false,annual,Operational records showing anti-bribery controls run as planned,32,false
+8.2,,Due diligence,8,false,true,false,annual,"Due diligence reports on business associates, transactions and personnel",33,false
+8.3,,Financial controls,8,false,false,false,annual,Payment approval records with segregation of duties,34,false
+8.4,,Non-financial controls,8,false,false,false,annual,"Procurement and sales control records, such as tender evaluations",35,false
+8.5,,Anti-bribery controls by controlled organizations and business associates,8,false,false,false,annual,,36,false
+8.5.1,8.5,Controls by controlled organizations,8,false,false,false,annual,Evidence that controlled organisations run anti-bribery controls,37,false
+8.5.2,8.5,Controls by business associates that are not controlled,8,false,false,false,annual,"Anti-bribery controls required of business associates, with follow-up",38,false
+8.6,,Anti-bribery commitments,8,false,false,false,annual,Signed anti-bribery commitments from business associates,39,false
+8.7,,"Gifts, hospitality, donations and similar benefits",8,false,false,false,annual,"Gifts, hospitality and donations register with approvals",40,false
+8.8,,Managing inadequacy of anti-bribery controls,8,false,false,false,annual,Records of actions taken where controls were not adequate,41,false
+8.9,,Raising concerns,8,false,false,false,annual,Concern reporting channel records with confidentiality and protection,42,false
+8.10,,Investigating and dealing with bribery,8,false,true,false,annual,Investigation reports with outcomes and actions,43,false
+9.1,,"Monitoring, measurement, analysis and evaluation",9,true,true,false,annual,Monitoring and measurement report on ABMS performance,44,false
+9.2,,Internal audit,9,true,true,false,annual,Internal audit programme and audit reports,45,false
+9.3,,Management review,9,true,true,false,annual,,46,false
+9.3.1,9.3,Top management review,9,true,true,false,annual,Top management review minutes with decisions,47,false
+9.3.2,9.3,Governing body review,9,false,true,false,annual,Governing body review minutes of the ABMS,48,false
+9.4,,Review by the anti-bribery compliance function,9,false,false,false,annual,Compliance function report on the adequacy of the ABMS,49,false
+10.1,,Nonconformity and corrective action,10,true,true,false,annual,"Nonconformity register with root cause, correction and effectiveness check",50,false
+10.2,,Continual improvement,10,true,false,false,annual,"Improvement log with actions from reviews, audits and investigations",51,false
+10.3,,Continual improvement,10,true,false,false,annual,,52,true

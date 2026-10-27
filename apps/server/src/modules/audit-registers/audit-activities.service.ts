@@ -1,15 +1,21 @@
 // Audit Activity Planner (D.3 "Registers and workflows: audit side", PRD 8.1, WP-37): the activities of an audit
 // event in the path system, generating them from the edition's `ref.audit_activity_template` rows of the event's
-// type (codes the event already has are skipped), and planning one (auditee, date, status, note).
+// type (codes the event already has are skipped), and planning one (auditee, date, status, note). Milestone 2 (D.2,
+// M2-05): an activity names its auditor and the clause or control it examines (`targetCode`, a code of the edition);
+// an auditor who owns an entry, document or evidence of that target gets the `AUD-INDEP` warning. Holders of
+// `internal_audit.manage` without `audit_event.manage` (Internal Auditors) plan the activities of internal audits only.
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuditActivityItem, AuditActivityPatch, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
 import { ForbiddenError } from '../../common/problems';
 import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService,
-  type PermissionEvaluator, type Principal, type RecordResolver, type ScopePolicy,
+  type PermissionEvaluator, type Principal, type RecordResolver, type ScopePolicy, type Trx,
 } from '../../common/tokens';
+import { RuleEngine } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
+import type { AudIndepInput } from './internal-audit.rules';
+import { targetOf } from './internal-audit.service';
 import { auditEventOf, bump, commandResult, editionOf, nextPosition, refOf } from './support';
 
 const ENTITY = 'audit_activity';
@@ -28,6 +34,8 @@ interface ActivityRow {
   scheduled_at: string | null;
   status: AuditActivityItem['status'];
   note: string | null;
+  auditor_user_id: string | null;
+  target_code: string | null;
 }
 
 @Injectable()
@@ -39,16 +47,23 @@ export class AuditActivitiesService {
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(SCOPE_POLICY) private readonly scope: ScopePolicy,
     @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
+    private readonly rules: RuleEngine,
   ) {}
 
   /**
    * Milestone 2 D.2: the guard also admits holders of internal_audit.manage, who may plan the activities of internal
-   * audits only (M2-05 builds the rest of the rule). Throws 403 for any other event type without audit_event.manage.
+   * audits only. Throws 403 for any other event type without audit_event.manage.
    */
   private async assertMayPlan(principal: Principal, ms: string, eventType: string): Promise<void> {
     if (eventType === 'internal_audit') return;
     if ((await this.evaluator.evaluate(principal, 'audit_event.manage', { scope: 'ms', ms })) !== null) return;
     throw new ForbiddenError('You can plan the activities of internal audits only');
+  }
+
+  /** The display name of a person (the AUD-INDEP warning names the auditor). */
+  private async nameOf(trx: Trx, userId: string): Promise<string> {
+    const { rows } = await sql<{ display_name: string }>`select display_name from platform.app_user where id = ${userId}`.execute(trx);
+    return rows[0]?.display_name ?? '';
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -60,13 +75,17 @@ export class AuditActivitiesService {
       const system = await this.records.resolveMs(trx, ms);
       const event = await auditEventOf(trx, system, eventId);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
-      const { rows } = await sql<ActivityRow & { auditee: string | null }>`
-        select a.*, u.handle as auditee from audit_activity a left join platform.app_user u on u.id = a.auditee_user_id
+      const { rows } = await sql<ActivityRow & { auditee: string | null; auditor: string | null }>`
+        select a.*, u.handle as auditee, au.handle as auditor from audit_activity a
+          left join platform.app_user u on u.id = a.auditee_user_id
+          left join platform.app_user au on au.id = a.auditor_user_id
          where a.audit_event_id = ${event.id} and a.management_system_id = ${system.id} and a.deleted_at is null
          order by a.position, a.template_code nulls last, a.title`.execute(trx);
-      const items = rows.map((row) => ({ holderUserId: row.auditee_user_id, item: itemOf(row, row.auditee) }));
-      // Top Management: pending data as aggregates only (F.7, Q-8), so no auditee other than the caller.
-      return this.scope.filter(readScope, items).map((v) => (this.scope.holderShown(readScope, v) ? v.item : { ...v.item, auditee: null }));
+      const items = rows.map((row) => ({ holderUserId: row.auditee_user_id, item: itemOf(row, row.auditee, row.auditor) }));
+      // Top Management: pending data as aggregates only (F.7, Q-8), so no auditee or auditor other than the caller.
+      return this.scope
+        .filter(readScope, items)
+        .map((v) => (this.scope.holderShown(readScope, v) ? v.item : { ...v.item, auditee: null, auditor: v.item.auditor === principal.user.handle ? v.item.auditor : null }));
     });
   }
 
@@ -141,21 +160,39 @@ export class AuditActivitiesService {
       if (patch.scheduledAt !== undefined) change('scheduled_at', patch.scheduledAt);
       if (patch.status !== undefined) change('status', patch.status);
       if (patch.note !== undefined) change('note', patch.note);
+      // D.2: the auditor is a member of the organisation (`none` clears it); the target is a clause or control code
+      // of the edition that is still in the standard (null clears it).
+      if (patch.auditorHandle !== undefined) change('auditor_user_id', await this.members.resolveHandle(trx, patch.auditorHandle), patch.auditorHandle);
+      if (patch.targetCode !== undefined && patch.targetCode !== row.target_code) {
+        change('target_code', patch.targetCode === null ? null : (await targetOf(trx, record.ms.id, patch.targetCode)).code);
+      }
       const changed = Object.keys(after).length > 0;
       let updatedAt = new Date(row.updated_at);
       if (changed) {
         updatedAt = await bump(trx, ENTITY, row.id, { ...set, updated_by: actor });
         await this.audit.record(trx, { action: 'audit_activity.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: code, before, after });
       }
+      // AUD-INDEP when the auditor or the target changed and both are set: the auditor owns work of the target.
+      const auditor = ('auditor_user_id' in set ? set.auditor_user_id : row.auditor_user_id) as string | null;
+      const target = ('target_code' in set ? set.target_code : row.target_code) as string | null;
+      const warnings = auditor && target && ('auditor_user_id' in set || 'target_code' in set)
+        ? await this.rules.enforce<AudIndepInput>(
+            trx,
+            'AUD-INDEP',
+            { auditorUserId: auditor, auditorName: await this.nameOf(trx, auditor), targetCode: target },
+            { msIds: [record.ms.id], ref: refOf(ENTITY, row.id, code, updatedAt) },
+          )
+        : [];
       return commandResult([record.ms.slug], {
         ref: refOf(ENTITY, row.id, code, updatedAt),
+        warnings,
         ...(changed ? {} : { message: ['Nothing to change', 'Tidak ada yang diubah'] }),
       });
     });
   }
 }
 
-function itemOf(row: ActivityRow, auditee: string | null): AuditActivityItem {
+function itemOf(row: ActivityRow, auditee: string | null, auditor: string | null): AuditActivityItem {
   return {
     ref: refOf(ENTITY, row.id, row.template_code ?? row.title, row.updated_at),
     templateCode: row.template_code,
@@ -167,5 +204,7 @@ function itemOf(row: ActivityRow, auditee: string | null): AuditActivityItem {
     scheduledAt: row.scheduled_at,
     status: row.status,
     note: row.note,
+    auditor,
+    targetCode: row.target_code,
   };
 }

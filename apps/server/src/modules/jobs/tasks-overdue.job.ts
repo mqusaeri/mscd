@@ -6,15 +6,19 @@
 // - Findings past `due_at` and not closed get a BR-15 task; the finding owner and the system's MS Managers get
 //   `finding_overdue` when the task opens.
 // - Completed due diligence past `valid_until` becomes `expired`.
+// - Competence records (Milestone 2, M2-07) get the renewal action (`pending_action`, `action_due_at` = `valid_until`)
+//   30 days before `valid_until`, so they show in the owner's tasks; the owner gets `task_overdue` once when
+//   `valid_until` has passed. An action the owner completed is not set again for the same `valid_until`.
 // - BR-10 and BR-15 tasks whose condition cleared are closed (`done`, actor system).
 // Rules run only where the system's edition activates them (`ref.rule_activation`).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
-import { fmtDay } from '../../common/dates';
+import { addDays, fmtDay } from '../../common/dates';
 import { JobHandler, type JobHandlerInstance } from '../../common/jobs/job-handler';
 import type { JobRun } from '../../common/jobs/job-queue';
 import { AUDIT_WRITER, NOTIFICATION_WRITER, SYSTEM_USER_ID, type AuditWriter, type NotificationWriter, type Trx } from '../../common/tokens';
+import { COMPETENCE_REMINDER_DAYS, COMPETENCE_RENEWAL_ACTION, competenceCode } from '../risk-registers/competence';
 import { activeRulesBySystem, ruleActive, RuleTaskService, type ActiveRules } from './rule-tasks';
 import { msManagersOf, notificationSent } from './job-support';
 import { TenantJobRunner } from './tenant-job';
@@ -27,6 +31,8 @@ export interface TasksOverdueResult {
   br15TasksOpened: number;
   tasksClosed: number;
   dueDiligenceExpired: number;
+  /** Competence records that got the renewal action (Milestone 2). */
+  competenceReminders: number;
   notifications: number;
 }
 
@@ -41,6 +47,7 @@ function emptyResult(): TasksOverdueResult {
     br15TasksOpened: 0,
     tasksClosed: 0,
     dueDiligenceExpired: 0,
+    competenceReminders: 0,
     notifications: 0,
   };
 }
@@ -77,6 +84,7 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
         await this.documents(trx, today, rules, result);
         await this.findings(trx, today, rules, result);
         result.dueDiligenceExpired = await this.dueDiligence(trx, today);
+        await this.competence(trx, today, result);
         return result;
       },
       requestId,
@@ -250,6 +258,60 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
       }
     }
     result.tasksClosed += (await this.tasks.closeCleared(trx, 'BR-15', 'finding', open)).length;
+  }
+
+  /**
+   * Competence records (Milestone 2 M2-07): the renewal action from 30 days before `valid_until` (once per
+   * `valid_until`: `action_due_at` keeps the date it was set for, also after the owner completed it), and
+   * `task_overdue` to the owner once when `valid_until` has passed.
+   */
+  private async competence(trx: Trx, today: string, result: TasksOverdueResult): Promise<void> {
+    const { rows } = await sql<{
+      id: string; role_title: string; owner_user_id: string | null; valid_until: string; pending_action: string | null; action_due_at: string | null;
+      ms_id: string | null; person: string | null;
+    }>`
+      select c.id, c.role_title, c.owner_user_id, c.valid_until::text as valid_until, c.pending_action, c.action_due_at::text as action_due_at,
+             (select l.management_system_id from entity_ms_link l where l.entity_type = 'competence_record' and l.entity_id = c.id
+               and l.deleted_at is null order by l.is_primary desc limit 1) as ms_id,
+             (select u.display_name from platform.app_user u where u.id = c.user_id) as person
+        from competence_record c
+       where c.deleted_at is null and c.valid_until is not null and c.valid_until <= ${addDays(today, COMPETENCE_REMINDER_DAYS)}::date
+       order by c.valid_until, c.id`.execute(trx);
+    for (const record of rows) {
+      const code = competenceCode(record.id);
+      if (record.pending_action === null && record.action_due_at !== record.valid_until) {
+        await sql`update competence_record set pending_action = ${COMPETENCE_RENEWAL_ACTION}, action_due_at = ${record.valid_until}::date,
+                         updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond'), updated_by = ${SYSTEM_USER_ID}
+                   where id = ${record.id}`.execute(trx);
+        await this.audit.record(trx, {
+          action: 'register.updated',
+          actor: SYSTEM_ACTOR,
+          msId: record.ms_id,
+          entityType: 'competence_record',
+          entityId: record.id,
+          entityCode: code,
+          before: { pending_action: null, action_due_at: record.action_due_at },
+          after: { pending_action: COMPETENCE_RENEWAL_ACTION, action_due_at: record.valid_until },
+        });
+        result.competenceReminders += 1;
+      }
+      if (record.valid_until >= today || !record.owner_user_id) continue;
+      if (await notificationSent(trx, 'task_overdue', record.id, record.owner_user_id)) continue;
+      const who = record.person ? `${record.person}, ${record.role_title}` : record.role_title;
+      const created = await this.notifications.create(trx, {
+        recipientUserId: record.owner_user_id,
+        kind: 'task_overdue',
+        msId: record.ms_id,
+        title: { en: `Competence expired: ${code}`, id: `Kompetensi kedaluwarsa: ${code}` },
+        body: {
+          en: `The competence of ${who} was valid until ${fmtDay(record.valid_until, 'en')}. Renew the proof and update the record.`,
+          id: `Kompetensi ${who} berlaku sampai ${fmtDay(record.valid_until, 'id')}. Perbarui bukti dan rekamannya.`,
+        },
+        ref: { module: 'audit', entityType: 'competence_record', id: record.id, code },
+        createdBy: SYSTEM_USER_ID,
+      });
+      if (created) result.notifications += 1;
+    }
   }
 
   /** Completed due diligence past `valid_until` becomes `expired`. */

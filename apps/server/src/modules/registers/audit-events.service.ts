@@ -2,6 +2,11 @@
 // change an audit event (moving its date recomputes the After audit flags and the BR-43 flags of its preparation
 // tasks and notifies the holders whose items now fall after the audit, BR-42), add and update preparation tasks
 // (due before the audit, BR-43; status per C.13, blocked needs a note) and update cycle items (status per C.13).
+// Milestone 2 (D.2, D.4, M2-05): internal audits with their scope text and report (a document of type record of the
+// system), planned by MS Managers and Internal Auditors; an Internal Auditor without `audit_event.manage` changes
+// internal audits only and never turns one into another event type; the first `stage1` or `recertification` event of
+// a system without an open cycle starts the certification cycle (or activates the planned one with a `stage1`
+// event); an internal audit with a report queues `cycle.derive` (`internal_audit_done`).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
@@ -9,17 +14,22 @@ import {
   type PrepTaskCreate, type PrepTaskPatch, type RecordRef, type UiMsSnapshot,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { Clock } from '../../common/clock';
 import { assertIfMatch } from '../../common/etag';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
 import { ForbiddenError, NotFoundError, ProblemError, TransitionNotAllowedError, ValidationError } from '../../common/problems';
+import { currentRequestId } from '../../common/request-context';
 import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, NOTIFICATION_WRITER, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type AuthzState, type MembershipService,
   type MsRef, type NotificationWriter, type PermissionEvaluator, type Principal, type RecordResolver, type Trx,
 } from '../../common/tokens';
+import { cycleDeriveKey } from '../audit-registers/cycle-derive.service';
+import { CYCLE_OPENING_EVENTS, openCycleOf, startCycle, threeYearsAfter, type StartedCycle } from '../management-systems/certification.cycles';
 import { ReadModelService } from '../read-model';
 import { RuleEngine, ruleMessages } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import {
-  assertOwnScope, assertRequires, commandResult, isBr43TriggerError, orgOf, personOf, pickTransition, refOf, writeRow,
+  assertOwnScope, assertRequires, commandResult, isBr43TriggerError, orgOf, personOf, pickTransition, refOf, todayOf, unprocessable, writeRow,
 } from './command-support';
 import type { Br42Input, Br43Input } from './register.rules';
 
@@ -42,6 +52,9 @@ interface EventRow {
   prep_window_days: number;
   outcome: string | null;
   outcome_summary: string | null;
+  scope_text: string | null;
+  report_document_id: string | null;
+  certification_cycle_id: string | null;
 }
 
 /** Request members of `AuditEventPatch` and their columns. */
@@ -57,6 +70,8 @@ const EVENT_FIELDS: readonly [keyof AuditEventPatch, keyof EventRow][] = [
   ['prepWindowDays', 'prep_window_days'],
   ['outcome', 'outcome'],
   ['outcomeSummary', 'outcome_summary'],
+  ['scopeText', 'scope_text'],
+  ['reportDocumentId', 'report_document_id'],
 ];
 
 /** A preparation task or cycle item as the progress commands read it. */
@@ -104,6 +119,8 @@ export class AuditEventCommandsService {
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(NOTIFICATION_WRITER) private readonly notifications: NotificationWriter,
     @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
+    @Inject(JOB_QUEUE) private readonly jobs: JobQueue,
+    private readonly clock: Clock,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -112,18 +129,25 @@ export class AuditEventCommandsService {
 
   async createEvent(principal: Principal, ms: string, body: AuditEventCreateRequest): Promise<CommandResult> {
     const actor = principal.user.id;
+    const today = todayOf(this.clock, orgOf(principal));
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
-      const cycle = await sql<{ id: string }>`
-        select id from certification_cycle where management_system_id = ${system.id} and deleted_at is null
-         order by (status in ('active', 'planned', 'certified')) desc, cycle_start desc limit 1`.execute(trx);
+      if (body.reportDocumentId) await this.assertReport(trx, system, body.reportDocumentId);
+      // D.4: the first stage1 or recertification event of a system without an open cycle starts one (a stage1 event
+      // activates the planned cycle); the cycle step links this event, which is inserted without a cycle first.
+      const opens = await this.opensCycle(trx, system, body.eventType);
+      const cycle = opens
+        ? null
+        : await sql<{ id: string }>`
+            select id from certification_cycle where management_system_id = ${system.id} and deleted_at is null
+             order by (status in ('active', 'planned', 'certified')) desc, cycle_start desc limit 1`.execute(trx);
       const id = randomUUID();
       const { rows } = await sql<{ updated_at: Date }>`
         insert into audit_event (id, management_system_id, certification_cycle_id, event_type, name_en, name_id, short_label, scheduled_at,
-                                 audit_days, lead_auditor_name, expected_focus, prep_window_days, created_by, updated_by)
-        values (${id}, ${system.id}, ${cycle.rows[0]?.id ?? null}, ${body.eventType}, ${body.nameEn}, ${body.nameId}, ${body.shortLabel},
+                                 audit_days, lead_auditor_name, expected_focus, prep_window_days, scope_text, report_document_id, created_by, updated_by)
+        values (${id}, ${system.id}, ${cycle?.rows[0]?.id ?? null}, ${body.eventType}, ${body.nameEn}, ${body.nameId}, ${body.shortLabel},
                 ${body.scheduledAt}::date, ${body.auditDays ?? null}, ${body.leadAuditorName ?? null}, ${body.expectedFocus ?? null},
-                ${body.prepWindowDays ?? 60}, ${actor}, ${actor})
+                ${body.prepWindowDays ?? 60}, ${body.scopeText ?? null}, ${body.reportDocumentId ?? null}, ${actor}, ${actor})
         returning updated_at`.execute(trx);
       // Audit events are shareable (C.6): the path system holds the primary link.
       await sql`insert into entity_ms_link (entity_type, entity_id, management_system_id, is_primary, created_by, updated_by)
@@ -140,10 +164,80 @@ export class AuditEventCommandsService {
           scheduled_at: body.scheduledAt,
           ...(body.auditDays !== undefined ? { audit_days: body.auditDays } : {}),
           prep_window_days: body.prepWindowDays ?? 60,
+          ...(body.scopeText ? { scope_text: body.scopeText } : {}),
+          ...(body.reportDocumentId ? { report_document_id: body.reportDocumentId } : {}),
         },
       });
-      return commandResult([system.slug], { ref: refOf(EVENT, id, body.shortLabel, rows[0]!.updated_at) });
+      const started = opens ? await this.startCycleFor(trx, system, { id, eventType: body.eventType, shortLabel: body.shortLabel, scheduledAt: body.scheduledAt }, today, actor) : null;
+      if (body.eventType === 'internal_audit' && body.reportDocumentId) await this.queueDerive(trx, principal, system.id);
+      return commandResult([system.slug], {
+        ref: refOf(EVENT, id, body.shortLabel, rows[0]!.updated_at),
+        ...(started ? { message: cycleMessage(started), data: { cycle: { id: started.cycleId, activated: started.activated, items: started.items } } } : {}),
+      });
     });
+  }
+
+  /**
+   * True when an event of `eventType` starts the certification cycle of the system now (D.4): a stage1 or
+   * recertification event and no open cycle, or a stage1 event and a planned cycle.
+   */
+  private async opensCycle(trx: Trx, system: MsRef, eventType: string): Promise<boolean> {
+    if (!CYCLE_OPENING_EVENTS.has(eventType)) return false;
+    const open = await openCycleOf(trx, system.id, true);
+    return !open || (open.status === 'planned' && eventType === 'stage1');
+  }
+
+  /** Starts the cycle for an opening event: from the earlier of today and the event date, for three years (D.4). */
+  private async startCycleFor(
+    trx: Trx,
+    system: MsRef,
+    event: { id: string; eventType: string; shortLabel: string; scheduledAt: string },
+    today: string,
+    actor: string,
+  ): Promise<StartedCycle> {
+    const { rows } = await sql<{ framework_version_id: string }>`select framework_version_id from management_system where id = ${system.id}`.execute(trx);
+    const cycleStart = event.scheduledAt < today ? event.scheduledAt : today;
+    return startCycle(trx, this.audit, {
+      system: { id: system.id, slug: system.slug, frameworkVersionId: rows[0]!.framework_version_id },
+      cycleStart,
+      cycleEnd: threeYearsAfter(cycleStart),
+      keepPlannedDates: true,
+      today,
+      actor,
+      trigger: { kind: 'audit_event', eventId: event.id, eventType: event.eventType, shortLabel: event.shortLabel },
+    });
+  }
+
+  /**
+   * The audit report of an event (D.2): a live document of type record that belongs to the system (its own, shared
+   * with it, or organisation-wide); 404 for an unknown document, 422 for another document type.
+   */
+  private async assertReport(trx: Trx, system: MsRef, documentId: string): Promise<void> {
+    const { rows } = await sql<{ doc_code: string; doc_type: string }>`
+      select d.doc_code, d.doc_type from document d
+       where d.id = ${documentId} and d.deleted_at is null
+         and (d.is_org_wide or exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = d.id
+                                         and l.management_system_id = ${system.id} and l.deleted_at is null))`.execute(trx);
+    const doc = rows[0];
+    if (!doc) throw new NotFoundError('Unknown document');
+    if (doc.doc_type !== 'record') {
+      throw unprocessable(
+        'audit.report_not_record',
+        `${doc.doc_code} is not a record; the audit report is a document of type record`,
+        `${doc.doc_code} bukan rekaman; laporan audit adalah dokumen bertipe rekaman`,
+      );
+    }
+  }
+
+  /** Queues `cycle.derive` for a system in the command's transaction (D.4 `internal_audit_done`). */
+  private async queueDerive(trx: Trx, principal: Principal, msId: string): Promise<void> {
+    const org = orgOf(principal);
+    await this.jobs.send(
+      'cycle.derive',
+      { orgId: org.id, requestId: currentRequestId(), requestedBy: principal.user.id, payload: { msId } },
+      { singletonKey: cycleDeriveKey(org.id, msId), startAfterSeconds: 60, retryLimit: 3 },
+      trx,
+    );
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -164,6 +258,7 @@ export class AuditEventCommandsService {
       }
       const currentRef = refOf(EVENT, id, event.short_label, event.updated_at);
       assertIfMatch(ifMatch, event.updated_at, currentRef);
+      if (patch.reportDocumentId && patch.reportDocumentId !== event.report_document_id) await this.assertReport(trx, system, patch.reportDocumentId);
       const set: Record<string, unknown> = {};
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
@@ -216,7 +311,27 @@ export class AuditEventCommandsService {
       if (Object.keys(set).length > 0) {
         await this.audit.record(trx, { action: 'audit_event.updated', msId: system.id, entityType: EVENT, entityId: id, entityCode: event.short_label, before, after });
       }
-      return { ...commandResult([system.slug], { ref: refOf(EVENT, id, event.short_label, updatedAt) }), count: notified };
+      // D.4: an event changed into the first stage1 or recertification event of a system without an open cycle starts it.
+      const typeChanged = set.event_type !== undefined;
+      const started = typeChanged && (await this.opensCycle(trx, system, set.event_type as string))
+        ? await this.startCycleFor(trx, system, {
+            id, eventType: set.event_type as string, shortLabel: (set.short_label as string | undefined) ?? event.short_label,
+            scheduledAt: (set.scheduled_at as string | undefined) ?? event.scheduled_at,
+          }, todayOf(this.clock, org), actor)
+        : null;
+      if (started && event.certification_cycle_id !== null) {
+        await sql`update audit_event set certification_cycle_id = ${started.cycleId} where id = ${id}`.execute(trx);
+      }
+      const eventType = (set.event_type as string | undefined) ?? event.event_type;
+      const report = 'report_document_id' in set ? (set.report_document_id as string | null) : event.report_document_id;
+      if (eventType === 'internal_audit' && report && ('report_document_id' in set || typeChanged)) await this.queueDerive(trx, principal, system.id);
+      return {
+        ...commandResult([system.slug], {
+          ref: refOf(EVENT, id, event.short_label, updatedAt),
+          ...(started ? { message: cycleMessage(started), data: { cycle: { id: started.cycleId, activated: started.activated, items: started.items } } } : {}),
+        }),
+        count: notified,
+      };
     });
   }
 
@@ -383,6 +498,13 @@ export class AuditEventCommandsService {
       digest: true,
     });
   }
+}
+
+/** The message of a command that started the certification cycle (D.4). */
+function cycleMessage(started: StartedCycle): [string, string] {
+  return started.activated
+    ? [`The planned certification cycle is now active, ${started.items.length} cycle items added`, `Siklus sertifikasi yang direncanakan kini aktif, ${started.items.length} butir siklus ditambahkan`]
+    : [`Certification cycle started, ${started.items.length} cycle items added`, `Siklus sertifikasi dimulai, ${started.items.length} butir siklus ditambahkan`];
 }
 
 /** After audit flags of a system's chain items by key, with the holder (BR-42 compares two of these). */

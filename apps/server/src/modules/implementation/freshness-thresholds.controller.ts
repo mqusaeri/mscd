@@ -1,20 +1,29 @@
 // `GET` and `PUT /ms/{ms}/freshness-thresholds` (Milestone 2 D.1): freshness limits per evidence frequency of a
-// system. Stubs of M2-02, answering 501 `not-implemented` after the guard; M2-07 replaces them and registers its
-// services in targets.module.ts.
+// system, in force (`set` for the system or `default`) and set or reset by the MS Manager (`applicability.manage`).
 import { Controller } from '@nestjs/common';
-import { freshnessThresholdsGetRoute, freshnessThresholdsPutRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import {
+  freshnessThresholdsGetRoute, freshnessThresholdsPutRoute, type CommandResult, type FreshnessThresholdItem, type FreshnessThresholdParams,
+  type FreshnessThresholdSet,
+} from '@mscd/shared';
+import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import type { Principal } from '../../common/tokens';
+import { FreshnessThresholdsService } from './freshness-thresholds.service';
 
 @Controller()
 export class FreshnessThresholdsController {
+  constructor(private readonly thresholds: FreshnessThresholdsService) {}
+
   @ApiRoute(freshnessThresholdsGetRoute)
-  list(): never {
-    return routeStub(freshnessThresholdsGetRoute);
+  list(@CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: { ms: string }): Promise<FreshnessThresholdItem[]> {
+    return this.thresholds.list(principal, params.ms);
   }
 
   @ApiRoute(freshnessThresholdsPutRoute)
-  set(): never {
-    return routeStub(freshnessThresholdsPutRoute);
+  set(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: FreshnessThresholdParams,
+    @RouteInputParam('body') body: FreshnessThresholdSet,
+  ): Promise<CommandResult> {
+    return this.thresholds.set(principal, params.ms, params.frequencyCode, body);
   }
 }

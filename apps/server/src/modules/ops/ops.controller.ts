@@ -1,5 +1,6 @@
 // Operations routes of the platform operator (D.3 "Operations", WP-34). Every route needs a platform permission
-// (`ops.read` or `ops.jobs.run`), which only the `platform_operator` role grants (F.6).
+// (`ops.read`, `ops.jobs.run`, `ops.tenants.manage` or `ops.users.manage`), which only the `platform_operator` role
+// grants (F.6). Milestone 2 (D.1, M2-06): the organisation list and creation and the second-factor reset by email.
 import { Controller, Inject, Res } from '@nestjs/common';
 import {
   opsDiagnosticsRoute,
@@ -16,6 +17,12 @@ import {
   type JobRunRequest,
   type JobRunResponse,
   type OpsHealth,
+  type OpsOrganizationCreate,
+  type OpsOrganizationCreateResult,
+  type OpsOrganizationItem,
+  type OpsOrganizationListQuery,
+  type OpsResetMfaRequest,
+  type Page,
   type QueueStats,
 } from '@mscd/shared';
 import type { FastifyReply } from 'fastify';
@@ -24,7 +31,9 @@ import { FILE_CONTENT_SECURITY_POLICY, contentDisposition } from '../../common/f
 import { UnauthenticatedError, routeStub } from '../../common/problems';
 import { AUDIT_WRITER, type AuditWriter, type Principal } from '../../common/tokens';
 import { DiagnosticsService } from './diagnostics.service';
+import { OperatorAccountsService } from './operator-accounts.service';
 import { OpsService } from './ops.service';
+import { OpsOrganizationsService } from './organizations.service';
 
 function required(principal: Principal | null): Principal {
   if (!principal) throw new UnauthenticatedError();
@@ -36,6 +45,8 @@ export class OpsController {
   constructor(
     private readonly ops: OpsService,
     private readonly diagnostics: DiagnosticsService,
+    private readonly organizations: OpsOrganizationsService,
+    private readonly accounts: OperatorAccountsService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
   ) {}
 
@@ -85,22 +96,23 @@ export class OpsController {
     await reply.status(200).send(archive.data);
   }
 
-  // Milestone 2 D.1 stubs (M2-02): M2-06 builds the organisation list and creation and the factor reset; M2-S09 the
-  // detail, the status changes and the status history.
+  // Milestone 2 D.1 (M2-06): the organisation list and creation and the factor reset.
   @ApiRoute(opsOrganizationsListRoute)
-  organizations(): never {
-    return routeStub(opsOrganizationsListRoute);
+  listOrganizations(@RouteInputParam('query') query: OpsOrganizationListQuery): Promise<Page<OpsOrganizationItem>> {
+    return this.organizations.list(query);
   }
 
   @ApiRoute(opsOrganizationsCreateRoute)
-  createOrganization(): never {
-    return routeStub(opsOrganizationsCreateRoute);
+  createOrganization(@CurrentPrincipal() principal: Principal | null, @RouteInputParam('body') body: OpsOrganizationCreate): Promise<OpsOrganizationCreateResult> {
+    return this.organizations.create(required(principal), body);
   }
 
   @ApiRoute(opsUsersResetMfaRoute)
-  resetMfa(): never {
-    return routeStub(opsUsersResetMfaRoute);
+  resetMfa(@CurrentPrincipal() principal: Principal | null, @RouteInputParam('body') body: OpsResetMfaRequest): Promise<void> {
+    return this.accounts.resetMfa(required(principal), body);
   }
+
+  // Milestone 2 D.1 stubs (M2-02): M2-S09 builds the detail, the status changes and the status history.
 
   @ApiRoute(opsOrganizationsGetRoute)
   organization(): never {

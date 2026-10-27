@@ -5,9 +5,10 @@
 #   bash deploy/helm/mscd/ci/validate.sh
 #
 # 1. helm lint --strict with values.yaml, values-ha.yaml and values-ci.yaml;
-# 2. helm template for the three values files, plus renders that must fail
-#    (missing database URLs, test services without generated secrets, no
-#    trusted proxy ranges, mixed TLS modes);
+# 2. helm template for the three values files and the admin Job (adminJob,
+#    on the CI values), plus renders that must fail (missing database URLs,
+#    test services without generated secrets, no trusted proxy ranges, mixed
+#    TLS modes, an admin Job without a step or with a bad slug);
 # 3. kubeconform 0.7.0 (-strict, Kubernetes 1.34.1; cert-manager resources
 #    from the CRDs catalog at a pinned commit), schemas cached in ci/.schema-cache;
 # 4. ci/assert-render.mjs on each render.
@@ -84,6 +85,17 @@ for entry in "${renders[@]}"; do
   log "  $name: $(grep -c '^kind:' "$OUT_DIR/$name.yaml") objects"
 done
 
+# The admin Job (Milestone 2, M2-06): tenant create and the first administrator, on the CI values.
+admin_set=(-f /chart/values-ci.yaml --set adminJob.enabled=true
+  --set adminJob.tenantCreate.enabled=true --set adminJob.tenantCreate.slug=acme --set "adminJob.tenantCreate.name=PT Acme"
+  --set adminJob.createUser.enabled=true --set adminJob.createUser.email=admin@acme.example)
+tool helm lint --strict /chart --namespace "$NAMESPACE" --kube-version "$KUBE_VERSION" "${admin_set[@]}" >"$OUT_DIR/lint-admin.log" 2>&1 ||
+  { cat "$OUT_DIR/lint-admin.log" >&2; die "helm lint failed for the admin Job"; }
+tool helm template "$RELEASE" /chart --namespace "$NAMESPACE" --kube-version "$KUBE_VERSION" "${admin_set[@]}" \
+  >"$OUT_DIR/admin.yaml" 2>"$OUT_DIR/template-admin.log" || { cat "$OUT_DIR/template-admin.log" >&2; die "helm template failed with adminJob.enabled"; }
+grep -q 'name: mscd-admin$' "$OUT_DIR/admin.yaml" || die "no admin Job was rendered with adminJob.enabled"
+log "  admin (adminJob.enabled): $(grep -c '^kind:' "$OUT_DIR/admin.yaml") objects"
+
 # Extra renders: cert-manager with a given issuer, and the chart-made certificates without secrets.create.
 tool helm template "$RELEASE" /chart --namespace "$NAMESPACE" --kube-version "$KUBE_VERSION" \
   --set certManager.enabled=true --set certManager.issuerRef.name=corp-ca --set certManager.issuerRef.kind=ClusterIssuer \
@@ -107,11 +119,14 @@ expect_failure "testServices without secrets.create" "needs secrets.create" --se
 expect_failure "no trusted proxy ranges for the api" "trustedProxyCidrs" --set-json 'api.trustedProxyCidrs=[]'
 expect_failure "different TLS modes of gateway and clients" "must be equal" --set profile.gateway.tls.mode=off
 expect_failure "web TLS without a certificate Secret" "web.tls.secretName" --set web.tls.enabled=true
+expect_failure "an admin Job without a step" "needs at least one step" --set adminJob.enabled=true
+expect_failure "an admin Job with a bad slug" "adminJob.tenantCreate.slug" --set adminJob.enabled=true \
+  --set adminJob.tenantCreate.enabled=true --set adminJob.tenantCreate.slug=Acme --set adminJob.tenantCreate.name=Acme
 
 log "kubeconform (Kubernetes $KUBE_VERSION)"
 tool kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" -cache /cache \
   -schema-location default -schema-location "$CRD_SCHEMAS" \
-  /out/default.yaml /out/ha.yaml /out/ci.yaml /out/certmanager.yaml
+  /out/default.yaml /out/ha.yaml /out/ci.yaml /out/certmanager.yaml /out/admin.yaml
 
 log "assert-render"
 for entry in "${renders[@]}"; do
@@ -120,5 +135,6 @@ for entry in "${renders[@]}"; do
   node "$CHART_DIR/ci/assert-render.mjs" $flags "$OUT_DIR/$name.yaml"
 done
 node "$CHART_DIR/ci/assert-render.mjs" "$OUT_DIR/certmanager.yaml"
+node "$CHART_DIR/ci/assert-render.mjs" --secrets-create --admin-job "$OUT_DIR/admin.yaml"
 
 log "all checks passed"

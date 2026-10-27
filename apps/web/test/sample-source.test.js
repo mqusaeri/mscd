@@ -91,13 +91,33 @@ describe('snapshot of the sample source', () => {
     expect(Object.keys(snap.bundles)).toEqual(['isms', 'qms', 'bcms', 'abms']);
     expect(row('isms')).toEqual([93, 79, 22, 63, 24, 4, 3]);
     expect(row('qms')).toEqual([28, 27, 10, 18, 5, 0, 0]);
-    expect(row('bcms')).toEqual([27, 11, 8, 25, 2, 3, 0]);
-    expect(row('abms')).toEqual([32, 2, 5, 35, 3, 1, 0]);
+    // Milestone 2 E.2 (M2-04): clause 10 per standard, so BCMS and ABMS hold 10.1 and 10.2 only (10.3 is retired).
+    expect(row('bcms')).toEqual([26, 11, 8, 24, 2, 3, 0]);
+    expect(row('abms')).toEqual([31, 2, 5, 34, 3, 1, 0]);
   });
 
   it('gives My Tasks counts per persona: rina 3, bagus 31, maya 1, hendra 3', async () => {
     const snap = await createSampleDataSource().load('ndt');
     expect(Object.fromEntries(Object.entries(ME).map(([role, who]) => [role, tasks(snap, who).length]))).toEqual({ manager: 3, owner: 31, auditor: 1, top: 3 });
+  });
+
+  it('numbers clause 10 per standard and names the scope and policy document of each system (M2-04, E.2)', async () => {
+    const snap = await createSampleDataSource().load('ndt');
+    const clause10 = (ms) => bundleOf(snap, ms).reqs.filter((r) => r.key.startsWith('10.')).map((r) => [r.key, r.title]);
+    expect(clause10('qms')).toEqual([['10.1', 'Improvement: general'], ['10.2', 'Nonconformity and corrective action'], ['10.3', 'Continual improvement']]);
+    expect(clause10('bcms')).toEqual([['10.1', 'Nonconformity and corrective action'], ['10.2', 'Continual improvement']]);
+    expect(clause10('abms')).toEqual([['10.1', 'Continual improvement'], ['10.2', 'Nonconformity and corrective action']]);
+    const outputs = (ms) => Object.fromEntries(bundleOf(snap, ms).phases.flatMap((p) => p.acts).filter((a) => a.out).map((a) => [a.no, a.out]));
+    expect(outputs('isms')).toMatchObject({ '2.3': 'SCO-01', '2.6': 'SCO-01', '3.1': 'POL-01', '4.1': 'PRC-04', '4.7': 'SOA-01', '4.9': 'PLN-01' });
+    expect(outputs('qms')).toMatchObject({ '2.3': 'SCO-Q01', '2.5': 'SCO-Q01', '3.1': 'QM-01', '3.4': 'QM-01', '9.10': 'PRC-Q03' });
+    expect(outputs('bcms')).toMatchObject({ '2.3': 'SCO-B01', '2.5': 'SCO-B01', '3.1': 'POL-B01', '3.4': 'POL-B01', '5.4': 'PLN-B02' });
+    expect(outputs('abms')).toMatchObject({ '2.3': 'SCO-A01', '2.5': 'SCO-A01', '3.1': 'POL-A01', '3.4': 'POL-A01' });
+    expect(outputs('abms')['4.2']).toBeUndefined();
+    // Activity outputs of one system never name the policy of another system (the POL-01 clash of the gap study).
+    for (const ms of ['qms', 'bcms', 'abms']) expect(Object.values(outputs(ms))).not.toContain('POL-01');
+    expect(act(snap, 'bcms', '3.1').doc).toMatchObject({ id: 'POL-B01' });
+    expect(act(snap, 'isms', '6.7').title).toBe('Approve policies and standards');
+    expect(act(snap, 'isms', '6.8').title).toBe('Approve procedures, plans and registers');
   });
 
   it('equals the old controller derivation for every organisation, system and language', async () => {

@@ -6,16 +6,16 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 1,Initiation & mandate,Inisiasi & mandat,false,5,Communicate programme kick-off,,,Communicate programme kick-off: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,1,Identify internal and external issues,,,Identify internal and external issues: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,2,Identify interested parties and requirements,,,Identify interested parties and requirements: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,3,Define ISMS scope and boundaries,,,Define ISMS scope and boundaries: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,3,Define ISMS scope and boundaries,,SCO-01,Define ISMS scope and boundaries: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,4,Inventory information assets,,,Inventory information assets: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,5,Map interfaces and dependencies,,,Map interfaces and dependencies: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,6,Approve scope statement,,,Approve scope statement: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,6,Approve scope statement,,SCO-01,Approve scope statement: approved and recorded in the register
 3,Leadership & policy,Kepemimpinan & kebijakan,false,1,Draft information security policy,,POL-01,Draft information security policy: approved and recorded in the register
 3,Leadership & policy,Kepemimpinan & kebijakan,false,2,"Define roles, responsibilities and authorities",,,"Define roles, responsibilities and authorities: approved and recorded in the register"
 3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Approve policy at management review,,POL-01,Approve policy at management review: approved and recorded in the register
-3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Set information security objectives,,,Set information security objectives: approved and recorded in the register
+3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Set information security objectives,,,"Information security objectives recorded in the objectives register with a measure, an owner and a due date"
 3,Leadership & policy,Kepemimpinan & kebijakan,false,5,Communicate policy to all staff,,POL-01,Communicate policy to all staff: approved and recorded in the register
-4,Risk assessment & SoA,Penilaian risiko & SoA,true,1,Define risk assessment methodology,,PRC-05,Define risk assessment methodology: approved and recorded in the register
+4,Risk assessment & SoA,Penilaian risiko & SoA,true,1,Define risk assessment methodology,,PRC-04,Define risk assessment methodology: approved and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,2,Identify information security risks,,,Identify information security risks: approved and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,3,Analyse and evaluate risks,,,Analyse and evaluate risks: approved and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,4,Select risk treatment options,,,Select risk treatment options: approved and recorded in the register
@@ -23,7 +23,7 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,6,Justify inclusions and exclusions,,,Justify inclusions and exclusions: approved and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,7,Draft Statement of Applicability,,SOA-01,Draft Statement of Applicability: approved and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,8,Risk owner approval of residual risk,,,Risk owner approval of residual risk: approved and recorded in the register
-4,Risk assessment & SoA,Penilaian risiko & SoA,true,9,Approve risk treatment plan,,,Approve risk treatment plan: approved and recorded in the register
+4,Risk assessment & SoA,Penilaian risiko & SoA,true,9,Approve risk treatment plan,,PLN-01,Risk treatment plan (PLN-01) approved by the risk owners and recorded in the register
 4,Risk assessment & SoA,Penilaian risiko & SoA,true,10,Approve Statement of Applicability,,SOA-01,Approve Statement of Applicability: approved and recorded in the register
 5,Risk treatment & controls,Perlakuan risiko & kontrol,false,1,Implement organisational controls (A.5),,,Implement organisational controls (A.5): approved and recorded in the register
 5,Risk treatment & controls,Perlakuan risiko & kontrol,false,2,Implement people controls (A.6),,,Implement people controls (A.6): approved and recorded in the register
@@ -43,10 +43,10 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 6,Documentation,Dokumentasi,false,4,Define record retention,,,Define record retention: approved and recorded in the register
 6,Documentation,Dokumentasi,false,5,Publish document register,,,Publish document register: approved and recorded in the register
 6,Documentation,Dokumentasi,false,6,Train document owners,,,Train document owners: approved and recorded in the register
-6,Documentation,Dokumentasi,false,7,Approve tier 1–2 documents,,,Approve tier 1–2 documents: approved and recorded in the register
-6,Documentation,Dokumentasi,false,8,Approve tier 3–4 documents,,,Approve tier 3–4 documents: approved and recorded in the register
+6,Documentation,Dokumentasi,false,7,Approve policies and standards,,,Approve policies and standards: approved and recorded in the register
+6,Documentation,Dokumentasi,false,8,"Approve procedures, plans and registers",,,"Approve procedures, plans and registers: approved and recorded in the register"
 7,Operation & awareness,Operasi & kepedulian,false,1,Run awareness campaign,,,Run awareness campaign: approved and recorded in the register
-7,Operation & awareness,Operasi & kepedulian,false,2,Role-based security training,,,Role-based security training: approved and recorded in the register
+7,Operation & awareness,Operasi & kepedulian,false,2,Role-based security training,,,Training and competence of each role recorded in the competence register
 7,Operation & awareness,Operasi & kepedulian,false,3,Operate controls and collect evidence,,,Operate controls and collect evidence: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,4,Supplier onboarding under new requirements,,PRC-08,Supplier onboarding under new requirements: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,5,Handle incidents per procedure,,PRC-13,Handle incidents per procedure: approved and recorded in the register

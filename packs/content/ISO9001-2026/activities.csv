@@ -1,0 +1,3 @@
+phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,output_document_code,expected_outcome
+3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Set measurable objectives,,,"Quality objectives recorded in the objectives register with a measure, an owner and a due date"
+7,Operation & awareness,Operasi & kepedulian,false,2,Role-based training,,,Training and competence of each role recorded in the competence register

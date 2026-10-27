@@ -313,6 +313,59 @@ migrate:
     port: 5432
   extraEnv: []
 
+# adminJob: an optional Job that runs administration commands once the release
+# is installed (a Helm hook), so the first organisation, its first
+# administrator or the platform operator need no "kubectl exec". The enabled
+# steps run in this order: tenantCreate (mscd-server tenant create),
+# createUser (mscd-server admin create-user: the invitation is emailed; its
+# one-time link is printed in the Job log only when email does not work and
+# profile mail.required is false) and createOperator (mscd-server admin
+# create-operator, for SaaS: the set-password link is emailed). The Job reads
+# the api Secret, the database owner URL of the migrate Secret and the api
+# client certificate. Install with --wait, so the storage gateway is ready
+# before tenant create asks it for the organisation's data key. See
+# docs/INSTALL-ONPREM.md, "Kubernetes with Helm".
+adminJob:
+  # -- Run the Job.
+  enabled: false
+  # -- helm.sh/hook of the Job: post-install runs it once. Add post-upgrade
+  # (post-install,post-upgrade) only for steps that may run again: tenant
+  # create passes when the organisation exists (--if-missing), but admin
+  # create-user sends a new invitation each time and fails once the person is
+  # an active member.
+  hook: post-install
+  # -- Retries of a failed pod. Each retry runs every step again from the
+  # first; tenant create then passes because the organisation exists.
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  # -- Seconds the finished Job (and its log) is kept.
+  ttlSecondsAfterFinished: 86400
+  tenantCreate:
+    enabled: false
+    # -- Organisation slug: a lower-case letter, then letters, digits or _.
+    # It names the organisation's schema and cannot be changed later.
+    slug: ""
+    name: ""
+    timeZone: Asia/Jakarta
+    siteCount: 1
+  createUser:
+    enabled: false
+    email: ""
+    # -- Display name (default: the part of the email before @).
+    name: ""
+    # -- Grant the Tenant Admin role (the first administrator).
+    tenantAdmin: true
+    # -- Organisation slug; empty means tenantCreate.slug, else the only organisation.
+    org: ""
+  createOperator:
+    enabled: false
+    email: ""
+    name: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  extraEnv: []
+
 ingress:
   # -- Create an Ingress routing / and /api to the web Service.
   enabled: false

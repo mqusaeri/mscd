@@ -246,12 +246,12 @@ export const opsOrganizationsListRoute = defineRoute({
 });
 export const opsOrganizationsCreateRoute = defineRoute({
   ...opM2, owner: 'M2-06', id: 'ops.organizations.create', method: 'POST', path: '/api/v1/ops/organizations',
-  summary: 'Create an organisation with local sign-in allowed and invite its first administrator (409 single_tenancy, 409 mail_required; audited ops.organization_created)',
-  permission: 'ops.tenants.manage', body: OpsOrganizationCreate, response: OpsOrganizationCreateResult, status: 201, errors: [409, 422], idempotent: true,
+  summary: 'Create an organisation with local sign-in allowed and invite its first administrator (409 single_tenancy, 409 mail_required, 409 org_exists; 503 when the storage gateway or the database owner role is unavailable; audited ops.organization_created)',
+  permission: 'ops.tenants.manage', body: OpsOrganizationCreate, response: OpsOrganizationCreateResult, status: 201, errors: [409, 422, 503], idempotent: true,
 });
 export const opsUsersResetMfaRoute = defineRoute({
   ...opM2, owner: 'M2-06', id: 'ops.users.reset-mfa', method: 'POST', path: '/api/v1/ops/users/reset-mfa',
-  summary: 'Reset the second factor of an account with several active memberships, ending its sessions (audited auth.mfa_reset)',
+  summary: 'Reset the second factor of an account found by email (404 when it has no factor), ending its sessions and emailing the account (audited auth.mfa_reset with the reason)',
   permission: 'ops.users.manage', body: OpsResetMfaRequest, response: NoBody, status: 204, errors: [404, 422],
 });
 export const opsOrganizationsGetRoute = defineRoute({

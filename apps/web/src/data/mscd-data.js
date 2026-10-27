@@ -91,7 +91,14 @@ const RISK27 = id => { const [t,n] = id.split('.').map(Number); const base = { 5
 
 // ---------- Harmonized Structure requirement lists ----------
 const HS = [['4.1','Understanding the organization and its context'],['4.2','Needs and expectations of interested parties'],['4.3','Scope of the management system'],['4.4','Management system and its processes'],['5.1','Leadership and commitment'],['5.2','Policy'],['5.3','Roles, responsibilities and authorities'],['6.1','Actions to address risks and opportunities'],['6.2','Objectives and planning to achieve them'],['6.3','Planning of changes'],['7.1','Resources'],['7.2','Competence'],['7.3','Awareness'],['7.4','Communication'],['7.5','Documented information']];
-const HS9 = [['9.1','Monitoring, measurement, analysis and evaluation'],['9.2','Internal audit'],['9.3','Management review'],['10.1','Improvement: general'],['10.2','Nonconformity and corrective action'],['10.3','Continual improvement']];
+const HS9 = [['9.1','Monitoring, measurement, analysis and evaluation'],['9.2','Internal audit'],['9.3','Management review']];
+// Clause 10 numbering differs per standard (MILESTONE-2 E.2): ISO 9001 keeps 10.1 to 10.3, ISO 22301:2019 has 10.1
+// Nonconformity and 10.2 Continual improvement, ISO 37001:2025 follows the Harmonized Structure (10.1 Continual improvement).
+const C10 = {
+  qms:[['10.1','Improvement: general'],['10.2','Nonconformity and corrective action'],['10.3','Continual improvement']],
+  bcms:[['10.1','Nonconformity and corrective action'],['10.2','Continual improvement']],
+  abms:[['10.1','Continual improvement'],['10.2','Nonconformity and corrective action']],
+};
 const C8 = {
   qms:[['8.1','Operational planning and control'],['8.2','Requirements for products and services'],['8.3','Design and development of products and services'],['8.4','Control of externally provided processes, products and services'],['8.5','Production and service provision'],['8.6','Release of products and services'],['8.7','Control of nonconforming outputs']],
   bcms:[['8.1','Operational planning and control'],['8.2','Business impact analysis and risk assessment'],['8.3','Business continuity strategies and solutions'],['8.4','Business continuity plans and procedures'],['8.5','Exercise programme'],['8.6','Evaluation of business continuity documentation and capabilities']],
@@ -99,7 +106,7 @@ const C8 = {
 };
 const REQCFG = {
   qms:{ st:{ '8.4':'partial','9.1':'partial','6.3':'partial','7.2':'partial','10.3':'planned','8.7':'complete' }, own:{ '8.3':'yusuf','8.4':'andi','7.2':'dewi','9.2':'maya','8.5':'yusuf' }, def:'sari', doc:{ '7.5':'IMS-01','9.2':'IMS-02','10.2':'IMS-03','9.3':'IMS-04','8.3':'PRC-Q02','8.4':'PRC-Q03','8.7':'PRC-Q04','8.2':'REG-Q01','9.1':'REG-Q01' }, ddoc:'QM-01', freq:{ '9.1':'monthly','8.4':'annual','8.7':'event','8.6':'event','9.2':'annual','9.3':'annual','7.2':'annual','8.2':'event','8.3':'event','8.5':'monthly','10.2':'event' }, dfreq:'annual', note:{ '8.4':'External provider evaluations 2026 done for 6 of 9 critical suppliers', '9.1':'Customer satisfaction survey Q3 not analysed', '6.3':'Transition change plan (ISO 9001:2026) not approved', '7.2':'Competence matrix missing 4 new hires', '8.7':'Marked complete by process owner: awaiting verification' } },
-  bcms:{ st:{ '6.3':'partial','7.1':'partial','7.2':'partial','7.3':'partial','7.4':'partial','7.5':'implemented','8.1':'implemented','8.2':'blocked','8.3':'planned','8.4':'planned','8.5':'ns','8.6':'ns','9.1':'ns','9.2':'ns','9.3':'ns','10.1':'ns','10.2':'ns','10.3':'ns' }, own:{ '8.2':'tono','8.3':'bagus','8.4':'bagus','8.5':'tono','8.6':'tono','7.2':'dewi','9.2':'maya' }, def:'tono', doc:{ '7.5':'IMS-01','9.2':'IMS-02','10.2':'IMS-03','9.3':'IMS-04','8.2':'PLN-B01','8.3':'PLN-B02','8.4':'PLN-B02','4.4':'REG-B01' }, ddoc:'POL-B01', freq:{ '8.2':'annual','8.5':'annual','9.1':'quarterly' }, dfreq:'annual', note:{ '8.2':'BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: holds the BIA & Risk Assessment gate', '8.3':'Awaiting BIA gate', '8.4':'Awaiting BIA gate', '7.4':'Emergency communication tree not tested' } },
+  bcms:{ st:{ '6.3':'partial','7.1':'partial','7.2':'partial','7.3':'partial','7.4':'partial','7.5':'implemented','8.1':'implemented','8.2':'blocked','8.3':'planned','8.4':'planned','8.5':'ns','8.6':'ns','9.1':'ns','9.2':'ns','9.3':'ns','10.1':'ns','10.2':'ns' }, own:{ '8.2':'tono','8.3':'bagus','8.4':'bagus','8.5':'tono','8.6':'tono','7.2':'dewi','9.2':'maya' }, def:'tono', doc:{ '7.5':'IMS-01','9.2':'IMS-02','10.1':'IMS-03','9.3':'IMS-04','8.2':'PLN-B01','8.3':'PLN-B02','8.4':'PLN-B02','4.4':'REG-B01' }, ddoc:'POL-B01', freq:{ '8.2':'annual','8.5':'annual','9.1':'quarterly' }, dfreq:'annual', note:{ '8.2':'BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: holds the BIA & Risk Assessment gate', '8.3':'Awaiting BIA gate', '8.4':'Awaiting BIA gate', '7.4':'Emergency communication tree not tested' } },
   abms:{ st:{ '4.1':'partial','4.2':'partial','4.5':'blocked' }, own:{ '4.5':'lina','8.2':'andi','8.3':'andi','8.7':'andi' }, def:'lina', doc:{}, ddoc:'POL-A01', freq:{}, dfreq:'annual', note:{ '4.5':'Bribery risk assessment not started: holds the gate for phase 2', '4.1':'Context workshop held 18 Sep; issues not yet recorded' } },
 };
 
@@ -156,7 +163,7 @@ export function buildReqs(ms) {
     }));
     return out;
   }
-  const cfg = REQCFG[ms.id]; const list = [...HS, ...C8[ms.id], ...HS9].sort((a,b)=>parseFloat(a[0])-parseFloat(b[0]) || a[0].localeCompare(b[0]));
+  const cfg = REQCFG[ms.id]; const list = [...HS, ...C8[ms.id], ...HS9, ...C10[ms.id]].sort((a,b)=>parseFloat(a[0])-parseFloat(b[0]) || a[0].localeCompare(b[0]));
   const seen = new Set();
   return list.filter(([id]) => !seen.has(id) && seen.add(id)).map(([id,title],i) => {
     let st = cfg.st[id]; if (!st) st = ms.id==='abms' ? 'ns' : 'implemented';
@@ -236,10 +243,12 @@ export const STAGES = {
 
 
 // ---------- Phases & activities ----------
-const GENP = (gate, ops) => [
+// `w`: the system's short name and policy name, so the scope and policy activities name the document they produce
+// (each pack has its own scope statement and policy template, MILESTONE-2 E.2).
+const GENP = (w, gate, ops) => [
   { n:'Initiation & mandate', acts:['Secure top management mandate','Appoint management system manager','Approve project charter and budget','Baseline gap assessment'] },
-  { n:'Context & scope', acts:['Identify internal and external issues','Identify interested parties and requirements','Define scope and boundaries','Map processes and interfaces','Approve scope statement'] },
-  { n:'Leadership & policy', acts:['Draft policy','Define roles, responsibilities and authorities','Set measurable objectives','Approve and communicate policy'] },
+  { n:'Context & scope', acts:['Identify internal and external issues','Identify interested parties and requirements','Define '+w.ms+' scope and boundaries','Map processes and interfaces','Approve '+w.ms+' scope statement'] },
+  { n:'Leadership & policy', acts:['Draft '+w.policy,'Define roles, responsibilities and authorities','Set measurable objectives','Approve and communicate '+w.policy] },
   gate, ops,
   { n:'Documentation', acts:['Establish document control','Write mandatory procedures','Define record retention','Publish document register','Approve controlled documents'] },
   { n:'Operation & awareness', acts:['Run awareness campaign','Role-based training','Operate controls and collect evidence','Handle nonconformities per procedure','Evidence freshness review'] },
@@ -252,14 +261,14 @@ export const PHASES = {
     { n:'Leadership & policy', acts:['Draft information security policy','Define roles, responsibilities and authorities','Approve policy at management review','Set information security objectives','Communicate policy to all staff'] },
     { n:'Risk assessment & SoA', gate:true, acts:['Define risk assessment methodology','Identify information security risks','Analyse and evaluate risks','Select risk treatment options','Select Annex A controls','Justify inclusions and exclusions','Draft Statement of Applicability','Risk owner approval of residual risk','Approve risk treatment plan','Approve Statement of Applicability'] },
     { n:'Risk treatment & controls', acts:['Implement organisational controls (A.5)','Implement people controls (A.6)','Implement physical controls (A.7)','Implement technological controls (A.8)','Establish supplier security requirements','Deploy access control and identity management','Deploy logging and monitoring','Establish incident management process','Establish backup and continuity arrangements','Cryptography and key management','Secure development practices','Track treatment plan progress'] },
-    { n:'Documentation', acts:['Establish document control procedure','Write mandatory procedures','Write operating standards','Define record retention','Publish document register','Train document owners','Approve tier 1–2 documents','Approve tier 3–4 documents'] },
+    { n:'Documentation', acts:['Establish document control procedure','Write mandatory procedures','Write operating standards','Define record retention','Publish document register','Train document owners','Approve policies and standards','Approve procedures, plans and registers'] },
     { n:'Operation & awareness', acts:['Run awareness campaign','Role-based security training','Operate controls and collect evidence','Supplier onboarding under new requirements','Handle incidents per procedure','Change management under control','Quarterly access reviews','Evidence freshness review'] },
     { n:'Performance evaluation', acts:['Define metrics and measurement plan','Collect metric values','Plan internal audit programme','Conduct internal audit','Record and classify findings','Prepare management review inputs','Hold management review','Record decisions and actions'] },
     { n:'Improvement & audit readiness', acts:['Root cause analysis for findings','Implement corrective actions','Verify corrective action effectiveness','Compile evidence pack','Surveillance readiness check','Brief auditees on sampling focus','Close-out of open actions'] } ],
-  qms:[ ...GENP({ n:'Risk & opportunity + process map', gate:true, acts:['Determine risks and opportunities','Plan actions for risks and opportunities','Define process map and interactions','Assign process owners','Define process KPIs','Approve process map','Approve quality objectives'] }, { n:'Process controls & design', acts:['Customer requirements review','Design and development controls','External provider evaluation','Production and service provision controls','Release and nonconforming output controls','Customer feedback process','Complaint handling'] }),
+  qms:[ ...GENP({ ms:'QMS', policy:'quality policy' }, { n:'Risk & opportunity + process map', gate:true, acts:['Determine risks and opportunities','Plan actions for risks and opportunities','Define process map and interactions','Assign process owners','Define process KPIs','Approve process map','Approve quality objectives'] }, { n:'Process controls & design', acts:['Customer requirements review','Design and development controls','External provider evaluation','Production and service provision controls','Release and nonconforming output controls','Customer feedback process','Complaint handling'] }),
     { n:'ISO 9001:2026 transition', acts:['Install ISO 9001:2026 framework pack','Run gap analysis 2015 to 2026','Map documents to new requirements','Map evidence to new requirements','Review three new requirements','Update quality manual','Update process map','Train process owners','Update quality objectives','Update supplier controls','Internal audit against 2026 edition','Management review on transition','Notify certification body','Confirm transition audit date'] } ],
-  bcms: GENP({ n:'BIA & risk assessment', gate:true, acts:['Identify products and services','Determine prioritised activities','Set MTPD, RTO and RPO per activity','Complete BIA for all prioritised activities','Assess disruption risks','Approve BIA report','Approve risk assessment'] }, { n:'BC strategies & plans', acts:['Select continuity strategies','Define resource requirements','Write BC plans','Define incident response structure','Establish warning and communication','Exercise programme design','Approve plans'] }),
-  abms: GENP({ n:'Bribery risk assessment', gate:true, acts:['Identify bribery risk positions and transactions','Identify business associates in scope','Assess bribery risks by position, partner, region','Determine proportionate controls','Approve bribery risk assessment','Set risk review triggers'] }, { n:'Anti-bribery controls', acts:['Establish anti-bribery compliance function','Due diligence procedure','Financial controls','Non-financial controls','Gifts, hospitality and donations register','Anti-bribery commitments from associates','Raising concerns channel','Investigation procedure'] }),
+  bcms: GENP({ ms:'BCMS', policy:'business continuity policy' }, { n:'BIA & risk assessment', gate:true, acts:['Identify products and services','Determine prioritised activities','Set MTPD, RTO and RPO per activity','Complete BIA for all prioritised activities','Assess disruption risks','Approve BIA report','Approve risk assessment'] }, { n:'BC strategies & plans', acts:['Select continuity strategies','Define resource requirements','Write BC plans','Define incident response structure','Establish warning and communication','Exercise programme design','Approve plans'] }),
+  abms: GENP({ ms:'ABMS', policy:'anti-bribery policy' }, { n:'Bribery risk assessment', gate:true, acts:['Identify bribery risk positions and transactions','Identify business associates in scope','Assess bribery risks by position, partner, region','Determine proportionate controls','Approve bribery risk assessment','Set risk review triggers'] }, { n:'Anti-bribery controls', acts:['Establish anti-bribery compliance function','Due diligence procedure','Financial controls','Non-financial controls','Gifts, hospitality and donations register','Anti-bribery commitments from associates','Raising concerns channel','Investigation procedure'] }),
 };
 export const PHASE_STATE = {
   isms:{ verifiedUpTo:9, ov:{ '4:5':'blocked:A.8.12','4:6':'blocked:A.5.23','4:9':'blocked:R-031','4:10':'blocked:SOA-01','9:4':'progress','9:6':'progress','9:7':'ns' } },
@@ -267,7 +276,10 @@ export const PHASE_STATE = {
   bcms:{ verifiedUpTo:3, current:4, lockedFrom:5, ov:{ '4:1':'verified','4:2':'complete','4:3':'blocked:BIA-03','4:4':'blocked:BIA-06','4:5':'progress','4:6':'ns','4:7':'ns' } },
   abms:{ verifiedUpTo:0, current:1, lockedFrom:2, ov:{ '1:1':'verified','1:2':'verified','1:3':'complete','1:4':'progress' } },
 };
-export const OUTPUT_MAP = [['Statement of Applicability','SOA-01'],['SoA','SOA-01'],['information security policy','POL-01'],['policy','POL-01'],['document control','IMS-01'],['internal audit','IMS-02'],['corrective action','IMS-03'],['management review','IMS-04'],['risk assessment methodology','PRC-05'],['backup','PRC-11'],['incident','PRC-13'],['access control','PRC-07'],['supplier','PRC-08'],['BIA','PLN-B01'],['BC plan','PLN-B02'],['quality manual','QM-01'],['process map','QM-01'],['transition','PLN-Q05'],['gap analysis','PLN-Q05']];
+// Activity output documents: the first keyword contained in the title. Codes are those of the pack templates
+// (MILESTONE-2 E.2): each system has its own scope statement and policy, and the risk assessment method is PRC-04
+// (PRC-05 is the asset handling procedure).
+export const OUTPUT_MAP = [['Statement of Applicability','SOA-01'],['SoA','SOA-01'],['QMS scope','SCO-Q01'],['BCMS scope','SCO-B01'],['ABMS scope','SCO-A01'],['ISMS scope','SCO-01'],['scope statement','SCO-01'],['information security policy','POL-01'],['quality policy','QM-01'],['business continuity policy','POL-B01'],['anti-bribery policy','POL-A01'],['policy','POL-01'],['document control','IMS-01'],['internal audit','IMS-02'],['corrective action','IMS-03'],['management review','IMS-04'],['risk assessment methodology','PRC-04'],['risk treatment plan','PLN-01'],['backup','PRC-11'],['response structure','PLN-B02'],['incident','PRC-13'],['access control','PRC-07'],['supplier controls','PRC-Q03'],['supplier','PRC-08'],['BIA','PLN-B01'],['BC plan','PLN-B02'],['quality manual','QM-01'],['process map','QM-01'],['transition','PLN-Q05'],['gap analysis','PLN-Q05']];
 
 // ---------- Traceability chains ----------
 export const CHAINS = {
@@ -283,7 +295,7 @@ export const CHAINS = {
   abms:[],
 };
 export const TITLES = { 'CI-02':'Dependence on privileged administrators','CI-05':'Reliance on public cloud providers','CI-03':'Ageing virtualisation platform in Surabaya','CI-01':'Multi-tenant hosting for regulated customers','R-003':'Unauthorised access to customer environments','T-003':'Role-based access with quarterly review','T-022':'Cloud provider assurance programme','M-03':'Cloud provider SLA breaches','M-02':'Access review completion rate','CI-Q01':'Competitive pressure on release cadence','ACT-04':'Automated release gate pilot','QO-01':'On-time release ≥ 95%','MQ-01':'Release defect rate' };
-export const CLAUSE_AT_RISK = { context:'4.1', risk:'6.1.2', treatment:'6.1.3', control:'6.1.3 d)', soa:'6.1.3 d)', document:'7.5', evidence:'8.1 / 9.1', metric:'9.1', action:'6.1', process:'4.4', objective:'6.2', product:'8.2.1', bia:'8.2.2', drisk:'8.2.3', strategy:'8.3', exercise:'8.5' };
+export const CLAUSE_AT_RISK = { context:'4.1', risk:'6.1.2', treatment:'6.1.3', control:'6.1.3 d)', soa:'6.1.3 d)', document:'7.5', evidence:'8.1 / 9.1', metric:'9.1', action:'6.1', process:'4.4', objective:'6.2', product:'8.2.1', bia:'8.2.2', drisk:'8.2.3', strategy:'8.3', exercise:'8.5', brisk:'4.5', associate:'8.2' };
 
 // ---------- Certification cycle ----------
 export const EVENTS = {

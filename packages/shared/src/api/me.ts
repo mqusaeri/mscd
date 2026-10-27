@@ -34,6 +34,17 @@ export const MeSession = named(
 );
 export type MeSession = z.infer<typeof MeSession>;
 
+export const PendingMembership = named(
+  'PendingMembership',
+  z.object({ org: OrgSlug, name: z.string(), invitedBy: z.string().nullable(), invitedAt: Instant }),
+  'An invited membership of another organisation that waits for the session user to accept or decline it: the organisation, the name of the person who invited (null for an operator command) and when (Milestone 2 D.2)',
+  {
+    valid: [{ org: 'bsd', name: 'PT Bank Sentosa Digital', invitedBy: 'Andi Wijaya', invitedAt: '2026-10-20T03:00:00Z' }, { org: 'rmn', name: 'Rumah Sakit Nusantara', invitedBy: null, invitedAt: '2026-10-21T08:30:00Z' }],
+    invalid: [{ org: 'BSD', name: 'x', invitedBy: null, invitedAt: '2026-10-20T03:00:00Z' }, { org: 'bsd', name: 'x', invitedAt: '2026-10-20' }],
+  },
+);
+export type PendingMembership = z.infer<typeof PendingMembership>;
+
 export const Me = named(
   'Me',
   z.object({
@@ -49,15 +60,24 @@ export const Me = named(
     session: MeSession,
     personas: RolesMap.optional(),
     preferences: z.record(z.string(), z.unknown()),
+    /**
+     * Invited memberships of other organisations, oldest first (Milestone 2 D.2). The server always sends the list;
+     * it is optional so a client still reads the answer of an older server.
+     */
+    pendingMemberships: z.array(PendingMembership).optional(),
   }),
-  'Session user, current organisation, roles and permissions per system, CSRF token and preferences (D.2). org is null only for a platform operator without a membership',
+  'Session user, current organisation, roles and permissions per system, CSRF token, preferences and the invitations waiting for the user (D.2, Milestone 2 D.2). org is null only for a platform operator without a membership',
   {
     valid: [
       EXAMPLE_ME,
+      { ...EXAMPLE_ME, pendingMemberships: [{ org: 'bsd', name: 'PT Bank Sentosa Digital', invitedBy: 'Andi Wijaya', invitedAt: '2026-10-20T03:00:00Z' }] },
       { ...EXAMPLE_ME, personas: { manager: { who: 'rina', label: ['MS Manager', 'Manajer SM'] }, owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] } } },
       { ...EXAMPLE_ME, org: null, orgs: [], rolesByMs: {}, uiRoleByMs: {}, adminRoles: [], platformRoles: ['platform_operator'], permissions: { org: ['ops.read'], ms: {} } },
     ],
-    invalid: [{ ...EXAMPLE_ME, uiRoleByMs: { isms: 'admin' } }, { ...EXAMPLE_ME, csrfToken: undefined }, { ...EXAMPLE_ME, rolesByMs: { isms: ['manager'] } }],
+    invalid: [
+      { ...EXAMPLE_ME, uiRoleByMs: { isms: 'admin' } }, { ...EXAMPLE_ME, csrfToken: undefined }, { ...EXAMPLE_ME, rolesByMs: { isms: ['manager'] } },
+      { ...EXAMPLE_ME, pendingMemberships: [{ org: 'bsd' }] },
+    ],
   },
 );
 export type Me = z.infer<typeof Me>;
@@ -142,7 +162,7 @@ export const meGetRoute = defineRoute({
   owner: 'WP-39',
   method: 'GET',
   path: '/api/v1/me',
-  summary: 'Session user with roles, UI role and permissions per system',
+  summary: 'Session user with roles, UI role and permissions per system, and the invitations waiting for the user',
   auth: 'session',
   response: Me,
   errors: [],
@@ -202,7 +222,7 @@ export const meRecoveryCodesRoute = defineRoute({
   owner: 'M2-06',
   method: 'POST',
   path: '/api/v1/me/mfa/recovery-codes',
-  summary: 'Ten new recovery codes while keeping the authenticator; the authenticator code is needed unless one was given in the last 5 minutes (audited auth.recovery_codes_regenerated)',
+  summary: 'Ten new recovery codes while keeping the authenticator; the authenticator code is needed unless one was given in the last 5 minutes (422 auth.proof_required or auth.proof_invalid, 409 without an authenticator; audited auth.recovery_codes_regenerated)',
   auth: 'session',
   body: RecoveryCodesRequest,
   response: RecoveryCodesResponse,

@@ -1,15 +1,22 @@
-// `POST /me/mfa/recovery-codes` (Milestone 2 D.1): ten new recovery codes while keeping the authenticator. Stub of
-// M2-02, answering 501 `not-implemented` after the guard; M2-06 replaces it and registers its services in
-// recovery-codes.module.ts.
-import { Controller } from '@nestjs/common';
-import { meRecoveryCodesRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+// `POST /me/mfa/recovery-codes` (Milestone 2 D.1): ten new recovery codes while keeping the authenticator, shown once.
+import { Controller, Req, Res } from '@nestjs/common';
+import { meRecoveryCodesRoute, type RecoveryCodesRequest, type RecoveryCodesResponse } from '@mscd/shared';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { ApiRoute, RouteInputParam } from '../../common/api-route';
+import { RecoveryCodesService } from './recovery-codes.service';
 
 @Controller()
 export class RecoveryCodesController {
+  constructor(private readonly codes: RecoveryCodesService) {}
+
   @ApiRoute(meRecoveryCodesRoute)
-  regenerate(): never {
-    return routeStub(meRecoveryCodesRoute);
+  regenerate(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @RouteInputParam('body') body: RecoveryCodesRequest,
+  ): Promise<RecoveryCodesResponse> {
+    // The codes are shown once: never stored by a cache.
+    reply.header('cache-control', 'no-store');
+    return this.codes.regenerate(request, reply, body);
   }
 }

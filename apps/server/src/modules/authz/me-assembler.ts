@@ -1,10 +1,11 @@
 // ME_ASSEMBLER (build plan D.2 `Me`, G.5 `orgs[]`, F.7 UI role per system): the session user, the current
 // organisation, the user's organisations with the systems where they hold a role, business roles and the UI role
 // per system, organisation and platform roles, permissions per system, the CSRF token, session expiry, the demo
-// personas (demo mode only) and the stored preferences.
+// personas (demo mode only), the stored preferences, and the invitations waiting for the user (Milestone 2 D.2).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { DEMO_PERSONAS, UI_ROLE_LABELS, uiRoleFor, type Me, type Organisation, type UiRole } from '@mscd/shared';
+import { sql } from 'kysely';
+import { DEMO_PERSONAS, UI_ROLE_LABELS, uiRoleFor, type Me, type Organisation, type PendingMembership, type UiRole } from '@mscd/shared';
 import { PERMISSION_EVALUATOR, type MeAssembler, type PermissionEvaluator, type Principal, type TenantInfo } from '../../common/tokens';
 import { PreferencesService } from '../identity/preferences.service';
 import { tenantContextOf } from '../tenancy/tenant-scope';
@@ -65,7 +66,70 @@ export class MeAssemblerService implements MeAssembler {
       },
       ...(personas ? { personas } : {}),
       preferences: await this.preferencesOf(principal.user.id),
+      pendingMemberships: this.roles.available && principal.user.kind !== 'guest' ? await this.pendingMemberships(principal.user.id) : [],
     };
+  }
+
+  /**
+   * Milestone 2 D.2 `pendingMemberships`: the user's invited memberships of organisations that are not archived, oldest
+   * invitation first, with the name of the person who invited (null for an operator command). Read through the
+   * policy's user clause, like `orgs`; organisations and accounts carry no row-level security.
+   */
+  private async pendingMemberships(userId: string): Promise<PendingMembership[]> {
+    const rows = await this.infra.withUserOnly(userId, (trx) =>
+      trx
+        .selectFrom('platform.org_membership as m')
+        .innerJoin('platform.organization as o', 'o.id', 'm.organization_id')
+        .leftJoin('platform.app_user as inviter', 'inviter.id', 'm.invited_by')
+        .select(['o.id', 'o.slug', 'o.name', 'inviter.display_name as invited_by', 'm.created_at'])
+        .where('m.user_id', '=', userId)
+        .where('m.status', '=', 'invited')
+        .where('m.deleted_at', 'is', null)
+        .where('o.deleted_at', 'is', null)
+        .where('o.status', '<>', 'archived')
+        .execute(),
+    );
+    if (rows.length === 0) return [];
+    const invitedAt = await this.invitationTimes(userId, rows.map((r) => r.id));
+    return rows
+      .map((r) => ({ org: r.slug, name: r.name, invitedBy: r.invited_by ?? null, invitedAt: (invitedAt.get(r.id) ?? new Date(r.created_at)).toISOString() }))
+      .sort((a, b) => a.invitedAt.localeCompare(b.invitedAt) || a.org.localeCompare(b.org));
+  }
+
+  /**
+   * When each pending invitation was made: the time of the latest `user.invited` entry of the organisation for the
+   * user (entity `user`, or entity `invitation` naming one of the user's invitation links). The membership row is no
+   * clock for this: a trigger moves `updated_at` on every change of the invited row (its admin roles, for example),
+   * and `created_at` stays from a former membership that was invited again. A membership without such an entry
+   * (seeded data) keeps its `created_at`. The entries belong to organisations the session is not bound to, so they
+   * are read in platform scope, read only.
+   */
+  private async invitationTimes(userId: string, orgIds: string[]): Promise<Map<string, Date>> {
+    const rows = await this.infra.scope.withPlatform(
+      async (trx) => {
+        await sql`set transaction read only`.execute(trx);
+        return trx
+          .selectFrom('platform.audit_log as a')
+          .select(['a.organization_id', (eb) => eb.fn.max('a.occurred_at').as('at')])
+          .where('a.action', '=', 'user.invited')
+          .where('a.organization_id', 'in', orgIds)
+          .where((eb) =>
+            eb.or([
+              eb.and([eb('a.entity_type', '=', 'user'), eb('a.entity_id', '=', userId)]),
+              eb.and([
+                eb('a.entity_type', '=', 'invitation'),
+                eb('a.entity_id', 'in', eb.selectFrom('platform.invitation as i').select('i.id').where('i.user_id', '=', userId)),
+              ]),
+            ]),
+          )
+          .groupBy('a.organization_id')
+          .execute();
+      },
+      { scope: 'auth', userId },
+    );
+    const times = new Map<string, Date>();
+    for (const r of rows) if (r.organization_id && r.at) times.set(r.organization_id, new Date(r.at));
+    return times;
   }
 
   /** G.5 `orgs[]`: the user's active memberships in organisation order, each with the systems where the user holds a role. */

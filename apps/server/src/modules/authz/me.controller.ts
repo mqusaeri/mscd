@@ -1,4 +1,5 @@
-// `GET /me`, `PUT /me/org`, `POST /me/memberships/{org}/accept` and `POST /auth/demo/persona` (build plan D.3, WP-39).
+// `GET /me`, `PUT /me/org`, `POST /me/memberships/{org}/accept` and `POST /auth/demo/persona` (build plan D.3, WP-39);
+// `POST /me/memberships/{org}/decline` and `GET /me/security` (Milestone 2 D.1, M2-06).
 import { Controller, Req, Res } from '@nestjs/common';
 import {
   authDemoPersonaRoute,
@@ -9,11 +10,11 @@ import {
   meSwitchOrgRoute,
   type DemoPersonaRequest,
   type Me,
+  type MeSecurity,
   type SwitchOrgRequest,
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
 import type { Principal } from '../../common/tokens';
 import { MeService } from './me.service';
 
@@ -55,14 +56,13 @@ export class MeController {
     return this.me.switchPersona(request, reply, principal, body.role);
   }
 
-  // Milestone 2 D.1 stubs (M2-02); M2-06 replaces them.
   @ApiRoute(meDeclineMembershipRoute)
-  declineMembership(): never {
-    return routeStub(meDeclineMembershipRoute);
+  declineMembership(@CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: { org: string }): Promise<void> {
+    return this.me.declineMembership(principal, params.org);
   }
 
   @ApiRoute(meSecurityRoute)
-  security(): never {
-    return routeStub(meSecurityRoute);
+  security(@CurrentPrincipal() principal: Principal): Promise<MeSecurity> {
+    return this.me.security(principal);
   }
 }

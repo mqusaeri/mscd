@@ -1,6 +1,8 @@
 import type { Command } from 'commander';
+import { sql } from 'kysely';
 import { ConfigError, type MscdConfig } from '../config/mscd-config';
 import { exitOnConfigError, loadConfigOrExit } from '../config/run-context';
+import { createKysely } from '../db/kysely';
 import {
   GatewayDataKeyIssuer,
   gatewayDataKeyIssuer,
@@ -12,7 +14,10 @@ import {
   type VerifiedDomain,
 } from '../db/tenant-provisioner';
 
-/** `tenant create` and `tenant verify-domain` (D-01, C.8, D-25). Both run as mscd_migrator with platform scope. */
+/**
+ * `tenant create` and `tenant verify-domain` (D-01, C.8, D-25). Both run as mscd_migrator with platform scope.
+ * `tenant create --if-missing` succeeds without changes when the slug exists (Milestone 2 M2-06, Helm admin Job).
+ */
 export function register(program: Command): void {
   const tenant = program.command('tenant').description('Organisation (tenant) administration');
   tenant
@@ -20,19 +25,30 @@ export function register(program: Command): void {
     .description(
       'Create an organisation with its schema, tenant migrations, data key (from the storage gateway) and Managed Vault repository',
     )
-    .requiredOption('--slug <slug>', 'organisation slug (schema org_<slug>): a lower-case letter, then letters, digits or _')
+    .requiredOption('--slug <slug>', 'organisation slug (schema org_<slug>), permanent: a lower-case letter, then letters, digits or _')
     .requiredOption('--name <name>', 'display name')
     .option('--id <uuid>', 'fixed organisation id (for licences bound to it)')
     .option('--time-zone <zone>', 'IANA time zone of the organisation local dates', 'Asia/Jakarta')
     .option('--site-count <n>', 'number of sites', '1')
     .option('--demo-deploy-label <label>', 'demo installs only: show the organisation as saas or onprem (D-20)')
-    .action(async (options: TenantCreateOptions) => {
+    .option('--if-missing', 'succeed without changes when an organisation with this slug exists (for jobs that may run again)')
+    .action(async (options: TenantCreateOptions & { ifMissing?: boolean }) => {
       await runCommand('tenant create', async (config) => {
-        const created = await tenantCreate(config, options);
+        const outcome = options.ifMissing ? await tenantCreateIfMissing(config, options) : { created: await tenantCreate(config, options) };
+        if (outcome.existing) {
+          const found = outcome.existing;
+          process.stdout.write(
+            `tenant create: organisation ${found.slug} (${found.id}) already exists with the name "${found.name}" ` +
+              `and the status ${found.status}; nothing changed (--if-missing)\n`,
+          );
+          return;
+        }
+        const created = outcome.created;
         process.stdout.write(
           `tenant create: organisation ${created.slug} (${created.id}) created: schema ${created.schemaName}, ` +
             `${created.migrations.length} tenant migrations, data key ${created.kekId}, ` +
-            `Managed Vault repository ${created.vaultRepositoryId}\n`,
+            `Managed Vault repository ${created.vaultRepositoryId}\n` +
+            `The slug ${created.slug} cannot be changed: it names the organisation's schema. Local sign-in is allowed.\n`,
         );
       });
     });
@@ -88,6 +104,60 @@ export async function tenantCreate(config: MscdConfig, options: TenantCreateOpti
     });
   } finally {
     if (issuer instanceof GatewayDataKeyIssuer && issuer !== dataKeys) await issuer.close();
+  }
+}
+
+/** An organisation that `tenant create --if-missing` found. */
+export interface ExistingOrganisation {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+}
+
+/** What `tenant create --if-missing` did: created the organisation, or found one with the slug. */
+export type TenantCreateOutcome = { created: CreatedTenant; existing?: undefined } | { existing: ExistingOrganisation; created?: undefined };
+
+/**
+ * `tenant create --if-missing`: the organisation with the slug when one exists (not deleted), else `tenant create`.
+ * A retried Helm admin Job (its steps run in order in one pod) then passes this step after a partial run. An
+ * organisation created between the lookup and the provisioner's own check also counts as found.
+ */
+export async function tenantCreateIfMissing(config: MscdConfig, options: TenantCreateOptions, dataKeys?: DataKeyIssuer): Promise<TenantCreateOutcome> {
+  const existing = await findOrganisation(config, options.slug);
+  if (existing) return { existing };
+  try {
+    return { created: await tenantCreate(config, options, dataKeys) };
+  } catch (error) {
+    if (error instanceof TenantProvisioningError) {
+      const raced = await findOrganisation(config, options.slug);
+      if (raced) return { existing: raced };
+    }
+    throw error;
+  }
+}
+
+/** The organisation with this slug that is not deleted, read as mscd_migrator with platform scope. */
+async function findOrganisation(config: MscdConfig, slug: string): Promise<ExistingOrganisation | null> {
+  const migrator = createKysely({ connectionString: config.databaseUrl('migrator'), max: 1, applicationName: 'mscd-tenant-create' });
+  try {
+    const row = await migrator.transaction().execute(async (trx) => {
+      await sql`select set_config('app.platform_scope', 'on', true)`.execute(trx);
+      return trx
+        .selectFrom('platform.organization')
+        .select(['id', 'slug', 'name', 'status'])
+        .where('slug', '=', slug)
+        .where('deleted_at', 'is', null)
+        .executeTakeFirst();
+    });
+    return row ?? null;
+  } catch (error) {
+    if ((error as { code?: string }).code === '42P01') {
+      throw new TenantProvisioningError('The platform tables do not exist yet: run "mscd-server migrate" first', { cause: error });
+    }
+    throw error;
+  } finally {
+    await migrator.destroy();
   }
 }
 

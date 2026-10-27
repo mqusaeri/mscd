@@ -1,94 +1,94 @@
 item_code,theme_code,title_short,requirement_code,default_frequency_code,evidence_example,sort_order,retired
-A.5.1,A.5,Policies for information security,,annual,,1,false
-A.5.2,A.5,Information security roles and responsibilities,,annual,,2,false
-A.5.3,A.5,Segregation of duties,,annual,,3,false
-A.5.4,A.5,Management responsibilities,,annual,,4,false
-A.5.5,A.5,Contact with authorities,,annual,,5,false
-A.5.6,A.5,Contact with special interest groups,,annual,,6,false
-A.5.7,A.5,Threat intelligence,,monthly,,7,false
-A.5.8,A.5,Information security in project management,,event,,8,false
-A.5.9,A.5,Inventory of information and other associated assets,,quarterly,Asset register export with date stamp,9,false
-A.5.10,A.5,Acceptable use of information and other associated assets,,annual,,10,false
-A.5.11,A.5,Return of assets,,event,,11,false
-A.5.12,A.5,Classification of information,,annual,,12,false
-A.5.13,A.5,Labelling of information,,annual,,13,false
-A.5.14,A.5,Information transfer,,annual,,14,false
-A.5.15,A.5,Access control,,annual,,15,false
-A.5.16,A.5,Identity management,,annual,,16,false
-A.5.17,A.5,Authentication information,,annual,,17,false
-A.5.18,A.5,Access rights,,quarterly,Access review spreadsheet signed by the system owner,18,false
-A.5.19,A.5,Information security in supplier relationships,,annual,Completed supplier security questionnaire and review notes,19,false
-A.5.20,A.5,Addressing information security within supplier agreements,,annual,,20,false
-A.5.21,A.5,Managing information security in the ICT supply chain,,annual,,21,false
-A.5.22,A.5,"Monitoring, review and change management of supplier services",,quarterly,,22,false
-A.5.23,A.5,Information security for use of cloud services,,annual,,23,false
-A.5.24,A.5,Information security incident management planning and preparation,,event,,24,false
-A.5.25,A.5,Assessment and decision on information security events,,event,,25,false
-A.5.26,A.5,Response to information security incidents,,event,,26,false
-A.5.27,A.5,Learning from information security incidents,,event,,27,false
-A.5.28,A.5,Collection of evidence,,event,,28,false
-A.5.29,A.5,Information security during disruption,,annual,,29,false
-A.5.30,A.5,ICT readiness for business continuity,,annual,,30,false
-A.5.31,A.5,"Legal, statutory, regulatory and contractual requirements",,annual,,31,false
-A.5.32,A.5,Intellectual property rights,,annual,,32,false
-A.5.33,A.5,Protection of records,,annual,,33,false
-A.5.34,A.5,Privacy and protection of PII,,annual,,34,false
-A.5.35,A.5,Independent review of information security,,semi,,35,false
-A.5.36,A.5,"Compliance with policies, rules and standards for information security",,annual,,36,false
-A.5.37,A.5,Documented operating procedures,,annual,,37,false
-A.6.1,A.6,Screening,,event,,38,false
-A.6.2,A.6,Terms and conditions of employment,,event,,39,false
-A.6.3,A.6,"Information security awareness, education and training",,event,LMS attendance export or signed attendance sheet,40,false
-A.6.4,A.6,Disciplinary process,,event,,41,false
-A.6.5,A.6,Responsibilities after termination or change of employment,,event,,42,false
-A.6.6,A.6,Confidentiality or non-disclosure agreements,,event,,43,false
-A.6.7,A.6,Remote working,,quarterly,,44,false
-A.6.8,A.6,Information security event reporting,,event,,45,false
-A.7.1,A.7,Physical security perimeters,,annual,,46,false
-A.7.2,A.7,Physical entry,,monthly,,47,false
-A.7.3,A.7,"Securing offices, rooms and facilities",,annual,,48,false
-A.7.4,A.7,Physical security monitoring,,monthly,,49,false
-A.7.5,A.7,Protecting against physical and environmental threats,,annual,,50,false
-A.7.6,A.7,Working in secure areas,,annual,,51,false
-A.7.7,A.7,Clear desk and clear screen,,quarterly,,52,false
-A.7.8,A.7,Equipment siting and protection,,annual,,53,false
-A.7.9,A.7,Security of assets off-premises,,annual,,54,false
-A.7.10,A.7,Storage media,,annual,,55,false
-A.7.11,A.7,Supporting utilities,,annual,,56,false
-A.7.12,A.7,Cabling security,,annual,,57,false
-A.7.13,A.7,Equipment maintenance,,semi,Vendor maintenance report or signed log,58,false
-A.7.14,A.7,Secure disposal or re-use of equipment,,event,,59,false
-A.8.1,A.8,User endpoint devices,,quarterly,,60,false
-A.8.2,A.8,Privileged access rights,,quarterly,,61,false
-A.8.3,A.8,Information access restriction,,quarterly,,62,false
-A.8.4,A.8,Access to source code,,quarterly,,63,false
-A.8.5,A.8,Secure authentication,,quarterly,,64,false
-A.8.6,A.8,Capacity management,,monthly,,65,false
-A.8.7,A.8,Protection against malware,,daily,,66,false
-A.8.8,A.8,Management of technical vulnerabilities,,monthly,Scanner PDF report showing scan date and remediation status,67,false
-A.8.9,A.8,Configuration management,,quarterly,,68,false
-A.8.10,A.8,Information deletion,,event,,69,false
-A.8.11,A.8,Data masking,,quarterly,,70,false
-A.8.12,A.8,Data leakage prevention,,quarterly,,71,false
-A.8.13,A.8,Information backup,,monthly,Backup job log export and restore test sign-off,72,false
-A.8.14,A.8,Redundancy of information processing facilities,,semi,,73,false
-A.8.15,A.8,Logging,,daily,SIEM review record with reviewer and date,74,false
-A.8.16,A.8,Monitoring activities,,daily,,75,false
-A.8.17,A.8,Clock synchronization,,quarterly,,76,false
-A.8.18,A.8,Use of privileged utility programs,,quarterly,,77,false
-A.8.19,A.8,Installation of software on operational systems,,event,,78,false
-A.8.20,A.8,Networks security,,quarterly,,79,false
-A.8.21,A.8,Security of network services,,quarterly,,80,false
-A.8.22,A.8,Segregation of networks,,quarterly,,81,false
-A.8.23,A.8,Web filtering,,quarterly,,82,false
-A.8.24,A.8,Use of cryptography,,quarterly,Key rotation ticket or KMS audit log,83,false
-A.8.25,A.8,Secure development life cycle,,quarterly,,84,false
-A.8.26,A.8,Application security requirements,,quarterly,,85,false
-A.8.27,A.8,Secure system architecture and engineering principles,,quarterly,,86,false
-A.8.28,A.8,Secure coding,,event,,87,false
-A.8.29,A.8,Security testing in development and acceptance,,event,,88,false
-A.8.30,A.8,Outsourced development,,quarterly,,89,false
-A.8.31,A.8,"Separation of development, test and production environments",,quarterly,,90,false
-A.8.32,A.8,Change management,,event,CAB meeting minutes with approvals,91,false
-A.8.33,A.8,Test information,,quarterly,,92,false
-A.8.34,A.8,Protection of information systems during audit testing,,quarterly,,93,false
+A.5.1,A.5,Policies for information security,5.2,annual,Approved topic-specific policies with review dates and acknowledgement records,1,false
+A.5.2,A.5,Information security roles and responsibilities,5.3,annual,Role descriptions or RACI listing information security responsibilities,2,false
+A.5.3,A.5,Segregation of duties,8.3,annual,Segregation of duties matrix with conflicting roles identified,3,false
+A.5.4,A.5,Management responsibilities,5.1,annual,Signed management commitment or briefing record on policy compliance,4,false
+A.5.5,A.5,Contact with authorities,7.4,annual,Contact list of authorities with last review date,5,false
+A.5.6,A.5,Contact with special interest groups,8.3,annual,Membership records or subscriptions to security forums,6,false
+A.5.7,A.5,Threat intelligence,8.3,monthly,Threat intelligence digest with assessed relevance and actions,7,false
+A.5.8,A.5,Information security in project management,8.3,event,Project security checklist or risk review in the project file,8,false
+A.5.9,A.5,Inventory of information and other associated assets,8.3,quarterly,Asset register export with date stamp,9,false
+A.5.10,A.5,Acceptable use of information and other associated assets,8.3,annual,Acceptable use rules with signed acknowledgements,10,false
+A.5.11,A.5,Return of assets,8.3,event,Leaver checklist showing returned equipment and access media,11,false
+A.5.12,A.5,Classification of information,8.3,annual,Classification scheme and a sample of classified information,12,false
+A.5.13,A.5,Labelling of information,8.3,annual,Sample of labelled documents and media,13,false
+A.5.14,A.5,Information transfer,8.3,annual,Information transfer rules and a transfer agreement or log,14,false
+A.5.15,A.5,Access control,8.3,annual,Access control rules approved by the information owners,15,false
+A.5.16,A.5,Identity management,8.3,annual,"User account lifecycle records: joiner, mover and leaver tickets",16,false
+A.5.17,A.5,Authentication information,8.3,annual,Authentication policy settings export,17,false
+A.5.18,A.5,Access rights,8.3,quarterly,Access review spreadsheet signed by the system owner,18,false
+A.5.19,A.5,Information security in supplier relationships,8.3,annual,Completed supplier security questionnaire and review notes,19,false
+A.5.20,A.5,Addressing information security within supplier agreements,8.3,annual,Signed supplier agreement with security clauses,20,false
+A.5.21,A.5,Managing information security in the ICT supply chain,8.3,annual,ICT supplier risk assessment or component inventory with provenance,21,false
+A.5.22,A.5,"Monitoring, review and change management of supplier services",8.3,quarterly,Supplier service review minutes or performance report,22,false
+A.5.23,A.5,Information security for use of cloud services,8.3,annual,Cloud service register with security assessment and exit plan,23,false
+A.5.24,A.5,Information security incident management planning and preparation,8.3,event,Incident management plan with roles and contact list,24,false
+A.5.25,A.5,Assessment and decision on information security events,8.3,event,Event triage log with classification decisions,25,false
+A.5.26,A.5,Response to information security incidents,8.3,event,Incident tickets showing response actions and closure,26,false
+A.5.27,A.5,Learning from information security incidents,8.3,event,Post-incident review report with lessons learned,27,false
+A.5.28,A.5,Collection of evidence,8.3,event,Evidence handling procedure and chain of custody form,28,false
+A.5.29,A.5,Information security during disruption,8.3,annual,"Continuity plan section on keeping security during disruption, with test record",29,false
+A.5.30,A.5,ICT readiness for business continuity,8.3,annual,ICT continuity test report with recovery times achieved,30,false
+A.5.31,A.5,"Legal, statutory, regulatory and contractual requirements",4.2,annual,"Register of legal, regulatory and contractual requirements with review date",31,false
+A.5.32,A.5,Intellectual property rights,8.3,annual,Software licence inventory reconciled with installations,32,false
+A.5.33,A.5,Protection of records,7.5.3,annual,Records retention schedule and storage protection settings,33,false
+A.5.34,A.5,Privacy and protection of PII,8.3,annual,Record of processing activities and privacy impact assessment,34,false
+A.5.35,A.5,Independent review of information security,9.2,semi,Independent review or external assessment report,35,false
+A.5.36,A.5,"Compliance with policies, rules and standards for information security",9.1,annual,Compliance check results with follow-up actions,36,false
+A.5.37,A.5,Documented operating procedures,8.3,annual,Approved operating procedures with version and owner,37,false
+A.6.1,A.6,Screening,8.3,event,Background check confirmations for new hires in scope,38,false
+A.6.2,A.6,Terms and conditions of employment,8.3,event,Signed employment contract with a security responsibilities clause,39,false
+A.6.3,A.6,"Information security awareness, education and training",7.3,event,LMS attendance export or signed attendance sheet,40,false
+A.6.4,A.6,Disciplinary process,8.3,event,"Disciplinary procedure covering security breaches, communicated to staff",41,false
+A.6.5,A.6,Responsibilities after termination or change of employment,8.3,event,Exit records with a reminder of continuing confidentiality duties,42,false
+A.6.6,A.6,Confidentiality or non-disclosure agreements,8.3,event,Signed confidentiality or non-disclosure agreements,43,false
+A.6.7,A.6,Remote working,8.3,quarterly,Remote working rules and acknowledgement or device compliance report,44,false
+A.6.8,A.6,Information security event reporting,8.3,event,Security event reports submitted by staff through the reporting channel,45,false
+A.7.1,A.7,Physical security perimeters,8.3,annual,Site plan showing secure perimeters and their controls,46,false
+A.7.2,A.7,Physical entry,8.3,monthly,Visitor log and badge access report,47,false
+A.7.3,A.7,"Securing offices, rooms and facilities",8.3,annual,Inspection checklist for secured offices and rooms,48,false
+A.7.4,A.7,Physical security monitoring,8.3,monthly,CCTV or alarm monitoring log with review sign-off,49,false
+A.7.5,A.7,Protecting against physical and environmental threats,8.3,annual,"Fire, flood and power protection inspection records",50,false
+A.7.6,A.7,Working in secure areas,8.3,annual,Rules for secure areas and access log of the data centre,51,false
+A.7.7,A.7,Clear desk and clear screen,8.3,quarterly,Clear desk and clear screen spot-check record,52,false
+A.7.8,A.7,Equipment siting and protection,8.3,annual,Equipment rack layout and environmental monitoring readings,53,false
+A.7.9,A.7,Security of assets off-premises,8.3,annual,Register of assets taken off-site with approvals,54,false
+A.7.10,A.7,Storage media,8.3,annual,Media handling log and encryption status of removable media,55,false
+A.7.11,A.7,Supporting utilities,8.3,annual,UPS and generator test records,56,false
+A.7.12,A.7,Cabling security,8.3,annual,Cabling inspection record or network room access log,57,false
+A.7.13,A.7,Equipment maintenance,8.3,semi,Vendor maintenance report or signed log,58,false
+A.7.14,A.7,Secure disposal or re-use of equipment,8.3,event,Certificates of secure disposal or wiping logs,59,false
+A.8.1,A.8,User endpoint devices,8.3,quarterly,Endpoint management report showing encryption and patch status,60,false
+A.8.2,A.8,Privileged access rights,8.3,quarterly,Privileged account list with approvals and review record,61,false
+A.8.3,A.8,Information access restriction,8.3,quarterly,Access rights report for a sampled system with owner approval,62,false
+A.8.4,A.8,Access to source code,8.3,quarterly,Source code repository access list with permissions review,63,false
+A.8.5,A.8,Secure authentication,8.3,quarterly,Multi-factor authentication settings and enrolment report,64,false
+A.8.6,A.8,Capacity management,8.3,monthly,Capacity monitoring report with thresholds and actions,65,false
+A.8.7,A.8,Protection against malware,8.3,daily,Malware protection console report showing coverage and detections,66,false
+A.8.8,A.8,Management of technical vulnerabilities,8.3,monthly,Scanner PDF report showing scan date and remediation status,67,false
+A.8.9,A.8,Configuration management,8.3,quarterly,Configuration baseline and drift report,68,false
+A.8.10,A.8,Information deletion,8.3,event,Deletion request log or data wiping records,69,false
+A.8.11,A.8,Data masking,8.3,quarterly,Masking rules and a sample of masked test data,70,false
+A.8.12,A.8,Data leakage prevention,8.3,quarterly,Data leakage prevention policy settings and incident report,71,false
+A.8.13,A.8,Information backup,8.3,monthly,Backup job log export and restore test sign-off,72,false
+A.8.14,A.8,Redundancy of information processing facilities,8.3,semi,Failover test record for redundant components,73,false
+A.8.15,A.8,Logging,8.3,daily,SIEM review record with reviewer and date,74,false
+A.8.16,A.8,Monitoring activities,8.3,daily,Security monitoring report with alerts reviewed,75,false
+A.8.17,A.8,Clock synchronization,8.3,quarterly,Time synchronisation settings showing the reference time source,76,false
+A.8.18,A.8,Use of privileged utility programs,8.3,quarterly,List of permitted utility programs and usage log,77,false
+A.8.19,A.8,Installation of software on operational systems,8.3,event,Software installation approvals or allow-list settings,78,false
+A.8.20,A.8,Networks security,8.3,quarterly,Network diagram and firewall rule review record,79,false
+A.8.21,A.8,Security of network services,8.3,quarterly,Network service agreement with security requirements and monitoring report,80,false
+A.8.22,A.8,Segregation of networks,8.3,quarterly,Network segmentation diagram and access rules,81,false
+A.8.23,A.8,Web filtering,8.3,quarterly,Web filtering settings and block report,82,false
+A.8.24,A.8,Use of cryptography,8.3,quarterly,Key rotation ticket or KMS audit log,83,false
+A.8.25,A.8,Secure development life cycle,8.3,quarterly,Secure development procedure and a project security gate record,84,false
+A.8.26,A.8,Application security requirements,8.3,quarterly,Security requirements specification for a sampled application,85,false
+A.8.27,A.8,Secure system architecture and engineering principles,8.3,quarterly,Architecture principles and a design review record,86,false
+A.8.28,A.8,Secure coding,8.3,event,Code review or static analysis report,87,false
+A.8.29,A.8,Security testing in development and acceptance,8.3,event,Security test report from the acceptance phase,88,false
+A.8.30,A.8,Outsourced development,8.3,quarterly,Contract with the development supplier and acceptance test results,89,false
+A.8.31,A.8,"Separation of development, test and production environments",8.3,quarterly,"Environment diagram showing separated development, test and production",90,false
+A.8.32,A.8,Change management,8.3,event,CAB meeting minutes with approvals,91,false
+A.8.33,A.8,Test information,8.3,quarterly,Approval to use test data and the protection measures applied,92,false
+A.8.34,A.8,Protection of information systems during audit testing,8.3,quarterly,Approved audit test plan with access restrictions,93,false

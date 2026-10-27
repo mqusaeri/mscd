@@ -178,4 +178,19 @@ export class FilesCommon {
        order by ms.position, ms.slug`.execute(trx);
     return rows.map((r) => r.slug);
   }
+
+  /**
+   * Ids of the systems whose readiness a document feeds (Milestone 2 D.6): its linked systems, or every active system
+   * for an organisation-wide document.
+   */
+  async documentSystemIds(trx: Trx, documentId: string, orgWide: boolean): Promise<string[]> {
+    const { rows } = await sql<{ id: string }>`
+      select ms.id from management_system ms
+       where ms.deleted_at is null
+         and (case when ${orgWide}::boolean then ms.status <> 'archived'
+                   else exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = ${documentId}
+                                  and l.management_system_id = ms.id and l.deleted_at is null) end)
+       order by ms.id`.execute(trx);
+    return rows.map((r) => r.id);
+  }
 }

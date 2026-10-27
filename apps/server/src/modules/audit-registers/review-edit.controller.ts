@@ -1,15 +1,22 @@
-// `PATCH /ms/{ms}/management-reviews/{id}` (Milestone 2 D.1): change a planned or held management review. Stub of
-// M2-02, answering 501 `not-implemented` after the guard; M2-07 replaces it and registers its services in
-// review-edit.module.ts.
+// `PATCH /ms/{ms}/management-reviews/{id}` (Milestone 2 D.1): change the title, planned date, owner and linked
+// systems of a planned or held management review (`management_review.manage`, `If-Match`).
 import { Controller } from '@nestjs/common';
-import { managementReviewsUpdateRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import { managementReviewsUpdateRoute, type CommandResult, type ManagementReviewPatch } from '@mscd/shared';
+import { ApiRoute, CurrentPrincipal, IfMatchHeader, RouteInputParam } from '../../common/api-route';
+import type { Principal } from '../../common/tokens';
+import { ManagementReviewEditService } from './management-reviews.service';
 
 @Controller()
 export class ReviewEditController {
+  constructor(private readonly reviews: ManagementReviewEditService) {}
+
   @ApiRoute(managementReviewsUpdateRoute)
-  update(): never {
-    return routeStub(managementReviewsUpdateRoute);
+  update(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: { ms: string; id: string },
+    @RouteInputParam('body') body: ManagementReviewPatch,
+    @IfMatchHeader() ifMatch: string | undefined,
+  ): Promise<CommandResult> {
+    return this.reviews.update(principal, params.ms, params.id, body, ifMatch);
   }
 }

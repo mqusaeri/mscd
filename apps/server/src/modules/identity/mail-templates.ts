@@ -1,4 +1,5 @@
-// Texts of the `account` and `security` emails (build plan E.6, F.4, F.5, F.8, F.14) in English and Indonesian.
+// Texts of the `account` and `security` emails (build plan E.6, F.4, F.5, F.8, F.14, Milestone 2 D.1 and D.2) in English
+// and Indonesian.
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
 // `http.public_url`. Security messages end with the same advice, so a user who did not act knows what to do.
 
@@ -9,7 +10,11 @@ export type AccountTemplate =
   | { name: 'invitation'; link: string; organisation: string; hours: number }
   | { name: 'mfa_reset'; link: string }
   | { name: 'guest_access_link'; link: string; organisation: string; system: string; expiresOn: string }
-  | { name: 'guest_code'; code: string; minutes: number };
+  | { name: 'guest_code'; code: string; minutes: number }
+  /** An existing active account was invited to another organisation (Milestone 2 D.2): accept or decline after signing in. */
+  | { name: 'membership_invited'; link: string; organisation: string; invitedBy: string | null }
+  /** A new platform operator account: the one-time link to set the password (`admin create-operator`, M2-06). */
+  | { name: 'operator_invitation'; link: string; hours: number };
 
 export type SecurityTemplate =
   | { name: 'mfa_enrolled'; link: string }
@@ -18,7 +23,10 @@ export type SecurityTemplate =
   | { name: 'mfa_locked'; link: string; until: string }
   | { name: 'password_changed'; link: string }
   | { name: 'password_reset_done'; link: string }
-  | { name: 'identity_linked'; link: string; provider: string };
+  | { name: 'identity_linked'; link: string; provider: string }
+  | { name: 'recovery_codes_regenerated'; link: string }
+  /** An existing account was made a platform operator (`admin create-operator`, M2-06). */
+  | { name: 'operator_granted'; link: string };
 
 /** `account` emails are sent to anyone a flow names; `security` emails report a change of the user's own sign-in. */
 export type MailTemplate = AccountTemplate | SecurityTemplate;
@@ -31,6 +39,8 @@ export const SECURITY_TEMPLATES: ReadonlySet<MailTemplate['name']> = new Set([
   'password_changed',
   'password_reset_done',
   'identity_linked',
+  'recovery_codes_regenerated',
+  'operator_granted',
 ]);
 
 export interface RenderedMail {
@@ -122,6 +132,38 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
           ? [`Your one-time code is ${template.code}. It is valid for ${template.minutes} minutes.`, 'If you did not ask for a code, ignore this email.']
           : [`Kode sekali pakai Anda adalah ${template.code}. Kode berlaku ${template.minutes} menit.`, 'Jika Anda tidak meminta kode, abaikan email ini.'],
       };
+    case 'membership_invited': {
+      const by = template.invitedBy;
+      return {
+        title: en ? `You are invited to ${template.organisation} on MSCD` : `Anda diundang ke ${template.organisation} di MSCD`,
+        paragraphs: en
+          ? [
+              by ? `${by} invited you to join ${template.organisation} on MSCD.` : `You have been invited to join ${template.organisation} on MSCD.`,
+              'Sign in with your MSCD account as usual. The invitation waits for you there, and you can accept or decline it.',
+            ]
+          : [
+              by ? `${by} mengundang Anda untuk bergabung dengan ${template.organisation} di MSCD.` : `Anda diundang untuk bergabung dengan ${template.organisation} di MSCD.`,
+              'Masuk dengan akun MSCD Anda seperti biasa. Undangan menunggu Anda di sana, dan Anda dapat menerima atau menolaknya.',
+            ],
+        link: { href: template.link, label: en ? 'Open MSCD' : 'Buka MSCD' },
+      };
+    }
+    case 'operator_invitation':
+      return {
+        title: en ? 'Your MSCD platform operator account' : 'Akun operator platform MSCD Anda',
+        paragraphs: en
+          ? [
+              'An MSCD platform operator account was created for this email address.',
+              `Open the link below within ${template.hours} hours to choose your password. The link works once. At your first sign-in you set up an authenticator app.`,
+              'If you did not expect this email, tell the owner of the MSCD service.',
+            ]
+          : [
+              'Akun operator platform MSCD dibuat untuk alamat email ini.',
+              `Buka tautan di bawah dalam ${template.hours} jam untuk memilih kata sandi Anda. Tautan hanya berlaku sekali. Pada saat masuk pertama Anda mengatur aplikasi autentikator.`,
+              'Jika Anda tidak menunggu email ini, beri tahu pemilik layanan MSCD.',
+            ],
+        link: { href: template.link, label: en ? 'Choose your password' : 'Pilih kata sandi Anda' },
+      };
     case 'mfa_enrolled':
       return security(
         language,
@@ -174,6 +216,28 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
         language,
         en ? 'Your password was reset' : 'Kata sandi Anda diatur ulang',
         [en ? 'The password of your MSCD account was reset and all your sessions were ended.' : 'Kata sandi akun MSCD Anda diatur ulang dan semua sesi Anda diakhiri.'],
+        template.link,
+      );
+    case 'recovery_codes_regenerated':
+      return security(
+        language,
+        en ? 'New recovery codes' : 'Kode pemulihan baru',
+        [
+          en
+            ? 'Ten new recovery codes were created for your MSCD account. The old codes no longer work. Your authenticator app stays as it is.'
+            : 'Sepuluh kode pemulihan baru dibuat untuk akun MSCD Anda. Kode lama tidak berlaku lagi. Aplikasi autentikator Anda tetap seperti sebelumnya.',
+        ],
+        template.link,
+      );
+    case 'operator_granted':
+      return security(
+        language,
+        en ? 'Your account is now a platform operator' : 'Akun Anda sekarang operator platform',
+        [
+          en
+            ? 'Your MSCD account was made a platform operator. Sign in with your password and your authenticator app to use the operator console.'
+            : 'Akun MSCD Anda dijadikan operator platform. Masuk dengan kata sandi dan aplikasi autentikator Anda untuk menggunakan konsol operator.',
+        ],
         template.link,
       );
     case 'identity_linked':

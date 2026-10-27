@@ -1,1 +1,11 @@
 code,title,mandatory,sort_order,review_kind
+MR-01,Status of actions from previous management reviews,true,1,management
+MR-02,Changes in external and internal issues,true,2,management
+MR-03,Changes in needs and expectations of interested parties,true,3,management
+MR-04,Trends in nonconformities and corrective actions,true,4,management
+MR-05,Trends in monitoring and measurement results,true,5,management
+MR-06,Trends in audit results,true,6,management
+MR-07,Fulfilment of information security objectives,true,7,management
+MR-08,Feedback from interested parties,true,8,management
+MR-09,Results of risk assessment and status of the risk treatment plan,true,9,management
+MR-10,Opportunities for continual improvement,true,10,management

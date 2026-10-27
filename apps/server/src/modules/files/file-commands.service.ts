@@ -1,7 +1,9 @@
 // Evidence files and document versions (build plan D.3, A.4 5.7, E.3, BR-23, BR-29, BR-30, BR-36): a linked
 // provider item (gateway `link`, the current version pinned) or a finished upload intent becomes the evidence's file
 // or a new document version in review. The evidence's freshness and integrity are stored in the same transaction
-// and `freshness.recompute` is queued for its target systems.
+// and `freshness.recompute` is queued for its target systems. A new document version keeps the change summary of
+// the request (Milestone 2 D.2); BR-23 also reads mappings that start at a catalogue item (ref 0002). Both commands
+// queue `readiness.recompute` and `cycle.derive` (Milestone 2 D.6) for the systems the record counts in.
 import { Inject, Injectable } from '@nestjs/common';
 import {
   type CommandResult,
@@ -14,7 +16,6 @@ import {
   type ScopeRoot,
   type UploadMode,
 } from '@mscd/shared';
-import { sql } from 'kysely';
 import { addDays, localDate } from '../../common/dates';
 import { etagOf } from '../../common/etag';
 import { ConflictError } from '../../common/problems';
@@ -29,6 +30,8 @@ import {
   type ResolvedRecord,
   type Trx,
 } from '../../common/tokens';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
+import { crossSystemNonReusable } from '../risk-registers/rules';
 import type { RepositoryRow } from '../storage';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { deriveEvidence } from './evidence-state';
@@ -176,7 +179,7 @@ export class FileCommandsService {
       const warnings: Warning[] = [];
       if (source.repository.ownership_type === 'personal') warnings.push(warning('BR-30'));
       if (object.providerCreatedAt && producedAt > addDays(localDate(object.providerCreatedAt, org.timeZone), 1)) warnings.push(warning('BR-36'));
-      if (await this.crossSystemNonReusable(trx, record.id)) warnings.push(warning('BR-23'));
+      if (await crossSystemNonReusable(trx, record.id)) warnings.push(warning('BR-23'));
 
       const systems = await this.common.evidenceSystems(trx, record.id);
       await this.audit.record(trx, {
@@ -204,6 +207,7 @@ export class FileCommandsService {
           { singletonKey: `fr:${org.id}:${msId}`, startAfterSeconds: FRESHNESS_DELAY_SECONDS, retryLimit: 3 },
           trx,
         );
+        await enqueueDerived(this.jobs, trx, org, msId, principal.user.id);
       }
       return {
         ok: true,
@@ -223,23 +227,6 @@ export class FileCommandsService {
     if (object && LINK_OK.has(object.link_status)) {
       throw new ConflictError('The current file is intact; submit a new file instead of relinking', { messageKey: 'files.relink_not_needed' });
     }
-  }
-
-  /** BR-23: the evidence also targets another system through a mapping with `evidence_reusable = false`. */
-  private async crossSystemNonReusable(trx: Trx, evidenceId: string): Promise<boolean> {
-    const { rows } = await sql<{ found: boolean }>`
-      select exists (
-        select 1
-          from evidence_target a
-          join evidence_target b on b.evidence_id = a.evidence_id and b.management_system_id <> a.management_system_id and b.deleted_at is null
-          left join ref.catalogue_item ca on ca.id = a.catalogue_item_id
-          left join ref.catalogue_item cb on cb.id = b.catalogue_item_id
-          join ref.requirement_mapping m
-            on (m.source_requirement_id = coalesce(a.requirement_id, ca.requirement_id) and m.target_requirement_id = coalesce(b.requirement_id, cb.requirement_id))
-            or (m.target_requirement_id = coalesce(a.requirement_id, ca.requirement_id) and m.source_requirement_id = coalesce(b.requirement_id, cb.requirement_id))
-         where a.evidence_id = ${evidenceId} and a.deleted_at is null and m.evidence_reusable = false
-      ) as found`.execute(trx);
-    return rows[0]?.found === true;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -292,6 +279,7 @@ export class FileCommandsService {
           status: 'in_review',
           submitted_by: principal.user.id,
           submitted_at: now,
+          change_summary: body.changeSummary ?? null,
           created_by: principal.user.id,
           updated_by: principal.user.id,
         })
@@ -319,9 +307,13 @@ export class FileCommandsService {
           source: body.source,
           repository: source.repository.slug,
           hashAlgorithm: object.hashAlgorithm,
+          ...(body.changeSummary ? { changeSummary: body.changeSummary } : {}),
         },
       });
       const warnings: Warning[] = source.repository.ownership_type === 'personal' ? [warning('BR-30')] : [];
+      for (const msId of await this.common.documentSystemIds(trx, record.id, row.is_org_wide)) {
+        await enqueueDerived(this.jobs, trx, org, msId, principal.user.id);
+      }
       return {
         ok: true,
         changed: await this.common.documentSystems(trx, record.id, row.is_org_wide),

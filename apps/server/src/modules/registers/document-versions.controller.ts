@@ -1,14 +1,17 @@
-// `GET /ms/{ms}/documents/{id}/versions` (Milestone 2 D.1): the version history of a document. Stub of M2-02, answering
-// 501 `not-implemented` after the guard; M2-07 replaces it and registers its services in holdings.module.ts.
+// `GET /ms/{ms}/documents/{id}/versions` (Milestone 2 D.1): the version history of a document, newest first, with the
+// scope policy of the document.
 import { Controller } from '@nestjs/common';
-import { documentsVersionsListRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import { documentsVersionsListRoute, type DocumentVersionItem } from '@mscd/shared';
+import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import type { Principal } from '../../common/tokens';
+import { DocumentVersionsService } from './documents.service';
 
 @Controller()
 export class DocumentVersionsController {
+  constructor(private readonly versionsService: DocumentVersionsService) {}
+
   @ApiRoute(documentsVersionsListRoute)
-  versions(): never {
-    return routeStub(documentsVersionsListRoute);
+  versions(@CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: { ms: string; id: string }): Promise<DocumentVersionItem[]> {
+    return this.versionsService.list(principal, params.ms, params.id);
   }
 }

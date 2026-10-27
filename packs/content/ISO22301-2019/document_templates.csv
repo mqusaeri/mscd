@@ -1,0 +1,24 @@
+code,title,doc_type,requirement_code
+SCO-B01,Scope of the business continuity management system,policy,4.3.2
+REG-B02,Legal and regulatory requirements register,register,4.2.2
+POL-B01,Business continuity policy,policy,5.2.1
+REG-B03,Business continuity objectives register,register,6.2.1
+REG-B04,Competence and training register,register,7.2
+IMS-01,Document control procedure,procedure,7.5.3
+PRC-B01,Business impact analysis and risk assessment method,procedure,8.2.1
+PLN-B01,Business impact analysis report,plan,8.2.2
+REG-B01,Prioritised activities register,register,8.2.2
+REG-B05,Disruption risk register,register,8.2.3
+PLN-B03,Business continuity strategies and solutions,plan,8.3
+PRC-B02,Warning and communication procedure,procedure,8.4.3
+PLN-B02,Business continuity plan,plan,8.4.4
+PRC-B03,Recovery procedure,procedure,8.4.5
+PLN-B04,Exercise programme,plan,8.5
+REC-B01,Exercise report,record,8.5
+REC-B02,Evaluation of business continuity documentation and capabilities,record,8.6
+REC-B03,Monitoring and measurement report,record,9.1
+IMS-02,Internal audit procedure,procedure,9.2
+REC-B04,Internal audit programme and report,record,9.2.2
+IMS-04,Management review procedure,procedure,9.3
+REC-B05,Management review minutes,record,9.3.3
+IMS-03,Corrective action procedure,procedure,10.1

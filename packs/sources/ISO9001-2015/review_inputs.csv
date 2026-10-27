@@ -1,1 +1,13 @@
 code,title,mandatory,sort_order,review_kind
+MR-01,Status of actions from previous management reviews,true,1,management
+MR-02,Changes in external and internal issues,true,2,management
+MR-03,Customer satisfaction and feedback from interested parties,true,3,management
+MR-04,Extent to which quality objectives have been met,true,4,management
+MR-05,Process performance and conformity of products and services,true,5,management
+MR-06,Nonconformities and corrective actions,true,6,management
+MR-07,Monitoring and measurement results,true,7,management
+MR-08,Audit results,true,8,management
+MR-09,Performance of external providers,true,9,management
+MR-10,Adequacy of resources,true,10,management
+MR-11,Effectiveness of actions taken on risks and opportunities,true,11,management
+MR-12,Opportunities for improvement,true,12,management

@@ -3,7 +3,8 @@
 // - global account fields (display name, job title, account status) and the MFA reset change only by the user, by
 //   the platform operator, or by a Tenant Admin when the user has no other active membership;
 // - `POST /admin/users` answers the same 202 for a new and an existing email, so other tenants' accounts are never
-//   revealed; an existing account gets an `invited` membership that its owner accepts after signing in;
+//   revealed; an existing account gets an `invited` membership that its owner accepts after signing in, and an
+//   existing active account is told by email and by a `membership_invited` notification (Milestone 2 D.2);
 // - every path that enables a non-guest member checks the licence user limit (`LIC-USERS`, D-15).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OrgRole, Page, UserCreate, UserIdentityRegistration, UserListQuery, UserPatch, UserView } from '@mscd/shared';
@@ -71,11 +72,21 @@ export class UsersService {
     const org = orgOf(principal);
     const adminRoles = [...new Set(body.adminRoles)] as OrgRole[];
     await this.scope.withTenant(tenantContextOf(principal), async (trx) => {
-      const sent = await this.invite(trx, org.id, body, adminRoles, principal.user.id);
-      if (sent) {
+      const outcome = await this.invite(trx, org.id, body, adminRoles, principal.user.id);
+      if (outcome?.kind === 'link') {
         this.mailer.sendAfterCommit(trx, {
-          to: { email: sent.email, userId: sent.userId },
-          template: { name: 'invitation', link: sent.invitation.link, organisation: org.name, hours: INVITATION_TTL_MS / 3_600_000 },
+          to: { email: outcome.email, userId: outcome.userId },
+          template: { name: 'invitation', link: outcome.invitation.link, organisation: org.name, hours: INVITATION_TTL_MS / 3_600_000 },
+        });
+      } else if (outcome?.kind === 'existing') {
+        // Milestone 2 D.2: an existing active account learns of the invitation by email and in-app notification.
+        this.invitations.notifyInvitedAccount(trx, {
+          userId: outcome.userId,
+          email: outcome.email,
+          orgId: org.id,
+          orgName: org.name,
+          invitedBy: principal.user.displayName,
+          actorUserId: principal.user.id,
         });
       }
     });
@@ -94,7 +105,8 @@ export class UsersService {
    *   listed in the organisation's view; the inviting organisation is in its `after` data for the operator;
    * - an invitation link is issued only for an account that was never activated (new, or invited and not accepted);
    *   an active account accepts after signing in, a disabled one once it is enabled again.
-   * Returns the link to mail, or null.
+   * Returns the link to mail, the existing active account to tell (Milestone 2 D.2), or null (nothing to send: an
+   * active member, or a disabled account).
    */
   private async invite(
     trx: Trx,
@@ -102,7 +114,11 @@ export class UsersService {
     body: UserCreate,
     adminRoles: OrgRole[],
     actorUserId: string,
-  ): Promise<{ userId: string; email: string; invitation: CreatedInvitation } | null> {
+  ): Promise<
+    | { kind: 'link'; userId: string; email: string; invitation: CreatedInvitation }
+    | { kind: 'existing'; userId: string; email: string }
+    | null
+  > {
     const actor = { userId: actorUserId, kind: 'user' as const };
     const email = body.email.trim();
     await this.licence.assertCanAddUser(trx, orgId);
@@ -197,7 +213,8 @@ export class UsersService {
         at: this.clock.now().toISOString(),
       },
     });
-    return invitation ? { userId: user.id, email: user.email, invitation } : null;
+    if (invitation) return { kind: 'link', userId: user.id, email: user.email, invitation };
+    return user.status === 'active' ? { kind: 'existing', userId: user.id, email: user.email } : null;
   }
 
   /** A free handle from the email's local part (`rina.kusuma`, then `rina.kusuma-2`, ...), as `InvitationService` does. */

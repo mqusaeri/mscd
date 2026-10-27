@@ -13,9 +13,9 @@ import { deriveManagementSystem, themeLabels } from '../derive/ms-fields';
 import { stageEntry } from '../derive/org-formats';
 import { derivePhases } from '../derive/phases';
 import { RefCollector, recordRef } from '../derive/refs';
-import { deriveRequirement, requirementId, requirementKey } from '../derive/requirements';
+import { deriveRequirement, entryKey, requirementId } from '../derive/requirements';
 import { NONE, type PeopleNames } from '../derive/text';
-import type { LoadedChainRecord, SystemCore, SystemData } from '../load/loader';
+import { documentOriginFields, type LoadedChainRecord, type SystemCore, type SystemData } from '../load/loader';
 
 export interface BuildContext {
   today: string;
@@ -129,13 +129,14 @@ export function buildSystemSnapshot(system: SystemData, ctx: BuildContext): UiMs
       gateReason: entry.gateReason,
     };
   });
-  const entryIds = new Map(rows.entries.map((e) => [e.id, { id: requirementId(e.targetType, e.code), key: requirementKey(e.code) }]));
+  const entryIds = new Map(rows.entries.map((e) => [e.id, { id: requirementId(e.targetType, e.code), key: entryKey(e) }]));
 
   // Documents (G.5 bundle.docs).
   const docs: ChainDocument[] = sortDocuments(rows.documents).map((d) => {
     refs.add(ms, 'doc', d.code, recordRef('doc', 'document', d.id, d.code, d.updatedAt));
     return {
       ...deriveDocument(d, { ms, msId: system.id, today: ctx.today, docTypeLabels: system.docTypes, systemCodes: ctx.systemCodes }),
+      ...documentOriginFields(d),
       pendingHolder: d.pendingHolder,
       pendingDueAt: d.pendingDueAt,
     };

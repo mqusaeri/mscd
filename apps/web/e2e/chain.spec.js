@@ -266,7 +266,8 @@ test.describe('Chain stages', () => {
     await expect(tabs(page)).toHaveCount(6);
     await expect(activeTab(page).locator('div').nth(1)).toHaveText('Control / requirement');
     await expect(listRows(page)).toHaveCount(30);
-    await expect(moreButton(page)).toHaveText('+ 2');
+    // 31 requirements since Milestone 2 E.2 (M2-04): clause 10.3 left ISO 37001:2025, so one row waits behind "+ 1".
+    await expect(moreButton(page)).toHaveText('+ 1');
     await expect(people(page)).toHaveCount(2);
   });
 });

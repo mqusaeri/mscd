@@ -1,7 +1,8 @@
 // Management system administration (TS 6.2, C.13 `management_system.status`, D-30, D-15): the list, creation on an
-// installed edition (BR-21, LIC-MS) with the activity templates copied into `implementation_activity_progress`, the
-// changes of scope, certification body, colour and default repository, the `ms.admin` status moves (setup to
-// implementing, archive), and the edition transitions of `POST /ms/{ms}/transitions` (feature `edition_transition`).
+// installed edition (BR-21, LIC-MS) with the activity templates copied into `implementation_activity_progress` and the
+// applicability entries of D2-09 (Milestone 2, M2-06), the changes of scope, certification body, colour and default
+// repository, the `ms.admin` status moves (setup to implementing, archive), and the edition transitions of
+// `POST /ms/{ms}/transitions` (feature `edition_transition`).
 import { Inject, Injectable } from '@nestjs/common';
 import {
   transitionsVia,
@@ -13,8 +14,13 @@ import {
   type MsTransitionRequest,
 } from '@mscd/shared';
 import { fmtDay } from '../../common/dates';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
 import { ConflictError, NotFoundError, TransitionNotAllowedError, ValidationError } from '../../common/problems';
+import { currentRequestId } from '../../common/request-context';
 import { AUDIT_WRITER, LICENCE_GATE, type AuditWriter, type LicenceGate, type Principal, type Trx } from '../../common/tokens';
+import { freshnessRecomputeKey } from '../freshness/freshness.jobs';
+import { seedApplicability } from '../implementation/applicability-seed';
+import { enqueueReadiness } from '../implementation/readiness/readiness-queue';
 import { LicenceService } from '../license/licence.service';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 
@@ -46,6 +52,7 @@ export class ManagementSystemsService {
     private readonly licences: LicenceService,
     @Inject(LICENCE_GATE) private readonly gate: LicenceGate,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
+    @Inject(JOB_QUEUE) private readonly jobs: JobQueue,
   ) {}
 
   private inOrg<T>(principal: Principal, fn: (trx: Trx, orgId: string) => Promise<T>): Promise<T> {
@@ -112,6 +119,10 @@ export class ManagementSystemsService {
    * `POST /admin/management-systems` (TS 6.2 creation, D-30): the edition must be installed and not withdrawn, the
    * framework licensed (BR-21) and the system count within `max_management_systems` (LIC-MS). The activity templates
    * of the edition are copied into `implementation_activity_progress`, so later minor pack updates never rewrite them.
+   * Milestone 2 D2-09: the applicability entries are created in the same transaction by the seeder of M2-03 (one per
+   * catalogue item and one per leaf requirement row that is still in the standard; applicable, `not_started`, no
+   * owner; H.8 default), audited `applicability.seeded` with the count, and the freshness and readiness
+   * recomputations are queued after the commit.
    */
   create(principal: Principal, body: ManagementSystemCreate): Promise<ManagementSystemView> {
     return this.inOrg(principal, async (trx, orgId) => {
@@ -210,9 +221,11 @@ export class ManagementSystemsService {
           )
           .execute();
       }
+      // Milestone 2 D.6: null until `readiness.recompute` (queued below) computes the groups, so a new system shows "Not
+      // computed yet" for that minute and never 0.
       await trx
         .insertInto('clause_readiness')
-        .values(CLAUSE_GROUPS.map((group) => ({ management_system_id: ms.id, clause_group: group, readiness_pct: 0, source: 'computed' as const, created_by: userId, updated_by: userId })))
+        .values(CLAUSE_GROUPS.map((group) => ({ management_system_id: ms.id, clause_group: group, readiness_pct: null, source: 'computed' as const, created_by: userId, updated_by: userId })))
         .execute();
       if (version.pre_release) {
         await trx
@@ -247,6 +260,34 @@ export class ManagementSystemsService {
           activities_copied: templates.length,
         },
       });
+
+      // D2-09: the entries the system starts with (seeder of M2-03, every target).
+      const seeded = await seedApplicability(trx, ms.id, { actorUserId: userId });
+      const catalogueItems = seeded.added.filter((e) => e.targetType === 'catalogue_item').length;
+      await this.audit.record(trx, {
+        action: 'applicability.seeded',
+        msId: ms.id,
+        entityType: 'management_system',
+        entityId: ms.id,
+        entityCode: body.code,
+        after: {
+          count: seeded.added.length,
+          catalogueItems,
+          requirements: seeded.added.length - catalogueItems,
+          pack_id: version.pack_id,
+          pack_version: version.pack_version,
+        },
+      });
+      if (seeded.added.length > 0) {
+        await this.jobs.send(
+          'freshness.recompute',
+          { orgId, requestId: currentRequestId(), requestedBy: userId, payload: { msId: ms.id, entryIds: seeded.added.map((e) => e.id) } },
+          { singletonKey: freshnessRecomputeKey(orgId, ms.id), startAfterSeconds: 5 },
+          trx,
+        );
+      }
+      // The readiness rows above stay null until this run computes them (D.6), also for a system without entries.
+      await enqueueReadiness(this.jobs, trx, { id: orgId }, ms.id, userId);
       return this.view(trx, ms.id);
     });
   }

@@ -1,1 +1,26 @@
 code,title,doc_type,requirement_code
+SCO-01,Scope statement,policy,4.3
+POL-01,Information security policy,policy,5.2
+PRC-04,Information security risk assessment and treatment method,procedure,6.1.2
+SOA-01,Statement of Applicability,register,6.1.3
+PLN-01,Information security risk treatment plan,plan,6.1.3
+REG-01,Information security objectives register,register,6.2
+REG-04,Competence and training register,register,7.2
+IMS-01,Document control procedure,procedure,7.5.3
+REG-02,Information security risk register,register,8.2
+REC-01,Monitoring and measurement report,record,9.1
+IMS-02,Internal audit procedure,procedure,9.2
+REC-02,Internal audit programme and report,record,9.2.2
+IMS-04,Management review procedure,procedure,9.3
+REC-03,Management review minutes,record,9.3.3
+IMS-03,Corrective action procedure,procedure,10.2
+REC-04,Nonconformity and corrective action record,record,10.2
+REG-03,Information asset register,register,8.3
+PRC-05,Asset and information handling procedure,procedure,8.3
+PRC-07,Access control procedure,procedure,8.3
+PRC-08,Supplier security procedure,procedure,8.3
+PRC-09,Change management procedure,procedure,8.3
+PRC-11,Backup and restore procedure,procedure,8.3
+PRC-13,Incident management procedure,procedure,8.3
+PLN-02,ICT continuity plan,plan,8.3
+STD-06,Cryptography and data protection standard,standard,8.3

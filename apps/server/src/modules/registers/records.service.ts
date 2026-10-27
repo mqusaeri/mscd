@@ -4,6 +4,10 @@
 // (D-29). Every command resolves its record through `RecordResolver` (F.7) inside the tenant transaction, checks
 // people through `MembershipService`, honours `If-Match` where the route accepts it, and writes its audit entry in
 // the same transaction.
+//
+// Milestone 2 (M2-07): a competence record (code derived from its id) carries the renewal action that the daily
+// `tasks.overdue` job sets before it lapses; the action is completed like any pending action, and from the owner's
+// task list (its task id is the record's id, D-29).
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ASSIGNMENT_KIND_ENTITY_TYPES,
@@ -25,6 +29,7 @@ import {
   type NotificationWriter, type Principal, type RecordResolver, type ResolvedRecord, type Trx,
 } from '../../common/tokens';
 import { entryBusinessId } from '../implementation';
+import { competenceCode } from '../risk-registers/competence';
 import { mergeWarnings, RuleEngine, ruleMessages } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import {
@@ -47,8 +52,8 @@ const ASSIGNMENT_COLUMNS: Readonly<Record<AssignmentRequest['kind'], { holder: s
   drift: { holder: 'holder_user_id', due: 'due_at' },
 };
 
-/** Tables whose open action is `pending_action` (C.10 chain records). */
-const PENDING_ACTION_TABLES: ReadonlySet<string> = new Set(STAGE_RECORD_ENTITY_TYPES);
+/** Tables whose open action is `pending_action` (C.10 chain records, and competence records since Milestone 2). */
+const PENDING_ACTION_TABLES: ReadonlySet<string> = new Set([...STAGE_RECORD_ENTITY_TYPES, 'competence_record']);
 
 /** The holder column of a record for own-scope checks. */
 function holdersOf(entityType: string, row: Record<string, unknown>): (string | null)[] {
@@ -195,7 +200,10 @@ export class RecordCommandsService {
         if (row.pending_action === null || row.pending_action === undefined) throw new ConflictError('This record has no open action', { messageKey: 'records.no_open_action' });
         before = { pending_action: row.pending_action };
         after = { pending_action: null, action_completed_at: now.toISOString() };
-        set = { pending_action: null, action_completed_at: now, action_completed_by: actor };
+        // competence_record (Milestone 2) has no completion columns; the audit entry keeps when and who.
+        set = entityType === 'competence_record'
+          ? { pending_action: null }
+          : { pending_action: null, action_completed_at: now, action_completed_by: actor };
       } else if (entityType === 'drift_result') {
         if (row.resolved_at) throw new ConflictError('This drift item is already resolved', { messageKey: 'records.no_open_action' });
         before = { resolved_at: null };
@@ -281,8 +289,10 @@ export class RecordCommandsService {
           from task t left join management_system m on m.id = t.management_system_id
          where t.id = ${id} and t.deleted_at is null for update of t`.execute(trx);
       const task = rows[0];
+      // The renewal action of a competence record is listed as a task of its owner under the record's id.
+      if (!task) return this.completeCompetenceAction(trx, actor, id, body);
       // Another person's task is not visible to the caller (D-29: tasks are listed for their owner only).
-      if (!task || task.owner_user_id !== actor) throw new NotFoundError();
+      if (task.owner_user_id !== actor) throw new NotFoundError();
       if (task.status !== 'open') throw new ConflictError('This task is not open', { messageKey: 'tasks.not_open' });
       const updatedAt = await writeRow(trx, 'task', id, { status: 'done', closed_by: actor, closed_at: new Date() }, actor);
       const code = task.entity_code ?? task.id;
@@ -298,6 +308,37 @@ export class RecordCommandsService {
       const ref: RecordRef = { module: 'audit', entityType: 'task', id, code, etag: refOf('task', id, code, updatedAt).etag };
       return commandResult(task.ms_slug ? [task.ms_slug] : [], { ref });
     });
+  }
+
+  /**
+   * Completes the renewal action of a competence record the caller owns (D-29 task list, Milestone 2 M2-07); 404 for
+   * anything else, as for a task of another person.
+   */
+  private async completeCompetenceAction(trx: Trx, actor: string, id: string, body: CompleteActionRequest): Promise<CommandResult> {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundError();
+    const { rows } = await sql<{ id: string; owner_user_id: string | null; pending_action: string | null; ms_id: string | null; ms_slug: string | null }>`
+      select c.id, c.owner_user_id, c.pending_action,
+             (select l.management_system_id from entity_ms_link l where l.entity_type = 'competence_record' and l.entity_id = c.id
+               and l.deleted_at is null order by l.is_primary desc limit 1) as ms_id,
+             (select m.slug from entity_ms_link l join management_system m on m.id = l.management_system_id
+               where l.entity_type = 'competence_record' and l.entity_id = c.id and l.deleted_at is null order by l.is_primary desc, m.slug limit 1) as ms_slug
+        from competence_record c where c.id = ${id} and c.deleted_at is null for update of c`.execute(trx);
+    const record = rows[0];
+    if (!record || record.owner_user_id !== actor || !record.pending_action) throw new NotFoundError();
+    // competence_record has no completion columns (tenant 0008): clearing the action is the completion, audited below;
+    // `action_due_at` keeps the date the action was set for, so the daily job does not set it again (tasks.overdue).
+    const updatedAt = await writeRow(trx, 'competence_record', id, { pending_action: null }, actor);
+    const code = competenceCode(id);
+    await this.audit.record(trx, {
+      action: 'record.action_completed',
+      msId: record.ms_id,
+      entityType: 'competence_record',
+      entityId: id,
+      entityCode: code,
+      before: { pending_action: record.pending_action },
+      after: { pending_action: null, ...(body.note ? { note: body.note } : {}) },
+    });
+    return commandResult(record.ms_slug ? [record.ms_slug] : [], { ref: refOf('competence_record', id, code, updatedAt) });
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -342,6 +383,8 @@ export async function businessCodeOf(trx: Trx, record: Pick<ResolvedRecord, 'ent
       return row.requirement_code as string;
     case 'drift_result':
       return row.entity_code as string;
+    case 'competence_record':
+      return competenceCode(record.id);
     default:
       return typeof row.code === 'string' ? row.code : record.id;
   }

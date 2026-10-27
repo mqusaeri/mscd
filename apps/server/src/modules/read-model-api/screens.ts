@@ -190,7 +190,8 @@ export function implementationSummary(d: ScreenData): ImplementationSummary {
   const openFindings = d.system.findings.filter((f) => f.status !== 'closed' && ['major', 'minor', 'ofi'].includes(f.classification)).length;
   const open = openPerClause(chain.items, (stage) => overviewClause.get(stage) ?? 8, openFindings);
   const maturity: ClauseMaturity[] = OVERVIEW_CLAUSES.map((clause) => {
-    const readiness = Math.max(0, Math.min(100, Math.round(d.system.readiness.get(clause) ?? 0)));
+    // The loader passes the stored row (Milestone 2 D.6, M2-07); the Milestone 1 view of the overview reads its readiness.
+    const readiness = Math.max(0, Math.min(100, Math.round(d.system.readiness.get(clause)?.readiness ?? 0)));
     return { clause, readiness, dimensions: maturityValues(readiness, open[clause] ?? 0).map(maturityLevel) };
   });
   return {

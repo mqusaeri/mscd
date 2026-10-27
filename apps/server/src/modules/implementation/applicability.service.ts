@@ -2,14 +2,20 @@
 // justifications, gate flag, note, frequency, owner, risks and documents, and new entries for a catalogue item or
 // requirement of the active edition. Every command resolves the record through `RecordResolver` inside the tenant
 // transaction, checks people through `MembershipService`, honours `If-Match`, runs the active rules (BR-01, BR-02,
-// BR-03, VERIFY-SELF), writes its audit entry and, where freshness reads the changed state, queues
-// `freshness.recompute` in the same transaction.
+// BR-03, VERIFY-SELF, and APPL-ASSESS of Milestone 2 D.2), writes its audit entry and, where freshness reads the
+// changed state, queues `freshness.recompute` in the same transaction.
+//
+// Milestone 2 (M2-07): a row of the edition that is no longer in the standard (`retired`, E.1) gets no new entry,
+// and `ApplicabilityTargetsService` lists the targets of the active edition (`applicability.targets`) for the Add
+// control form and the import resolver.
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   transitionsVia,
   type ApplicabilityCreateRequest,
   type ApplicabilityPatch,
+  type ApplicabilityTargetItem,
+  type ApplicabilityTargetsQuery,
   type ApplicabilityTransitionRequest,
   type CommandResult,
   type ImplementationStatus,
@@ -30,7 +36,7 @@ import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import {
   assertRequires, commandResult, enqueueFreshness, orgOf, pickTransition, refOf, todayOf, windowNowOf,
 } from './command-support';
-import type { Br01Input, Br02Input, Br03Input, VerifySelfInput } from './rules';
+import type { ApplAssessInput, Br01Input, Br02Input, Br03Input, VerifySelfInput } from './rules';
 
 const ENTITY = 'applicability_entry';
 const MACHINE = 'applicability_entry.implementation_status' as const;
@@ -122,6 +128,10 @@ export class ApplicabilityService {
       }
       if (transition.rules.includes('BR-01')) {
         await this.rules.enforce<Br01Input>(trx, 'BR-01', { entryId: row.id, today, now: windowNowOf(this.clock, org) }, scope);
+      }
+      if (to === 'not_applicable') {
+        // APPL-ASSESS (Milestone 2 D.2): a clause row that always applies is never marked not applicable.
+        await this.rules.enforce<ApplAssessInput>(trx, 'APPL-ASSESS', { assessable: await this.assessable(trx, row), code }, scope);
       }
       if (to === 'not_applicable' && body.exclusionJustification) {
         warnings = mergeWarnings(warnings, await this.rules.enforce<Br03Input>(trx, 'BR-03', { justification: body.exclusionJustification }, scope));
@@ -216,6 +226,9 @@ export class ApplicabilityService {
         // applicable, a new assessment to not started).
         const from = row.implementation_status === 'not_applicable' && status === 'not_started' ? null : row.implementation_status;
         if (transitionsVia(MACHINE, from, status!, null).length === 0) throw new TransitionNotAllowedError(from, status!);
+        if (status === 'not_applicable') {
+          await this.rules.enforce<ApplAssessInput>(trx, 'APPL-ASSESS', { assessable: await this.assessable(trx, row), code }, scope);
+        }
         change('implementation_status', status);
         if (status === 'not_applicable') {
           change('verified_by_user_id', null);
@@ -314,6 +327,11 @@ export class ApplicabilityService {
       const ref = refOf(ENTITY, id, code, new Date());
       const scope = { msIds: [system.id], ref };
 
+      if (!body.isApplicable) {
+        // APPL-ASSESS (Milestone 2 D.2, D2-09): a clause row that always applies is never created as not applicable.
+        const assessable = await this.assessable(trx, { target_type: body.targetType, requirement_id: body.targetType === 'requirement' ? target : null });
+        await this.rules.enforce<ApplAssessInput>(trx, 'APPL-ASSESS', { assessable, code }, scope);
+      }
       // BR-02 (A.4 5.2): a new applicable entry has no risk yet, so the engine holds its gate until one is linked.
       const br02 = body.isApplicable ? await this.rules.evaluate<Br02Input>(trx, 'BR-02', { applicable: true, riskCount: 0 }, scope) : [];
       const holdsGate = br02.length > 0;
@@ -393,6 +411,14 @@ export class ApplicabilityService {
     return entryBusinessId(row.target_type, rows[0]?.code ?? '');
   }
 
+  /** `applicability_assessable` of the entry's pack row (Milestone 2 D2-09); catalogue items are always assessable. */
+  private async assessable(trx: Trx, row: Pick<EntryRow, 'target_type' | 'requirement_id'>): Promise<boolean> {
+    if (row.target_type !== 'requirement' || !row.requirement_id) return true;
+    const { rows } = await sql<{ assessable: boolean }>`
+      select applicability_assessable as assessable from ref.requirement where id = ${row.requirement_id}`.execute(trx);
+    return rows[0]?.assessable ?? true;
+  }
+
   private async riskCount(trx: Trx, entryId: string): Promise<number> {
     const { rows } = await sql<{ n: number }>`
       select count(*)::int as n from applicability_entry_risk er
@@ -409,8 +435,8 @@ export class ApplicabilityService {
   /** The catalogue item or requirement of the active edition with this code; 422 when the edition has none. */
   private async targetOf(trx: Trx, versionId: string, targetType: ApplicabilityCreateRequest['targetType'], code: string): Promise<string> {
     const { rows } = targetType === 'catalogue_item'
-      ? await sql<{ id: string }>`select id from ref.catalogue_item where framework_version_id = ${versionId} and item_code = ${code}`.execute(trx)
-      : await sql<{ id: string }>`select id from ref.requirement where framework_version_id = ${versionId} and requirement_code = ${code}`.execute(trx);
+      ? await sql<{ id: string; retired: boolean }>`select id, retired from ref.catalogue_item where framework_version_id = ${versionId} and item_code = ${code}`.execute(trx)
+      : await sql<{ id: string; retired: boolean }>`select id, retired from ref.requirement where framework_version_id = ${versionId} and requirement_code = ${code}`.execute(trx);
     const id = rows[0]?.id;
     if (!id) {
       throw unprocessable(
@@ -418,6 +444,10 @@ export class ApplicabilityService {
         `${code} is not a ${targetType === 'catalogue_item' ? 'catalogue item' : 'requirement'} of the edition in use`,
         `${code} bukan ${targetType === 'catalogue_item' ? 'butir katalog' : 'persyaratan'} dari edisi yang digunakan`,
       );
+    }
+    // Milestone 2 E.1: a row that is no longer in the standard stays for the entries that point to it; it gets no new one.
+    if (rows[0]!.retired) {
+      throw unprocessable('applicability.retired_target', `${code} is no longer in the standard`, `${code} tidak lagi ada dalam standar`);
     }
     return id;
   }
@@ -542,3 +572,75 @@ export class ApplicabilityService {
   }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// GET /ms/{ms}/applicability/targets (Milestone 2 D.1, M2-07)
+// ---------------------------------------------------------------------------------------------------------------
+
+interface TargetRow {
+  kind: 'catalogue_item' | 'requirement';
+  code: string;
+  title: string;
+  clause_group: ApplicabilityTargetItem['clauseGroup'];
+  retired: boolean;
+  assessable: boolean;
+  documented_info: boolean;
+  has_entry: boolean;
+  leaf: boolean;
+}
+
+/**
+ * The targets of the system's active edition for the Add control form and the import resolver: every catalogue item
+ * (always assessable, its clause group from the requirement it belongs to) and the leaf requirement rows (D2-09),
+ * plus any requirement row the system already has an entry for, each with whether the system has a live entry,
+ * whether the row is retired, assessable (clause rows are not, D2-09) and asks for documented information. Retired
+ * rows are left out unless `retired=true` (Milestone 2 E.1: pickers leave them out).
+ */
+@Injectable()
+export class ApplicabilityTargetsService {
+  constructor(
+    private readonly tenancy: TenantScope,
+    @Inject(RECORD_RESOLVER) private readonly records: RecordResolver,
+  ) {}
+
+  async list(principal: Principal, ms: string, query: ApplicabilityTargetsQuery): Promise<ApplicabilityTargetItem[]> {
+    return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
+      const system = await this.records.resolveMs(trx, ms);
+      const { rows } = await sql<TargetRow>`
+        with v as (select framework_version_id as id from management_system where id = ${system.id}),
+        live as (select catalogue_item_id, requirement_id from applicability_entry where management_system_id = ${system.id} and deleted_at is null)
+        select * from (
+          select 'catalogue_item' as kind, c.item_code as code, c.title_short as title, rq.clause_group, c.retired, true as assessable,
+                 false as documented_info, exists (select 1 from live where live.catalogue_item_id = c.id) as has_entry, true as leaf,
+                 0 as part, c.sort_order
+            from ref.catalogue_item c join v on v.id = c.framework_version_id
+            left join ref.requirement rq on rq.id = c.requirement_id
+          union all
+          select 'requirement' as kind, r.requirement_code as code, r.title_short as title, r.clause_group, r.retired, r.applicability_assessable as assessable,
+                 (r.documented_info_mandatory or exists (select 1 from ref.documented_info i
+                   where i.framework_version_id = r.framework_version_id and i.requirement_code = r.requirement_code)) as documented_info,
+                 exists (select 1 from live where live.requirement_id = r.id) as has_entry,
+                 not exists (select 1 from ref.requirement child where child.parent_id = r.id and not child.retired) as leaf,
+                 1 as part, r.sort_order
+            from ref.requirement r join v on v.id = r.framework_version_id
+        ) t
+        order by part, sort_order, code`.execute(trx);
+      const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      return rows
+        .filter((r) => r.leaf || r.has_entry)
+        .filter((r) => query.retired === true || !r.retired)
+        .filter((r) => !query.kind || r.kind === query.kind)
+        .filter((r) => words.every((w) => `${r.code} ${r.title}`.toLowerCase().includes(w)))
+        .map((r) => ({
+          kind: r.kind,
+          code: r.code,
+          title: r.title,
+          clauseGroup: r.clause_group ?? null,
+          hasEntry: r.has_entry,
+          retired: r.retired,
+          assessable: r.assessable,
+          documentedInfo: r.documented_info,
+        }));
+    });
+  }
+}

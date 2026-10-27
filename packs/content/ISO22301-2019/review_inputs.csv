@@ -1,0 +1,14 @@
+code,title,mandatory,sort_order,review_kind
+MR-01,Status of actions from previous management reviews,true,1,management
+MR-02,Changes in external and internal issues,true,2,management
+MR-03,Trends in nonconformities and corrective actions,true,3,management
+MR-04,Trends in monitoring and measurement evaluation results,true,4,management
+MR-05,Trends in audit results,true,5,management
+MR-06,Feedback from interested parties,true,6,management
+MR-07,"Need for changes to the BCMS, including the policy and objectives",true,7,management
+MR-08,Procedures and resources that could improve BCMS performance,true,8,management
+MR-09,Information from the business impact analysis and risk assessment,true,9,management
+MR-10,Output from the evaluation of business continuity documentation and capabilities,true,10,management
+MR-11,Risks or issues not adequately addressed in a previous risk assessment,true,11,management
+MR-12,Lessons learned and actions from near-misses and disruptions,true,12,management
+MR-13,Opportunities for continual improvement,true,13,management

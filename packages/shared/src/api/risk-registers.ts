@@ -1,11 +1,13 @@
 // Area `risk-registers` (owner from wave 9: WP-36): context issues, interested parties, assets, risks and metrics,
 // metric values, risk treatments (C.13), residual acceptance (BR-04), evidence records and targets (BR-23), entity
 // links (A-29) (D.2, D.3 "Registers and workflows: risk side"). Milestone 2 (D.2, D.3) adds the register kinds
-// `objectives` (quality_objective) and `competence` (competence_record), built by M2-07.
+// `objectives` (quality_objective, ISO 9001 6.2) and `competence` (competence_record, clause 7.2), built by M2-07.
 import { z } from 'zod';
-import { ApplicabilityTarget, Classification, IssueType, ShareableEntityType, TreatmentStatus } from '../enums.js';
 import {
-  Code, CommandResult, FreqId, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, ReasonBody, RecordRef, Uuid,
+  ApplicabilityTarget, Classification, CompetenceProofType, IssueType, QualityObjectiveStatus, ShareableEntityType, TreatmentStatus,
+} from '../enums.js';
+import {
+  Code, CommandResult, FreqId, Handle, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, ReasonBody, RecordRef, Uuid,
   defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { PermissionByMember, RouteDef } from './common.js';
@@ -71,7 +73,40 @@ const kindFields = {
   targetValue: z.number().nullable().optional(),
   frequencyCode: FreqId.nullable().optional(),
   lastMeasuredAt: IsoDate.nullable().optional(),
+  // Objectives (quality_objective, Milestone 2 D.2): the objective, its target and metric, the due date, the
+  // resources, how results are evaluated, the status, the result and the date it was achieved.
+  statement: Text4000.nullable().optional(),
+  targetText: z.string().trim().max(150).nullable().optional(),
+  metricCode: Code.nullable().optional(),
+  dueAt: IsoDate.nullable().optional(),
+  resources: Text4000.nullable().optional(),
+  evaluationMethod: Text4000.nullable().optional(),
+  objectiveStatus: QualityObjectiveStatus.nullable().optional(),
+  result: Text4000.nullable().optional(),
+  achievedAt: IsoDate.nullable().optional(),
+  // Competence (competence_record, Milestone 2 D.2): the person, the competence the role needs, the proof (type and
+  // stored file), when it was achieved, until when it is valid and who verified it. The role is the row's title.
+  personHandle: Handle.optional(),
+  competenceRequired: z.string().trim().min(1).max(4000).optional(),
+  proofType: CompetenceProofType.optional(),
+  proofObjectId: Uuid.nullable().optional(),
+  validUntil: IsoDate.nullable().optional(),
+  verifiedByHandle: Handle.nullable().optional(),
 };
+
+const EXAMPLE_OBJECTIVE_ITEM = {
+  ref: { module: 'audit', entityType: 'quality_objective', id: '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f', code: 'QO-03' }, code: 'QO-03', title: 'On-time delivery',
+  owner: 'sari', status: 'ready', updatedAt: '2026-09-10T04:00:00Z', shared: false, ms: ['qms'], statement: 'Deliver 98 percent of orders on time',
+  targetText: '98% on time', metricCode: 'M-07', dueAt: '2026-12-31', resources: 'Logistics team, routing software', evaluationMethod: 'Monthly delivery report',
+  objectiveStatus: 'on_track', result: null, achievedAt: null,
+} as const;
+
+const EXAMPLE_COMPETENCE_ITEM = {
+  ref: { module: 'audit', entityType: 'competence_record', id: '1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a', code: 'CMP-1D2E3F4A' }, code: 'CMP-1D2E3F4A',
+  title: 'Internal auditor', owner: 'rina', status: 'ready', updatedAt: '2026-09-10T04:00:00Z', shared: false, ms: ['isms'], personHandle: 'maya',
+  competenceRequired: 'ISO/IEC 27001 lead auditor training', proofType: 'certificate', proofObjectId: null, achievedAt: '2025-03-14', validUntil: '2028-03-14',
+  verifiedByHandle: 'rina',
+} as const;
 
 const EXAMPLE_RISK_ITEM = {
   ref: { module: 'audit', entityType: 'risk', id: '8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6b', code: 'R-014' }, code: 'R-014', title: 'Privileged credential misuse',
@@ -94,19 +129,32 @@ export const RegisterItem = named(
   }),
   'Row of a register (D.2 RegisterItem) with the fields of its kind',
   {
-    valid: [EXAMPLE_RISK_ITEM, { ref: { ...EXAMPLE_RISK_ITEM.ref, entityType: 'context_issue', code: 'CI-09' }, code: 'CI-09', title: 'Regulatory change', owner: 'lina', updatedAt: '2026-09-01T00:00:00Z', shared: true, ms: ['isms', 'qms'], issueType: 'external', lastReviewedAt: '2026-08-30' }],
-    invalid: [{ ...EXAMPLE_RISK_ITEM, likelihood: 0 }, { ...EXAMPLE_RISK_ITEM, issueType: 'outside' }, { ...EXAMPLE_RISK_ITEM, ms: 'isms' }],
+    valid: [
+      EXAMPLE_RISK_ITEM,
+      { ref: { ...EXAMPLE_RISK_ITEM.ref, entityType: 'context_issue', code: 'CI-09' }, code: 'CI-09', title: 'Regulatory change', owner: 'lina', updatedAt: '2026-09-01T00:00:00Z', shared: true, ms: ['isms', 'qms'], issueType: 'external', lastReviewedAt: '2026-08-30' },
+      EXAMPLE_OBJECTIVE_ITEM,
+      EXAMPLE_COMPETENCE_ITEM,
+    ],
+    invalid: [
+      { ...EXAMPLE_RISK_ITEM, likelihood: 0 }, { ...EXAMPLE_RISK_ITEM, issueType: 'outside' }, { ...EXAMPLE_RISK_ITEM, ms: 'isms' },
+      { ...EXAMPLE_OBJECTIVE_ITEM, objectiveStatus: 'done' }, { ...EXAMPLE_COMPETENCE_ITEM, proofType: 'diploma' },
+    ],
   },
 );
 export type RegisterItem = z.infer<typeof RegisterItem>;
 
 export const RegisterCreate = named(
   'RegisterCreate',
-  z.strictObject({ code: Code, title: Title, ownerHandle: PersonId.optional(), ...kindFields, linkedMs: z.array(MsId).min(1).optional(), confirm: z.boolean().optional() }),
-  'POST /ms/{ms}/registers/{register} body: risks need an owner (BR-17); linkedMs for shareable kinds, the first is primary',
+  z.strictObject({ code: Code.optional(), title: Title.optional(), ownerHandle: PersonId.optional(), ...kindFields, linkedMs: z.array(MsId).min(1).optional(), confirm: z.boolean().optional() }),
+  'POST /ms/{ms}/registers/{register} body: code and title for every kind except competence, whose title is the role and whose code the server assigns (CMP- and 8 characters); risks need an owner (BR-17), objectives and competence an owner other than none, competence a person, the competence required and the proof type; linkedMs for shareable kinds, the first is primary',
   {
-    valid: [{ code: 'R-040', title: 'Loss of the backup site', ownerHandle: 'bagus', riskProfileCode: 'information_security', likelihood: 2, consequence: 5 }, { code: 'AS-12', title: 'Hypervisor cluster Surabaya', ownerHandle: 'bagus', assetType: 'infrastructure', classification: 'confidential', linkedMs: ['isms', 'bcms'] }],
-    invalid: [{ title: 'No code' }, { code: 'R-040', title: 'x', likelihood: 101 }, { code: 'R-040', title: 'x', linkedMs: [] }],
+    valid: [
+      { code: 'R-040', title: 'Loss of the backup site', ownerHandle: 'bagus', riskProfileCode: 'information_security', likelihood: 2, consequence: 5 },
+      { code: 'AS-12', title: 'Hypervisor cluster Surabaya', ownerHandle: 'bagus', assetType: 'infrastructure', classification: 'confidential', linkedMs: ['isms', 'bcms'] },
+      { code: 'QO-04', title: 'Customer complaints answered in two days', ownerHandle: 'sari', statement: 'Answer 95 percent of complaints within two working days', targetText: '95%', dueAt: '2027-06-30', objectiveStatus: 'planned' },
+      { title: 'Internal auditor', ownerHandle: 'rina', personHandle: 'maya', competenceRequired: 'ISO/IEC 27001 lead auditor training', proofType: 'certificate', achievedAt: '2025-03-14', validUntil: '2028-03-14' },
+    ],
+    invalid: [{ code: 'R-040', title: 'x', likelihood: 101 }, { code: 'R-040', title: 'x', linkedMs: [] }, { title: 'Internal auditor', personHandle: 'none' }, { code: 'QO-04', title: 'x', objectiveStatus: 'done' }],
   },
 );
 export type RegisterCreate = z.infer<typeof RegisterCreate>;
@@ -115,8 +163,8 @@ export const RegisterPatch = named(
   'RegisterPatch',
   z.strictObject({ code: Code.optional(), title: Title.optional(), ownerHandle: PersonId.optional(), ...kindFields, linkedMs: z.array(MsId).min(1).optional(), confirm: z.boolean().optional() })
     .refine((p) => Object.entries(p).some(([k, v]) => k !== 'confirm' && v !== undefined), { message: 'Give at least one field' }),
-  'PATCH /ms/{ms}/registers/{register}/{id} body; confirm after 409 confirmation-required for shared records (BR-22)',
-  { valid: [{ likelihood: 2, assessedAt: '2026-09-29' }, { title: 'Renamed', confirm: true }], invalid: [{}, { confirm: true }] },
+  'PATCH /ms/{ms}/registers/{register}/{id} body; confirm after 409 confirmation-required for shared records (BR-22); a competence record has no code to change',
+  { valid: [{ likelihood: 2, assessedAt: '2026-09-29' }, { title: 'Renamed', confirm: true }, { objectiveStatus: 'achieved', result: '98.4 percent on time', achievedAt: '2026-12-20' }, { validUntil: '2029-03-14' }], invalid: [{}, { confirm: true }, { proofType: 'diploma' }] },
 );
 export type RegisterPatch = z.infer<typeof RegisterPatch>;
 
@@ -236,7 +284,7 @@ const registerRoute = { auth: 'session' as const, msSource: 'path' as const, own
 
 export const registersListRoute = defineRoute({
   ...ms, id: 'registers.list', method: 'GET', path: '/api/v1/ms/:ms/registers/:register',
-  summary: 'Rows of a register (context issues, interested parties, assets, risks, metrics), filtered by ScopePolicy',
+  summary: 'Rows of a register (context issues, interested parties, assets, risks, metrics, objectives, competence), filtered by ScopePolicy; competence rows of other people only for MS Managers, Programme Owners and Internal Auditors (H.5)',
   permission: 'ms.read', params: RegisterParams, query: RegisterListQuery, response: pageOf(RegisterItem), errors: [404],
 });
 

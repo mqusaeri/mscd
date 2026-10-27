@@ -1,0 +1,85 @@
+requirement_code,parent_code,title_short,clause_group,is_hs_common,documented_info_mandatory,applicability_assessable,default_frequency_code,evidence_example,sort_order,retired
+4.1,,Understanding the organization and its context,4,true,false,false,annual,Register of internal and external issues with review date,1,false
+4.2,,Needs and expectations of interested parties,4,true,false,false,annual,Register of interested parties and their requirements,2,false
+4.3,,Scope of the management system,4,true,true,false,annual,"Approved QMS scope statement with products, services and justified exclusions",3,false
+4.4,,Management system and its processes,4,true,true,false,annual,,4,false
+4.4.1,4.4,"Processes, their sequence and interaction",4,false,false,false,annual,"Process map showing sequence, interaction, owners and measures",5,false
+4.4.2,4.4,Documented information for processes,4,false,true,false,annual,Process descriptions and records showing processes run as planned,6,false
+5.1,,Leadership and commitment,5,true,false,false,annual,,7,false
+5.1.1,5.1,Leadership and commitment: general,5,true,false,false,annual,Management review minutes showing leadership decisions and resources,8,false
+5.1.2,5.1,Customer focus,5,false,false,false,annual,Customer satisfaction targets and records of customer requirement reviews,9,false
+5.2,,Policy,5,true,true,false,annual,,10,false
+5.2.1,5.2,Establishing the quality policy,5,true,false,false,annual,Approved quality policy with date and signature,11,false
+5.2.2,5.2,Communicating the quality policy,5,true,true,false,annual,Evidence that the quality policy is communicated and available to interested parties,12,false
+5.3,,"Roles, responsibilities and authorities",5,true,false,false,annual,Organisation chart or RACI with quality roles and authorities,13,false
+6.1,,Actions to address risks and opportunities,6,true,false,false,annual,,14,false
+6.1.1,6.1,Determining risks and opportunities,6,true,false,false,annual,Register of risks and opportunities for the QMS,15,false
+6.1.2,6.1,Planning actions on risks and opportunities,6,true,false,false,annual,Action plan for risks and opportunities with effectiveness review,16,false
+6.2,,Objectives and planning to achieve them,6,true,true,false,annual,,17,false
+6.2.1,6.2,Setting quality objectives,6,true,true,false,annual,Quality objectives register with measurable targets,18,false
+6.2.2,6.2,Planning to achieve quality objectives,6,true,false,false,annual,"Objective plans naming actions, resources, owner, due date and evaluation",19,false
+6.3,,Planning of changes,6,true,false,false,annual,Change plan for changes to the QMS with purpose and resources,20,false
+7.1,,Resources,7,true,true,false,annual,,21,false
+7.1.1,7.1,Resources: general,7,true,false,false,annual,Resource plan or budget approved for the QMS,22,false
+7.1.2,7.1,People,7,false,false,false,annual,Staffing plan or headcount review for the processes,23,false
+7.1.3,7.1,Infrastructure,7,false,false,false,annual,Infrastructure maintenance records,24,false
+7.1.4,7.1,Environment for the operation of processes,7,false,false,false,annual,Records of workplace condition checks,25,false
+7.1.5,7.1,Monitoring and measuring resources,7,false,true,false,annual,,26,false
+7.1.5.1,7.1.5,Monitoring and measuring resources: general,7,false,true,true,annual,List of monitoring and measuring resources with fitness checks,27,false
+7.1.5.2,7.1.5,Measurement traceability,7,false,true,true,annual,Calibration certificates traceable to national or international standards,28,false
+7.1.6,7.1,Organizational knowledge,7,false,false,false,annual,Knowledge base or lessons learned records,29,false
+7.2,,Competence,7,true,true,false,annual,Competence matrix with training and qualification records,30,false
+7.3,,Awareness,7,true,false,false,annual,Awareness attendance records covering the policy and objectives,31,false
+7.4,,Communication,7,true,false,false,annual,"Communication plan stating what, when, with whom and how",32,false
+7.5,,Documented information,7,true,true,false,annual,,33,false
+7.5.1,7.5,Documented information: general,7,true,false,false,annual,Document register listing the documented information of the QMS,34,false
+7.5.2,7.5,Creating and updating documented information,7,true,false,false,annual,"Document showing identification, version, review and approval",35,false
+7.5.3,7.5,Control of documented information,7,true,true,false,annual,,36,false
+7.5.3.1,7.5.3,Availability and protection of documented information,7,true,false,false,annual,Access settings showing controlled documents are available and protected,37,false
+7.5.3.2,7.5.3,"Distribution, storage, change and retention",7,true,true,false,annual,"Distribution, version control and retention records, including external documents",38,false
+8.1,,Operational planning and control,8,true,true,false,annual,Operational plans and records showing outputs meet requirements,39,false
+8.2,,Requirements for products and services,8,false,true,false,event,,40,false
+8.2.1,8.2,Customer communication,8,false,false,false,event,"Customer communication records: enquiries, contracts and feedback",41,false
+8.2.2,8.2,Determining requirements for products and services,8,false,false,false,event,Product or service requirements including legal requirements,42,false
+8.2.3,8.2,Review of requirements for products and services,8,false,true,false,event,,43,false
+8.2.3.1,8.2.3,Review before committing to supply,8,false,false,false,event,Contract or order review record before commitment to supply,44,false
+8.2.3.2,8.2.3,Results of the requirements review,8,false,true,false,event,Signed requirement review results and new requirements,45,false
+8.2.4,8.2,Changes to requirements for products and services,8,false,false,false,event,Records of changed requirements communicated to the people concerned,46,false
+8.3,,Design and development of products and services,8,false,true,false,event,,47,false
+8.3.1,8.3,Design and development: general,8,false,false,true,event,Design and development process description,48,false
+8.3.2,8.3,Design and development planning,8,false,true,true,event,"Design and development plan with stages, reviews and responsibilities",49,false
+8.3.3,8.3,Design and development inputs,8,false,true,true,event,"Design inputs record: functional, performance and legal requirements",50,false
+8.3.4,8.3,Design and development controls,8,false,true,true,event,"Design review, verification and validation records",51,false
+8.3.5,8.3,Design and development outputs,8,false,true,true,event,"Design outputs: specifications, drawings or release criteria",52,false
+8.3.6,8.3,Design and development changes,8,false,true,true,event,Design change records with review and authorisation,53,false
+8.4,,"Control of externally provided processes, products and services",8,false,true,false,annual,,54,false
+8.4.1,8.4,External providers: general,8,false,true,false,annual,External provider evaluation and re-evaluation results,55,false
+8.4.2,8.4,Type and extent of control,8,false,false,false,annual,Incoming inspection or verification records for provided products,56,false
+8.4.3,8.4,Information for external providers,8,false,false,false,annual,Purchase orders or agreements stating requirements for the provider,57,false
+8.5,,Production and service provision,8,false,true,false,monthly,,58,false
+8.5.1,8.5,Control of production and service provision,8,false,true,false,monthly,"Work instructions, specifications and process monitoring records",59,false
+8.5.2,8.5,Identification and traceability,8,false,true,false,monthly,Traceability records with unique identification of outputs,60,false
+8.5.3,8.5,Property belonging to customers or external providers,8,false,true,true,monthly,Register of customer or provider property with condition reports,61,false
+8.5.4,8.5,Preservation,8,false,false,false,monthly,"Handling, packaging and storage records that preserve outputs",62,false
+8.5.5,8.5,Post-delivery activities,8,false,false,true,monthly,"Warranty, maintenance or support records after delivery",63,false
+8.5.6,8.5,Control of changes,8,false,true,false,monthly,Change review records for production or service provision,64,false
+8.6,,Release of products and services,8,false,true,false,event,Release record with acceptance evidence and the authorising person,65,false
+8.7,,Control of nonconforming outputs,8,false,true,false,event,,66,false
+8.7.1,8.7,Handling nonconforming outputs,8,false,false,false,event,Nonconforming output log with disposition decisions,67,false
+8.7.2,8.7,Records of nonconforming outputs,8,false,true,false,event,"Nonconformity records with actions, concessions and authority",68,false
+9.1,,"Monitoring, measurement, analysis and evaluation",9,true,true,false,monthly,,69,false
+9.1.1,9.1,Monitoring and measurement: general,9,true,true,false,monthly,Monitoring and measurement plan with results,70,false
+9.1.2,9.1,Customer satisfaction,9,false,false,false,monthly,Customer satisfaction survey results and analysis,71,false
+9.1.3,9.1,Analysis and evaluation,9,false,false,false,monthly,Data analysis report with trends and conclusions,72,false
+9.2,,Internal audit,9,true,true,false,annual,,73,false
+9.2.1,9.2,Internal audit: general,9,true,false,false,annual,Internal audit report with findings and conclusions,74,false
+9.2.2,9.2,Audit programme,9,true,true,false,annual,"Approved internal audit programme with scope, criteria and auditors",75,false
+9.3,,Management review,9,true,true,false,annual,,76,false
+9.3.1,9.3,Management review: general,9,true,false,false,annual,Management review minutes with date and attendees,77,false
+9.3.2,9.3,Management review inputs,9,true,false,false,annual,Management review input pack covering every required input,78,false
+9.3.3,9.3,Management review outputs,9,true,true,false,annual,"Management review minutes with decisions, actions and resource needs",79,false
+10.1,,Improvement: general,10,true,false,false,annual,Improvement log with selected opportunities and actions,80,false
+10.2,,Nonconformity and corrective action,10,true,true,false,event,,81,false
+10.2.1,10.2,Responding to a nonconformity,10,true,false,false,event,"Nonconformity records with correction, root cause and corrective action",82,false
+10.2.2,10.2,Records of nonconformities and corrective actions,10,true,true,false,event,Corrective action records with the results of the effectiveness review,83,false
+10.3,,Continual improvement,10,true,false,false,annual,Records of continual improvement decisions from analysis and review,84,false

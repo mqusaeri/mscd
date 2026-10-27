@@ -5,13 +5,13 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 1,Initiation & mandate,Inisiasi & mandat,false,4,Baseline gap assessment,,,Baseline gap assessment: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,1,Identify internal and external issues,,,Identify internal and external issues: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,2,Identify interested parties and requirements,,,Identify interested parties and requirements: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,3,Define scope and boundaries,,,Define scope and boundaries: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,3,Define QMS scope and boundaries,,SCO-Q01,Define QMS scope and boundaries: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,4,Map processes and interfaces,,,Map processes and interfaces: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,5,Approve scope statement,,,Approve scope statement: approved and recorded in the register
-3,Leadership & policy,Kepemimpinan & kebijakan,false,1,Draft policy,,POL-01,Draft policy: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,5,Approve QMS scope statement,,SCO-Q01,Approve QMS scope statement: approved and recorded in the register
+3,Leadership & policy,Kepemimpinan & kebijakan,false,1,Draft quality policy,,QM-01,Draft quality policy: approved and recorded in the register
 3,Leadership & policy,Kepemimpinan & kebijakan,false,2,"Define roles, responsibilities and authorities",,,"Define roles, responsibilities and authorities: approved and recorded in the register"
-3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Set measurable objectives,,,Set measurable objectives: approved and recorded in the register
-3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Approve and communicate policy,,POL-01,Approve and communicate policy: approved and recorded in the register
+3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Set measurable objectives,,,"Quality objectives recorded in the objectives register with a measure, an owner and a due date"
+3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Approve and communicate quality policy,,QM-01,Approve and communicate quality policy: approved and recorded in the register
 4,Risk & opportunity + process map,Risiko & peluang + peta proses,true,1,Determine risks and opportunities,,,Determine risks and opportunities: approved and recorded in the register
 4,Risk & opportunity + process map,Risiko & peluang + peta proses,true,2,Plan actions for risks and opportunities,,,Plan actions for risks and opportunities: approved and recorded in the register
 4,Risk & opportunity + process map,Risiko & peluang + peta proses,true,3,Define process map and interactions,,QM-01,Define process map and interactions: approved and recorded in the register
@@ -32,7 +32,7 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 6,Documentation,Dokumentasi,false,4,Publish document register,,,Publish document register: approved and recorded in the register
 6,Documentation,Dokumentasi,false,5,Approve controlled documents,,,Approve controlled documents: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,1,Run awareness campaign,,,Run awareness campaign: approved and recorded in the register
-7,Operation & awareness,Operasi & kepedulian,false,2,Role-based training,,,Role-based training: approved and recorded in the register
+7,Operation & awareness,Operasi & kepedulian,false,2,Role-based training,,,Training and competence of each role recorded in the competence register
 7,Operation & awareness,Operasi & kepedulian,false,3,Operate controls and collect evidence,,,Operate controls and collect evidence: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,4,Handle nonconformities per procedure,,,Handle nonconformities per procedure: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,5,Evidence freshness review,,,Evidence freshness review: approved and recorded in the register
@@ -51,7 +51,7 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,7,Update process map,,QM-01,Update process map: approved and recorded in the register
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,8,Train process owners,,,Train process owners: approved and recorded in the register
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,9,Update quality objectives,,,Update quality objectives: approved and recorded in the register
-9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,10,Update supplier controls,,PRC-08,Update supplier controls: approved and recorded in the register
+9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,10,Update supplier controls,,PRC-Q03,Update supplier controls: approved and recorded in the register
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,11,Internal audit against 2026 edition,,IMS-02,Internal audit against 2026 edition: approved and recorded in the register
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,12,Management review on transition,,IMS-04,Management review on transition: approved and recorded in the register
 9,ISO 9001:2026 transition,Transisi ISO 9001:2026,false,13,Notify certification body,,,Notify certification body: approved and recorded in the register

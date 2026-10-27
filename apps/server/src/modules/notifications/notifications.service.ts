@@ -1,6 +1,7 @@
 // In-app notifications of the session user (build plan D.3, E.6): `GET /notifications?unread=` (newest first,
-// paginated) and `POST /notifications/{id}/read` (the recipient only; anyone else gets 404). A notification belongs
-// to its recipient alone, so no other scope applies.
+// paginated), `POST /notifications/{id}/read` (the recipient only; anyone else gets 404) and `POST
+// /notifications/read-all` (Milestone 2 D.1: every unread notification of the user in the current organisation). A
+// notification belongs to its recipient alone, so no other scope applies.
 import { Injectable } from '@nestjs/common';
 import { RecordRef, type Notification, type NotificationsQuery, type Page } from '@mscd/shared';
 import { sql } from 'kysely';
@@ -66,6 +67,25 @@ export class NotificationsService {
       if (row.read_at) return;
       const now = this.clock.now();
       await trx.updateTable('notification').set({ read_at: now, updated_at: now, updated_by: principal.user.id }).where('id', '=', id).execute();
+    });
+  }
+
+  /**
+   * Marks every unread notification of the session user in the current organisation read, in one statement; returns
+   * how many changed. A session without an organisation (a platform operator) has none.
+   */
+  async markAllRead(principal: Principal): Promise<number> {
+    if (!principal.org) return 0;
+    return this.scope.withTenant(tenantContextOf(principal), async (trx) => {
+      const now = this.clock.now();
+      const result = await trx
+        .updateTable('notification')
+        .set({ read_at: now, updated_at: now, updated_by: principal.user.id })
+        .where('recipient_user_id', '=', principal.user.id)
+        .where('read_at', 'is', null)
+        .where('deleted_at', 'is', null)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
     });
   }
 

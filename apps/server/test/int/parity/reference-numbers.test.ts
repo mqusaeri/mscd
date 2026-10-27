@@ -10,8 +10,9 @@ import { createReadModelApp, sessionFor, type ReadModelApp } from '../read-model
 const REFERENCE: Record<string, { requirements: number; evidence: number; documents: number; chainItems: number; notPending: number; gateItems: number; criticalEvidence: number }> = {
   isms: { requirements: 93, evidence: 79, documents: 22, chainItems: 63, notPending: 24, gateItems: 4, criticalEvidence: 3 },
   qms: { requirements: 28, evidence: 27, documents: 10, chainItems: 18, notPending: 5, gateItems: 0, criticalEvidence: 0 },
-  bcms: { requirements: 27, evidence: 11, documents: 8, chainItems: 25, notPending: 2, gateItems: 3, criticalEvidence: 0 },
-  abms: { requirements: 32, evidence: 2, documents: 5, chainItems: 35, notPending: 3, gateItems: 1, criticalEvidence: 0 },
+  // Milestone 2 E.2 (M2-04): clause 10 per standard, so BCMS and ABMS hold 10.1 and 10.2 only (10.3 is retired).
+  bcms: { requirements: 26, evidence: 11, documents: 8, chainItems: 24, notPending: 2, gateItems: 3, criticalEvidence: 0 },
+  abms: { requirements: 31, evidence: 2, documents: 5, chainItems: 34, notPending: 3, gateItems: 1, criticalEvidence: 0 },
 };
 
 /** UI 2.8 card statistics of the sample (gate, findings open and major, expired documents, critical and unverifiable evidence, after audit). */

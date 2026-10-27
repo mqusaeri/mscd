@@ -1,0 +1,6 @@
+code,title,days_before_audit,skip_on_first_audit,sort_order
+PREP-01,Confirm audit plan and auditee schedule with certifier,33,false,1
+PREP-02,Issue the internal audit report for the cycle,30,false,2
+PREP-03,Hold and record the management review,21,false,3
+PREP-04,Close open nonconformities with effectiveness verification,14,true,4
+PREP-05,Brief auditees on expected sampling focus,3,false,5

@@ -1,0 +1,242 @@
+{{- /*
+adminJob (Milestone 2, M2-06): an optional Job that runs administration
+commands of mscd-server after the release is installed, so a cluster needs no
+"kubectl exec" for the first organisation, its first administrator or the
+platform operator. The enabled steps run in this order, each in its own
+container (init containers, then the last one):
+  tenantCreate    mscd-server tenant create --slug --name --time-zone --site-count --if-missing
+  createUser      mscd-server admin create-user --email [--name] [--tenant-admin] [--org]
+  createOperator  mscd-server admin create-operator --email [--name]
+The Job is a hook (adminJob.hook, post-install by default) and reads the api
+Secret (application database URL, platform key, gateway token, SMTP password),
+only the database owner URL of the migrate Secret (tenant create and the
+operator role) and the api client certificate for the storage gateway. With
+NetworkPolicies it may reach the database, the storage gateway and the SMTP
+relay; the gateway and the bundled test database accept it.
+A failed pod is retried (backoffLimit) from the first step, so tenant create
+runs with --if-missing: it passes when the organisation exists.
+*/}}
+{{- if .Values.adminJob.enabled }}
+{{- $job := .Values.adminJob }}
+{{- $fullname := include "mscd.fullname" . }}
+{{- $steps := list }}
+{{- if $job.tenantCreate.enabled }}
+{{- $t := $job.tenantCreate }}
+{{- if not (regexMatch "^[a-z][a-z0-9_]{1,39}$" (toString $t.slug)) }}
+{{- fail "adminJob.tenantCreate.slug must be a lower-case letter, then 1 to 39 lower-case letters, digits or _ (it cannot be changed later)" }}
+{{- end }}
+{{- if not $t.name }}
+{{- fail "adminJob.tenantCreate.name is required" }}
+{{- end }}
+{{- $steps = append $steps (dict "name" "tenant-create" "args" (list "tenant" "create" "--slug" (toString $t.slug) "--name" (toString $t.name) "--time-zone" (toString ($t.timeZone | default "Asia/Jakarta")) "--site-count" (toString (int ($t.siteCount | default 1))) "--if-missing")) }}
+{{- end }}
+{{- if $job.createUser.enabled }}
+{{- $u := $job.createUser }}
+{{- if not $u.email }}
+{{- fail "adminJob.createUser.email is required" }}
+{{- end }}
+{{- $args := list "admin" "create-user" "--email" (toString $u.email) }}
+{{- if $u.name }}{{ $args = concat $args (list "--name" (toString $u.name)) }}{{ end }}
+{{- if $u.tenantAdmin }}{{ $args = append $args "--tenant-admin" }}{{ end }}
+{{- $org := $u.org | default (and $job.tenantCreate.enabled $job.tenantCreate.slug) }}
+{{- if $org }}{{ $args = concat $args (list "--org" (toString $org)) }}{{ end }}
+{{- $steps = append $steps (dict "name" "create-user" "args" $args) }}
+{{- end }}
+{{- if $job.createOperator.enabled }}
+{{- $o := $job.createOperator }}
+{{- if not $o.email }}
+{{- fail "adminJob.createOperator.email is required" }}
+{{- end }}
+{{- $args := list "admin" "create-operator" "--email" (toString $o.email) }}
+{{- if $o.name }}{{ $args = concat $args (list "--name" (toString $o.name)) }}{{ end }}
+{{- $steps = append $steps (dict "name" "create-operator" "args" $args) }}
+{{- end }}
+{{- if not $steps }}
+{{- fail "adminJob.enabled needs at least one step: tenantCreate, createUser or createOperator" }}
+{{- end }}
+{{- $last := last $steps }}
+{{- $first := initial $steps }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-admin
+  labels:
+    {{- include "mscd.labels" (list . "admin") | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $job.hook | quote }}
+    helm.sh/hook-weight: "5"
+    # Kept until the next run of the hook, so its log can be read.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ $job.backoffLimit }}
+  ttlSecondsAfterFinished: {{ $job.ttlSecondsAfterFinished }}
+  activeDeadlineSeconds: {{ $job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "mscd.labels" (list . "admin") | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "mscd.podPlacement" (list . "admin") | nindent 6 }}
+      {{- if $first }}
+      initContainers:
+        {{- range $first }}
+        - name: {{ .name }}
+          image: {{ include "mscd.serverImage" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.server.pullPolicy }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          env:
+            {{- include "mscd.serverEnv" (list $ $job.extraEnv) | nindent 12 }}
+          resources:
+            {{- toYaml $job.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "mscd.serverVolumeMounts" $ | nindent 12 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ $last.name }}
+          image: {{ include "mscd.serverImage" . | quote }}
+          imagePullPolicy: {{ .Values.image.server.pullPolicy }}
+          args:
+            {{- toYaml $last.args | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "mscd.serverEnv" (list . $job.extraEnv) | nindent 12 }}
+          resources:
+            {{- toYaml $job.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "mscd.serverVolumeMounts" . | nindent 12 }}
+      volumes:
+        - name: profile
+          configMap:
+            name: {{ $fullname }}-profile
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ include "mscd.secretName" (list . "api") }}
+              - secret:
+                  name: {{ include "mscd.secretName" (list . "migrate") }}
+                  items:
+                    - key: db-migrator.url
+                      path: db-migrator.url
+              {{- if include "mscd.mtls" . }}
+              - secret:
+                  name: {{ include "mscd.tlsSecretName" (list . "api") }}
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+                    - key: tls.crt
+                      path: client.crt
+                    - key: tls.key
+                      path: client.key
+              {{- end }}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $databasePort := $np.database.port }}
+{{- $databasePeers := list }}
+{{- if .Values.testServices.enabled }}
+{{- $databasePeers = list (dict "podSelector" (dict "matchLabels" (fromYaml (include "mscd.selectorLabels" (list . "postgres"))))) }}
+{{- $databasePort = 5432 }}
+{{- else }}
+{{- range $np.database.cidrs }}{{ $databasePeers = append $databasePeers (dict "ipBlock" (dict "cidr" .)) }}{{ end }}
+{{- end }}
+{{- $databaseRule := dict "ports" (list (dict "port" (int $databasePort) "protocol" "TCP")) }}
+{{- if $databasePeers }}{{ $_ := set $databaseRule "to" $databasePeers }}{{ end }}
+{{- $smtpPeers := list }}
+{{- range $np.smtp.cidrs }}{{ $smtpPeers = append $smtpPeers (dict "ipBlock" (dict "cidr" .)) }}{{ end }}
+{{- $smtpRule := dict "ports" (list (dict "port" (int .Values.profile.mail.smtp.port) "protocol" "TCP")) }}
+{{- if $smtpPeers }}{{ $_ := set $smtpRule "to" $smtpPeers }}{{ end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-admin
+  labels:
+    {{- include "mscd.labels" (list . "admin") | nindent 4 }}
+spec:
+  # The admin Job: the database, the storage gateway (data key of a new organisation) and the SMTP relay.
+  podSelector:
+    matchLabels:
+      {{- include "mscd.selectorLabels" (list . "admin") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {{- toYaml $databaseRule | nindent 6 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mscd.selectorLabels" (list . "gateway") | nindent 14 }}
+      ports:
+        - port: 8443
+          protocol: TCP
+    - {{- toYaml $smtpRule | nindent 6 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-gateway-from-admin
+  labels:
+    {{- include "mscd.labels" (list . "admin") | nindent 4 }}
+spec:
+  # Added to the gateway policy: the admin Job asks for the data key of a new organisation.
+  podSelector:
+    matchLabels:
+      {{- include "mscd.selectorLabels" (list . "gateway") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mscd.selectorLabels" (list . "admin") | nindent 14 }}
+      ports:
+        - port: 8443
+          protocol: TCP
+{{- if .Values.testServices.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-postgres-from-admin
+  labels:
+    {{- include "mscd.labels" (list . "admin") | nindent 4 }}
+spec:
+  # Added to the policy of the bundled test database.
+  podSelector:
+    matchLabels:
+      {{- include "mscd.selectorLabels" (list . "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mscd.selectorLabels" (list . "admin") | nindent 14 }}
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

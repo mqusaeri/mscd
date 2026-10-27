@@ -96,10 +96,21 @@ export const UserIdentityRegistration = named(
 );
 export type UserIdentityRegistration = z.infer<typeof UserIdentityRegistration>;
 
-export const OrgPolicyPatch = named('OrgPolicyPatch', z.strictObject({ localLogin: LocalLoginPolicy }), 'PATCH /admin/organization body (F.4)', {
-  valid: [{ localLogin: 'admins_only' }],
-  invalid: [{ localLogin: 'never' }, {}],
-});
+export const OrgPolicyPatch = named(
+  'OrgPolicyPatch',
+  z.strictObject({
+    localLogin: LocalLoginPolicy.optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+    /** IANA time zone name, checked with `Intl` and PostgreSQL; stored in its canonical spelling. */
+    timeZone: z.string().trim().min(1).max(64).optional(),
+    siteCount: z.int().min(0).max(10_000).optional(),
+  }).refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
+  'PATCH /admin/organization body: the local sign-in policy (F.4), the name, the IANA time zone and the number of sites (Milestone 2 D.2); the slug is permanent',
+  {
+    valid: [{ localLogin: 'admins_only' }, { name: 'PT Nusantara Digital Teknologi', timeZone: 'Asia/Makassar', siteCount: 3 }],
+    invalid: [{ localLogin: 'never' }, {}, { slug: 'ndt2' }, { siteCount: -1 }, { name: '' }],
+  },
+);
 export type OrgPolicyPatch = z.infer<typeof OrgPolicyPatch>;
 
 export const RoleGrant = named(
@@ -282,7 +293,7 @@ export const adminOrganizationUpdateRoute = defineRoute({
   owner: 'WP-39',
   method: 'PATCH',
   path: '/api/v1/admin/organization',
-  summary: 'Set the local sign-in policy of the organisation',
+  summary: 'Change the local sign-in policy, the name, the time zone or the number of sites of the organisation; the slug is permanent (audited org.settings_updated and org.updated)',
   auth: 'session',
   permission: 'org.settings.manage',
   scope: 'org',

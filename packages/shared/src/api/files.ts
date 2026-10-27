@@ -118,14 +118,24 @@ export const EvidenceFileRequest = named(
 );
 export type EvidenceFileRequest = z.infer<typeof EvidenceFileRequest>;
 
+/** What changed in a document version, in a sentence or two (Milestone 2 D.2). */
+const ChangeSummary = z.string().trim().min(1).max(500);
+
 export const DocumentVersionRequest = named(
   'DocumentVersionRequest',
   z.discriminatedUnion('source', [
-    z.strictObject({ source: z.literal('link'), repository: RepositorySlug, externalItemId: ExternalItemId }),
-    z.strictObject({ source: z.literal('upload'), uploadIntentId: Uuid }),
+    z.strictObject({ source: z.literal('link'), repository: RepositorySlug, externalItemId: ExternalItemId, changeSummary: ChangeSummary.optional() }),
+    z.strictObject({ source: z.literal('upload'), uploadIntentId: Uuid, changeSummary: ChangeSummary.optional() }),
   ]),
-  'POST /ms/{ms}/documents/{id}/versions body: the new version goes to in_review (A.4 5.7)',
-  { valid: [{ source: 'link', repository: 'sp', externalItemId: 'demo-sp-doc-1' }, { source: 'upload', uploadIntentId: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e' }], invalid: [{ source: 'upload' }, { source: 'link', repository: 'sp' }] },
+  'POST /ms/{ms}/documents/{id}/versions body: the new version goes to in_review (A.4 5.7); changeSummary says what changed, up to 500 characters (Milestone 2 D.2)',
+  {
+    valid: [
+      { source: 'link', repository: 'sp', externalItemId: 'demo-sp-doc-1' },
+      { source: 'upload', uploadIntentId: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e' },
+      { source: 'upload', uploadIntentId: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e', changeSummary: 'Access review frequency changed to quarterly' },
+    ],
+    invalid: [{ source: 'upload' }, { source: 'link', repository: 'sp' }, { source: 'upload', uploadIntentId: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e', changeSummary: 'x'.repeat(501) }],
+  },
 );
 export type DocumentVersionRequest = z.infer<typeof DocumentVersionRequest>;
 

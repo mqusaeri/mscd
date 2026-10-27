@@ -1,8 +1,8 @@
 // Area `documents` (owner from wave 9: WP-35): document register commands (D.2, D.3, C.13 `document.status`,
 // A.4 5.7 and 5.8). Document versions are file commands (`files.ts`); Milestone 2 (D.1) adds the version history,
-// built by M2-07.
+// and Milestone 2 (D.2) external documents (origin, source, reference, date received), built by M2-07.
 import { z } from 'zod';
-import { Classification, DocumentVersionStatus } from '../enums.js';
+import { Classification, DocumentOrigin, DocumentVersionStatus } from '../enums.js';
 import {
   Code, CommandResult, Handle, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, Uuid, defineRoute, named,
 } from './common.js';
@@ -10,6 +10,10 @@ import type { RouteDef } from './common.js';
 
 const Title = z.string().trim().min(1).max(255);
 const DocType = z.string().regex(/^[a-z][a-z0-9_]{0,19}$/);
+/** Who issued an external document (a standard body, a regulator, a customer or a supplier). */
+const ExternalSource = z.string().trim().min(1).max(200);
+/** The issuer's own reference of an external document (its number, edition or version). */
+const ExternalRef = z.string().trim().min(1).max(120);
 
 export const DocumentTransitionRequest = named(
   'DocumentTransitionRequest',
@@ -32,11 +36,28 @@ export const DocumentCreateRequest = named(
     classification: Classification,
     orgWide: z.boolean(),
     linkedMs: z.array(MsId).min(1),
-  }),
-  'POST /ms/{ms}/documents body; docType is a doc_type lookup code of the active edition',
+    origin: DocumentOrigin.optional(),
+    externalSource: ExternalSource.optional(),
+    externalRef: ExternalRef.optional(),
+    receivedAt: IsoDate.optional(),
+  })
+    .refine((r) => r.origin === 'external' || (r.externalSource === undefined && r.externalRef === undefined && r.receivedAt === undefined), {
+      message: 'externalSource, externalRef and receivedAt describe an external document (origin external)',
+      path: ['origin'],
+    })
+    .refine((r) => r.origin !== 'external' || r.externalSource !== undefined, { message: 'An external document names its source', path: ['externalSource'] }),
+  'POST /ms/{ms}/documents body; docType is a doc_type lookup code of the active edition; origin internal (default) or external, an external document names its source and may give its reference and the date it was received (Milestone 2 D.2)',
   {
-    valid: [{ docCode: 'PRC-15', title: 'Secure Development Procedure', docType: 'procedure', ownerHandle: 'yusuf', approverHandle: 'hendra', nextReviewAt: '2027-10-01', classification: 'internal', orgWide: false, linkedMs: ['isms'] }],
-    invalid: [{ docCode: 'PRC-15', title: 'x', docType: 'Procedure', ownerHandle: 'yusuf', classification: 'internal', orgWide: false, linkedMs: ['isms'] }, { docCode: 'PRC-15', title: 'x', docType: 'procedure', ownerHandle: 'yusuf', classification: 'internal', orgWide: false, linkedMs: [] }],
+    valid: [
+      { docCode: 'PRC-15', title: 'Secure Development Procedure', docType: 'procedure', ownerHandle: 'yusuf', approverHandle: 'hendra', nextReviewAt: '2027-10-01', classification: 'internal', orgWide: false, linkedMs: ['isms'] },
+      { docCode: 'EXT-07', title: 'Personal Data Protection Law', docType: 'policy', ownerHandle: 'rina', classification: 'public', orgWide: true, linkedMs: ['isms'], origin: 'external', externalSource: 'Republic of Indonesia', externalRef: 'UU 27/2022', receivedAt: '2022-10-17' },
+    ],
+    invalid: [
+      { docCode: 'PRC-15', title: 'x', docType: 'Procedure', ownerHandle: 'yusuf', classification: 'internal', orgWide: false, linkedMs: ['isms'] },
+      { docCode: 'PRC-15', title: 'x', docType: 'procedure', ownerHandle: 'yusuf', classification: 'internal', orgWide: false, linkedMs: [] },
+      { docCode: 'EXT-07', title: 'x', docType: 'policy', ownerHandle: 'rina', classification: 'public', orgWide: true, linkedMs: ['isms'], origin: 'external' },
+      { docCode: 'PRC-15', title: 'x', docType: 'procedure', ownerHandle: 'yusuf', classification: 'internal', orgWide: false, linkedMs: ['isms'], externalRef: 'v2' },
+    ],
   },
 );
 export type DocumentCreateRequest = z.infer<typeof DocumentCreateRequest>;
@@ -49,10 +70,17 @@ export const DocumentPatch = named(
     approverHandle: Handle.nullable().optional(),
     nextReviewAt: IsoDate.nullable().optional(),
     classification: Classification.optional(),
+    origin: DocumentOrigin.optional(),
+    externalSource: ExternalSource.nullable().optional(),
+    externalRef: ExternalRef.nullable().optional(),
+    receivedAt: IsoDate.nullable().optional(),
     confirm: z.boolean().optional(),
   }).refine((p) => Object.entries(p).some(([k, v]) => k !== 'confirm' && v !== undefined), { message: 'Give at least one field' }),
-  'PATCH /ms/{ms}/documents/{id} body; confirm after 409 confirmation-required for shared documents (BR-22)',
-  { valid: [{ nextReviewAt: '2027-09-24' }, { title: 'Access Control Procedure v4', confirm: true }], invalid: [{}, { confirm: true }, { status: 'approved' }] },
+  'PATCH /ms/{ms}/documents/{id} body; confirm after 409 confirmation-required for shared documents (BR-22); origin and the external fields as on create (Milestone 2 D.2)',
+  {
+    valid: [{ nextReviewAt: '2027-09-24' }, { title: 'Access Control Procedure v4', confirm: true }, { origin: 'external', externalSource: 'Bank Indonesia', externalRef: 'PBI 23/2021' }, { externalRef: null }],
+    invalid: [{}, { confirm: true }, { status: 'approved' }, { origin: 'supplier' }],
+  },
 );
 export type DocumentPatch = z.infer<typeof DocumentPatch>;
 

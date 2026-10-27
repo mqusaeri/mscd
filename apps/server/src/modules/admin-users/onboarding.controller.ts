@@ -1,14 +1,16 @@
-// `GET /admin/onboarding` (Milestone 2 D.1, D.5): the onboarding checklist of the organisation. Stub of M2-02, answering
-// 501 `not-implemented` after the guard; M2-06 replaces it and registers its services in onboarding.module.ts.
+// `GET /admin/onboarding` (Milestone 2 D.1, D.5): the onboarding checklist of the organisation, states and counts only.
 import { Controller } from '@nestjs/common';
-import { adminOnboardingRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import { adminOnboardingRoute, type OnboardingStep } from '@mscd/shared';
+import { ApiRoute, CurrentPrincipal } from '../../common/api-route';
+import type { Principal } from '../../common/tokens';
+import { OnboardingService } from './onboarding.service';
 
 @Controller()
 export class OnboardingController {
+  constructor(private readonly onboarding: OnboardingService) {}
+
   @ApiRoute(adminOnboardingRoute)
-  checklist(): never {
-    return routeStub(adminOnboardingRoute);
+  checklist(@CurrentPrincipal() principal: Principal): Promise<OnboardingStep[]> {
+    return this.onboarding.checklist(principal);
   }
 }

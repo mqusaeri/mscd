@@ -1,0 +1,26 @@
+code,title,doc_type,requirement_code
+SCO-Q01,Scope of the quality management system,policy,4.3
+QM-01,Quality manual with the quality policy and process map,policy,4.4
+REG-Q02,Quality objectives register,register,6.2
+PLN-Q05,Plan for changes to the quality management system,plan,6.3
+REC-Q01,Calibration and verification records,record,7.1.5
+REG-Q03,Competence and training register,register,7.2
+IMS-01,Document control procedure,procedure,7.5.3
+REC-Q02,Requirements review record,record,8.2.3
+PRC-Q02,Design and development procedure,procedure,8.3
+REC-Q03,Design and development record,record,8.3
+PRC-Q03,External provider evaluation procedure,procedure,8.4
+REG-Q04,Approved external provider register,register,8.4.1
+STD-Q01,Product and service specification,standard,8.5.1
+REC-Q04,"Identification, traceability and property record",record,8.5.2
+REC-Q05,Production and service change review record,record,8.5.6
+REC-Q06,Release record,record,8.6
+PRC-Q04,Nonconforming output procedure,procedure,8.7
+REC-Q07,Nonconformity record,record,8.7.2
+REC-Q08,Monitoring and measurement report,record,9.1.1
+REG-Q01,Customer feedback and complaint register,register,9.1.2
+IMS-02,Internal audit procedure,procedure,9.2
+REC-Q09,Internal audit programme and report,record,9.2.2
+IMS-04,Management review procedure,procedure,9.3
+REC-Q10,Management review minutes,record,9.3.3
+IMS-03,Corrective action procedure,procedure,10.2

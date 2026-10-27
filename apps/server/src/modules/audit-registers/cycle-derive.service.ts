@@ -1,15 +1,27 @@
-// `cycle.derive` (E.2, TS 6.8, WP-37): for each cycle item (`cycle_requirement_status`) of the current certification
-// cycle of a system whose definition (`ref.cycle_requirement_def.derivation`) names a derivation, decides whether
-// the requirement is met and then sets the item `done` (actor system, audit `cycle_item.updated`); otherwise the
+// `cycle.derive` (E.2, TS 6.8, WP-37, Milestone 2 D.4): for each cycle item (`cycle_requirement_status`) of the current
+// certification cycle of a system whose definition (`ref.cycle_requirement_def.derivation`) names a derivation, decides
+// whether the requirement is met and then sets the item `done` (actor system, audit `cycle_item.updated`); otherwise the
 // stored status is kept, so a derivation never lowers a status. Derivation kinds:
 // - `management_review_closed`: a `closed` management review linked to the system, closed within the cycle, whose
 //   mandatory inputs of this system all have content;
 // - `risk_assessment_current` (`months`, default 12): the system has risks and every risk linked to it was assessed
 //   within the window;
-// - `internal_audit_done`: a finding of the system with source `internal_audit` raised within the cycle;
-// - `exercise_performed`: an exercise of the system performed within the cycle.
+// - `internal_audit_done`: an `internal_audit` event of the system in the cycle (linked to it, or dated within it)
+//   with its report attached, or a finding of the system with source `internal_audit` raised within the cycle;
+// - `exercise_performed`: an exercise of the system performed within the cycle;
+// - `corrective_actions_closed` (Milestone 2): at least one corrective action of the system was verified and closed
+//   within the cycle, and no corrective action of the system is still open;
+// - `metrics_current` (Milestone 2): the system has metrics and each has a value in its current period (a value
+//   period that ended within one period of today, the period of the metric's frequency, 365 days without one);
+// - `documents_reviewed_on_time` (Milestone 2): the system has approved documents and none is expired or past its
+//   review date;
+// - `bia_approved` (Milestone 2): the system has business impact analyses and every one is approved and not past its
+//   review date;
+// - `due_diligence_current` (Milestone 2, `months`, default 12): the system has completed due diligence records and
+//   every completed or expired one is current (valid until today or later, or performed within the window when it
+//   names no end).
 // Unknown kinds are skipped with a warning. The demo packs carry no derivations (G.7), so their items keep the
-// seeded statuses.
+// seeded statuses. Commands that feed a kind queue `cycle.derive` for their system (`readiness-queue.ts`).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { AUDIT_WRITER, SYSTEM_USER_ID, type AuditWriter, type Trx } from '../../common/tokens';
@@ -21,7 +33,10 @@ export function cycleDeriveKey(orgId: string, msId?: string | null): string {
 
 const SYSTEM_ACTOR = { userId: SYSTEM_USER_ID, kind: 'system' as const };
 
-export const DERIVATION_KINDS = ['management_review_closed', 'risk_assessment_current', 'internal_audit_done', 'exercise_performed'] as const;
+export const DERIVATION_KINDS = [
+  'management_review_closed', 'risk_assessment_current', 'internal_audit_done', 'exercise_performed',
+  'corrective_actions_closed', 'metrics_current', 'documents_reviewed_on_time', 'bia_approved', 'due_diligence_current',
+] as const;
 export type DerivationKind = (typeof DERIVATION_KINDS)[number];
 
 export interface DerivedItem {
@@ -48,6 +63,7 @@ interface ItemRow {
   requirement_code: string;
   status: string;
   derivation: { kind?: unknown; months?: unknown } | null;
+  cycle_id: string;
   cycle_start: string;
   cycle_end: string;
 }
@@ -67,7 +83,7 @@ export class CycleDeriveService {
           from certification_cycle c join management_system m on m.id = c.management_system_id and m.deleted_at is null and m.status <> 'archived'
          where c.deleted_at is null and (${msId ?? null}::uuid is null or c.management_system_id = ${msId ?? null}::uuid)
          order by c.management_system_id, c.cycle_start desc, c.created_at desc)
-      select s.id, s.management_system_id, s.title, s.requirement_code, s.status, d.derivation, cc.cycle_start, cc.cycle_end
+      select s.id, s.management_system_id, s.title, s.requirement_code, s.status, d.derivation, cc.id as cycle_id, cc.cycle_start, cc.cycle_end
         from cycle_requirement_status s
         join current_cycle cc on cc.id = s.certification_cycle_id
         join ref.cycle_requirement_def d on d.id = s.cycle_requirement_def_id
@@ -139,6 +155,14 @@ export class CycleDeriveService {
       case 'internal_audit_done': {
         const { rows } = await sql<{ found: boolean }>`
           select exists (
+            select 1 from audit_event e
+             where e.deleted_at is null and e.event_type = 'internal_audit' and e.report_document_id is not null
+               and (e.management_system_id = ${ms}
+                    or exists (select 1 from entity_ms_link l where l.entity_type = 'audit_event' and l.entity_id = e.id
+                                 and l.management_system_id = ${ms} and l.deleted_at is null))
+               and (e.certification_cycle_id = ${item.cycle_id}
+                    or e.scheduled_at between ${item.cycle_start}::date and ${item.cycle_end}::date)
+          ) or exists (
             select 1 from finding f
              where f.management_system_id = ${ms} and f.deleted_at is null and f.source = 'internal_audit'
                and f.raised_at between ${item.cycle_start}::date and ${item.cycle_end}::date
@@ -153,6 +177,63 @@ export class CycleDeriveService {
                and x.performed_at between ${item.cycle_start}::date and ${item.cycle_end}::date
           ) as found`.execute(trx);
         return rows[0]?.found === true;
+      }
+      case 'corrective_actions_closed': {
+        const { rows } = await sql<{ closed: number; open: number }>`
+          select count(*) filter (where c.status = 'closed' and c.verified_at between ${item.cycle_start}::date and ${item.cycle_end}::date)::int as closed,
+                 count(*) filter (where c.status not in ('closed', 'cancelled'))::int as open
+            from corrective_action c
+           where c.management_system_id = ${ms} and c.deleted_at is null`.execute(trx);
+        const counts = rows[0];
+        return !!counts && counts.closed > 0 && counts.open === 0;
+      }
+      case 'metrics_current': {
+        const { rows } = await sql<{ total: number; current: number }>`
+          select count(*)::int as total,
+                 count(*) filter (where exists (
+                   select 1 from metric_value v
+                    where v.metric_id = m.id and v.deleted_at is null
+                      and v.period_end > (${today}::date - coalesce(f.period_days, 365)))
+                   or (m.last_measured_at is not null and m.last_measured_at > (${today}::date - coalesce(f.period_days, 365))))::int as current
+            from metric m
+            join management_system s on s.id = ${ms}
+            left join ref.evidence_frequency_rule f on f.framework_version_id = s.framework_version_id and f.code = m.frequency_code
+           where m.deleted_at is null
+             and exists (select 1 from entity_ms_link l where l.entity_type = 'metric' and l.entity_id = m.id and l.management_system_id = ${ms} and l.deleted_at is null)`.execute(trx);
+        const counts = rows[0];
+        return !!counts && counts.total > 0 && counts.current === counts.total;
+      }
+      case 'documents_reviewed_on_time': {
+        const { rows } = await sql<{ approved: number; late: number }>`
+          select count(*) filter (where d.status = 'approved')::int as approved,
+                 count(*) filter (where d.status = 'expired' or (d.status = 'approved' and d.next_review_at < ${today}::date))::int as late
+            from document d
+           where d.deleted_at is null
+             and exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = d.id and l.management_system_id = ${ms} and l.deleted_at is null)`.execute(trx);
+        const counts = rows[0];
+        return !!counts && counts.approved > 0 && counts.late === 0;
+      }
+      case 'bia_approved': {
+        const { rows } = await sql<{ total: number; approved: number }>`
+          select count(*)::int as total,
+                 count(*) filter (where b.status = 'approved' and (b.next_review_at is null or b.next_review_at >= ${today}::date))::int as approved
+            from business_impact_analysis b
+           where b.management_system_id = ${ms} and b.deleted_at is null`.execute(trx);
+        const counts = rows[0];
+        return !!counts && counts.total > 0 && counts.approved === counts.total;
+      }
+      case 'due_diligence_current': {
+        const raw = Number(item.derivation?.months);
+        const months = Number.isInteger(raw) && raw > 0 ? raw : 12;
+        const { rows } = await sql<{ total: number; current: number }>`
+          select count(*)::int as total,
+                 count(*) filter (where d.status = 'completed'
+                                    and (d.valid_until >= ${today}::date
+                                         or (d.valid_until is null and d.performed_at >= (${today}::date - make_interval(months => ${months}))::date)))::int as current
+            from due_diligence d
+           where d.management_system_id = ${ms} and d.deleted_at is null and d.status in ('completed', 'expired')`.execute(trx);
+        const counts = rows[0];
+        return !!counts && counts.total > 0 && counts.current === counts.total;
       }
     }
   }

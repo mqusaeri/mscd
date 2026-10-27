@@ -1,7 +1,11 @@
 // Implementation overview of a system (build plan A.4 5.14, UI 2.6): open items per clause, the four maturity
 // values over the stored clause readiness and the live open counts, the maturity level, blockers and the next gate.
 // The TS 9.2 overview endpoint (WP-32) serves these; `/ui/*` lets the controller compute them from the bundle.
-import type { ChainItem, GateItem, Pair, Phase } from '@mscd/shared';
+// Milestone 2 (D.6, M2-05): a clause row computed by `readiness.recompute` stores its four dimensions (documented,
+// implemented, evidenced, measured), and the overview shows them as stored (null where the group has no rows of that
+// kind); a row without stored dimensions (seeded or manual, as in the demo) keeps the Milestone 1 offset formula of
+// `maturityValues`; a row whose readiness is null (not computed yet) has no maturity values.
+import type { ChainItem, ClauseMaturity, GateItem, Pair, Phase } from '@mscd/shared';
 
 /** Clause groups of the overview (4 to 10). */
 export const OVERVIEW_CLAUSES = [4, 5, 6, 7, 8, 9, 10] as const;
@@ -28,6 +32,65 @@ export function maturityValues(p: number, o: number): [number, number, number, n
 /** Maturity level 0 to 4 of a value (UI 2.6 `q(x)`). */
 export function maturityLevel(x: number): number {
   return Math.max(0, Math.min(4, Math.round(x / 25)));
+}
+
+/** A clause readiness row as stored (`clause_readiness`, Milestone 2 D.3, D.6); the loader passes nulls through. */
+export interface StoredReadiness {
+  readiness: number | null;
+  documented: number | null;
+  implemented: number | null;
+  evidenced: number | null;
+  measured: number | null;
+  /** When `readiness.recompute` wrote the row; null for seeded and manual rows. */
+  computedAt?: Date | string | null;
+}
+
+/** A stored readiness value of one clause group: a bare percentage (Milestone 1 loader) or the full row (D.6). */
+export type ReadinessValue = number | null | StoredReadiness;
+
+/** The stored row of a readiness value (a bare percentage has no dimensions). */
+export function storedReadiness(value: ReadinessValue | undefined): StoredReadiness {
+  if (value === undefined || value === null) return { readiness: null, documented: null, implemented: null, evidenced: null, measured: null, computedAt: null };
+  if (typeof value === 'number') return { readiness: value, documented: null, implemented: null, evidenced: null, measured: null, computedAt: null };
+  return value;
+}
+
+/** True when a row holds dimensions of `readiness.recompute` (D.6): it was computed, or names a dimension. */
+export function hasStoredDimensions(row: StoredReadiness): boolean {
+  return (row.computedAt !== undefined && row.computedAt !== null)
+    || [row.documented, row.implemented, row.evidenced, row.measured].some((d) => d !== null && d !== undefined);
+}
+
+/**
+ * The four maturity values of a clause (D.6): the stored dimensions of a computed row, else the Milestone 1 offset
+ * formula of `maturityValues` over the stored readiness and the open count; all null while the readiness is null.
+ */
+export function clauseDimensions(value: ReadinessValue | undefined, open: number): [number | null, number | null, number | null, number | null] {
+  const row = storedReadiness(value);
+  if (hasStoredDimensions(row)) return [row.documented, row.implemented, row.evidenced, row.measured];
+  if (row.readiness === null) return [null, null, null, null];
+  return maturityValues(clampPct(row.readiness), open);
+}
+
+function clampPct(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+/**
+ * One `ClauseMaturity` of the implementation summary (A.4 5.14, D.6): the stored readiness (null until computed),
+ * the maturity level of each dimension (null where the dimension is null) and, for a computed row, `computedAt`.
+ */
+export function clauseMaturity(clause: number, value: ReadinessValue | undefined, open: number): ClauseMaturity {
+  const row = storedReadiness(value);
+  const dims = clauseDimensions(value, open);
+  const levels = dims.map((d) => (d === null ? null : maturityLevel(d))) as ClauseMaturity['dimensions'];
+  const computedAt = row.computedAt === undefined || row.computedAt === null ? null : new Date(row.computedAt).toISOString();
+  return {
+    clause,
+    readiness: row.readiness === null ? null : clampPct(row.readiness),
+    dimensions: levels,
+    ...(hasStoredDimensions(row) ? { computedAt } : {}),
+  } as ClauseMaturity;
 }
 
 export const MATURITY_LABELS: readonly Pair[] = [

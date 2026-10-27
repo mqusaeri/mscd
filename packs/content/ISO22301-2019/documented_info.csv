@@ -1,0 +1,16 @@
+code,requirement_code,kind,title,template_code,sort_order
+DI-01,4.2.2,maintain,"Legal, regulatory and other requirements",REG-B02,1
+DI-02,4.3.2,maintain,Scope of the BCMS and the reasons for any exclusion,SCO-B01,2
+DI-03,5.2.1,maintain,Business continuity policy,POL-B01,3
+DI-04,6.2.1,retain,Business continuity objectives,REG-B03,4
+DI-05,7.2,retain,Evidence of competence,REG-B04,5
+DI-06,8.2.2,retain,Business impact analysis results,PLN-B01,6
+DI-07,8.2.3,retain,Risk assessment results,REG-B05,7
+DI-08,8.4.3,maintain,Warning and communication procedures and records of the disruption,PRC-B02,8
+DI-09,8.4.4,maintain,Business continuity plans and procedures,PLN-B02,9
+DI-10,8.4.5,maintain,Procedures to restore and return to normal operations,PRC-B03,10
+DI-11,8.5,retain,Exercise results and post-exercise reports,REC-B01,11
+DI-12,9.1,retain,Monitoring and measurement results,REC-B03,12
+DI-13,9.2.2,retain,Audit programme and audit results,REC-B04,13
+DI-14,9.3.3,retain,Results of management reviews,REC-B05,14
+DI-15,10.1,retain,"Nonconformities, actions taken and corrective action results",IMS-03,15

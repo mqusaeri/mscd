@@ -101,12 +101,16 @@ describe('installing the development packs (E.8)', () => {
     expect(outcomes.map((o) => [o.packId, o.status])).toEqual(DEV_PACK_IDS.map((id) => [id, 'installed']));
 
     expect(await refCounts(db, 'ISO27001-2022')).toEqual({
-      requirements: 24, catalogue: 93, chain: 8, activities: 69, phases: 9, frequencies: 7, labels: 20, lookups: 11,
+      requirements: 35, catalogue: 93, chain: 8, activities: 69, phases: 9, frequencies: 7, labels: 20, lookups: 11,
       audit_activities: 6, finding_conditions: 6, cycle_requirements: 6, drift_rules: 4, prep_tasks: 7, rules: 40, risk_profiles: 1,
     });
-    expect(await refCounts(db, 'ISO9001-2026')).toMatchObject({ requirements: 28, catalogue: 0, chain: 8, activities: 57, lookups: 11, rules: 39 });
-    expect(await refCounts(db, 'ISO22301-2019')).toMatchObject({ requirements: 27, chain: 8, activities: 43, lookups: 15 });
-    expect(await refCounts(db, 'ISO37001-2025')).toMatchObject({ requirements: 32, chain: 6, activities: 43, lookups: 19, rules: 40 });
+    // The content step of M2-04 (E.2): every requirement row is kept, retired rows included, and the ISO 9001:2026
+    // edition drops the transition phase of the demo (E.4).
+    expect(await refCounts(db, 'ISO9001-2026')).toMatchObject({ requirements: 84, catalogue: 0, chain: 8, activities: 43, phases: 8, lookups: 11, rules: 39, prep_tasks: 5 });
+    expect(await refCounts(db, 'ISO9001-2015')).toMatchObject({ requirements: 84, activities: 57, phases: 9 });
+    expect(await refCounts(db, 'ISO22301-2019')).toMatchObject({ requirements: 60, chain: 8, activities: 43, lookups: 15 });
+    expect(await refCounts(db, 'ISO37001-2025')).toMatchObject({ requirements: 52, chain: 6, activities: 43, lookups: 19, rules: 40, prep_tasks: 5 });
+    expect(await refCounts(db, 'ISO37001-2016')).toMatchObject({ requirements: 52, chain: 6, prep_tasks: 5 });
 
     const gate = await sql<{ phase_no: number }>`
       select distinct a.phase_no from ref.activity_template a join ref.framework_version v on v.id = a.framework_version_id
@@ -121,12 +125,12 @@ describe('installing the development packs (E.8)', () => {
       select v.pack_id, v.pack_version, v.status, v.pre_release, v.transition_ends_at, s.pack_id as supersedes, v.applicability_target as target
       from ref.framework_version v left join ref.framework_version s on s.id = v.supersedes_version_id order by v.pack_id`.execute(db.migrator);
     expect(versions.rows).toEqual([
-      { pack_id: 'ISO22301-2019', pack_version: '1.0.1', status: 'current', pre_release: false, transition_ends_at: null, supersedes: null, target: 'requirement' },
-      { pack_id: 'ISO27001-2022', pack_version: '1.2.1', status: 'current', pre_release: false, transition_ends_at: null, supersedes: null, target: 'catalogue_item' },
-      { pack_id: 'ISO37001-2016', pack_version: '1.0.1', status: 'withdrawn', pre_release: false, transition_ends_at: null, supersedes: null, target: 'requirement' },
-      { pack_id: 'ISO37001-2025', pack_version: '0.6.1', status: 'current', pre_release: true, transition_ends_at: null, supersedes: null, target: 'requirement' },
-      { pack_id: 'ISO9001-2015', pack_version: '1.4.3', status: 'transition', pre_release: false, transition_ends_at: '2029-09-15', supersedes: null, target: 'requirement' },
-      { pack_id: 'ISO9001-2026', pack_version: '0.9.1', status: 'current', pre_release: false, transition_ends_at: null, supersedes: 'ISO9001-2015', target: 'requirement' },
+      { pack_id: 'ISO22301-2019', pack_version: '1.1.0', status: 'current', pre_release: false, transition_ends_at: null, supersedes: null, target: 'requirement' },
+      { pack_id: 'ISO27001-2022', pack_version: '1.3.0', status: 'current', pre_release: false, transition_ends_at: null, supersedes: null, target: 'catalogue_item' },
+      { pack_id: 'ISO37001-2016', pack_version: '1.1.0', status: 'withdrawn', pre_release: false, transition_ends_at: null, supersedes: null, target: 'requirement' },
+      { pack_id: 'ISO37001-2025', pack_version: '0.7.0', status: 'current', pre_release: true, transition_ends_at: null, supersedes: null, target: 'requirement' },
+      { pack_id: 'ISO9001-2015', pack_version: '1.5.0', status: 'transition', pre_release: false, transition_ends_at: '2029-09-15', supersedes: null, target: 'requirement' },
+      { pack_id: 'ISO9001-2026', pack_version: '0.10.0', status: 'current', pre_release: false, transition_ends_at: null, supersedes: 'ISO9001-2015', target: 'requirement' },
     ]);
     const frameworks = await sql<{ code: string; name: string }>`select code, name from ref.framework order by code`.execute(db.migrator);
     expect(frameworks.rows).toEqual([
@@ -152,6 +156,88 @@ describe('installing the development packs (E.8)', () => {
     expect(audited.map((a) => a.entity_code)).toEqual(DEV_PACK_IDS.map((id) => `${id} ${devPack(id).manifest.pack_version}`));
     expect(audited.every((a) => a.organization_id === null && a.actor_kind === 'operator')).toBe(true);
     expect(audited[1]!.after_data).toMatchObject({ pack_id: 'ISO27001-2022', rows: { catalogue: 93, activities: 69, chain: 8 } });
+  });
+
+  it('holds the content step of M2-04 (E.2): clause trees, Annex A links, documented information, templates and review inputs', async () => {
+    const content = async (packId: string) => {
+      const { rows } = await sql<Record<string, string | null>>`
+        select
+          (select count(*) from ref.requirement r where r.framework_version_id = v.id and not r.retired) as live,
+          (select string_agg(r.requirement_code, ',' order by r.sort_order) from ref.requirement r where r.framework_version_id = v.id and r.retired) as retired,
+          (select count(*) from ref.documented_info d where d.framework_version_id = v.id) as documented_info,
+          (select count(*) from ref.document_template t where t.framework_version_id = v.id) as templates,
+          (select count(*) from ref.review_input_def i where i.framework_version_id = v.id and i.mandatory) as review_inputs,
+          (select count(*) from ref.requirement r where r.framework_version_id = v.id and r.applicability_assessable) as assessable,
+          (select count(*) from ref.requirement r where r.framework_version_id = v.id and not r.retired and coalesce(r.evidence_example, '') = ''
+              and not exists (select 1 from ref.requirement c where c.parent_id = r.id and not c.retired)) as leaves_without_example,
+          (select count(*) from ref.activity_template a where a.framework_version_id = v.id and a.output_document_code is not null
+              and not exists (select 1 from ref.document_template t where t.framework_version_id = v.id and t.code = a.output_document_code)) as open_outputs,
+          (select count(*) from ref.documented_info d where d.framework_version_id = v.id and d.template_code is not null
+              and not exists (select 1 from ref.document_template t where t.framework_version_id = v.id and t.code = d.template_code)) as open_templates
+        from ref.framework_version v where v.pack_id = ${packId}`.execute(db.migrator);
+      const r = rows[0]!;
+      return {
+        live: Number(r.live), retired: r.retired ?? '', documentedInfo: Number(r.documented_info), templates: Number(r.templates), reviewInputs: Number(r.review_inputs),
+        assessable: Number(r.assessable), open: Number(r.leaves_without_example) + Number(r.open_outputs) + Number(r.open_templates),
+      };
+    };
+    expect(await content('ISO27001-2022')).toEqual({ live: 34, retired: '10.3', documentedInfo: 15, templates: 25, reviewInputs: 10, assessable: 0, open: 0 });
+    expect(await content('ISO9001-2015')).toEqual({ live: 84, retired: '', documentedInfo: 27, templates: 25, reviewInputs: 12, assessable: 10, open: 0 });
+    expect(await content('ISO9001-2026')).toEqual({ live: 84, retired: '', documentedInfo: 27, templates: 25, reviewInputs: 13, assessable: 10, open: 0 });
+    expect(await content('ISO22301-2019')).toEqual({ live: 59, retired: '10.3', documentedInfo: 15, templates: 23, reviewInputs: 13, assessable: 0, open: 0 });
+    expect(await content('ISO37001-2016')).toEqual({ live: 50, retired: '6.3,10.3', documentedInfo: 13, templates: 23, reviewInputs: 11, assessable: 0, open: 0 });
+    expect(await content('ISO37001-2025')).toEqual({ live: 51, retired: '10.3', documentedInfo: 13, templates: 24, reviewInputs: 12, assessable: 0, open: 0 });
+
+    // Clause 10 per standard: retitled and retired, never deleted.
+    const clause10 = async (packId: string) =>
+      (await sql<{ code: string; title: string; retired: boolean }>`
+        select r.requirement_code as code, r.title_short as title, r.retired from ref.requirement r join ref.framework_version v on v.id = r.framework_version_id
+         where v.pack_id = ${packId} and r.requirement_code like '10.%' order by r.sort_order`.execute(db.migrator)).rows.map((r) => `${r.code} ${r.title}${r.retired ? ' (retired)' : ''}`);
+    expect(await clause10('ISO27001-2022')).toEqual(['10.1 Continual improvement', '10.2 Nonconformity and corrective action', '10.3 Continual improvement (retired)']);
+    expect(await clause10('ISO9001-2015')).toEqual(['10.1 Improvement: general', '10.2 Nonconformity and corrective action', '10.2.1 Responding to a nonconformity', '10.2.2 Records of nonconformities and corrective actions', '10.3 Continual improvement']);
+    expect(await clause10('ISO22301-2019')).toEqual(['10.1 Nonconformity and corrective action', '10.2 Continual improvement', '10.3 Continual improvement (retired)']);
+    expect(await clause10('ISO37001-2016')).toEqual(['10.1 Nonconformity and corrective action', '10.2 Continual improvement', '10.3 Continual improvement (retired)']);
+    expect(await clause10('ISO37001-2025')).toEqual(['10.1 Continual improvement', '10.2 Nonconformity and corrective action', '10.3 Continual improvement (retired)']);
+
+    // Annex A: 84 controls support 8.3 and nine a closer clause; every control has an evidence example.
+    const links = await sql<{ code: string; n: string; examples: string }>`
+      select r.requirement_code as code, count(*) as n, count(nullif(c.evidence_example, '')) as examples from ref.catalogue_item c
+        join ref.framework_version v on v.id = c.framework_version_id join ref.requirement r on r.id = c.requirement_id
+       where v.pack_id = 'ISO27001-2022' group by r.requirement_code`.execute(db.migrator);
+    expect(Object.fromEntries(links.rows.map((r) => [r.code, Number(r.n)]))).toEqual({ '4.2': 1, '5.1': 1, '5.2': 1, '5.3': 1, '7.3': 1, '7.4': 1, '7.5.3': 1, '8.3': 84, '9.1': 1, '9.2': 1 });
+    expect(links.rows.reduce((sum, r) => sum + Number(r.examples), 0)).toBe(93);
+
+    // SCO-01 answers clause 4.3; the activities of ISO/IEC 27001 name 13 output documents, each a template of the pack.
+    const sco = await sql`select t.code, r.requirement_code from ref.document_template t join ref.framework_version v on v.id = t.framework_version_id
+      left join ref.requirement r on r.framework_version_id = v.id and r.requirement_code = t.requirement_code where v.pack_id = 'ISO27001-2022' and t.code = 'SCO-01'`.execute(db.migrator);
+    expect(sco.rows).toEqual([{ code: 'SCO-01', requirement_code: '4.3' }]);
+    const outputs = await sql<{ code: string }>`select distinct a.output_document_code as code from ref.activity_template a join ref.framework_version v on v.id = a.framework_version_id
+      where v.pack_id = 'ISO27001-2022' and a.output_document_code is not null order by 1`.execute(db.migrator);
+    expect(outputs.rows.map((r) => r.code)).toEqual(['IMS-01', 'IMS-02', 'IMS-03', 'IMS-04', 'PLN-01', 'POL-01', 'PRC-04', 'PRC-07', 'PRC-08', 'PRC-11', 'PRC-13', 'SCO-01', 'SOA-01']);
+
+    // The ISO 37001 chain asks its questions in both languages and names a clause at risk per stage.
+    const chain = await sql<{ stage_key: string; clause_at_risk: string | null; en: string; id: string }>`
+      select c.stage_key, c.clause_at_risk, c.auditor_question_en as en, c.auditor_question_id as id from ref.traceability_chain_def c
+        join ref.framework_version v on v.id = c.framework_version_id where v.pack_id = 'ISO37001-2025' order by c.position`.execute(db.migrator);
+    expect(chain.rows.map((r) => [r.stage_key, r.clause_at_risk])).toEqual([['context', '4.1'], ['brisk', '4.5'], ['control', '8.1'], ['associate', '8.2'], ['document', '7.5'], ['evidence', '8.1 / 9.1']]);
+    expect(chain.rows.every((r) => r.en !== '' && r.id !== '' && r.en !== r.id)).toBe(true);
+
+    // Derivation JSON on the cycle requirements that have a data source; no demo facts in prep tasks.
+    const cycle = await sql<{ code: string; kind: string | null }>`
+      select d.code, d.derivation->>'kind' as kind from ref.cycle_requirement_def d join ref.framework_version v on v.id = d.framework_version_id
+       where v.pack_id = 'ISO27001-2022' order by d.sort_order`.execute(db.migrator);
+    expect(cycle.rows).toEqual([
+      { code: 'RISK_ASSESSMENT', kind: 'risk_assessment_current' },
+      { code: 'INTERNAL_AUDIT', kind: 'internal_audit_done' },
+      { code: 'MGMT_REVIEW', kind: 'management_review_closed' },
+      { code: 'CORRECTIVE_ACTION', kind: 'corrective_actions_closed' },
+      { code: 'PERFORMANCE_EVALUATION', kind: 'metrics_current' },
+      { code: 'DOCUMENT_REVIEW', kind: 'documents_reviewed_on_time' },
+    ]);
+    const demoText = await sql<{ n: string }>`
+      select (select count(*) from ref.prep_task_template where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint|Internal audit 2026 report|EX-01)')
+           + (select count(*) from ref.cycle_requirement_def where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint)') as n`.execute(db.migrator);
+    expect(Number(demoText.rows[0]!.n)).toBe(0);
   });
 
   it('treats a second installation of the same versions as a no-op', async () => {
@@ -191,8 +277,7 @@ describe('installing the development packs (E.8)', () => {
         select v.id, (select count(*) from ref.requirement r where r.framework_version_id = v.id) as n
         from ref.framework_version v where v.pack_id = 'ISO27001-2022'`.execute(db.migrator);
       const update = changedPack('ISO27001-2022', (s) => {
-        // Below 1.3.0, the content step: the Milestone 1 content may leave content references open (E.1).
-        s.manifest.pack_version = '1.2.9';
+        s.manifest.pack_version = '1.4.0';
         editDataset(s, 'activities.csv', ',Secure top management mandate,', ',Secure the mandate of top management,');
         editDataset(s, 'requirements.csv', 'Understanding the organization and its context', 'Understanding the organisation and its context');
         editDataset(s, 'catalogue.csv', 'Policies for information security', 'Information security policies');
@@ -200,12 +285,12 @@ describe('installing the development packs (E.8)', () => {
         editDataset(s, 'lookups.csv', 'doc_type,policy,Policy,', 'doc_type,policy,Policy document,');
       });
       const outcome = await testInstaller(db.packInstaller).install(update.bytes, { actor: OPERATOR });
-      expect(outcome).toMatchObject({ status: 'installed', version: '1.2.9', updatedEdition: true, previousVersion: '1.2.1' });
+      expect(outcome).toMatchObject({ status: 'installed', version: '1.4.0', updatedEdition: true, previousVersion: '1.3.0' });
 
       const after = await sql<{ id: string; pack_version: string; status: string; n: string }>`
         select v.id, v.pack_version, v.status, (select count(*) from ref.requirement r where r.framework_version_id = v.id) as n
         from ref.framework_version v where v.pack_id = 'ISO27001-2022'`.execute(db.migrator);
-      expect(after.rows).toEqual([{ id: before.rows[0]!.id, pack_version: '1.2.9', status: 'current', n: before.rows[0]!.n }]);
+      expect(after.rows).toEqual([{ id: before.rows[0]!.id, pack_version: '1.4.0', status: 'current', n: before.rows[0]!.n }]);
       const titles = await sql<{ requirement: string; item: string; activity: string; label: string; lookup: string }>`
         select (select title_short from ref.requirement where framework_version_id = v.id and requirement_code = '4.1') as requirement,
                (select title_short from ref.catalogue_item where framework_version_id = v.id and item_code = 'A.5.1') as item,
@@ -222,8 +307,8 @@ describe('installing the development packs (E.8)', () => {
       });
       const installs = (await packInstallRows(db)).filter((r) => r.pack_id === 'ISO27001-2022');
       expect(installs).toEqual([
-        { pack_id: 'ISO27001-2022', pack_version: '1.2.1', status: 'superseded' },
-        { pack_id: 'ISO27001-2022', pack_version: '1.2.9', status: 'installed' },
+        { pack_id: 'ISO27001-2022', pack_version: '1.3.0', status: 'superseded' },
+        { pack_id: 'ISO27001-2022', pack_version: '1.4.0', status: 'installed' },
       ]);
 
       // The tenant's activity copies keep the titles and the template version of the activation.
@@ -233,8 +318,8 @@ describe('installing the development packs (E.8)', () => {
           select title, template_pack_version from ${sql.id(tenant.schemaName, 'implementation_activity_progress')} order by phase_no, activity_no`.execute(trx);
       });
       expect(scoped.rows).toHaveLength(69);
-      expect(scoped.rows[0]).toEqual({ title: 'Secure top management mandate', template_pack_version: '1.2.1' });
-      expect(scoped.rows.every((r) => r.template_pack_version === '1.2.1')).toBe(true);
+      expect(scoped.rows[0]).toEqual({ title: 'Secure top management mandate', template_pack_version: '1.3.0' });
+      expect(scoped.rows.every((r) => r.template_pack_version === '1.3.0')).toBe(true);
     });
 
     it('rejects an older version than the installed one and writes nothing but the rejection', async () => {
@@ -243,7 +328,7 @@ describe('installing the development packs (E.8)', () => {
       const older = changedPack('ISO27001-2022', (s) => {
         s.manifest.pack_version = '1.1.0';
       });
-      await expectRejected(testInstaller(db.packInstaller).install(older.bytes, { actor: OPERATOR }), 'downgrade', /older than the installed version 1\.2\.9/);
+      await expectRejected(testInstaller(db.packInstaller).install(older.bytes, { actor: OPERATOR }), 'downgrade', /older than the installed version 1\.4\.0/);
       expect(await totalRefRows(db)).toBe(refBefore);
       expect(await packInstallRows(db)).toEqual(installsBefore);
       const rejected = await auditActions(db, 'pack.rejected');
@@ -343,34 +428,21 @@ function setCsv(source: MutableSource, file: string, header: readonly string[], 
   source.datasets.set(file, Buffer.from(`${[header.join(','), ...rows.map((r) => header.map((h) => csvField(r[h] ?? '')).join(','))].join('\n')}\n`, 'utf8'));
 }
 
-/** ISO 22301 with documented information, so every content reference resolves: subclauses 8.2.1 to 8.2.3 and the output templates. */
-function iso22301WithDocumentedInfo(version: string) {
+/**
+ * ISO 22301 of the content step (M2-04, E.2), which holds documented information, template clauses, sub-clauses and
+ * a retired row, with a governing body review input and an internal audit template added (the development pack has
+ * neither).
+ */
+function iso22301WithInternalAudit(version: string) {
   return changedPack('ISO22301-2019', (s) => {
     s.manifest.pack_version = version;
-    editCsv(s, 'requirements.csv', (rows) => {
-      const base = rows.find((r) => r.requirement_code === '8.2')!;
-      const sub = ['8.2.1', '8.2.2', '8.2.3'].map((code, i) => ({ ...base, requirement_code: code, parent_code: '8.2', title_short: `Analysis part ${i + 1}`, is_hs_common: 'false' }));
-      const all = [...rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'true' } : r)), ...sub];
-      const key = (code: string) => code.split('.').map((n) => n.padStart(3, '0')).join('.');
-      return all.sort((a, b) => key(a.requirement_code!).localeCompare(key(b.requirement_code!))).map((r, i) => ({ ...r, sort_order: String(i + 1) }));
-    });
-    const outputs = [...new Set(parseCsv(s.datasets.get('activities.csv')!.toString('utf8')).slice(1).map((r: string[]) => r[7]).filter((c): c is string => !!c))];
-    setCsv(s, 'document_templates.csv', ['code', 'title', 'doc_type', 'requirement_code'], [
-      { code: 'SCO-01', title: 'Scope statement', doc_type: 'record', requirement_code: '4.3' },
-      ...outputs.map((code) => ({ code, title: `Template ${code}`, doc_type: 'plan', requirement_code: '' })),
-    ]);
-    setCsv(s, 'documented_info.csv', ['code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'], [
-      { code: 'DI-4.3', requirement_code: '4.3', kind: 'maintain', title: 'Scope of the business continuity management system', template_code: 'SCO-01', sort_order: '1' },
-      { code: 'DI-9.2', requirement_code: '9.2', kind: 'retain', title: 'Audit programme and audit results', template_code: '', sort_order: '2' },
-    ]);
-    setCsv(s, 'review_inputs.csv', ['code', 'title', 'mandatory', 'sort_order', 'review_kind'], [
-      { code: 'MRI-01', title: 'Status of actions from previous reviews', mandatory: 'true', sort_order: '1', review_kind: 'management' },
-      { code: 'GBR-01', title: 'Results of the management review', mandatory: 'false', sort_order: '2', review_kind: 'governing_body' },
+    editCsv(s, 'review_inputs.csv', (rows) => [
+      ...rows,
+      { code: 'GB-01', title: 'Results of the management review', mandatory: 'false', sort_order: String(rows.length + 1), review_kind: 'governing_body' },
     ]);
     setCsv(s, 'audit_activities.csv', ['code', 'event_type', 'clause_ref', 'title', 'auditee_role', 'key_questions', 'evidence_to_request', 'sort_order'], [
       { code: 'AA-IA-01', event_type: 'internal_audit', clause_ref: '9.2', title: 'Check the audit programme', auditee_role: 'Internal Auditor', key_questions: '', evidence_to_request: 'Audit programme', sort_order: '1' },
     ]);
-    editCsv(s, 'cycle_requirements.csv', (rows) => rows.map((r, i) => (i === 0 ? { ...r, derivation: '{"kind":"bia_approved"}' } : r)));
   });
 }
 
@@ -378,31 +450,34 @@ describe('the pack format of engine 1.1.0 (Milestone 2 E.1)', () => {
   const db = useTestDatabase('empty');
 
   it('writes retired rows, documented information, template clauses, review kinds and internal audit templates', async () => {
-    const pack = iso22301WithDocumentedInfo('1.0.2');
+    const pack = iso22301WithInternalAudit('1.1.1');
     expect(pack.warnings).toEqual([]);
     const outcome = await testInstaller(db.packInstaller).install(pack.bytes, { actor: OPERATOR });
-    expect(outcome).toMatchObject({ status: 'installed', version: '1.0.2', updatedEdition: false, changes: null, warnings: [] });
-    expect(outcome.status === 'installed' && outcome.rows).toMatchObject({ documentedInfo: 2, documentTemplates: 9, reviewInputs: 2, auditActivities: 1, requirements: 30 });
+    expect(outcome).toMatchObject({ status: 'installed', version: '1.1.1', updatedEdition: false, changes: null, warnings: [] });
+    expect(outcome.status === 'installed' && outcome.rows).toMatchObject({ documentedInfo: 15, documentTemplates: 23, reviewInputs: 14, auditActivities: 1, requirements: 60 });
     const version = (await sql<{ id: string }>`select id from ref.framework_version where pack_id = 'ISO22301-2019'`.execute(db.migrator)).rows[0]!.id;
     const info = await sql`select code, requirement_code, kind, title, template_code, sort_order from ref.documented_info where framework_version_id = ${version} order by sort_order`.execute(db.migrator);
-    expect(info.rows).toEqual([
-      { code: 'DI-4.3', requirement_code: '4.3', kind: 'maintain', title: 'Scope of the business continuity management system', template_code: 'SCO-01', sort_order: 1 },
-      { code: 'DI-9.2', requirement_code: '9.2', kind: 'retain', title: 'Audit programme and audit results', template_code: null, sort_order: 2 },
+    expect(info.rows).toHaveLength(15);
+    expect(info.rows.slice(0, 2)).toEqual([
+      { code: 'DI-01', requirement_code: '4.2.2', kind: 'maintain', title: 'Legal, regulatory and other requirements', template_code: 'REG-B02', sort_order: 1 },
+      { code: 'DI-02', requirement_code: '4.3.2', kind: 'maintain', title: 'Scope of the BCMS and the reasons for any exclusion', template_code: 'SCO-B01', sort_order: 2 },
     ]);
-    const retired = await sql<{ requirement_code: string; retired: boolean; parent: string | null }>`
+    const tree = await sql<{ requirement_code: string; retired: boolean; parent: string | null }>`
       select r.requirement_code, r.retired, p.requirement_code as parent from ref.requirement r left join ref.requirement p on p.id = r.parent_id
        where r.framework_version_id = ${version} and (r.retired or r.parent_id is not null) order by r.sort_order`.execute(db.migrator);
-    expect(retired.rows).toEqual([
+    expect(tree.rows.filter((r) => r.retired)).toEqual([{ requirement_code: '10.3', retired: true, parent: null }]);
+    expect(tree.rows.filter((r) => r.parent)).toHaveLength(33);
+    expect(tree.rows.filter((r) => r.parent === '8.2')).toEqual([
       { requirement_code: '8.2.1', retired: false, parent: '8.2' },
       { requirement_code: '8.2.2', retired: false, parent: '8.2' },
       { requirement_code: '8.2.3', retired: false, parent: '8.2' },
-      { requirement_code: '10.3', retired: true, parent: null },
     ]);
-    expect((await sql`select requirement_code from ref.document_template where framework_version_id = ${version} and code = 'SCO-01'`.execute(db.migrator)).rows).toEqual([{ requirement_code: '4.3' }]);
-    expect((await sql`select code, review_kind from ref.review_input_def where framework_version_id = ${version} order by sort_order`.execute(db.migrator)).rows).toEqual([
-      { code: 'MRI-01', review_kind: 'management' },
-      { code: 'GBR-01', review_kind: 'governing_body' },
-    ]);
+    expect(tree.rows.find((r) => r.requirement_code === '7.5.3.1')).toEqual({ requirement_code: '7.5.3.1', retired: false, parent: '7.5.3' });
+    expect((await sql`select requirement_code from ref.document_template where framework_version_id = ${version} and code = 'SCO-B01'`.execute(db.migrator)).rows).toEqual([{ requirement_code: '4.3.2' }]);
+    const kinds = (await sql<{ code: string; review_kind: string }>`select code, review_kind from ref.review_input_def where framework_version_id = ${version} order by sort_order`.execute(db.migrator)).rows;
+    expect(kinds).toHaveLength(14);
+    expect(kinds[0]).toEqual({ code: 'MR-01', review_kind: 'management' });
+    expect(kinds.at(-1)).toEqual({ code: 'GB-01', review_kind: 'governing_body' });
     expect((await sql`select event_type from ref.audit_activity_template where framework_version_id = ${version}`.execute(db.migrator)).rows).toEqual([{ event_type: 'internal_audit' }]);
     expect((await sql`select derivation from ref.cycle_requirement_def where framework_version_id = ${version} order by sort_order limit 1`.execute(db.migrator)).rows).toEqual([{ derivation: { kind: 'bia_approved' } }]);
   });
@@ -485,7 +560,7 @@ describe('mapping rows whose target pack is not installed yet (Milestone 2 E.1)'
 
     // A newer target version retries again without writing a row twice; the row that never resolves stays out.
     const newer = changedPack('ISO22301-2019', (s) => {
-      s.manifest.pack_version = '1.0.2';
+      s.manifest.pack_version = '1.1.1';
     });
     expect(await testInstaller(db.packInstaller).install(newer.bytes, { actor: OPERATOR })).toMatchObject({ status: 'installed', mappingsRetried: 2 });
     expect((await mappingRows()).rows).toEqual(written);
@@ -493,7 +568,7 @@ describe('mapping rows whose target pack is not installed yet (Milestone 2 E.1)'
 
   it('writes catalogue item sources directly when the target pack is installed', async () => {
     const update = changedPack('ISO27001-2022', (s) => {
-      s.manifest.pack_version = '1.2.2';
+      s.manifest.pack_version = '1.3.1';
       mappings([{ source_code: 'A.5.30', target_pack_id: 'ISO22301-2019', target_code: '8.4', mapping_type: 'partial', evidence_reusable: 'true', note: '' }])(s);
     });
     expect(await testInstaller(db.packInstaller).install(update.bytes, { actor: OPERATOR })).toMatchObject({ status: 'installed', skippedMappings: 0, mappingsRetried: 0 });

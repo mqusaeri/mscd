@@ -4,6 +4,16 @@
 // risks; BR-22 confirmation for rows shared by several systems; `integrated_mode` for a second system), and metric
 // values. Every command resolves records through `RecordResolver`, people through `MembershipService`, honours
 // `If-Match` where the route asks for it and writes its audit entry in the same transaction.
+//
+// Milestone 2 (D.2, D.3, M2-07) adds two kinds with own-row rights (`register.manage` own) and an owner that is never
+// none:
+// - `objectives` (`quality_objective`, ISO 9001 6.2): rows of one system (`management_system_id`, no system links),
+//   with statement, target, metric, due date, resources, evaluation method, status, result and achieved date;
+// - `competence` (`competence_record`, clause 7.2): rows shared with systems through `entity_ms_link`, with the
+//   person, the role (the row's title), the competence required, the proof type and file, achieved and valid until
+//   dates and the verifier. The table has no code column, so the code is derived from the id (`competence.ts`).
+//   Competence rows of other people are listed only to MS Managers, Programme Owners and Internal Auditors (the full
+//   read scope); everyone else sees the rows where they are the person or the owner (H.5).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
@@ -19,17 +29,22 @@ import {
   type ShareableEntityType,
 } from '@mscd/shared';
 import { sql, type RawBuilder } from 'kysely';
+import { Clock } from '../../common/clock';
+import { addDays } from '../../common/dates';
 import { assertIfMatch } from '../../common/etag';
-import { ConflictError, ForbiddenError, NotImplementedError, ValidationError } from '../../common/problems';
+import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
+import { ConflictError, ForbiddenError, ValidationError } from '../../common/problems';
 import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type LicenceGate,
   type MembershipService, type MsRef, type Principal, type RecordResolver, type ScopePolicy, type Trx,
 } from '../../common/tokens';
+import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
+import { COMPETENCE_REMINDER_DAYS, COMPETENCE_ROLE_MAX, competenceCode, roleTooLong } from './competence';
 import { confirmShared, type Br17Input } from './rules';
 import {
-  assertFrequency, bump, commandResult, duplicateCode, editionOf, grantedInFull, linksOf, orgOf, refOf, unprocessable, type LinkRow,
+  assertFrequency, bump, commandResult, duplicateCode, editionOf, grantedInFull, linksOf, orgOf, refOf, todayOf, unprocessable, type LinkRow,
 } from './support';
 
 /** Chain record text of a new risk until a treatment is linked (the sample's wording, UI 1.8). */
@@ -37,7 +52,8 @@ export const RISK_NEEDS_TREATMENT = 'Select a treatment: no treatment linked';
 /** Chain record text of a new metric until its first value is recorded. */
 export const METRIC_NEEDS_VALUE = 'Enter the first value';
 
-type FieldKind = 'text' | 'date' | 'int' | 'number' | 'bool' | 'json';
+/** Column types: `person` is a handle on the wire and a user id in the table, `metric` a metric code and a metric id. */
+type FieldKind = 'text' | 'date' | 'int' | 'number' | 'bool' | 'json' | 'person' | 'metric' | 'uuid';
 type KindKey = keyof typeof KIND_KEY_SET;
 
 interface FieldSpec {
@@ -52,6 +68,8 @@ const KIND_KEY_SET = {
   issueType: 1, description: 1, lastReviewedAt: 1, requirements: 1, assetType: 1, classification: 1, riskProfileCode: 1, isOpportunity: 1,
   likelihood: 1, consequence: 1, impactDimensions: 1, residualLikelihood: 1, residualConsequence: 1, treatmentOption: 1, assessedAt: 1,
   nextReviewAt: 1, residualAcceptedAt: 1, unit: 1, targetValue: 1, frequencyCode: 1, lastMeasuredAt: 1,
+  statement: 1, targetText: 1, metricCode: 1, dueAt: 1, resources: 1, evaluationMethod: 1, objectiveStatus: 1, result: 1, achievedAt: 1,
+  personHandle: 1, competenceRequired: 1, proofType: 1, proofObjectId: 1, validUntil: 1, verifiedByHandle: 1,
 } as const;
 const KIND_KEYS = Object.keys(KIND_KEY_SET) as KindKey[];
 
@@ -90,28 +108,65 @@ const FIELDS: Readonly<Record<RegisterKind, readonly FieldSpec[]>> = {
     { key: 'frequencyCode', column: 'frequency_code', type: 'text' },
     { key: 'lastMeasuredAt', column: 'last_measured_at', type: 'date', readOnly: 'Recording a metric value sets it (POST .../values)' },
   ],
-  // Milestone 2 register kinds (D.2): the contract exists from wave 1a, M2-07 adds their fields and behaviour.
-  'objectives': [],
-  'competence': [],
+  'objectives': [
+    { key: 'statement', column: 'statement', type: 'text' },
+    { key: 'targetText', column: 'target_text', type: 'text' },
+    { key: 'metricCode', column: 'metric_id', type: 'metric' },
+    { key: 'dueAt', column: 'due_at', type: 'date' },
+    { key: 'resources', column: 'resources', type: 'text' },
+    { key: 'evaluationMethod', column: 'evaluation_method', type: 'text' },
+    { key: 'objectiveStatus', column: 'status', type: 'text' },
+    { key: 'result', column: 'result', type: 'text' },
+    { key: 'achievedAt', column: 'achieved_at', type: 'date' },
+  ],
+  'competence': [
+    { key: 'personHandle', column: 'user_id', type: 'person' },
+    { key: 'competenceRequired', column: 'competence_required', type: 'text' },
+    { key: 'proofType', column: 'proof_type', type: 'text' },
+    { key: 'proofObjectId', column: 'storage_object_id', type: 'uuid' },
+    { key: 'achievedAt', column: 'achieved_at', type: 'date' },
+    { key: 'validUntil', column: 'valid_until', type: 'date' },
+    { key: 'verifiedByHandle', column: 'verified_by', type: 'person' },
+  ],
 };
 
-/** Register kinds whose behaviour M2-07 builds; until then every route answers 501 `not-implemented` for them. */
-const PENDING_KINDS: ReadonlySet<RegisterKind> = new Set(['objectives', 'competence']);
-
-function assertKindBuilt(kind: RegisterKind, routeId: string): void {
-  if (PENDING_KINDS.has(kind)) throw new NotImplementedError(`${routeId} ${kind}`, 'M2-07');
+/** How each register kind is stored. */
+interface KindMeta {
+  /** Linked to systems through `entity_ms_link` (else the row has `management_system_id`). */
+  shared: boolean;
+  /** The row has a `code` column (a competence record's code is derived from its id). */
+  hasCode: boolean;
+  /** Column of the row's title (`role_title` for competence). */
+  titleColumn: string;
+  /** The row has a `position` column. */
+  positioned: boolean;
+  /** Rows are chain records with `pending_action` (C.10): their status is `open` or `ready`. */
+  chain: boolean;
+  /** The owner can never be none (Milestone 2 D.2: objectives and competence). */
+  ownerRequired: boolean;
 }
+
+const META: Readonly<Record<RegisterKind, KindMeta>> = {
+  'context-issues': { shared: true, hasCode: true, titleColumn: 'title', positioned: true, chain: true, ownerRequired: false },
+  'interested-parties': { shared: true, hasCode: true, titleColumn: 'title', positioned: true, chain: false, ownerRequired: false },
+  'assets': { shared: true, hasCode: true, titleColumn: 'title', positioned: true, chain: false, ownerRequired: false },
+  'risks': { shared: true, hasCode: true, titleColumn: 'title', positioned: true, chain: true, ownerRequired: false },
+  'metrics': { shared: true, hasCode: true, titleColumn: 'title', positioned: true, chain: true, ownerRequired: false },
+  'objectives': { shared: false, hasCode: true, titleColumn: 'title', positioned: true, chain: true, ownerRequired: true },
+  'competence': { shared: true, hasCode: false, titleColumn: 'role_title', positioned: false, chain: true, ownerRequired: true },
+};
+
+/** Fields a new competence record must have (the table's NOT NULL columns). */
+const COMPETENCE_REQUIRED: readonly KindKey[] = ['personHandle', 'competenceRequired', 'proofType'];
+const ROLE_TOO_LONG = `The role of a competence record has at most ${COMPETENCE_ROLE_MAX} characters`;
 
 /** Fields the Risk Owner may change on own risks (F.6 `risk.manage` own: assessment fields). */
 export const RISK_ASSESSMENT_KEYS: ReadonlySet<string> = new Set([
   'likelihood', 'consequence', 'impactDimensions', 'residualLikelihood', 'residualConsequence', 'treatmentOption', 'assessedAt', 'nextReviewAt',
 ]);
 
-/** Kinds whose rows are chain records (C.10) with `pending_action`. */
-const CHAIN_KINDS: ReadonlySet<RegisterKind> = new Set(['context-issues', 'risks', 'metrics']);
-
 /** A stored register row as the commands read it (snake_case columns). */
-type Row = Record<string, unknown> & { id: string; code: string; title: string; owner_user_id: string | null; updated_at: Date };
+type Row = Record<string, unknown> & { id: string; owner_user_id: string | null; updated_at: Date };
 
 interface RiskProfile {
   likelihood: { min: number; max: number };
@@ -140,11 +195,28 @@ function sqlValue(value: unknown, type: FieldKind): unknown {
   return value;
 }
 
-/** Wire value of a stored column. */
-function wireValue(value: unknown, type: FieldKind): unknown {
+/** Wire value of a stored column (people and metrics come from the joined `<column>__label` of the list query). */
+function wireValue(row: Record<string, unknown>, field: FieldSpec): unknown {
+  const value = field.type === 'person' || field.type === 'metric' ? row[`${field.column}__label`] : row[field.column];
   if (value === null || value === undefined) return null;
-  if (type === 'number' || type === 'int') return Number(value);
+  if (field.type === 'number' || field.type === 'int') return Number(value);
   return value;
+}
+
+/** Business code of a row: its code, or for a competence record the code derived from its id. */
+function codeOf(kind: RegisterKind, row: Pick<Row, 'id'> & { code?: unknown }): string {
+  return META[kind].hasCode ? String(row.code) : competenceCode(row.id);
+}
+
+/** Labels of the person and metric columns of a kind for the list query (`<column>__label`). */
+function labelColumns(kind: RegisterKind): RawBuilder<unknown>[] {
+  return FIELDS[kind]
+    .filter((f) => f.type === 'person' || f.type === 'metric')
+    .map((f) =>
+      f.type === 'person'
+        ? sql`(select u.handle from platform.app_user u where u.id = ${sql.ref(`t.${f.column}`)}) as ${sql.ref(`${f.column}__label`)}`
+        : sql`(select m.code from metric m where m.id = ${sql.ref(`t.${f.column}`)}) as ${sql.ref(`${f.column}__label`)}`,
+    );
 }
 
 @Injectable()
@@ -152,11 +224,13 @@ export class RegistersService {
   constructor(
     private readonly tenancy: TenantScope,
     private readonly rules: RuleEngine,
+    private readonly clock: Clock,
     @Inject(RECORD_RESOLVER) private readonly records: RecordResolver,
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
     @Inject(LICENCE_GATE) private readonly licence: LicenceGate,
     @Inject(SCOPE_POLICY) private readonly scope: ScopePolicy,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -164,32 +238,46 @@ export class RegistersService {
   // -------------------------------------------------------------------------------------------------------------
 
   async list(principal: Principal, authz: AuthzState | null, ms: string, kind: RegisterKind, query: RegisterListQuery): Promise<Page<RegisterItem>> {
-    assertKindBuilt(kind, 'registers.list');
     const table = REGISTER_ENTITY_TYPES[kind];
+    const meta = META[kind];
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
+      const labels = labelColumns(kind);
+      const links = meta.shared
+        ? sql`(select json_agg(json_build_object('slug', m.slug, 'primary', l2.is_primary) order by l2.is_primary desc, m.slug)
+                 from entity_ms_link l2 join management_system m on m.id = l2.management_system_id
+                where l2.entity_type = ${table} and l2.entity_id = t.id and l2.deleted_at is null)`
+        : sql`json_build_array(json_build_object('slug', ${system.slug}::text, 'primary', true))`;
+      const inSystem = meta.shared
+        ? sql`exists (select 1 from entity_ms_link l where l.entity_type = ${table} and l.entity_id = t.id
+                        and l.management_system_id = ${system.id} and l.deleted_at is null)`
+        : sql`t.management_system_id = ${system.id}`;
+      const order = meta.positioned ? sql`t.position, t.code` : sql`t.created_at, t.id`;
       const { rows } = await sql<Row & { owner_handle: string | null; owner_name: string | null; links: { slug: string; primary: boolean }[] }>`
-        select t.*, o.handle as owner_handle, o.display_name as owner_name,
-               (select json_agg(json_build_object('slug', m.slug, 'primary', l2.is_primary) order by l2.is_primary desc, m.slug)
-                  from entity_ms_link l2 join management_system m on m.id = l2.management_system_id
-                 where l2.entity_type = ${table} and l2.entity_id = t.id and l2.deleted_at is null) as links
+        select t.*, o.handle as owner_handle, o.display_name as owner_name, ${links} as links
+               ${labels.length > 0 ? sql`, ${sql.join(labels)}` : sql``}
           from ${sql.table(table)} t
           left join platform.app_user o on o.id = t.owner_user_id
-         where t.deleted_at is null
-           and exists (select 1 from entity_ms_link l where l.entity_type = ${table} and l.entity_id = t.id
-                         and l.management_system_id = ${system.id} and l.deleted_at is null)
-         order by t.position, t.code`.execute(trx);
+         where t.deleted_at is null and ${inSystem}
+         order by ${order}`.execute(trx);
+      // H.5: competence records of other people only for the full read scope (MS Manager, Programme Owner, Internal
+      // Auditor); everyone else sees the rows where they are the person or the owner.
+      const listed = kind === 'competence' && readScope.kind !== 'full'
+        ? rows.filter((row) => 'userId' in readScope && (row.user_id === readScope.userId || row.owner_user_id === readScope.userId))
+        : rows;
       const words = (query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
       // Top Management: pending data as aggregates only (F.7, Q-8): rows of other people carry no owner and no next
-      // review date, and the owner filter and the search match only what the caller sees.
-      const items = rows
+      // review or due date, and the owner filter and the search match only what the caller sees.
+      const items = listed
         .map((row) => {
           const item = this.itemOf(kind, row, row.owner_handle, row.links ?? []);
-          const shown = this.scope.holderShown(readScope, { ownerUserId: row.owner_user_id });
+          const scoped = { ownerUserId: row.owner_user_id, holderUserId: kind === 'competence' ? (row.user_id as string) : null };
+          const shown = this.scope.holderShown(readScope, scoped);
           const hidden: RegisterItem = { ...item, owner: 'none' };
           if (hidden.nextReviewAt !== undefined) hidden.nextReviewAt = null;
-          return { row, shown, item: shown ? item : hidden, ownerUserId: row.owner_user_id };
+          if (hidden.dueAt !== undefined) hidden.dueAt = null;
+          return { row, shown, item: shown ? item : hidden, ...scoped };
         })
         .filter(({ row, item, shown }) => {
           // The owner filter matches the real owner, and only when it is shown: `owner=none` lists the rows that are
@@ -201,7 +289,7 @@ export class RegistersService {
           if (query.status !== undefined && item.status !== query.status) return false;
           if (words.length === 0) return true;
           const person = shown ? [row.owner_name, row.owner_handle] : [];
-          const haystack = [row.code, row.title, ...person].filter(Boolean).join(' ').toLowerCase();
+          const haystack = [item.code, item.title, ...person].filter(Boolean).join(' ').toLowerCase();
           return words.every((w) => haystack.includes(w));
         });
       const visible = this.scope.filter(readScope, items);
@@ -212,19 +300,23 @@ export class RegistersService {
 
   private itemOf(kind: RegisterKind, row: Row, ownerHandle: string | null, links: readonly { slug: string; primary: boolean }[]): RegisterItem {
     const table = REGISTER_ENTITY_TYPES[kind];
+    const meta = META[kind];
+    const code = codeOf(kind, row);
     const item: Record<string, unknown> = {
-      ref: refOf('audit', table, row.id, row.code, new Date(row.updated_at)),
-      code: row.code,
-      title: row.title,
+      ref: refOf('audit', table, row.id, code, new Date(row.updated_at)),
+      code,
+      title: row[meta.titleColumn],
       owner: ownerHandle ?? 'none',
       updatedAt: new Date(row.updated_at).toISOString(),
       shared: links.length > 1,
       ms: links.map((l) => l.slug),
     };
-    if (CHAIN_KINDS.has(kind)) item.status = row.pending_action ? 'open' : 'ready';
+    if (meta.chain) item.status = row.pending_action ? 'open' : 'ready';
     for (const field of FIELDS[kind]) {
-      const value = wireValue(row[field.column], field.type);
+      const value = wireValue(row, field);
       if (field.key === 'riskProfileCode' || field.key === 'isOpportunity' || field.key === 'impactDimensions') {
+        if (value !== null) item[field.key] = value;
+      } else if (field.key === 'personHandle' || field.key === 'competenceRequired' || field.key === 'proofType') {
         if (value !== null) item[field.key] = value;
       } else {
         item[field.key] = value;
@@ -238,10 +330,11 @@ export class RegistersService {
   // -------------------------------------------------------------------------------------------------------------
 
   async create(principal: Principal, authz: AuthzState | null, ms: string, kind: RegisterKind, body: RegisterCreate): Promise<CommandResult> {
-    assertKindBuilt(kind, 'registers.create');
     const org = orgOf(principal);
     const actor = principal.user.id;
     const table = REGISTER_ENTITY_TYPES[kind];
+    const meta = META[kind];
+    this.assertCreateShape(kind, body);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const owner = body.ownerHandle !== undefined ? await this.members.resolveHandle(trx, body.ownerHandle) : kind === 'risks' ? null : actor;
@@ -250,30 +343,38 @@ export class RegistersService {
       } else if (!grantedInFull(authz, 'register.manage') && owner !== actor) {
         throw new ForbiddenError('You can add rows only with yourself as the owner');
       }
-      const systems = await this.linkedSystems(trx, system, body.linkedMs);
-      const values = this.kindValues(kind, body, 'create');
+      if (meta.ownerRequired && owner === null) throw ownerRequired();
+      const systems = meta.shared ? await this.linkedSystems(trx, system, body.linkedMs) : [system];
+      const input = this.kindValues(kind, body, 'create');
+      const { values, shown } = await this.resolveValues(trx, kind, system, input);
       const edition = await editionOf(trx, system.id);
       if (kind === 'risks') {
         values.risk_profile_code ??= await this.defaultProfile(trx, edition);
+        shown.risk_profile_code ??= values.risk_profile_code;
         await this.rules.enforce<Br17Input>(trx, 'BR-17', { ownerUserId: owner }, { msIds: systems.map((s) => s.id) });
       }
       await this.validateKind(trx, kind, edition, values, {});
       if (systems.length > 1) await this.licence.assertFeature(org.id, 'integrated_mode', trx);
-      await this.assertCodeFree(trx, table, body.code, null);
+      if (meta.hasCode) await this.assertCodeFree(trx, kind, body.code!, null, system);
 
       const id = randomUUID();
-      const position = await sql<{ next: number }>`select coalesce(max(position), -1)::int + 1 as next from ${sql.table(table)}`.execute(trx);
+      const code = meta.hasCode ? body.code! : competenceCode(id);
       const pending = kind === 'risks' ? RISK_NEEDS_TREATMENT : kind === 'metrics' ? METRIC_NEEDS_VALUE : null;
       const columns: Record<string, unknown> = {
         id,
-        code: body.code,
-        title: body.title,
+        [meta.titleColumn]: body.title,
         owner_user_id: owner,
-        position: position.rows[0]?.next ?? 0,
         created_by: actor,
         updated_by: actor,
-        ...(CHAIN_KINDS.has(kind) ? { pending_action: pending } : {}),
+        ...(meta.chain ? { pending_action: pending } : {}),
       };
+      if (meta.hasCode) columns.code = body.code;
+      if (!meta.shared) columns.management_system_id = system.id;
+      if (meta.positioned) {
+        const scopeFilter = meta.shared ? sql`` : sql`where management_system_id = ${system.id}`;
+        const position = await sql<{ next: number }>`select coalesce(max(position), -1)::int + 1 as next from ${sql.table(table)} ${scopeFilter}`.execute(trx);
+        columns.position = position.rows[0]?.next ?? 0;
+      }
       for (const field of FIELDS[kind]) {
         if (values[field.column] !== undefined) columns[field.column] = sqlValue(values[field.column], field.type);
       }
@@ -286,32 +387,53 @@ export class RegistersService {
           returning updated_at`.execute(trx);
         updatedAt = new Date(rows[0]!.updated_at);
       } catch (error) {
-        duplicateCode(error, body.code);
+        duplicateCode(error, code);
       }
-      for (const [index, s] of systems.entries()) {
-        await trx
-          .insertInto('entity_ms_link')
-          .values({ entity_type: table as ShareableEntityType, entity_id: id, management_system_id: s.id, is_primary: index === 0, created_by: actor, updated_by: actor })
-          .execute();
+      if (meta.shared) {
+        for (const [index, s] of systems.entries()) {
+          await trx
+            .insertInto('entity_ms_link')
+            .values({ entity_type: table as ShareableEntityType, entity_id: id, management_system_id: s.id, is_primary: index === 0, created_by: actor, updated_by: actor })
+            .execute();
+        }
       }
       await this.audit.record(trx, {
         action: 'register.created',
         msId: system.id,
         entityType: table,
         entityId: id,
-        entityCode: body.code,
+        entityCode: code,
         after: {
           // `code` alone is a secret key name of F.11 redaction; the business code goes under `register_code`.
-          register_code: body.code,
+          register_code: code,
           title: body.title,
           owner: body.ownerHandle ?? (owner === actor ? principal.user.handle : 'none'),
           linked_ms: systems.map((s) => s.slug),
-          ...Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined)),
+          ...Object.fromEntries(Object.entries(shown).filter(([, v]) => v !== undefined)),
           ...(pending ? { pending_action: pending } : {}),
         },
       });
-      return commandResult(systems.map((s) => s.slug), { ref: refOf('audit', table, id, body.code, updatedAt!) });
+      return commandResult(systems.map((s) => s.slug), { ref: refOf('audit', table, id, code, updatedAt!) });
     });
+  }
+
+  /** 400 for the members a kind needs or does not take on create (code and title; the competence facts). */
+  private assertCreateShape(kind: RegisterKind, body: RegisterCreate): void {
+    const errors: { path: string; message: string }[] = [];
+    if (META[kind].hasCode) {
+      if (body.code === undefined) errors.push({ path: 'body.code', message: 'Required' });
+    } else if (body.code !== undefined) {
+      errors.push({ path: 'body.code', message: 'A competence record gets its code from the server' });
+    }
+    if (body.title === undefined) errors.push({ path: 'body.title', message: kind === 'competence' ? 'Required: the role' : 'Required' });
+    if (kind === 'competence' && roleTooLong(body.title)) errors.push({ path: 'body.title', message: ROLE_TOO_LONG });
+    if (kind === 'competence') {
+      for (const key of COMPETENCE_REQUIRED) if (body[key] === undefined) errors.push({ path: `body.${key}`, message: 'Required for a competence record' });
+    }
+    if (!META[kind].shared && body.linkedMs !== undefined) {
+      errors.push({ path: 'body.linkedMs', message: 'Objectives belong to the system of the request' });
+    }
+    if (errors.length > 0) throw new ValidationError(errors, 'The request misses fields of this register');
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -327,14 +449,22 @@ export class RegistersService {
     patch: RegisterPatch,
     ifMatch: string | undefined,
   ): Promise<CommandResult> {
-    assertKindBuilt(kind, 'registers.update');
     const org = orgOf(principal);
     const actor = principal.user.id;
     const table = REGISTER_ENTITY_TYPES[kind];
+    const meta = META[kind];
+    if (!meta.hasCode && patch.code !== undefined) {
+      throw new ValidationError([{ path: 'body.code', message: 'A competence record gets its code from the server' }]);
+    }
+    if (!meta.shared && patch.linkedMs !== undefined) {
+      throw new ValidationError([{ path: 'body.linkedMs', message: 'Objectives belong to the system of the request' }]);
+    }
+    if (kind === 'competence' && roleTooLong(patch.title)) throw new ValidationError([{ path: 'body.title', message: ROLE_TOO_LONG }]);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const record = await this.records.resolve(trx, ms, table, id, { forUpdate: true });
       const row = record.row as Row;
-      assertIfMatch(ifMatch, row.updated_at, refOf('audit', table, row.id, row.code, row.updated_at));
+      const currentCode = codeOf(kind, row);
+      assertIfMatch(ifMatch, row.updated_at, refOf('audit', table, row.id, currentCode, row.updated_at));
       const given = Object.entries(patch).filter(([k, v]) => k !== 'confirm' && v !== undefined).map(([k]) => k);
 
       // F.6: risks need risk.manage (the Risk Owner only for the assessment fields of own risks); the other kinds
@@ -350,31 +480,44 @@ export class RegistersService {
       const set: Record<string, unknown> = {};
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
-      const change = (column: string, value: unknown, type: FieldKind, shown: unknown = value) => {
+      const change = (column: string, value: unknown, type: FieldKind, shown: unknown = value, shownBefore: unknown = undefined) => {
         if (same(row[column], value, type)) return;
         set[column] = sqlValue(value, type);
-        before[column] = wireValue(row[column], type);
+        before[column] = shownBefore !== undefined ? shownBefore : (row[column] ?? null);
         after[column] = shown ?? null;
       };
 
       if (patch.code !== undefined && patch.code !== row.code) {
-        await this.assertCodeFree(trx, table, patch.code, row.id);
+        await this.assertCodeFree(trx, kind, patch.code, row.id, record.ms);
         change('code', patch.code, 'text');
       }
-      if (patch.title !== undefined) change('title', patch.title, 'text');
+      if (patch.title !== undefined) change(meta.titleColumn, patch.title, 'text');
       let owner = row.owner_user_id;
       if (patch.ownerHandle !== undefined) {
         owner = await this.members.resolveHandle(trx, patch.ownerHandle);
         if (!grantedInFull(authz, permission) && owner !== actor) throw new ForbiddenError('You cannot hand your record to someone else');
-        change('owner_user_id', owner, 'text', patch.ownerHandle);
+        if (meta.ownerRequired && owner === null) throw ownerRequired();
+        change('owner_user_id', owner, 'text', patch.ownerHandle, await this.handleOf(trx, row.owner_user_id));
       }
 
-      const values = this.kindValues(kind, patch, 'patch');
-      const links = await linksOf(trx, table, row.id);
+      const input = this.kindValues(kind, patch, 'patch');
+      const { values, shown } = await this.resolveValues(trx, kind, record.ms, input);
+      const links = meta.shared ? await linksOf(trx, table, row.id) : [];
       const edition = await editionOf(trx, record.ms.id);
       await this.validateKind(trx, kind, edition, values, row);
       for (const field of FIELDS[kind]) {
-        if (values[field.column] !== undefined) change(field.column, values[field.column], field.type);
+        if (values[field.column] === undefined) continue;
+        const shownBefore = field.type === 'person' ? await this.handleOf(trx, row[field.column] as string | null) : undefined;
+        change(field.column, values[field.column], field.type, shown[field.column], shownBefore);
+      }
+      // A renewed competence record (valid beyond the reminder window again) no longer waits for renewal.
+      if (kind === 'competence' && row.pending_action && 'valid_until' in set) {
+        const validUntil = values.valid_until as string | null;
+        if (validUntil === null || validUntil > addDays(todayOf(this.clock, org), COMPETENCE_REMINDER_DAYS)) {
+          set.pending_action = null;
+          before.pending_action = row.pending_action;
+          after.pending_action = null;
+        }
       }
 
       let target: MsRef[] | null = null;
@@ -385,7 +528,7 @@ export class RegistersService {
       }
       const affected: Pick<LinkRow, 'msId' | 'slug'>[] = [...links, ...(target ?? []).map((s) => ({ msId: s.id, slug: s.slug }))];
       if (kind === 'risks' && patch.ownerHandle !== undefined) {
-        await this.rules.enforce<Br17Input>(trx, 'BR-17', { ownerUserId: owner }, { msIds: affected.map((l) => l.msId), ref: refOf('audit', table, row.id, row.code, row.updated_at) });
+        await this.rules.enforce<Br17Input>(trx, 'BR-17', { ownerUserId: owner }, { msIds: affected.map((l) => l.msId), ref: refOf('audit', table, row.id, currentCode, row.updated_at) });
       }
       // BR-22: a row shared by several systems changes everywhere; the caller confirms first.
       await confirmShared(trx, this.rules, affected, record.ms.slug, patch.confirm);
@@ -397,7 +540,7 @@ export class RegistersService {
           after.linked_ms = target.map((s) => s.slug);
         }
       }
-      const code = (patch.code ?? row.code) as string;
+      const code = meta.hasCode ? ((patch.code ?? row.code) as string) : currentCode;
       if ('code' in after) {
         before.register_code = before.code;
         after.register_code = after.code;
@@ -410,6 +553,7 @@ export class RegistersService {
         await this.audit.record(trx, { action: 'register.updated', msId: record.ms.id, entityType: table, entityId: row.id, entityCode: code, before, after });
       }
       const systems = new Set([...links.map((l) => l.slug), ...(target ?? []).map((s) => s.slug)]);
+      if (systems.size === 0) systems.add(record.ms.slug);
       return commandResult([...systems], {
         ref: refOf('audit', table, row.id, code, updatedAt),
         ...(changed ? {} : { message: ['Nothing to change', 'Tidak ada yang diubah'] }),
@@ -422,10 +566,11 @@ export class RegistersService {
   // -------------------------------------------------------------------------------------------------------------
 
   async recordMetricValue(principal: Principal, authz: AuthzState | null, ms: string, id: string, body: MetricValueRequest): Promise<CommandResult> {
+    const org = orgOf(principal);
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const record = await this.records.resolve(trx, ms, 'metric', id, { forUpdate: true });
-      const row = record.row as Row & { last_measured_at: string | null; pending_action: string | null };
+      const row = record.row as Row & { code: string; last_measured_at: string | null; pending_action: string | null };
       if (!grantedInFull(authz, 'metric.record') && row.owner_user_id !== actor) throw new ForbiddenError('Only the owner of this metric can record values');
       const { rows: overlaps } = await sql<{ period_start: string; period_end: string }>`
         select period_start, period_end from metric_value
@@ -464,6 +609,10 @@ export class RegistersService {
         },
       });
       const links = await linksOf(trx, 'metric', row.id);
+      // D.6: a value feeds the measured dimension of every linked system and its `metrics_current` cycle item.
+      for (const msId of new Set(links.length > 0 ? links.map((l) => l.msId) : [record.ms.id])) {
+        await enqueueDerived(this.queue, trx, org, msId, actor);
+      }
       return commandResult(links.map((l) => l.slug), { ref: refOf('audit', 'metric', row.id, row.code, updatedAt), data: { valueId } });
     });
   }
@@ -472,7 +621,7 @@ export class RegistersService {
   // Helpers
   // -------------------------------------------------------------------------------------------------------------
 
-  /** The kind's columns from a create or patch body; fields of other kinds and read-only fields are 400. */
+  /** The kind's columns from a create or patch body (wire values); fields of other kinds and read-only fields are 400. */
   private kindValues(kind: RegisterKind, body: Partial<Record<KindKey, unknown>>, mode: 'create' | 'patch'): Record<string, unknown> {
     const specs = new Map(FIELDS[kind].map((f) => [f.key, f]));
     const errors: { path: string; message: string }[] = [];
@@ -490,7 +639,45 @@ export class RegistersService {
     return values;
   }
 
-  /** Lookups and scales of the edition (risk profile scales and dimensions, treatment options, asset types, frequencies). */
+  /**
+   * Stored values of the wire values: handles to user ids (members of the organisation, NOT-A-MEMBER otherwise),
+   * metric codes to the id of a live metric of the system, proof files to a stored object of the organisation. `shown`
+   * keeps the wire values for the audit entry.
+   */
+  private async resolveValues(
+    trx: Trx,
+    kind: RegisterKind,
+    system: MsRef,
+    input: Record<string, unknown>,
+  ): Promise<{ values: Record<string, unknown>; shown: Record<string, unknown> }> {
+    const values: Record<string, unknown> = { ...input };
+    const shown: Record<string, unknown> = { ...input };
+    for (const field of FIELDS[kind]) {
+      const value = input[field.column];
+      if (value === undefined || value === null) continue;
+      if (field.type === 'person') {
+        values[field.column] = await this.members.resolveHandle(trx, value as string);
+      } else if (field.type === 'metric') {
+        const { rows } = await sql<{ id: string }>`
+          select m.id from metric m
+           where m.code = ${value as string} and m.deleted_at is null
+             and exists (select 1 from entity_ms_link l where l.entity_type = 'metric' and l.entity_id = m.id
+                           and l.management_system_id = ${system.id} and l.deleted_at is null)`.execute(trx);
+        if (!rows[0]) {
+          throw unprocessable('register.unknown_metric', `${String(value)} is not a metric of this management system`, `${String(value)} bukan metrik dari sistem manajemen ini`);
+        }
+        values[field.column] = rows[0].id;
+      } else if (field.type === 'uuid') {
+        const { rows } = await sql<{ id: string }>`select id from storage_object where id = ${value as string}`.execute(trx);
+        if (!rows[0]) {
+          throw unprocessable('register.unknown_proof', 'The proof file is not stored in this organisation', 'Berkas bukti tidak tersimpan di organisasi ini');
+        }
+      }
+    }
+    return { values, shown };
+  }
+
+  /** Lookups and scales of the edition (risk profile scales and dimensions, treatment options, asset types, frequencies), and dates. */
   private async validateKind(trx: Trx, kind: RegisterKind, edition: string, values: Record<string, unknown>, current: Record<string, unknown>): Promise<void> {
     if (kind === 'risks') {
       const profileCode = (values.risk_profile_code ?? current.risk_profile_code) as string;
@@ -526,6 +713,15 @@ export class RegistersService {
     }
     if (kind === 'assets' && typeof values.asset_type === 'string') await this.assertLookup(trx, edition, 'asset_type', values.asset_type, false);
     if (kind === 'metrics' && typeof values.frequency_code === 'string') await assertFrequency(trx, edition, values.frequency_code);
+    if (kind === 'competence') {
+      // The CHECK of competence_record, answered as a rule before the database refuses the row.
+      const achieved = (values.achieved_at !== undefined ? values.achieved_at : current.achieved_at) as string | null | undefined;
+      const valid = (values.valid_until !== undefined ? values.valid_until : current.valid_until) as string | null | undefined;
+      if (achieved && valid && valid < achieved) {
+        throw unprocessable('register.valid_before_achieved', 'The competence cannot be valid until a date before it was achieved',
+          'Kompetensi tidak dapat berlaku sampai tanggal sebelum kompetensi dicapai');
+      }
+    }
   }
 
   /**
@@ -581,11 +777,22 @@ export class RegistersService {
     return out;
   }
 
-  /** 409 when a live row of the table already has the code. */
-  private async assertCodeFree(trx: Trx, table: string, code: string, exceptId: string | null): Promise<void> {
+  /** 409 when a live row of the table already has the code (objectives: in the same system, as their unique index). */
+  private async assertCodeFree(trx: Trx, kind: RegisterKind, code: string, exceptId: string | null, system: MsRef): Promise<void> {
+    const table = REGISTER_ENTITY_TYPES[kind];
     const { rows } = await sql<{ id: string }>`
-      select id from ${sql.table(table)} where code = ${code} and deleted_at is null ${exceptId ? sql`and id <> ${exceptId}` : sql``} limit 1`.execute(trx);
+      select id from ${sql.table(table)} where code = ${code} and deleted_at is null
+        ${exceptId ? sql`and id <> ${exceptId}` : sql``}
+        ${META[kind].shared ? sql`` : sql`and management_system_id = ${system.id}`}
+      limit 1`.execute(trx);
     if (rows.length > 0) throw new ConflictError(`${code} already exists`, { messageKey: 'register.duplicate_code' });
+  }
+
+  /** Handle of a user id for audit entries (none for an unassigned column). */
+  private async handleOf(trx: Trx, userId: string | null): Promise<string> {
+    if (!userId) return 'none';
+    const { rows } = await sql<{ handle: string }>`select handle from platform.app_user where id = ${userId}`.execute(trx);
+    return rows[0]?.handle ?? 'none';
   }
 
   /**
@@ -624,4 +831,9 @@ export class RegistersService {
     }
     return changed;
   }
+}
+
+/** 422: objectives and competence records always have an owner (Milestone 2 D.2). */
+function ownerRequired() {
+  return unprocessable('register.owner_required', 'This register needs an owner for every row', 'Register ini memerlukan pemilik untuk setiap baris');
 }

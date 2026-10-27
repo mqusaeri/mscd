@@ -1,6 +1,7 @@
 // Shared steps of the implementation commands (build plan D.1, D.3, C.13, F.7): picking the C.13 row a caller may
 // perform, request members a row requires, the organisation date and the instant of validity windows, record refs
-// with their new ETag, and the `freshness.recompute` job sent in the command's transaction (E.2).
+// with their new ETag, and the `freshness.recompute` job sent in the command's transaction (E.2), with
+// `readiness.recompute` and `cycle.derive` next to it (Milestone 2 D.6).
 import {
   rejectionFor, transitionsVia, type CommandResult, type MachineEntity, type Pair, type RecordRef, type Transition, type Warning,
 } from '@mscd/shared';
@@ -12,6 +13,7 @@ import { BusinessRuleError, ForbiddenError, NotFoundError, TransitionNotAllowedE
 import { currentRequestId } from '../../common/request-context';
 import type { AuthzState, Principal, TenantInfo, Trx } from '../../common/tokens';
 import { ruleMessageKey, ruleMessages } from '../rules';
+import { enqueueDerived } from './readiness/readiness-queue';
 
 /** The organisation of the caller's session (every implementation route is ms-scoped, so there is one). */
 export function orgOf(principal: Principal): TenantInfo {
@@ -116,4 +118,6 @@ export async function enqueueFreshness(
     { singletonKey: `fr:${org.id}:${msId}`, startAfterSeconds: 5 },
     trx,
   );
+  // Milestone 2 D.6: the same changes feed clause readiness and the derived cycle items (M2-05).
+  await enqueueDerived(queue, trx, org, msId, requestedBy);
 }

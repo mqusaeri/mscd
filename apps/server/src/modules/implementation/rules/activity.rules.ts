@@ -5,6 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { BusinessRule, type BusinessRuleHandler, type RuleCheck, type RuleViolation } from '../../rules';
+import { resolvePackDocument } from '../documented-info.service';
 
 /**
  * BR-12 input: `start` when an activity of phase `phaseNo` leaves `not_started` (rejected while an earlier critical
@@ -61,12 +62,18 @@ export interface Br40Input {
   outputDocumentId: string | null;
 }
 
-/** BR-40: an activity whose output is a controlled document is completed only with the document linked. */
+/**
+ * BR-40: an activity whose output is a controlled document is completed only with the document linked. The pack's
+ * output code resolves to the system's document with that code, else to the document the customer linked to the code
+ * (`documented-info.link`, Milestone 2 D.1), so a customer that keeps its own document codes completes the activity.
+ */
 @Injectable()
 @BusinessRule('BR-40', { severity: 'error' })
 export class Br40OutputDocumentRule implements BusinessRuleHandler<Br40Input> {
-  check({ input }: RuleCheck<Br40Input>): RuleViolation | null {
-    return input.outputDocumentCode && !input.outputDocumentId ? { data: { outputDocumentCode: input.outputDocumentCode } } : null;
+  async check({ trx, msId, input }: RuleCheck<Br40Input>): Promise<RuleViolation | null> {
+    if (!input.outputDocumentCode || input.outputDocumentId) return null;
+    if (await resolvePackDocument(trx, msId, input.outputDocumentCode)) return null;
+    return { data: { outputDocumentCode: input.outputDocumentCode } };
   }
 }
 

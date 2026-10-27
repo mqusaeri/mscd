@@ -5,13 +5,13 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 1,Initiation & mandate,Inisiasi & mandat,false,4,Baseline gap assessment,,,Baseline gap assessment: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,1,Identify internal and external issues,,,Identify internal and external issues: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,2,Identify interested parties and requirements,,,Identify interested parties and requirements: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,3,Define scope and boundaries,,,Define scope and boundaries: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,3,Define BCMS scope and boundaries,,SCO-B01,Define BCMS scope and boundaries: approved and recorded in the register
 2,Context & scope,Konteks & ruang lingkup,false,4,Map processes and interfaces,,,Map processes and interfaces: approved and recorded in the register
-2,Context & scope,Konteks & ruang lingkup,false,5,Approve scope statement,,,Approve scope statement: approved and recorded in the register
-3,Leadership & policy,Kepemimpinan & kebijakan,false,1,Draft policy,,POL-01,Draft policy: approved and recorded in the register
+2,Context & scope,Konteks & ruang lingkup,false,5,Approve BCMS scope statement,,SCO-B01,Approve BCMS scope statement: approved and recorded in the register
+3,Leadership & policy,Kepemimpinan & kebijakan,false,1,Draft business continuity policy,,POL-B01,Draft business continuity policy: approved and recorded in the register
 3,Leadership & policy,Kepemimpinan & kebijakan,false,2,"Define roles, responsibilities and authorities",,,"Define roles, responsibilities and authorities: approved and recorded in the register"
-3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Set measurable objectives,,,Set measurable objectives: approved and recorded in the register
-3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Approve and communicate policy,,POL-01,Approve and communicate policy: approved and recorded in the register
+3,Leadership & policy,Kepemimpinan & kebijakan,false,3,Set measurable objectives,,,"Business continuity objectives recorded in the objectives register with a measure, an owner and a due date"
+3,Leadership & policy,Kepemimpinan & kebijakan,false,4,Approve and communicate business continuity policy,,POL-B01,Approve and communicate business continuity policy: approved and recorded in the register
 4,BIA & risk assessment,BIA & penilaian risiko,true,1,Identify products and services,,,Identify products and services: approved and recorded in the register
 4,BIA & risk assessment,BIA & penilaian risiko,true,2,Determine prioritised activities,,,Determine prioritised activities: approved and recorded in the register
 4,BIA & risk assessment,BIA & penilaian risiko,true,3,"Set MTPD, RTO and RPO per activity",,,"Set MTPD, RTO and RPO per activity: approved and recorded in the register"
@@ -22,7 +22,7 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 5,BC strategies & plans,Strategi & rencana BC,false,1,Select continuity strategies,,,Select continuity strategies: approved and recorded in the register
 5,BC strategies & plans,Strategi & rencana BC,false,2,Define resource requirements,,,Define resource requirements: approved and recorded in the register
 5,BC strategies & plans,Strategi & rencana BC,false,3,Write BC plans,,PLN-B02,Write BC plans: approved and recorded in the register
-5,BC strategies & plans,Strategi & rencana BC,false,4,Define incident response structure,,PRC-13,Define incident response structure: approved and recorded in the register
+5,BC strategies & plans,Strategi & rencana BC,false,4,Define incident response structure,,PLN-B02,Define incident response structure: approved and recorded in the register
 5,BC strategies & plans,Strategi & rencana BC,false,5,Establish warning and communication,,,Establish warning and communication: approved and recorded in the register
 5,BC strategies & plans,Strategi & rencana BC,false,6,Exercise programme design,,,Exercise programme design: approved and recorded in the register
 5,BC strategies & plans,Strategi & rencana BC,false,7,Approve plans,,,Approve plans: approved and recorded in the register
@@ -32,7 +32,7 @@ phase_no,phase_name_en,phase_name_id,is_gate_phase,activity_no,title,clause_ref,
 6,Documentation,Dokumentasi,false,4,Publish document register,,,Publish document register: approved and recorded in the register
 6,Documentation,Dokumentasi,false,5,Approve controlled documents,,,Approve controlled documents: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,1,Run awareness campaign,,,Run awareness campaign: approved and recorded in the register
-7,Operation & awareness,Operasi & kepedulian,false,2,Role-based training,,,Role-based training: approved and recorded in the register
+7,Operation & awareness,Operasi & kepedulian,false,2,Role-based training,,,Training and competence of each role recorded in the competence register
 7,Operation & awareness,Operasi & kepedulian,false,3,Operate controls and collect evidence,,,Operate controls and collect evidence: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,4,Handle nonconformities per procedure,,,Handle nonconformities per procedure: approved and recorded in the register
 7,Operation & awareness,Operasi & kepedulian,false,5,Evidence freshness review,,,Evidence freshness review: approved and recorded in the register

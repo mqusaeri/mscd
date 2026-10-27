@@ -319,17 +319,22 @@ export async function writeOrganisation(trx: Trx, input: OrgSeedInput): Promise<
     const certifiedAt = certMatch ? isoOfDisplayDate(certMatch[1]!) : null;
     const cycleId = randomUUID();
     cycleIds.set(id, cycleId);
+    const cycleEnd = certMatch && certifiedAt ? `${certMatch[3]}${certifiedAt.slice(4)}` : null;
     await tenant
       .insertInto('certification_cycle')
       .values(
-        certMatch && certifiedAt
+        certMatch && certifiedAt && cycleEnd
           ? {
               id: cycleId,
               management_system_id: msId,
               cycle_start: certifiedAt,
-              cycle_end: `${certMatch[3]}${certifiedAt.slice(4)}`,
+              cycle_end: cycleEnd,
               status: 'certified',
               certified_at: certifiedAt,
+              // Milestone 2 D.4: the certificate details of the cycle, with an expiry that keeps the sample label.
+              certificate_expires_at: demoCertificateExpiry(cycleEnd, today),
+              certification_body: ms.certifier || null,
+              certified_scope: ms.scope,
             }
           : { id: cycleId, management_system_id: msId, cycle_start: '2026-01-01', cycle_end: '2029-12-31', status: 'planned' },
       )
@@ -338,10 +343,12 @@ export async function writeOrganisation(trx: Trx, input: OrgSeedInput): Promise<
       { management_system_id: msId, framework_version_id: content.version.id, role: 'active', activated_at: certifiedAt ?? '2026-01-01' },
       ...(target ? [{ management_system_id: msId, framework_version_id: target.version.id, role: 'transition_target' as const, activated_at: isoOfDisplayDate(snapshot.PACKS[id]!.installed) }] : []),
     ]);
+    // Milestone 2 D.6: the sample readiness is kept as `manual` rows without dimensions, so readiness.recompute never
+    // overwrites it and the overview keeps the Milestone 1 maturity values of the sample.
     await insertRows(
       tenant,
       'clause_readiness',
-      ms.clauses.map((pct, i) => ({ management_system_id: msId, clause_group: 4 + i, readiness_pct: pct, source: 'seeded' as const })),
+      ms.clauses.map((pct, i) => ({ management_system_id: msId, clause_group: 4 + i, readiness_pct: pct, source: 'manual' as const })),
     );
     if (ms.banner) {
       const raised = { transition: localInstant(isoOfDisplayDate(snapshot.PACKS[id]!.installed)), connector: localInstant('2026-09-27', '06:00'), beta: localInstant(isoOfDisplayDate(snapshot.PACKS[id]!.installed)) }[ms.banner.kind];
@@ -1024,6 +1031,24 @@ function eventTypeOf(label: string): 'stage1' | 'stage2' | 'surveillance' | 'rec
 }
 
 const MONTHS: Record<string, string> = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
+
+/** Days a seeded certificate stays valid after the demo date at least, so no expiry notice or lapse changes the demo. */
+const DEMO_CERTIFICATE_MARGIN_DAYS = 90;
+
+/**
+ * The expiry date of a seeded certificate (Milestone 2 D.4): the day before the cycle end, as a certification body
+ * issues it; when that is not more than 90 days after the demo date (the sample QMS certificate of 2023), the
+ * 31 December of the cycle end year, which keeps the year of the sample label "cycle 2023–2026"; when that too is
+ * near or past, one year after the demo date.
+ */
+export function demoCertificateExpiry(cycleEnd: string, today: string): string {
+  const limit = addDays(today, DEMO_CERTIFICATE_MARGIN_DAYS);
+  const dayBefore = addDays(cycleEnd, -1);
+  if (dayBefore > limit) return dayBefore;
+  const yearEnd = `${cycleEnd.slice(0, 4)}-12-31`;
+  if (yearEnd > limit) return yearEnd;
+  return addDays(today, 365);
+}
 
 /** `14 Mar 2025` (sample display date) to `2025-03-14`. */
 export function isoOfDisplayDate(text: string): string {
