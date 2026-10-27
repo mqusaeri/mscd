@@ -23,6 +23,7 @@ CONCURRENCY RULES (several agents work in this repo at the same time, on other w
 - Docker: name every container, network, volume and compose project you create with the prefix "${WP.toLowerCase()}-". Never stop or remove containers you did not start; never prune. Remove your own containers at the end. If Docker is not running, say so in the report instead of skipping tests.
 - Never run "pkill -f" with a pattern that can match your own shell; kill by PID.
 - Writing rules for any document or UI text: plain English, no em dash (U+2014), no centre dot (U+00B7), no meta commentary.
+- SPEED RULE: the machine is shared by up to four packages. Do not run the full web E2E suite (all of apps/web/e2e) or the full server integration suite; run your package's acceptance commands, the targeted specs and tests of the files you touch, and the reduced common acceptance of section G.1. The orchestrator runs the full suites once per wave.
 - Write the handoff note docs/platform/handoff/${WP}.md (what was built, deviations, follow-ups, acceptance results).
 `
 

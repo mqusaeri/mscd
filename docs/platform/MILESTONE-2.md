@@ -454,7 +454,7 @@ Files that both tracks touch, with one owner per wave:
 
 When H.1 has no answer by the end of wave 3c, waves 5 and 6 run first, and M2-17 runs later, followed by the acceptance of M2-18 and M2-S13 again. Without M2-17 the product still shows each of the eight business roles under its own label and the readiness block as "Internal progress score" (M2-01), in the current product words.
 
-Common acceptance for every package (not repeated below): `npm run typecheck`, `npm run lint` and `npm test` pass; `npm run check:text` passes; `npm run test:int -w @mscd/server -- test/int/seed test/int/parity` and `CI=1 npm run test:e2e -w @mscd/web` pass (R-15); web packages also pass `npm run gen:views:check -w @mscd/web`, and each of their unit test commands reports at least one test (the zero-test check of M2-01, with the package's own test files); the handoff note exists (R-09).
+Common acceptance for every package (not repeated below): `npm run typecheck`, `npm run lint` and `npm test` pass; `npm run check:text` passes; packages that change server code also pass `npm run test:int -w @mscd/server -- test/int/seed test/int/parity`, and packages that change web code also pass `CI=1 npm run test:e2e -w @mscd/web -- e2e/contrast.spec.js e2e/shell.spec.js` plus the specs of the screens they touch (R-15). The full web E2E suite and the full server integration suite run once per wave, by the orchestrator, after the wave's packages are committed; a failure there goes back to the package that caused it; web packages also pass `npm run gen:views:check -w @mscd/web`, and each of their unit test commands reports at least one test (the zero-test check of M2-01, with the package's own test files); the handoff note exists (R-09).
 
 ### G.2 Work package details
 
