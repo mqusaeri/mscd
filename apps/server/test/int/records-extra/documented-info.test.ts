@@ -2,11 +2,12 @@
 // `ref.documented_info` row with the document that maintains it (by template code, by a link of a pack code, by the
 // implementing documents of the clause entry) or the evidence that retains it, with its state and the scope policy;
 // `documented-info.link` with its checks and audit; BR-40 accepting the document linked to an activity's output code,
-// which the phase board then shows.
+// which the activity then stores and the phase board shows, with BR-47 on that document.
 import { CommandResult, DocumentedInfoItem, type UiMsSnapshot } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
+import { grantRole } from '../commands-implementation/helpers';
 import { auditByAction, createExtraApp, etagOf, inOrg, rowsOf, sessionFor, systemOf, type Client, type CommandsApp } from './helpers';
 
 const LIST = '/api/v1/ms/isms/documented-information';
@@ -168,5 +169,31 @@ describe('documented information and pack code links (M2-07)', () => {
     const snapshot = (await rina.get<UiMsSnapshot>('/api/v1/ui/ms/isms')).body;
     const act = snapshot.bundle.phases.flatMap((p) => p.acts).find((a) => a.no === activity!.no)!;
     expect(act).toMatchObject({ out: 'XTP-02', docId: docA.code, st: 'complete' });
+    // The id of the linked document is stored on the activity.
+    const stored = async () =>
+      (await rowsOf<{ output_document_id: string | null }>(db, 'tst', sql`select output_document_id from implementation_activity_progress where id = ${activity!.id}`))[0]!.output_document_id;
+    expect(await stored()).toBe(docA.id);
+
+    // BR-47 runs for a linked document too: verifying the activity while the linked output document is not approved
+    // gives the warning.
+    const [unapproved] = await rowsOf<{ id: string; code: string }>(db, 'tst', sql`
+      select d.id, d.doc_code as code from document d
+        join entity_ms_link l on l.entity_type = 'document' and l.entity_id = d.id and l.deleted_at is null and l.management_system_id = ${isms.id}
+       where d.deleted_at is null and not d.is_org_wide and d.classification <> 'restricted' and d.status <> 'approved'
+       order by d.doc_code limit 1`);
+    expect((await rina.request('PUT', LINK('XTP-02'), { documentId: unapproved!.id })).status).toBe(200);
+    await inOrg(db, 'tst', (trx) => sql`
+      update implementation_activity_progress set status = 'in_progress', output_document_id = null, completed_by_user_id = null, completed_at = null,
+             owner_user_id = (select id from platform.app_user where handle = 'rina')
+       where id = ${activity!.id}`.execute(trx));
+    const again = await rina.post(`/api/v1/ms/isms/activities/${activity!.id}/transitions`, { to: 'complete' }, { 'if-match': await etag() });
+    expect(again.status).toBe(200);
+    expect(await stored()).toBe(unapproved!.id);
+    // A Programme Owner verifies (nobody verifies their own work).
+    await grantRole(db, 'tst', 'isms', 'hendra', 'programme_owner');
+    const verifier = await sessionFor(ctx, db, 'hendra', 'tst');
+    const verified = await verifier.post(`/api/v1/ms/isms/activities/${activity!.id}/transitions`, { to: 'verified' }, { 'if-match': await etag() });
+    expect(verified.status).toBe(200);
+    expect(verified.body.warnings?.map((w) => w.rule)).toContain('BR-47');
   });
 });

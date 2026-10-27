@@ -320,7 +320,7 @@ function itemOf(row: ReviewRow, ownerHandle: string | null, linked: readonly str
  * linked systems. The path system stays linked; a joint review needs `integrated_mode` and `management_review.manage`
  * in every system it gains or loses (as on create), the primary link stays unless its system is removed (then the
  * path system becomes primary), and a newly linked system gets the empty mandatory inputs of its edition. A closed
- * review answers 409. One `register.updated` entry records the change (J.5 has no action of its own for it).
+ * review answers 409. One `management_review.updated` entry records the change.
  */
 @Injectable()
 export class ManagementReviewEditService {
@@ -418,7 +418,7 @@ export class ManagementReviewEditService {
       const changed = Object.keys(after).length > 0;
       const updatedAt = changed ? await bump(trx, ENTITY, row.id, { ...set, updated_by: actor }) : new Date(row.updated_at);
       if (changed) {
-        await this.audit.record(trx, { action: 'register.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
+        await this.audit.record(trx, { action: 'management_review.updated', msId: record.ms.id, entityType: ENTITY, entityId: row.id, entityCode: row.code, before, after });
       }
       return commandResult([...new Set([...links.map((l) => l.slug), ...linked])], {
         ref: refOf(ENTITY, row.id, row.code, updatedAt),

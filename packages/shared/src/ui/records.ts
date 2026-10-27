@@ -156,11 +156,15 @@ export const Requirement = named(
     risks: z.array(z.string()),
     by: PersonId.nullable().optional(),
     due: IsoDate.nullable().optional(),
+    retired: z.boolean().optional(),
   }),
-  'Requirement or control of a system (UI 1.5, G.5 bundle.reqs); owner, by and note are absent in the external auditor projection. In a catalogue system the key of a clause entry is cl-<code> (Milestone 2 D2-09, clauseEntryKey), so it never equals the key of the Annex A control of the same number',
+  'Requirement or control of a system (UI 1.5, G.5 bundle.reqs); owner, by and note are absent in the external auditor projection. In a catalogue system the key of a clause entry is cl-<code> (Milestone 2 D2-09, clauseEntryKey), so it never equals the key of the Annex A control of the same number. retired is true when the catalogue item or requirement is no longer in the standard (Milestone 2 E.1, shown as No longer in the standard) and absent otherwise',
   {
-    valid: [EXAMPLE_REQUIREMENT, { ...EXAMPLE_REQUIREMENT, st: 'complete', by: 'bagus' }, { ...EXAMPLE_REQUIREMENT, owner: undefined, note: undefined, by: undefined }],
-    invalid: [{ ...EXAMPLE_REQUIREMENT, st: 'partially_implemented' }, { ...EXAMPLE_REQUIREMENT, risks: 'R-014' }, { ...EXAMPLE_REQUIREMENT, gate: 'no' }],
+    valid: [
+      EXAMPLE_REQUIREMENT, { ...EXAMPLE_REQUIREMENT, st: 'complete', by: 'bagus' }, { ...EXAMPLE_REQUIREMENT, owner: undefined, note: undefined, by: undefined },
+      { ...EXAMPLE_REQUIREMENT, retired: true },
+    ],
+    invalid: [{ ...EXAMPLE_REQUIREMENT, st: 'partially_implemented' }, { ...EXAMPLE_REQUIREMENT, risks: 'R-014' }, { ...EXAMPLE_REQUIREMENT, gate: 'no' }, { ...EXAMPLE_REQUIREMENT, retired: 'yes' }],
   },
 );
 export type Requirement = z.infer<typeof Requirement>;

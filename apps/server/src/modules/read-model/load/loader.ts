@@ -52,8 +52,8 @@ export interface CertificationCycleRow {
 
 /**
  * An applicability entry as the loader gives it: `catalogueSystem` when the system's edition has a catalogue (D2-09),
- * `retired` when its catalogue item or requirement is no longer in the standard (Milestone 2 E.1; the snapshot does not
- * carry it yet, see the M2-07 handoff).
+ * `retired` when its catalogue item or requirement is no longer in the standard (Milestone 2 E.1; the snapshot
+ * requirement carries it as `retired: true`).
  */
 export interface LoadedEntryRow extends EntryRow {
   catalogueSystem: boolean;

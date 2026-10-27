@@ -318,10 +318,12 @@ describe('applicability commands', () => {
       expect(stranger.status).toBe(422);
       expect(stranger.body.rule).toBe('NOT-A-MEMBER');
       expect((await bagus.post('/api/v1/ms/isms/applicability', base)).status).toBe(403);
+      // No ISO 27001 clause row is assessable (D2-09): a new clause entry that does not apply is refused by APPL-ASSESS.
+      // The BR-03 warning on a new entry that does not apply is covered on an assessable row in
+      // records-extra/targets-thresholds.test.ts.
       const notApplicable = await rina.post('/api/v1/ms/isms/applicability', { ...base, isApplicable: false, exclusionJustification: 'none' });
-      expect(notApplicable.status).toBe(201);
-      expect(notApplicable.body.warnings?.[0]?.rule).toBe('BR-03');
-      expect(await entryOf(db, 'tst', 'isms', '6.3')).toMatchObject({ status: 'not_applicable', holdsGate: false });
+      expect(notApplicable.status).toBe(422);
+      expect(notApplicable.body.rule).toBe('APPL-ASSESS');
     });
   });
 

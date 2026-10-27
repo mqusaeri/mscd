@@ -17,6 +17,7 @@ import { ReadModelService } from '../read-model';
 import { mergeWarnings, RuleEngine, ruleMessageKey, ruleMessages, type RuleFinding } from '../rules';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { assertRequires, commandResult, orgOf, pickTransition, refOf, todayOf } from './command-support';
+import { resolvePackDocument } from './documented-info.service';
 import type { Br12Input, Br39Input, Br40Input, Br46Input, Br47Input, VerifySelfInput } from './rules';
 
 const ENTITY = 'implementation_activity_progress';
@@ -270,8 +271,8 @@ export class ActivityService {
 
   /**
    * The register document an activity's output is linked to on completion: the code of the request, else the stored
-   * link, else the document whose code the template names (when the register holds it). A requested code the
-   * system's register does not hold is a BR-40 violation.
+   * link, else the document whose code the template names (when the register holds it) or the document linked to
+   * that code (`document_code_link`). A requested code the system's register does not hold is a BR-40 violation.
    */
   private async outputDocument(trx: Trx, system: MsRef, row: ActivityRow, requested: string | undefined): Promise<string | null> {
     if (requested) {
@@ -284,7 +285,9 @@ export class ActivityService {
       return id;
     }
     if (row.output_document_id) return row.output_document_id;
-    return row.output_document_code ? this.documentOf(trx, system, row.output_document_code) : null;
+    // The pack code names the document with that code, else the document linked to it (`document_code_link`, M2-07),
+    // so the id is stored and BR-47 runs for a linked document as well.
+    return row.output_document_code ? ((await resolvePackDocument(trx, system.id, row.output_document_code))?.id ?? null) : null;
   }
 
   /** A live document of the system (linked to it, or organisation-wide) by its code. */

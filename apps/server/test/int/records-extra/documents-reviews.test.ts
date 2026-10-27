@@ -151,7 +151,7 @@ describe('external documents, versions and management review changes (M2-07)', (
       expect(changed.status).toBe(200);
       expect(await reviewRow('tst', ref.id)).toMatchObject({ title: 'Management review 2027 (spring)', planned_at: '2027-03-15', owner: 'hendra' });
       expect((await auditOf(db, 'tst', ref.id)).at(-1)).toMatchObject({
-        action: 'register.updated', actor: 'rina',
+        action: 'management_review.updated', actor: 'rina',
         before: { title: 'Management review 2027', planned_at: '2027-03-01', owner: 'rina' },
         after: { title: 'Management review 2027 (spring)', planned_at: '2027-03-15', owner: 'hendra' },
       });
@@ -198,7 +198,7 @@ describe('external documents, versions and management review changes (M2-07)', (
       const back = await ndtRina.patch(url, { linkedMs: ['isms'] });
       expect(back.status).toBe(200);
       expect(await links()).toEqual([{ slug: 'isms', primary: true }]);
-      expect((await auditOf(db, 'ndt', ref.id)).at(-1)).toMatchObject({ before: { linked_ms: ['isms', 'qms'] }, after: { linked_ms: ['isms'] } });
+      expect((await auditOf(db, 'ndt', ref.id)).at(-1)).toMatchObject({ action: 'management_review.updated', before: { linked_ms: ['isms', 'qms'] }, after: { linked_ms: ['isms'] } });
     });
   });
 });

@@ -45,8 +45,11 @@ export function justificationOf(entry: Pick<EntryRow, 'status' | 'isApplicable' 
   return (excluded ? entry.exclusionJustification : entry.inclusionJustification) ?? '';
 }
 
-/** One requirement of `bundle.reqs` (G.5). */
-export function deriveRequirement(entry: EntryRow & { catalogueSystem?: boolean }, themeLabels: Readonly<Record<string, string>>): Requirement {
+/**
+ * One requirement of `bundle.reqs` (G.5). An entry whose catalogue item or requirement is no longer in the standard
+ * carries `retired: true` (Milestone 2 E.1); the member is left out otherwise, so Milestone 1 snapshots stay as they were.
+ */
+export function deriveRequirement(entry: EntryRow & { catalogueSystem?: boolean; retired?: boolean }, themeLabels: Readonly<Record<string, string>>): Requirement {
   const st = uiReqStatus(entry.status, entry.holdsGate);
   const requirement: Requirement = {
     id: requirementId(entry.targetType, entry.code),
@@ -63,5 +66,6 @@ export function deriveRequirement(entry: EntryRow & { catalogueSystem?: boolean 
     risks: [...entry.riskCodes],
   };
   if (entry.completedBy) requirement.by = entry.completedBy;
+  if (entry.retired) requirement.retired = true;
   return requirement;
 }

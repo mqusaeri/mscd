@@ -136,8 +136,11 @@ describe('jobs, notifications and audit actions', () => {
     const all = codes(line);
     const actions = all.filter((c) => /^[a-z_]+(\.[a-z_]+)+$/.test(c) && c !== 'platform.audit_log');
     for (const action of actions) expect(AUDIT_ACTIONS, action).toContain(action);
-    expect([...AUDIT_ACTIONS].sort()).toEqual([...new Set(planAuditActions())].sort());
-    expect(AUDIT_ACTIONS.length).toBe(new Set(actions).size + 24);
+    // `management_review.updated` (the management review PATCH of D.1, M2-07) is an orchestrator decision that J.5
+    // does not list yet; the set below holds it once J.5 does.
+    const extra = ['management_review.updated'];
+    expect([...AUDIT_ACTIONS].sort()).toEqual([...new Set([...planAuditActions(), ...extra])].sort());
+    expect(AUDIT_ACTIONS.length).toBe(new Set(actions).size + 25);
     expect([...PLATFORM_AUDIT_ACTION_PREFIXES]).toEqual(all.filter((c) => c.endsWith('.*')).map((c) => c.slice(0, -1)));
     expect(isPlatformAuditAction('auth.login')).toBe(true);
     expect(isPlatformAuditAction('licence.installed')).toBe(true);

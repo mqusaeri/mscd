@@ -15,7 +15,7 @@ import { etagOf } from '../../common/etag';
 import { NotFoundError } from '../../common/problems';
 import type { ScopeContext } from '../authz/scope-policy';
 import {
-  OVERVIEW_CLAUSES, currentPhaseNo, entryEvidenceState, integrityStatus, isUnverifiable, maturityLevel, maturityValues, openPerClause,
+  OVERVIEW_CLAUSES, clauseMaturity, currentPhaseNo, entryEvidenceState, integrityStatus, isUnverifiable, openPerClause,
   stageRecords, thresholdsFor, type SystemData,
 } from '../read-model';
 import { matchesQuery, paginate } from './query';
@@ -189,11 +189,9 @@ export function implementationSummary(d: ScreenData): ImplementationSummary {
   const overviewClause = new Map(d.system.stages.map((s) => [s.key, s.overviewClause]));
   const openFindings = d.system.findings.filter((f) => f.status !== 'closed' && ['major', 'minor', 'ofi'].includes(f.classification)).length;
   const open = openPerClause(chain.items, (stage) => overviewClause.get(stage) ?? 8, openFindings);
-  const maturity: ClauseMaturity[] = OVERVIEW_CLAUSES.map((clause) => {
-    // The loader passes the stored row (Milestone 2 D.6, M2-07); the Milestone 1 view of the overview reads its readiness.
-    const readiness = Math.max(0, Math.min(100, Math.round(d.system.readiness.get(clause)?.readiness ?? 0)));
-    return { clause, readiness, dimensions: maturityValues(readiness, open[clause] ?? 0).map(maturityLevel) };
-  });
+  // Milestone 2 D.6: the stored row as the loader passes it. A computed row shows its stored dimensions, a seeded or
+  // manual row (the demo) the Milestone 1 values, and a clause not computed yet null (one derivation, `clauseMaturity`).
+  const maturity: ClauseMaturity[] = OVERVIEW_CLAUSES.map((clause) => clauseMaturity(clause, d.system.readiness.get(clause), open[clause] ?? 0));
   return {
     cards,
     criticalEvidence: evs.filter((e) => e.fresh === 'critical').length,

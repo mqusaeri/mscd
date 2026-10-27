@@ -733,6 +733,8 @@ export const AUDIT_ACTIONS = [
   // Milestone 2 J.5, SaaS track
   'ops.organization_status_changed', 'ops.domain_added', 'ops.domain_verified', 'ops.domain_verification_failed',
   'ops.domain_removed', 'ops.entitlements_changed',
+  // Milestone 2 D.1 management review PATCH (M2-07, orchestrator decision)
+  'management_review.updated',
 ] as const;
 export const AuditAction = enumSchema('AuditAction', AUDIT_ACTIONS, 'Audit trail action (F.11, Milestone 2 J.5)');
 export type AuditAction = z.infer<typeof AuditAction>;

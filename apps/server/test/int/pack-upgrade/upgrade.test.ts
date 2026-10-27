@@ -295,6 +295,17 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     // The team of the ISMS deleted the entry of A.8.34 before the update.
     await deleteEntry(org, systems['upg:isms']!, 'A.8.34');
     const ismsBefore = await entryCodes(org, systems['upg:isms']!);
+    // System creation queued `readiness.recompute` for every system, and a waiting job hides a new one of the same
+    // system behind its singleton key (`rr:<org>:<ms>`). This app has no readiness worker, so a recording worker runs
+    // the waiting jobs now (no other worker is registered yet); the jobs that wait after the import are the import's.
+    const readinessRuns: unknown[] = [];
+    await app.queue.work('readiness.recompute', { concurrency: 1 }, async (job) => {
+      readinessRuns.push(job.env.payload);
+    });
+    await app.queue.drain({ includeDelayed: true });
+    expect(readinessRuns).toHaveLength(Object.keys(systems).length);
+    expect(app.queue.waitingJobs('readiness.recompute')).toEqual([]);
+    readinessRuns.length = 0;
     const response = await postImport(app, 'ta@upg', version('1.3.1', fixtureChanges).bytes);
     expect(response.statusCode, response.body).toBe(202);
     await app.runJobs();
@@ -382,9 +393,10 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
         after_data: expect.objectContaining({ pack_version: '1.3.1', entries_added: 1, added: ['8.1.1'], retitled: ['10.1'], retired: ['6.3'], cycle_items_added: [] }),
       }),
     ]);
-    // The new entries are queued for freshness and readiness (debounced, so they wait). Other commands of this test
-    // (system creation, deleted entries) may have queued the other systems too.
-    expect(app.queue.waitingJobs('readiness.recompute').map((j) => j.env.payload)).toEqual(expect.arrayContaining([{ msId: systems['upg:isms'] }, { msId: systems['upg:legacy'] }]));
+    // The new entries are queued for readiness (debounced, so they wait), for the two changed systems only: not the
+    // QMS on another edition, not the skipped demo system.
+    expect(app.queue.waitingJobs('readiness.recompute').map((j) => j.env.payload)).toEqual([{ msId: systems['upg:isms'] }, { msId: systems['upg:legacy'] }]);
+    expect(readinessRuns).toEqual([]);
 
     // Other systems are untouched: the QMS is on another edition, the demo organisation is skipped.
     expect(await entryCodes(org, systems['upg:qms']!)).toHaveLength(qmsTargets);

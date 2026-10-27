@@ -103,6 +103,9 @@ export function systemFields(system: SystemCore, today: string): ManagementSyste
     defaultRepository: { slug: system.defaultRepository.slug, adapter: system.defaultRepository.adapter },
     defaultRoutingMode: system.defaultRoute?.mode ?? null,
     approver: system.approver,
+    // The certificate label comes from the newest cycle that holds a certificate (Milestone 2 D.4, M2-05).
+    cycles: system.cycles,
+    today,
   });
 }
 

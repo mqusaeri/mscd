@@ -105,8 +105,8 @@ describe('installing the development packs (E.8)', () => {
       audit_activities: 6, finding_conditions: 6, cycle_requirements: 6, drift_rules: 4, prep_tasks: 7, rules: 40, risk_profiles: 1,
     });
     // The content step of M2-04 (E.2): every requirement row is kept, retired rows included, and the ISO 9001:2026
-    // edition drops the transition phase of the demo (E.4).
-    expect(await refCounts(db, 'ISO9001-2026')).toMatchObject({ requirements: 84, catalogue: 0, chain: 8, activities: 43, phases: 8, lookups: 11, rules: 39, prep_tasks: 5 });
+    // edition drops the transition phase and the transition cycle item of the demo (E.4).
+    expect(await refCounts(db, 'ISO9001-2026')).toMatchObject({ requirements: 84, catalogue: 0, chain: 8, activities: 43, phases: 8, lookups: 11, rules: 39, prep_tasks: 5, cycle_requirements: 5 });
     expect(await refCounts(db, 'ISO9001-2015')).toMatchObject({ requirements: 84, activities: 57, phases: 9 });
     expect(await refCounts(db, 'ISO22301-2019')).toMatchObject({ requirements: 60, chain: 8, activities: 43, lookups: 15 });
     expect(await refCounts(db, 'ISO37001-2025')).toMatchObject({ requirements: 52, chain: 6, activities: 43, lookups: 19, rules: 40, prep_tasks: 5 });
@@ -238,6 +238,20 @@ describe('installing the development packs (E.8)', () => {
       select (select count(*) from ref.prep_task_template where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint|Internal audit 2026 report|EX-01)')
            + (select count(*) from ref.cycle_requirement_def where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint)') as n`.execute(db.migrator);
     expect(Number(demoText.rows[0]!.n)).toBe(0);
+    // A system certified on ISO 9001:2026 gets general cycle items: the demo's transition wording stays in the 2015
+    // edition, whose demo system moves to 2026 (the seed links the demo cycle items by title).
+    const cycleTitles = async (packId: string) =>
+      (await sql<{ code: string; title: string }>`
+        select d.code, d.title from ref.cycle_requirement_def d join ref.framework_version v on v.id = d.framework_version_id
+         where v.pack_id = ${packId} order by d.sort_order`.execute(db.migrator)).rows.map((r) => `${r.code} ${r.title}`);
+    expect(await cycleTitles('ISO9001-2026')).toEqual([
+      'RISK_ASSESSMENT Risks and opportunities reviewed',
+      'CUSTOMER_SATISFACTION Customer satisfaction analysed',
+      'INTERNAL_AUDIT Internal audit covering all requirements',
+      'MGMT_REVIEW Management review with all mandatory inputs',
+      'CORRECTIVE_ACTION Corrective actions closed with verification',
+    ]);
+    expect(await cycleTitles('ISO9001-2015')).toContain('EDITION_TRANSITION Edition transition tasks complete');
   });
 
   it('treats a second installation of the same versions as a no-op', async () => {
