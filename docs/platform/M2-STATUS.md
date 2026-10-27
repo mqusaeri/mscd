@@ -14,15 +14,15 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | Package | Wave | Status | Notes for the next session |
 |---|---|---|---|
 | M2-02 Contract, schema, permissions | 1a | Done | Handoff lists follow-ups for M2-05, M2-06, M2-S10 |
-| M2-S01 Release images and signing | 1a | Done | Server image gate needs the zod and undici bump (M2-03). Web image gate needs a host that reaches `dl-cdn.alpinelinux.org` |
+| M2-S01 Release images and signing | 1a | Done | Server image gate passes since M2-03. Web image gate needs a host that reaches `dl-cdn.alpinelinux.org` |
 | M2-S03 Server bootstrap | 1a | Done | |
 | M2-S04 Go-live checklist and owner pack | 1a | Done | |
 | MOT-01 Marketing landing site | L1 | Done | Owner fills `APP_URL` and `DEMO_EMAIL` in `apps/site/site.config.mjs` |
 | MOT-02 Sign-in brand panel motion | L1 | Done | |
 | M2-01 Web screen host and Administration area | 1b | Running | MOT-03 plugs into its EmptyState `illustration` prop |
-| M2-03 Pack format and upgrade path | 1b | Running | Also raises zod to 4.6.6 and undici to 7.30.1 (lockfile owner) |
+| M2-03 Pack format and upgrade path | 1b | Done | zod 4.6.6 and undici 7.30.1 are in; the server image passes the gate. Notes for M2-04 to M2-07 are in their briefs |
 | M2-S02 SaaS Compose stack and TLS | 1b | Running | Caddy also serves `apps/site` on the bare domain |
-| M2-04, M2-05, M2-06, M2-07 | 2a | Next, after M2-03 (and M2-02) | |
+| M2-04, M2-05, M2-06, M2-07 | 2a | Next (M2-02 and M2-03 are done) | Read the "Orchestrator note from M2-03" lines in each brief |
 | MOT-03 In-app illustration library | L2 | Next, after M2-01 | |
 | M2-S10, M2-S05, M2-S07, M2-S08 | 2b | After M2-S02 and M2-06 | M2-S10: write `platform.entitlement` only in platform scope (see its brief) |
 | M2-S09, M2-08, M2-09, M2-10 | 3a | After wave 2 | |
