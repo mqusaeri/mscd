@@ -3,18 +3,21 @@
 //
 // Kinds (`HOLDING_KINDS`): applicability entries (owner or justification holder), activities not verified,
 // documents as owner or pending review holder (`document_owner`) and as approver (`document_approver`), evidence,
-// risks, risk treatments not closed or accepted, findings not closed, corrective actions not closed or cancelled,
-// preparation tasks and cycle items not done, register rows (the other register and chain record tables, and the
-// management reviews the person owns that are not closed) and tasks (open stored tasks, and the unresolved drift
-// results the person holds through `records.assign` kind `drift`).
+// risks, risk treatments not closed or accepted, findings not closed (and the open gaps of the self-assessment the
+// person owns), corrective actions not closed or cancelled, preparation tasks and cycle items not done (and the
+// planned audit activities where the person is the auditor or the auditee), register rows (the other register and
+// chain record tables, business associates also as relationship owner, and the management reviews the person owns
+// that are not closed) and tasks (open stored tasks, and the unresolved drift results the person holds through
+// `records.assign` kind `drift`).
 //
 // The MS Manager and the Programme Owner (`record.assign`) see the items of one system with codes and titles; the
 // Tenant Admin (`user.manage`) sees counts per system and kind with the primary manager of each system, never a
 // title (F.6). A handover moves every chosen kind in one transaction: each record's holder columns that name the
 // person move to the successor, BR-16 (a successor who wrote the version in review cannot approve it), BR-17 (a
-// risk keeps an owner) and BR-41 (a due date after the next audit) are checked per record and answered as warnings
-// that name the record, each record gets its `holdings.reassigned` audit entry, and records shared with other
-// systems need the BR-22 confirmation first.
+// risk keeps an owner), BR-41 (a due date after the next audit) and AUD-INDEP (a successor who becomes the auditor
+// of an activity examines their own work) are checked per record and answered as warnings that name the record,
+// each record gets its `holdings.reassigned` audit entry, and records shared with other systems need the BR-22
+// confirmation first.
 import { Inject, Injectable } from '@nestjs/common';
 import {
   HOLDING_KINDS,
@@ -32,6 +35,7 @@ import { NotFoundError, ProblemError } from '../../common/problems';
 import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, RECORD_RESOLVER, type AuditWriter, type MembershipService, type Principal, type RecordResolver, type Trx,
 } from '../../common/tokens';
+import type { AudIndepInput } from '../audit-registers/internal-audit.rules';
 import { entryBusinessId } from '../implementation';
 import { competenceCode } from '../risk-registers/competence';
 import { confirmShared, type Br17Input } from '../risk-registers/rules';
@@ -65,6 +69,15 @@ const LINKED_REGISTERS = ['context_issue', 'interested_party', 'asset', 'metric'
 const OWNED_REGISTERS = [
   'quality_objective', 'process', 'prioritized_activity', 'business_impact_analysis', 'bc_plan', 'exercise', 'business_associate', 'chain_record',
 ] as const;
+/**
+ * Holder columns of `register_row` tables with more than the owner: the relationship owner of a business associate,
+ * whom the drift rules treat as its holder (`drift.service.ts`).
+ */
+const REGISTER_HOLDERS: Readonly<Record<string, readonly string[]>> = {
+  business_associate: ['owner_user_id', 'relationship_owner_user_id'],
+};
+/** Holder columns of an audit activity: the auditor (Milestone 2 D.2) and the auditee. */
+const AUDIT_ACTIVITY_HOLDERS = ['auditor_user_id', 'auditee_user_id'] as const;
 /** Tables of `register_row` with `action_due_at`. */
 const ACTION_DUE: ReadonlySet<string> = new Set([
   'context_issue', 'metric', 'competence_record', 'prioritized_activity', 'business_impact_analysis', 'exercise', 'business_associate', 'chain_record',
@@ -160,11 +173,21 @@ function heldQueries(kind: HoldingKind, msId: string, userId: string, lock: bool
            and t.status not in ('residual_accepted', 'closed')
          order by t.position, t.code${forUpdate}`];
     case 'finding':
-      return [sql<HeldRow>`
+      return [
+        sql<HeldRow>`
         select 'finding' as tbl, t.id, t.updated_at, t.code, t.title, t.due_at, array['owner_user_id'] as columns, ${none} as other_ms, null as target_type
           from finding t
          where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid and t.status <> 'closed'
-         order by t.position, t.code${forUpdate}`];
+         order by t.position, t.code${forUpdate}`,
+        // Open gaps of the self-assessment the person owns (a gap needs an owner and a target date, PRD 8.1): the gap
+        // stays theirs until it is assessed again, whether or not a finding was raised from it.
+        sql<HeldRow>`
+        select 'self_assessment' as tbl, t.id, t.updated_at, c.code, c.text as title, t.target_fix_at as due_at,
+               array['owner_user_id'] as columns, ${none} as other_ms, null as target_type
+          from self_assessment t join ref.finding_condition c on c.id = t.finding_condition_id
+         where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid and t.status = 'gap'
+         order by c.code${forUpdate}`,
+      ];
     case 'corrective_action':
       return [sql<HeldRow>`
         select 'corrective_action' as tbl, t.id, t.updated_at, t.code, t.title, t.due_at, array['owner_user_id'] as columns, ${none} as other_ms,
@@ -177,12 +200,25 @@ function heldQueries(kind: HoldingKind, msId: string, userId: string, lock: bool
     case 'cycle_item': {
       const table = kind === 'prep_task' ? 'audit_prep_task' : 'cycle_requirement_status';
       const code = kind === 'prep_task' ? sql`coalesce(t.template_code, left(t.title, 30))` : sql`t.requirement_code`;
-      return [sql<HeldRow>`
+      const parts: RawBuilder<HeldRow>[] = [sql<HeldRow>`
         select ${table} as tbl, t.id, t.updated_at, ${code} as code, t.title, t.due_at, array['owner_user_id'] as columns, ${none} as other_ms,
                null as target_type
           from ${sql.table(table)} t
          where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid and t.status <> 'done'
          order by t.due_at, t.id${forUpdate}`];
+      if (kind === 'prep_task') {
+        // Planned audit activities (internal audits of M2-05 and the certification audit planner) where the person
+        // is the auditor or the auditee, due on their scheduled date; the code is the one the planner shows.
+        parts.push(sql<HeldRow>`
+          select 'audit_activity' as tbl, t.id, t.updated_at, coalesce(t.template_code, t.title) as code, t.title, t.scheduled_at as due_at,
+                 ${columnsNaming('t', AUDIT_ACTIVITY_HOLDERS, userId)} as columns, ${none} as other_ms, null as target_type
+            from audit_activity t
+           where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.status = 'planned'
+             and ${namedBy('t', AUDIT_ACTIVITY_HOLDERS, userId)}
+             and exists (select 1 from audit_event e where e.id = t.audit_event_id and e.deleted_at is null)
+           order by t.scheduled_at nulls last, t.position, t.id${forUpdate}`);
+      }
+      return parts;
     }
     case 'register_row': {
       const parts: RawBuilder<HeldRow>[] = [];
@@ -198,11 +234,12 @@ function heldQueries(kind: HoldingKind, msId: string, userId: string, lock: bool
       }
       for (const table of OWNED_REGISTERS) {
         const due = ACTION_DUE.has(table) ? sql`t.action_due_at` : sql`null::date`;
+        const cols = REGISTER_HOLDERS[table] ?? ['owner_user_id'];
         parts.push(sql<HeldRow>`
-          select ${table} as tbl, t.id, t.updated_at, t.code, t.title, ${due} as due_at, array['owner_user_id'] as columns, ${none} as other_ms,
-                  null as target_type
+          select ${table} as tbl, t.id, t.updated_at, t.code, t.title, ${due} as due_at, ${columnsNaming('t', cols, userId)} as columns,
+                  ${none} as other_ms, null as target_type
              from ${sql.table(table)} t
-            where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid${forUpdate}`);
+            where t.management_system_id = ${msId}::uuid and t.deleted_at is null and ${namedBy('t', cols, userId)}${forUpdate}`);
       }
       // Management reviews the person owns and that are not closed, in every system they are linked to (a joint
       // review is shared, BR-22); a planned review is due on its planned date.
@@ -323,6 +360,14 @@ export class HoldingsService {
         if (record.tbl === 'risk' && this.rules.registered().includes('BR-17')) {
           warnings = mergeWarnings(warnings, asWarnings(code, await this.rules.evaluate<Br17Input>(trx, 'BR-17', { ownerUserId: successor }, scope(ref))));
         }
+        // AUD-INDEP: a successor who becomes the auditor of an activity should not examine their own work (M2-05).
+        if (record.tbl === 'audit_activity' && record.columns.includes('auditor_user_id') && this.rules.registered().includes('AUD-INDEP')) {
+          const targetCode = await this.auditTargetOf(trx, record.id);
+          if (targetCode) {
+            const input: AudIndepInput = { auditorUserId: successor, auditorName: await this.nameOf(trx, successor), targetCode };
+            warnings = mergeWarnings(warnings, asWarnings(code, await this.rules.evaluate<AudIndepInput>(trx, 'AUD-INDEP', input, scope(ref))));
+          }
+        }
         const set = record.columns.map((c) => sql`${sql.ref(c)} = ${successor}::uuid`);
         await sql`
           update ${sql.table(record.tbl)}
@@ -410,6 +455,18 @@ export class HoldingsService {
       }
     }
     return out;
+  }
+
+  /** The clause or control code an audit activity examines (AUD-INDEP), null when none is set. */
+  private async auditTargetOf(trx: Trx, activityId: string): Promise<string | null> {
+    const { rows } = await sql<{ target_code: string | null }>`select target_code from audit_activity where id = ${activityId}`.execute(trx);
+    return rows[0]?.target_code ?? null;
+  }
+
+  /** The display name of a person (the AUD-INDEP warning names the auditor). */
+  private async nameOf(trx: Trx, userId: string): Promise<string> {
+    const { rows } = await sql<{ display_name: string }>`select display_name from platform.app_user where id = ${userId}`.execute(trx);
+    return rows[0]?.display_name ?? '';
   }
 
   /** BR-16 authors of a document: the submitter of the version in review, else of the current version, else its creator. */

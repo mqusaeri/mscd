@@ -393,8 +393,8 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
         after_data: expect.objectContaining({ pack_version: '1.3.1', entries_added: 1, added: ['8.1.1'], retitled: ['10.1'], retired: ['6.3'], cycle_items_added: [] }),
       }),
     ]);
-    // The new entries are queued for readiness (debounced, so they wait), for the two changed systems only: not the
-    // QMS on another edition, not the skipped demo system.
+    // The new entries are queued for readiness (debounced, so they wait) for the two changed systems only; the QMS on
+    // another edition and the skipped demo system get no job.
     expect(app.queue.waitingJobs('readiness.recompute').map((j) => j.env.payload)).toEqual([{ msId: systems['upg:isms'] }, { msId: systems['upg:legacy'] }]);
     expect(readinessRuns).toEqual([]);
 

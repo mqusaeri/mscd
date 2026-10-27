@@ -116,7 +116,8 @@ describe('WP-39 administration of users and role grants (F.6, C.13)', () => {
     expect(message.mailKind).toBe('account:invitation');
     expect(message.text).toContain('/invite#token=');
 
-    // An active account of another organisation: an invited membership, no email, the same answer.
+    // An active account of another organisation: an invited membership and the same answer; the account learns of the
+    // invitation by email (no link) and by a notification in its home organisation (Milestone 2 D.2).
     const existing = await ta1.post('/api/v1/admin/users', { email: u.bsdOnly!.email, displayName: 'Whatever', adminRoles: [] });
     expect(existing.statusCode).toBe(202);
     expect(existing.json()).toEqual({ status: 'invited' });
@@ -129,9 +130,12 @@ describe('WP-39 administration of users and role grants (F.6, C.13)', () => {
     }
     // The disabled account gets the same invited membership as an active one (no link: it cannot sign in).
     expect(await membership(ndt, u.disabled!.id)).toMatchObject({ status: 'invited' });
+    const told = await mail.waitFor(u.bsdOnly!.email, (m) => m.mailKind === 'account:membership_invited');
+    expect(told.text).not.toContain('/invite#token=');
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(await mail.messages(u.bsdOnly!.email)).toHaveLength(0);
+    expect((await mail.messages(u.bsdOnly!.email)).map((m) => m.mailKind)).toEqual(['account:membership_invited']);
     expect(await mail.messages(u.dewi!.email)).toHaveLength(0);
+    expect(await mail.messages(u.disabled!.email)).toHaveLength(0);
     // The list shows the same row for a new email and for accounts of other organisations, active or disabled: only
     // what this organisation supplied or knows until the user accepts (F.6).
     await addFactor(db, ctx.moduleRef, u.bsdOnly!.id);

@@ -238,8 +238,8 @@ describe('installing the development packs (E.8)', () => {
       select (select count(*) from ref.prep_task_template where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint|Internal audit 2026 report|EX-01)')
            + (select count(*) from ref.cycle_requirement_def where title ~ '(NC-2025-02|SoA v3\\.0|DC Jakarta|SharePoint)') as n`.execute(db.migrator);
     expect(Number(demoText.rows[0]!.n)).toBe(0);
-    // A system certified on ISO 9001:2026 gets general cycle items: the demo's transition wording stays in the 2015
-    // edition, whose demo system moves to 2026 (the seed links the demo cycle items by title).
+    // A system certified on ISO 9001:2026 gets general cycle items. The 2015 edition keeps the demo's titles, because the
+    // demo QMS is certified on it and the seed links its cycle items to the definitions by title.
     const cycleTitles = async (packId: string) =>
       (await sql<{ code: string; title: string }>`
         select d.code, d.title from ref.cycle_requirement_def d join ref.framework_version v on v.id = d.framework_version_id

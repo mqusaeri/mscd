@@ -208,7 +208,11 @@ export class AuthService {
     });
   }
 
-  /** `POST /auth/password/reset` (F.4): sets the new password and revokes every session of the user. */
+  /**
+   * `POST /auth/password/reset` (F.4): sets the new password and revokes every session of the user. Also redeems the
+   * one-time set-password link of a new platform operator (token kind `set_password`, `admin create-operator`,
+   * Milestone 2 M2-06), whose account has no password yet.
+   */
   async resetPassword(body: PasswordResetConfirm): Promise<void> {
     const now = this.infra.clock.now();
     const error = await this.infra.scope.withPlatform(
@@ -217,7 +221,7 @@ export class AuthService {
           .selectFrom('platform.password_reset_token')
           .selectAll()
           .where('token_hash', '=', sha256(body.token))
-          .where('kind', '=', 'reset')
+          .where('kind', 'in', ['reset', 'set_password'])
           .forUpdate()
           .executeTakeFirst();
         if (!token || token.used_at !== null || token.expires_at.getTime() <= now.getTime()) return invalidLinkToken('auth.reset_invalid', 'password reset');

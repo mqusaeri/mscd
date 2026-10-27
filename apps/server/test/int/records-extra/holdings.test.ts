@@ -178,6 +178,89 @@ describe('holdings and handover (M2-07)', () => {
     );
   });
 
+  it('lists open self-assessment gaps, planned audit activities and business associates held as relationship owner, and hands them over', async () => {
+    const [bagusId, dewiId, rinaId] = [await idOf(db, 'tst', 'bagus'), await idOf(db, 'tst', 'dewi'), await idOf(db, 'tst', 'rina')];
+    const ids = await inOrg(db, 'tst', async (trx) => {
+      const { rows: conditions } = await sql<{ id: string; code: string; text: string }>`
+        select c.id, c.code, c.text from ref.finding_condition c
+         where c.framework_version_id = ${isms.version}
+           and not exists (select 1 from self_assessment s where s.finding_condition_id = c.id and s.management_system_id = ${isms.id} and s.deleted_at is null)
+         order by c.code limit 2`.execute(trx);
+      expect(conditions).toHaveLength(2);
+      const assess = async (conditionId: string, status: 'gap' | 'conforming', fixAt: string | null) =>
+        (await sql<{ id: string }>`
+          insert into self_assessment (management_system_id, finding_condition_id, status, owner_user_id, target_fix_at, assessed_at)
+          values (${isms.id}, ${conditionId}, ${status}, ${bagusId}, ${fixAt}, '2026-09-20') returning id`.execute(trx)).rows[0]!.id;
+      // An applicability entry the successor owns, so that an activity examining it gives AUD-INDEP once she audits it.
+      const { rows: targets } = await sql<{ id: string; code: string }>`
+        select e.id, ci.item_code as code from applicability_entry e join ref.catalogue_item ci on ci.id = e.catalogue_item_id
+         where e.management_system_id = ${isms.id} and e.deleted_at is null
+           and e.owner_user_id is distinct from ${bagusId} and e.justification_holder_user_id is distinct from ${bagusId}
+         order by ci.item_code limit 1`.execute(trx);
+      await sql`update applicability_entry set owner_user_id = ${dewiId} where id = ${targets[0]!.id}`.execute(trx);
+      const { rows: events } = await sql<{ id: string }>`
+        select id from audit_event where management_system_id = ${isms.id} and deleted_at is null order by scheduled_at, id limit 1`.execute(trx);
+      const activity = async (code: string, column: 'auditor_user_id' | 'auditee_user_id', status: 'planned' | 'done', target: string | null) =>
+        (await sql<{ id: string }>`
+          insert into audit_activity (audit_event_id, management_system_id, template_code, title, ${sql.ref(column)}, scheduled_at, status, target_code)
+          values (${events[0]!.id}, ${isms.id}, ${code}, ${`Fixture audit activity ${code}`}, ${bagusId}, '2026-10-20', ${status}, ${target})
+          returning id`.execute(trx)).rows[0]!.id;
+      const associate = (await sql<{ id: string }>`
+        insert into business_associate (management_system_id, code, title, owner_user_id, relationship_owner_user_id)
+        values (${isms.id}, 'BA-HX1', 'Fixture business associate', ${rinaId}, ${bagusId}) returning id`.execute(trx)).rows[0]!.id;
+      return {
+        condition: conditions[0]!,
+        gap: await assess(conditions[0]!.id, 'gap', '2026-11-30'),
+        conforming: await assess(conditions[1]!.id, 'conforming', null),
+        audited: await activity('IA-HX1', 'auditor_user_id', 'planned', targets[0]!.code),
+        auditee: await activity('IA-HX2', 'auditee_user_id', 'planned', null),
+        done: await activity('IA-HX3', 'auditor_user_id', 'done', null),
+        associate,
+      };
+    });
+    const before = await holdings('bagus');
+    expect(before.items.find((i) => i.ref.id === ids.gap)).toMatchObject({
+      kind: 'finding', code: ids.condition.code, title: ids.condition.text, dueAt: '2026-11-30', ref: { module: 'audit', entityType: 'self_assessment' },
+    });
+    expect(before.items.find((i) => i.ref.id === ids.audited)).toMatchObject({
+      kind: 'prep_task', code: 'IA-HX1', dueAt: '2026-10-20', ref: { module: 'audit', entityType: 'audit_activity' },
+    });
+    expect(before.items.find((i) => i.ref.id === ids.auditee)).toMatchObject({ kind: 'prep_task', code: 'IA-HX2' });
+    expect(before.items.find((i) => i.ref.id === ids.associate)).toMatchObject({
+      kind: 'register_row', code: 'BA-HX1', ref: { entityType: 'business_associate' },
+    });
+    // A conforming row and a finished activity are not open items.
+    expect(before.items.some((i) => i.ref.id === ids.conforming || i.ref.id === ids.done)).toBe(false);
+    const counts = (await admin.get<UserHoldings>(`/api/v1/admin/users/${bagusId}/holdings`)).body.systems.find((s) => s.ms === 'isms')!;
+    expect(counts.total).toBe(before.items.length);
+
+    const response = await rina.post(`${HOLDINGS('isms', 'bagus')}/reassign`, { successor: 'dewi', kinds: ['finding', 'prep_task', 'register_row'] });
+    expect(response.status).toBe(200);
+    // The successor owns the entry the activity examines, so she would audit her own work (AUD-INDEP, a warning).
+    expect(response.body.warnings).toContainEqual({ rule: 'AUD-INDEP', messages: { en: expect.stringMatching(/^IA-HX1: /), id: expect.stringMatching(/^IA-HX1: /) } });
+    const after = await holdings('bagus');
+    expect(after.items.some((i) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(i.ref.id))).toBe(false);
+    const dewi = await holdings('dewi');
+    expect(dewi.items.filter((i) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(i.ref.id))).toHaveLength(4);
+    const [stored] = await rowsOf<Record<string, string>>(db, 'tst', sql`
+      select (select u.handle from self_assessment r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.gap}) as gap,
+             (select u.handle from self_assessment r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.conforming}) as conforming,
+             (select u.handle from audit_activity r join platform.app_user u on u.id = r.auditor_user_id where r.id = ${ids.audited}) as auditor,
+             (select u.handle from audit_activity r join platform.app_user u on u.id = r.auditee_user_id where r.id = ${ids.auditee}) as auditee,
+             (select u.handle from audit_activity r join platform.app_user u on u.id = r.auditor_user_id where r.id = ${ids.done}) as done,
+             (select u.handle from business_associate r join platform.app_user u on u.id = r.relationship_owner_user_id where r.id = ${ids.associate}) as relationship,
+             (select u.handle from business_associate r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.associate}) as associate_owner`);
+    expect(stored).toEqual({
+      gap: 'dewi', conforming: 'bagus', auditor: 'dewi', auditee: 'dewi', done: 'bagus', relationship: 'dewi', associate_owner: 'rina',
+    });
+    const audit = (await auditByAction(db, 'tst', 'holdings.reassigned')).filter((a) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(a.entity_id!));
+    expect(audit.map((a) => [a.entity_type, a.after?.columns])).toEqual(expect.arrayContaining([
+      ['self_assessment', ['owner_user_id']], ['audit_activity', ['auditor_user_id']], ['audit_activity', ['auditee_user_id']],
+      ['business_associate', ['relationship_owner_user_id']],
+    ]));
+    expect(audit).toHaveLength(4);
+  });
+
   it('hands everything over when no kind is named, after which the person holds nothing in the system', async () => {
     const response = await rina.post(`${HOLDINGS('isms', 'bagus')}/reassign`, { successor: 'dewi' });
     expect(response.status).toBe(200);
