@@ -1014,6 +1014,831 @@ CREATE TABLE import_run (
 
 The BP row `management_system.status` keeps its entity; its transition `implementing` to `certified` now runs through `ms.certification` (D.2).
 
+## K. SaaS production track
+
+This track makes MSCD ready to run as a multi-tenant SaaS service for paying customers. The core waves of section G build the product screens. This track builds the operator tools, the production deployment, and the checks needed before go-live. It builds on M2-06 (`admin create-operator`, `ops.organizations.create`) and M2-16 (operator console). It changes one row of section B: email domain verification moves into M2-S11, which adds DNS TXT verification.
+
+**Chosen deployment: Docker Compose on one Ubuntu VPS** (option a). The stack uses:
+- the existing `deploy/compose/docker-compose.yml`;
+- the `saas.yaml` profile, which already ships in the release server image;
+- a new `docker-compose.saas.yml` overlay;
+- a Caddy container in front for Let's Encrypt certificates;
+- separate overlays for backups and monitoring.
+
+Releases are built and signed by `release.yml` and pushed to `ghcr.io/mqusaeri`. They reach the server through `deploy-prod.yml`. That workflow pulls by digest, takes a backup, migrates, restarts the services in order, checks health and rolls back by itself when a check fails. A person approves every production run in GitHub.
+
+Why Compose and not k3s on the same server:
+1. The Compose path is hardened and tested today. It has per-service secret mounts, an internal network with no route out, resource limits, a fixed web address for proxy trust, and a migrate-first upgrade with canary and automatic rollback (`upgrade.sh`). The 11-step smoke test runs on it.
+2. The Helm chart has no production PostgreSQL or object store. On k3s the owner would also run and back up a database operator, an S3 store, cert-manager, an ingress controller and k3s itself. That is about 1 GB more RAM and many more parts that can fail, for an owner who does not run Kubernetes.
+3. On one node, Kubernetes gives no high availability. Compose comes close to its rolling updates: migrations run while the old version serves, then services restart one by one behind Caddy retries.
+4. Agents act only through `gh workflow run`. A short shell script over SSH is easier to debug from workflow logs than Helm hook failures.
+
+Move to k3s or managed Kubernetes with the existing chart when a second node is needed.
+
+### K.1 Rules for this track
+
+R-01 to R-18 apply. Handoff notes go to `docs/platform/handoff/M2-Sxx.md`. The rules below are added.
+
+| # | Rule |
+|---|---|
+| S-1 | No agent holds a production or staging secret, connects to those servers, or approves a protected GitHub environment. An agent may start `deploy-prod.yml`, `bootstrap-prod.yml` or `ops-cli.yml` with `gh workflow run` only when the owner asks. The run then waits for the owner's approval. |
+| S-2 | Acceptance runs on the build host with throwaway keys made at test time (`deploy/scripts/saas-keys.sh --out <tmp>`) and deleted afterwards. Keys from `packages/pack-tools/dev-keys/` stay limited to demo-flavour images (R-11, R-13). |
+| S-3 | New route ids, permissions, enum values, profile keys and the platform migration of this track appear only in M2-S06. Later packages follow R-14. |
+| S-4 | Every third-party action in a new workflow is pinned to a full commit SHA, with the tag in a comment. Secrets reach `run` steps only through `env`. `tools/scripts/check-workflows.mjs --saas` (M2-S01) enforces both. |
+| S-5 | New container images are only those of K.4. Each is pinned to an exact version at least two weeks old plus its digest, and recorded in the handoff note. R-06 applies. |
+| S-6 | SaaS packages share the four-agent limit of R-02 with the core packages. The orchestrator fills free slots in the order of K.5. Compose runs take the host lock (R-05) and use ports 18080 and 18443. |
+| S-7 | The demo stack and demo images never run on the production or staging server. `saas-deploy.sh` refuses image names ending in `-demo` and the `demo.yaml` and `test.yaml` profiles. |
+
+### K.2 What the owner provides
+
+Agents cannot buy, sign, register or approve any of these items. Each item names the package or step that needs it first.
+
+| Item | What exactly | Where it goes | Needed before |
+|---|---|---|---|
+| Production server | Ubuntu 24.04 LTS VPS. 4 vCPU or more, 16 GB RAM, 80 GB system disk, a separate block volume of 200 GB or more for Docker data. Public IPv4, plus IPv6 if offered. The provider's first root SSH key. Located as decided in K.3 (D-S2) | Secrets `BOOTSTRAP_SSH_KEY` (deleted after bootstrap), `DEPLOY_HOST` in environment `production` | First run of `bootstrap-prod.yml` |
+| Staging server (recommended) | A smaller VPS (8 GB RAM, same OS) for release rehearsals and the penetration test. It is separate from the demo server | Same secret names in environment `staging` | First release rehearsal |
+| Domain and DNS | A host name such as `app.<domain>`. A and AAAA records pointing to the VPS. A CAA record for `letsencrypt.org`. Optionally `ops.<domain>` for Grafana. DNS access to add records | Variable `MSCD_DOMAIN`, `ACME_EMAIL` | M2-S05 first deploy |
+| Mail provider | An account with a transactional SMTP provider (for example Amazon SES, Mailgun, Brevo or Postmark) on port 587. SPF, DKIM and DMARC records for the sending domain | Variables `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`; secrets `SMTP_USER`, `SMTP_PASSWORD` | First deploy (SaaS refuses to start without mail, M2-S09) |
+| Off-site backup storage | An S3-compatible bucket at a different provider or region, with versioning or object lock. One access key limited to that bucket, plus a second key limited to the secrets prefix | Secrets `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY`, `BACKUP_SECRETS_ACCESS_KEY`, `BACKUP_SECRETS_SECRET_KEY`, `BACKUP_RESTIC_PASSWORD` | M2-S07 first scheduled run |
+| Monitoring accounts | A heartbeat service (for example healthchecks.io) with three check URLs: watchdog, backup and restore test. An external uptime check of `https://<domain>/healthz`. An alert email address. Optionally a Telegram bot token and chat id, and a hosted status page | Secrets `HEARTBEAT_WATCHDOG_URL`, `HEARTBEAT_BACKUP_URL`, `HEARTBEAT_RESTORE_URL`, `TELEGRAM_BOT_TOKEN`; variables `ALERT_EMAIL_TO`, `TELEGRAM_CHAT_ID` | M2-S08 first deploy |
+| GitHub settings | Environments `release`, `staging`, `production` and `restore-test`. The owner is required reviewer on `release` and `production`. `restore-test` is limited to the default branch. A tag protection rule for `v*.*.*`. GHCR packages kept private | Repository settings | M2-S01 first release |
+| Release key set | Generated by the owner on the owner's own computer with `deploy/scripts/saas-keys.sh` (M2-S01): pack, licence and audit anchor Ed25519 pairs, the bundle signing key, and the two KEKs `platform.key` and `storage.key`. Offline copies go in a password manager, because GitHub secrets cannot be read back and losing a KEK makes every backup unreadable | `release`: `MSCD_PACK_SIGNING_KEY`, `MSCD_RELEASE_SIGNING_KEY`, variables `MSCD_TRUSTED_KEYS_LICENCE_PUB`, `MSCD_TRUSTED_KEYS_PACK_PUB`, `MSCD_TRUSTED_KEYS_ANCHOR_PUB`. `production` and `staging`: `PLATFORM_KEY`, `STORAGE_KEY`, `AUDIT_ANCHOR_KEY`. `restore-test`: copies of `PLATFORM_KEY` and `STORAGE_KEY` | M2-S01 first release |
+| SSH access | After bootstrap, the deploy key and the pinned host key line that `bootstrap-host.sh` prints | `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`, variable `DEPLOY_SSH_PORT` per environment | M2-S05 first deploy |
+| Legal documents | Drafted or reviewed by a lawyer qualified in Indonesian law: privacy notice (Indonesian and English); data processing agreement (DPA) with customers; terms of service (Indonesian and English, Law 24/2009); DPO decision; PSE Lingkup Privat registration through OSS; written position on data location and cross-border transfer (UU PDP Article 56); confirmation of the breach notice duties and the current authority. M2-S04 writes the facts the lawyer needs | Public URLs set as `legal.privacy_url` and `legal.terms_url` (variables `LEGAL_PRIVACY_URL`, `LEGAL_TERMS_URL`) | Go-live |
+| Penetration test vendor | Booking (allow 2 to 3 weeks), a grey-box web and API test of the staging stack using the scope in `docs/saas/pentest-scope.md`, a report, a retest after fixes, and a short summary letter for customers | `docs/saas/go-live-checklist.md` evidence column | Go-live |
+| Incident contacts | Named people for incident roles, a 24/7 phone number, the support email | `docs/saas/incident-response.md` | Go-live |
+| Decisions | The decisions of K.3 | Answers recorded in the handoff notes | The package named in K.3 |
+
+### K.3 Decisions for the owner
+
+Each decision has a default that is built when no answer arrives in time.
+
+| # | Decision | Default built | Needed by |
+|---|---|---|---|
+| D-S1 | Onboarding: the operator creates each organisation (sales-led), or customers sign up themselves | Sales-led. Self-service is in K.8 | M2-S09 |
+| D-S2 | Hosting location for the server, backups and mail provider: in Indonesia or abroad. Some regulated customers (for example under OJK) may need data kept in Indonesia | Server in Indonesia; backup bucket at a second provider, also in Indonesia when available | Owner purchase |
+| D-S3 | Public address | One host name `app.<domain>` for every organisation, with `?org=` and email discovery at sign-in | M2-S02 |
+| D-S4 | Plans and their limits | Presets `trial` (30 days, 10 users, 1 system) and `standard` (50 users, 3 systems, 12 months), editable in `saas.yaml` | M2-S10 |
+| D-S5 | Read-only period after a contract ends | 30 days in `offboarding`, then `archived` | M2-S09, DPA |
+| D-S6 | Backup retention and recovery point | 14 daily, 8 weekly, 12 monthly; recovery point 24 hours | M2-S07, DPA |
+| D-S7 | Uptime target and maintenance window | 99.5 percent monthly, announced maintenance excluded; window Sunday 22:00 to 24:00 WIB | M2-S04 |
+| D-S8 | CDN or web application firewall in front of the VPS | None at start; reviewed after the penetration test | M2-S02 |
+| D-S9 | Operational telemetry export in SaaS | Off until a collector exists | none |
+| D-S10 | May strangers find out which organisations are customers through the sign-in page | No: the same answer for unknown slugs and domains | M2-S11 |
+| D-S11 | Key management | File KEKs on the server with offline copies (deviation X-03); cloud KMS in K.8 | M2-S05 |
+| D-S12 | KEK copies in environment `restore-test` so the weekly restore test can open backups | Yes, environment limited to the default branch | M2-S07 |
+
+### K.4 Container images added by this track
+
+| Use | Image | Used by |
+|---|---|---|
+| TLS front and certificate renewal | `caddy` (Caddy 2) | M2-S02 |
+| Metrics, alerts, probes | `prom/prometheus`, `prom/alertmanager`, `prom/node-exporter`, `prometheuscommunity/postgres-exporter`, `prom/blackbox-exporter` | M2-S08 |
+| Dashboards (optional profile `grafana`) | `grafana/grafana-oss` | M2-S08 |
+| Local registry for deploy rehearsals (tests only) | `registry` (Distribution 2 or 3) | M2-S05 |
+| Bootstrap dry run (tests only) | `ubuntu:24.04` | M2-S03 |
+| Backup tools | Built from `postgres:16.15-alpine` with `restic` and `rclone` from Alpine packages (`deploy/docker/backup.Dockerfile`) | M2-S07 |
+| Image and config scanning | `aquasec/trivy:0.74.0` (already in CI) | M2-S01 |
+
+### K.5 Waves
+
+| Wave | Work packages | Can start when | Owners of shared files in this wave |
+|---|---|---|---|
+| S1 | M2-S01 Release images, signing and supply chain; M2-S02 SaaS Compose stack and TLS; M2-S03 Server bootstrap; M2-S04 Go-live checklist and owner pack | Core wave 1 is committed | `deploy/scripts/build-bundle.sh`: M2-S01. `apps/server/profiles/saas.yaml`, `deploy/nginx/**`: M2-S02 |
+| S2 | M2-S05 Deploy script and deploy workflow; M2-S06 SaaS contract, schema and permissions; M2-S07 Backups and restore test; M2-S08 Monitoring and alerts | Wave S1 done and core wave 2 committed (M2-06) | `packages/shared/src/**`, `apps/server/migrations/platform/0005_saas.sql`, `profile.schema.ts`, `saas.yaml`, contract snapshot, RBAC and security sweep files: M2-S06. `apps/server/src/main.ts`: M2-S07 |
+| S3 | M2-S09 Operator commands and organisation lifecycle; M2-S10 Per-organisation entitlements; M2-S11 Organisation discovery at sign-in | Wave S2 done and core wave 3 committed; never at the same time as M2-17 (both edit `apps/web/src/auth/i18n.ts`) | `apps/server/src/main.ts`, `apps/server/src/cli/tenant.ts`: M2-S09. `saas.yaml`: M2-S10. `apps/web/src/auth/**`, `tools/mock-providers/**`: M2-S11 |
+| S4 | M2-S12 Operator console: organisations, status, domains and entitlements | Wave S3 done and M2-16 committed | none |
+| S5 | M2-S13 SaaS end-to-end run, CI jobs and go-live evidence | Wave S4 done and M2-18 committed | `.github/workflows/ci.yml`, `tools/smoke/**`, `apps/server/test/setup/**`, `docs/saas/go-live-checklist.md` (status and evidence columns) |
+
+Common acceptance for every SaaS package (not repeated below):
+- the common acceptance of G.1;
+- `node tools/scripts/check-workflows.mjs --saas` passes once M2-S01 is done;
+- every new shell script passes `bash -n`.
+
+### K.6 Work package details
+
+#### M2-S01 Release images, signing and supply chain
+
+| | |
+|---|---|
+| Wave, depends on | S1; Milestone 1 |
+| Owns | `.github/workflows/release.yml`, `.github/workflows/security-scan.yml`, `.github/dependabot.yml`, `deploy/scripts/build-release-images.sh`, `deploy/scripts/build-bundle.sh` (new `--images-only` mode), `deploy/scripts/saas-keys.sh`, `tools/scripts/check-workflows.mjs`, `docs/saas/release.md`, `docs/platform/handoff/M2-S01.md` |
+
+Brief:
+- `build-bundle.sh --images-only`: stops after the image build, the release artefact check and the Trivy gate, and writes no bundle. The bundle path is unchanged.
+- `build-release-images.sh`: takes `--version x.y.z[-rc.n]`, `--revision`, `--trusted-keys-dir`, `--pack-signing-key`, `--build-ca`, `--registry <host/owner>`, `--load` or `--push` and `--digest-file <json>`.
+  - It calls `build-bundle.sh --images-only --release`, which builds web with `VITE_DATA_SOURCE=api` and server `--target release`.
+  - On loaded images it runs `check-release-artefacts.sh` and the Trivy gate (HIGH or CRITICAL with a fix fails) before any push.
+  - It pushes `mscd-server:<version>` and `mscd-web:<version>` with `--provenance=mode=max --sbom=true` and writes both digests.
+  - It refuses names ending in `-demo` and versions that do not match the pattern.
+- `release.yml`:
+  - Triggers: tags `v*.*.*` and `workflow_dispatch` with a tag input. Environment `release`. Permissions `contents: write`, `packages: write`, `id-token: write`, `attestations: write`.
+  - Writes the trusted-keys folder from the three `MSCD_TRUSTED_KEYS_*_PUB` variables, and the pack key from `MSCD_PACK_SIGNING_KEY` to `$RUNNER_TEMP` with mode 0600.
+  - Builds and pushes with `build-release-images.sh --push --registry ghcr.io/mqusaeri`, then signs each digest with keyless cosign and attaches the SBOM and provenance as attestations.
+  - Creates the GitHub Release with `digests.json` as an asset and the digests in the notes.
+  - An optional job (input `bundle`, default false) builds the signed on-premise bundle with `MSCD_RELEASE_SIGNING_KEY`.
+- `saas-keys.sh`: the owner runs it on the owner's own computer.
+  - It refuses an output folder inside a git work tree.
+  - It makes the pack and licence pairs with `mscd-pack keygen`, and the KEKs, gateway token and anchor pair with `mscd-server keys generate`. It also makes the bundle signing key, and names the public files the way the trusted-keys build context expects.
+  - It rejects any key id in `dev-key-ids.json`.
+  - It prints the `gh secret set --env <name> < file` and `gh variable set` commands for K.2. Private values are never printed.
+  - It ends with a reminder to store offline copies.
+  - `--print-only` prints the commands without the reminder prompt, for tests.
+- `security-scan.yml`, on push, pull request and nightly:
+  - CodeQL for JavaScript and TypeScript;
+  - gitleaks secret scanning;
+  - OSV scan of `package-lock.json`;
+  - Trivy config scan of `deploy/`;
+  - a nightly Trivy scan of the image digests in the latest GitHub Release's `digests.json`, so the deployed images are scanned again.
+- `dependabot.yml`: weekly grouped updates for npm, GitHub Actions and the Dockerfiles in `deploy/docker`.
+- `check-workflows.mjs` uses the `yaml` package already in the lockfile. It checks four things:
+  - top-level `permissions` is set;
+  - third-party `uses:` are pinned to a 40-character SHA;
+  - no `${{ secrets.` appears inside `run:` text;
+  - jobs with environment `production` or `staging` have a `concurrency` group with `cancel-in-progress: false`.
+
+  `--saas` checks the SaaS workflows that exist. `--require-all` also fails when one of `release.yml`, `security-scan.yml`, `bootstrap-prod.yml`, `deploy-prod.yml`, `restore-test.yml` and `ops-cli.yml` is missing.
+- `docs/saas/release.md`: how to cut a release, what each check means, and how to verify an image with `cosign verify` locally.
+
+Acceptance:
+
+```bash
+bash -n deploy/scripts/build-release-images.sh deploy/scripts/saas-keys.sh deploy/scripts/build-bundle.sh
+node tools/scripts/check-workflows.mjs .github/workflows/release.yml .github/workflows/security-scan.yml
+K=$(mktemp -d) && bash deploy/scripts/saas-keys.sh --out "$K/keys" --print-only | grep -q 'gh secret set --env production PLATFORM_KEY'
+! bash deploy/scripts/saas-keys.sh --out "$PWD/tmp-keys" --print-only && test ! -e "$PWD/tmp-keys"
+bash deploy/scripts/build-release-images.sh --version 1.1.0-rc.1 --trusted-keys-dir "$K/keys/trusted" --pack-signing-key "$K/keys/pack-signing.key" --build-ca "$MSCD_BUILD_CA" --registry localhost/mqusaeri --load --digest-file "$K/digests.json"
+node -e "const d=require(process.argv[1]);if(!/^sha256:/.test(d.server)||!/^sha256:/.test(d.web))process.exit(1)" "$K/digests.json"
+! bash deploy/scripts/build-release-images.sh --version 1.1.0 --registry localhost/mqusaeri-demo --load --trusted-keys-dir "$K/keys/trusted" --pack-signing-key "$K/keys/pack-signing.key"
+bash deploy/scripts/build-bundle.sh --help | grep -q images-only
+rm -rf "$K"
+```
+
+#### M2-S02 SaaS Compose stack and TLS
+
+| | |
+|---|---|
+| Wave, depends on | S1; Milestone 1 (uses `build-release-images.sh` from M2-S01 in its test script, so it finishes after M2-S01) |
+| Owns | `deploy/compose/docker-compose.saas.yml`, `deploy/compose/.env.saas.example`, `deploy/compose/config/caddy/**`, `deploy/nginx/**`, `apps/server/profiles/saas.yaml`, `deploy/scripts/test/saas-stack.sh`, `docs/saas/stack.md`, `docs/platform/handoff/M2-S02.md` |
+
+Brief:
+- `docker-compose.saas.yml`:
+  - **Server services:** `migrate`, `storage-gateway`, `api`, `worker` and `cli` use `${MSCD_SERVER_IMAGE}@${MSCD_SERVER_DIGEST}` with `pull_policy: missing`, one entry per service. `web` uses `${MSCD_IMAGE}@${MSCD_WEB_DIGEST}`.
+  - **web:** `ports: !override []`, `volumes: !reset []`, `MSCD_HTTP_REDIRECT=false`, `MSCD_TRUSTED_PROXY_CIDRS=<caddy address>/32`, and a fixed address on a fixed-subnet `edge` network.
+  - **caddy:** pinned by digest; ports 80/tcp, 443/tcp and 443/udp; volumes `caddy_data` and `caddy_config`; `read_only`, `cap_drop: [ALL]`, `cap_add: [NET_BIND_SERVICE]`.
+  - **postgres:** tuning flags for 16 GB (`shared_buffers=4GB`, `effective_cache_size=10GB`, `work_mem=16MB`, `maintenance_work_mem=512MB`, `wal_compression=on`, `log_min_duration_statement=500ms`) and `shm_size: 1g`.
+  - **Limits:** memory limits from `.env` (PostgreSQL 4G, SeaweedFS 2G, api 2G, worker 2G, gateway 1G, web and Caddy 512M).
+  - **Logging:** driver `local` with `max-size: 20m` and `max-file: 10`.
+  - **Profiles:** `COMPOSE_PROFILES=bundled-db,bundled-s3`; pg-boss stays and Valkey stays off.
+- `.env.saas.example` contains:
+  - `MSCD_PROFILE_FILE=/app/apps/server/profiles/saas.yaml`, `MSCD_DOMAIN`, `MSCD_PUBLIC_URL`;
+  - `MSCD_SMTP_*` for port 587 with STARTTLS;
+  - the image names `ghcr.io/mqusaeri/mscd-server` and `ghcr.io/mqusaeri/mscd-web` and the digest variables;
+  - `ACME_EMAIL` and `ACME_CA` (Let's Encrypt staging by default for a first run);
+  - `MSCD_TLS_MODE` (`acme` or `internal` for tests) and the memory limits.
+
+  It has no `MSCD_ORG_*` lines. The deploy script writes the real file, so the owner never edits it on the server.
+- `config/caddy/Caddyfile`:
+  - **Certificates:** ACME HTTP-01 with `{$ACME_EMAIL}` and `{$ACME_CA}`, or `tls internal` when `MSCD_TLS_MODE=internal`. HTTP redirects to HTTPS with 308.
+  - **Headers:** `Strict-Transport-Security: max-age=31536000; includeSubDomains`, without preload. Caddy replaces any client `X-Forwarded-For` with the client address.
+  - **Upstream:** `reverse_proxy web:8080` with `lb_try_duration 30s` and a health check on `/healthz`. A request body limit matches `max_upload_bytes` plus 1 MB.
+  - **Logs:** JSON access logs with the query string removed.
+  - **Extensions:** `import /etc/caddy/conf.d/*.caddy` for the optional ops host of M2-S08.
+- `deploy/nginx`:
+  - `limit_req` per client address for `/api/v1/auth/` (10 per second, burst 20) and for `/api/` (50 per second, burst 100), plus `limit_conn` 50 per address.
+  - Values come from `MSCD_RATE_*` variables in `40-mscd-runtime.sh`, and `MSCD_RATE_LIMITS=false` turns them off.
+  - The limits answer 429 with the problem headers.
+  - The defaults are generous so an office behind one carrier NAT address is not locked out.
+  - The on-premise defaults stay unchanged.
+- `saas.yaml`: SMTP port 587. Comments say that Compose sets `trust_proxy` and the public URL through environment variables. The anchor key file stays at `/run/secrets/audit-anchor.key`.
+- `saas-stack.sh up|check|down`: the local test stack, project `mscd-saas-test`, ports 18080 and 18443.
+  - **up:** makes throwaway keys with `saas-keys.sh` and builds release images with them. It writes `.env` from the example with `MSCD_TLS_MODE=internal` and `MSCD_DOMAIN=localhost`, adds Mailpit for mail, starts the stack, runs migrate, and copies Caddy's local root certificate to `/tmp/mscd-saas-test/caddy-root.crt`.
+  - **check:** asserts five things:
+    - tenancy mode `multi` through the `cli` service;
+    - only Caddy publishes ports;
+    - HSTS is present;
+    - the rate limit answers 429;
+    - after running the audit anchor job, the worker log has no line "not among the anchor keys compiled into this build".
+
+    The last assertion proves that the deployed anchor key matches the compiled key.
+  - **down:** removes everything, volumes included.
+
+Acceptance:
+
+```bash
+C="docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.saas.yml --env-file deploy/compose/.env.saas.example"
+$C config -q
+$C config --format json | node -e "const c=JSON.parse(require('fs').readFileSync(0));const p=Object.entries(c.services).filter(([,s])=>(s.ports||[]).length).map(([n])=>n);if(p.join()!=='caddy')process.exit(1)"
+bash -n deploy/scripts/test/saas-stack.sh
+flock /tmp/mscd-stack.lock bash -c 'bash deploy/scripts/test/saas-stack.sh up && bash deploy/scripts/test/saas-stack.sh check; s=$?; bash deploy/scripts/test/saas-stack.sh down; exit $s'
+flock /tmp/mscd-stack.lock npm run test:smoke
+```
+
+The `check` step also runs `curl --cacert /tmp/mscd-saas-test/caddy-root.crt https://localhost:18443/healthz` and checks that `http://localhost:18080/` answers 308. The last line proves the on-premise stack still works with the NGINX changes.
+
+#### M2-S03 Server bootstrap
+
+| | |
+|---|---|
+| Wave, depends on | S1; Milestone 1 |
+| Owns | `deploy/scripts/bootstrap-host.sh`, `deploy/host/{ssh,docker,firewall,system,test}/**`, `.github/workflows/bootstrap-prod.yml`, `docs/saas/bootstrap.md`, `docs/platform/handoff/M2-S03.md` |
+
+Brief:
+- `bootstrap-host.sh` runs as root and is safe to run again. Each step reports `done`, `changed` or `skipped`.
+  - **Packages and Docker:** `apt-get upgrade`; `unattended-upgrades` for security updates, with a reboot-needed marker for M2-S08; Docker CE and the Compose plugin from the `download.docker.com` apt repository.
+  - **Docker daemon:** `/etc/docker/daemon.json` sets `live-restore: true`, `log-driver: local`, and `default-address-pools` that avoid `172.31.250.0/24` and the edge subnet.
+  - **Accounts:** a `deploy` user with SSH key only, in the docker group; one admin user with sudo for the owner; the `mscd` system account.
+  - **SSH:** `sshd_config.d/10-mscd.conf` sets `PasswordAuthentication no`, `PermitRootLogin no` and `AllowUsers deploy <admin>`.
+  - **Firewall:** ufw denies incoming by default and allows `limit 22/tcp`, 80/tcp, 443/tcp and 443/udp. fail2ban covers sshd.
+  - **System:** UTC and chrony; a 4 GB swap file with swappiness 10; journald `SystemMaxUse=1G`.
+  - **Data volume:** an optional `--data-device <dev>` is mounted at `/var/lib/docker`. It is formatted only with `--format-data-device`, and only when the device is empty.
+  - **Folders:** `/opt/mscd/{releases,state,logs,secrets,backup,metrics}` with fixed owners and modes.
+  - **Output:** the host key fingerprints and the `known_hosts` line for `DEPLOY_SSH_KNOWN_HOSTS`.
+- Test modes:
+  - `--render-only --root <dir>` writes every config file under `<dir>` and changes nothing else.
+  - `--dry-run` prints each command it would run.
+  - `--check` reports what differs from the target state and exits 1 when anything does.
+- Docker-published ports bypass ufw. `docs/saas/bootstrap.md` explains this and why only Caddy publishes.
+- `bootstrap-prod.yml`, dispatched by hand:
+  - **Inputs:** `target` (`staging` or `production`), the admin user name, and `host_key_fingerprint`. The owner copies the fingerprint from the provider console.
+  - **Host check:** the workflow compares the ssh-keyscan result with that fingerprint and stops on a difference.
+  - **Run:** it connects as root with `BOOTSTRAP_SSH_KEY`, copies the script and runs it.
+  - **Output:** a job summary asking the owner to delete `BOOTSTRAP_SSH_KEY` and set `DEPLOY_SSH_KNOWN_HOSTS` and `DEPLOY_SSH_KEY`.
+- `docs/saas/bootstrap.md`: the provider steps, the block volume, the DNS records, the bootstrap run, and the later option of closing port 22 with the Tailscale GitHub Action (GitHub runner addresses change, so port 22 stays open at first).
+
+Acceptance:
+
+```bash
+bash -n deploy/scripts/bootstrap-host.sh
+node tools/scripts/check-workflows.mjs .github/workflows/bootstrap-prod.yml
+R=$(mktemp -d) && bash deploy/scripts/bootstrap-host.sh --render-only --root "$R" --admin-user owner --deploy-key-file deploy/host/test/deploy.pub
+grep -qx 'PasswordAuthentication no' "$R/etc/ssh/sshd_config.d/10-mscd.conf" && grep -qx 'PermitRootLogin no' "$R/etc/ssh/sshd_config.d/10-mscd.conf"
+node -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1]));if(d['live-restore']!==true||d['log-driver']!=='local')process.exit(1)" "$R/etc/docker/daemon.json"
+grep -q 'SystemMaxUse=1G' "$R/etc/systemd/journald.conf.d/10-mscd.conf"
+docker run --rm -v "$PWD/deploy:/deploy:ro" ubuntu:24.04 bash /deploy/scripts/bootstrap-host.sh --dry-run --admin-user owner --deploy-key-file /deploy/host/test/deploy.pub | grep -q 'ufw limit 22/tcp'
+rm -rf "$R"
+```
+
+#### M2-S04 Go-live checklist and owner pack
+
+| | |
+|---|---|
+| Wave, depends on | S1; none |
+| Owns | `docs/saas/README.md`, `docs/saas/go-live-checklist.md`, `docs/saas/owner-inputs.md`, `docs/saas/legal-inputs.md`, `docs/saas/records-of-processing.md`, `docs/saas/incident-response.md`, `docs/saas/pentest-scope.md`, `tools/scripts/check-golive.mjs`, `docs/platform/handoff/M2-S04.md` |
+
+Brief:
+- The pack is written early so the owner can start the legal work and book the penetration test while agents build. Booking alone can take weeks.
+- `go-live-checklist.md` is one table per area. Every row has these columns: id `GL-nn`, item, why it matters in plain words, who (`agent` or `owner`), evidence (a command, CI job or document), and status (`open`, `done` or `n/a`). Rows include at least the items below.
+  - **Security:**
+    - HSTS on, and certificates renewed by Caddy;
+    - NGINX rate limits on;
+    - tenant isolation proven under tenancy `multi` (M2-S13);
+    - MFA required;
+    - mail working, with invitation links never shown in SaaS;
+    - release keys made outside the repository, and development keys rejected;
+    - images signed and verified at deploy;
+    - Trivy, CodeQL, gitleaks and OSV clean;
+    - deploys only through the approved workflow;
+    - named SSH accounts only, and root login off;
+    - operator accounts with TOTP, and the break-glass decision recorded;
+    - audit chain and anchors verified;
+    - KEK offline copies confirmed by the owner;
+    - demo stack absent from the production server;
+    - penetration test done, findings fixed and retested.
+  - **Operations:**
+    - off-site backups running;
+    - a restore test passed in the last 8 days, with the measured restore time written down;
+    - a test alert received;
+    - external heartbeat and uptime check active;
+    - status page published;
+    - uptime target and support hours published.
+  - **Indonesian personal data protection (UU PDP, Law 27 of 2022):**
+    - privacy notice published in Indonesian and English and linked from the sign-in page;
+    - DPA ready, stating that the customer is the controller and MSCD the processor, with breach notice to the customer within 24 hours;
+    - records of processing complete;
+    - DPO decision recorded (Article 53);
+    - breach procedure meeting the 3 x 24 hour notice of Article 46, with templates and one exercise run;
+    - data location and cross-border position written (Article 56);
+    - PSE Lingkup Privat registration done (PP 71/2019);
+    - retention periods written for logs, backups and offboarding;
+    - a manual procedure for requests from data subjects until a feature exists (K.8);
+    - subprocessor list published;
+    - only essential cookies used.
+  - **Legal documents the owner provides:** privacy notice, DPA, terms of service in Indonesian and English (Law 24/2009), DPO appointment or decision, PSE registration proof, lawyer's note on cross-border transfer, and the penetration test summary letter.
+  - **Sign-off:** the owner's name and date.
+- `owner-inputs.md`: K.2 and K.3 as a checklist with the exact secret and variable names and the command that sets each one.
+- `legal-inputs.md`: the facts a lawyer needs, taken from the code and BP F.11 and F.12. It covers:
+  - the data categories per activity, their purposes and the people involved;
+  - the cookies (session, guest and binding);
+  - recipients and subprocessors (VPS host, mail provider, backup provider, heartbeat service);
+  - data locations and retention;
+  - the security measures, as a ready annex for the DPA;
+  - what happens at offboarding (D-S5) and what is not built yet (K.8).
+
+  It is headed "Facts for the lawyer. Not legal advice."
+- `records-of-processing.md`: one record per activity (account and sign-in data, customer compliance content, evidence files, notification emails, logs and backups, support access), with purpose, data, people, recipients, location, retention and safeguards. It is marked as a draft for review by a lawyer qualified in Indonesian law.
+- `incident-response.md`: roles, severity levels, the 24/7 contact placeholder, and how to find affected organisations and people with the audit log and access logs. It includes notice templates in Indonesian and English for customers and, where the controller asks for help, for the authority and the people affected. It also has an incident log template and an exercise script. It is marked as a draft for legal review.
+- `pentest-scope.md`: the staging target, test accounts per role in two organisations, and the areas in scope: moving between tenants, sign-in with MFA and SSO, file upload and download, the storage gateway, operator routes, and the VPS and network. It also lists what is out of scope and the rules of engagement.
+- `check-golive.mjs` parses the checklist tables.
+  - Default mode: fails when a row lacks an id, who, evidence or a valid status, or when a link to a repository file is broken.
+  - `--agent-items-done`: also fails on any open `agent` row.
+  - `--require-done`: fails on any open row. It is used on the go-live day.
+
+Acceptance:
+
+```bash
+npm run check:text
+node tools/scripts/check-golive.mjs docs/saas/go-live-checklist.md
+! node tools/scripts/check-golive.mjs --require-done docs/saas/go-live-checklist.md
+test "$(grep -c '^| GL-' docs/saas/go-live-checklist.md)" -ge 40
+grep -q '3 x 24' docs/saas/incident-response.md && grep -q 'Article 46' docs/saas/go-live-checklist.md
+grep -q 'PLATFORM_KEY' docs/saas/owner-inputs.md && grep -q 'BACKUP_RESTIC_PASSWORD' docs/saas/owner-inputs.md
+```
+
+#### M2-S05 Deploy script and deploy workflow
+
+| | |
+|---|---|
+| Wave, depends on | S2; M2-S01, M2-S02, M2-S03 |
+| Owns | `deploy/scripts/saas-deploy.sh`, `deploy/scripts/lib/saas.sh`, `deploy/scripts/test/saas-rehearsal.sh`, `.github/workflows/deploy-prod.yml`, `docs/saas/deploy.md`, `docs/platform/handoff/M2-S05.md` |
+
+Brief:
+- `saas-deploy.sh` sources `lib/common.sh` and the new `lib/saas.sh`. `common.sh` is unchanged, so `install.sh` and `upgrade.sh` behave as before. Actions are `deploy`, `rollback` and `check-only`. The steps are:
+  1. Lock, then check Docker, disk and memory.
+  2. Refuse demo images, demo or test profiles and any `MSCD_DEMO` value (S-7).
+  3. Write `.env` from `.env.saas.example` and the given values (`env_set`).
+  4. Write generated secrets only when missing (`ensure_secrets`: database passwords, gateway token, S3 identity, internal CA).
+  5. Read `PLATFORM_KEY`, `STORAGE_KEY` and `AUDIT_ANCHOR_KEY` from stdin. Each must match any existing file. On a mismatch the script stops and never overwrites. `ensure_anchor_key` is skipped.
+  6. Pull both images by digest while the old containers keep running, then start the new server image with `--help` once.
+  7. Take a pre-deploy `pg_dump --format=custom` to `/opt/mscd/backup/pre-deploy` (last 3 kept). When `deploy/backup/backup.sh` exists (M2-S07), also send an off-site copy.
+  8. Run migrate alone (`compose run --rm --no-deps migrate`). The timeout grows with the number of `org_` schemas, and the log is written to `/opt/mscd/logs` and printed back.
+  9. Restart with `--no-deps --wait` in order: storage-gateway, api, worker, web, caddy.
+  10. Verify through Caddy: `/healthz`, `/readyz` and the version in `/api/v1/system/profile`.
+  11. Record the current and previous digests in `/opt/mscd/state`, and keep the images of the last 3 releases.
+
+  It uses every overlay that exists: `docker-compose.saas.yml`, plus `docker-compose.backup.yml` and `docker-compose.ops.yml` when present.
+- A failed migrate or health check restores the saved `.env` and starts the previous digests (the `upgrade.sh` logic of `save_backup` and `restore_backup`, with registry pulls in place of `load_bundle_images`). There is no down migration. Restoring the database is a documented manual step, needed only for a broken contract migration.
+- `deploy-prod.yml`, on `workflow_dispatch`:
+  - **Inputs:** `version` (tag), `action` (`deploy` or `rollback`), `target` (`staging` or `production`), `skip_backup` (default false).
+  - **Run settings:** environment `${{ inputs.target }}`, concurrency group `deploy-${{ inputs.target }}` with `cancel-in-progress: false`, permissions `contents: read` and `packages: read`.
+  - **Steps:**
+    1. Check out the tag.
+    2. Read the digests from the release's `digests.json`, then `cosign verify` each digest with `--certificate-identity https://github.com/mqusaeri/mscd/.github/workflows/release.yml@refs/tags/<tag>` and the GitHub OIDC issuer.
+    3. Rsync `deploy/compose` and `deploy/scripts` (and `deploy/backup`, `deploy/ops` when present) to `/opt/mscd/releases/<version>`, with the host key from `DEPLOY_SSH_KNOWN_HOSTS`.
+    4. Over SSH: `docker login ghcr.io --password-stdin` with the job's `GITHUB_TOKEN`, which expires with the job; `saas-deploy.sh` with secret values on stdin and never as arguments; `docker logout`.
+    5. From the runner, check `https://<domain>/healthz` and the reported version.
+  - **Cleanup:** the runner always removes the key.
+- `saas-rehearsal.sh` proves deploy, upgrade, automatic rollback and manual rollback on the build host.
+  - It starts a local registry on `127.0.0.1:5000`. It builds and pushes two versions with throwaway keys, and makes a broken third version by tagging the web image as the server image so migrate fails.
+  - It runs `saas-deploy.sh` against `/tmp/mscd-rehearsal` four times: deploy rc.1, upgrade to rc.2, try rc.3 and expect the automatic restore to rc.2, then `rollback` to rc.1.
+  - The flag `--no-verify-signature` skips cosign. It is accepted only for a `127.0.0.1` registry.
+- `docs/saas/deploy.md`:
+  - how an agent starts a run (`gh workflow run deploy-prod.yml -f version=v1.1.0 -f target=staging`) and how the owner approves it;
+  - the release rehearsal order: staging first, then the restore-test migration rehearsal (M2-S07), then production;
+  - rollback;
+  - what users see during a deploy: slow requests for up to 20 seconds, and retried POSTs are safe because of idempotency keys.
+
+Acceptance:
+
+```bash
+bash -n deploy/scripts/saas-deploy.sh deploy/scripts/lib/saas.sh deploy/scripts/test/saas-rehearsal.sh
+node tools/scripts/check-workflows.mjs .github/workflows/deploy-prod.yml
+node -e "const y=require('yaml');const w=y.parse(require('fs').readFileSync('.github/workflows/deploy-prod.yml','utf8'));const j=Object.values(w.jobs)[0];if(!String(j.environment).includes('inputs.target'))process.exit(1)"
+flock /tmp/mscd-stack.lock bash deploy/scripts/test/saas-rehearsal.sh
+! MSCD_SERVER_IMAGE=ghcr.io/mqusaeri/mscd-server-demo bash deploy/scripts/saas-deploy.sh check-only --install-dir "$(mktemp -d)"
+! MSCD_PROFILE_FILE=/app/apps/server/profiles/demo.yaml bash deploy/scripts/saas-deploy.sh check-only --install-dir "$(mktemp -d)"
+flock /tmp/mscd-stack.lock npm run test:smoke
+```
+
+#### M2-S06 SaaS contract, schema and permissions
+
+| | |
+|---|---|
+| Wave, depends on | S2; M2-06 |
+| Owns | `packages/shared/src/api/{ops,auth,system,license}.ts`, `packages/shared/src/{enums.ts,machines.ts,examples.ts,index.ts,openapi.ts}`, `packages/shared/src/authz/matrix.ts`, `packages/shared/test/**`, `apps/server/migrations/platform/0005_saas.sql`, `apps/server/src/db/types/platform.ts`, `apps/server/src/config/profile.schema.ts`, `apps/server/profiles/{saas,onprem,demo,test}.yaml` (new keys only), stub files `apps/server/src/modules/ops/domains/**` and `apps/server/src/modules/license/entitlements.controller.ts`, the stub routes added to `apps/server/src/modules/ops/ops.controller.ts`, the module files that register them, `apps/server/test/int/{contract,rbac,security,db}/**`, `apps/server/test/int/m2-pending/M2-S{09,10,11}.json`, `docs/platform/handoff/M2-S06.md` |
+
+Brief:
+- New routes. All are platform scope and answer 409 `single_tenancy` in single tenancy.
+
+| Route id | Method and path | Permission | Built by |
+|---|---|---|---|
+| `ops.organizations.get` | `GET /api/v1/ops/organizations/:org` | `ops.read` [OP] | M2-S09 |
+| `ops.organizations.status` | `POST /api/v1/ops/organizations/:org/status` `{status, reason, confirmSlug?}` | `ops.tenants.manage` [OP] | M2-S09 |
+| `ops.organizations.events` | `GET /api/v1/ops/organizations/:org/events` | `ops.read` [OP] | M2-S09 |
+| `ops.domains.list` | `GET /api/v1/ops/organizations/:org/domains` | `ops.read` [OP] | M2-S11 |
+| `ops.domains.add` | `POST /api/v1/ops/organizations/:org/domains` `{domain}` returns `{domain, txtName, txtValue, status}` | `ops.tenants.manage` [OP] | M2-S11 |
+| `ops.domains.verify` | `POST /api/v1/ops/organizations/:org/domains/:domain/verify` | `ops.tenants.manage` [OP] | M2-S11 |
+| `ops.domains.remove` | `DELETE /api/v1/ops/organizations/:org/domains/:domain` | `ops.tenants.manage` [OP] | M2-S11 |
+| `ops.entitlements.get` | `GET /api/v1/ops/organizations/:org/entitlements` | `ops.read` [OP] | M2-S10 |
+| `ops.entitlements.set` | `PUT /api/v1/ops/organizations/:org/entitlements` with `If-Match` | `ops.entitlements.manage` [OP] (new) | M2-S10 |
+| `ops.plans.list` | `GET /api/v1/ops/plans` | `ops.read` [OP] | M2-S10 |
+
+- Changed schemas:
+  - `ops.organizations.create` takes an optional `preset`;
+  - `ops.organizations.list` items add `status`, `plan`, `validUntil` and `verifiedDomains`;
+  - `system.profile` adds `legal: {privacyUrl, termsUrl}`;
+  - `auth.providers` documents the same answer for unknown slugs and domains, plus 429.
+- `enums.ts`:
+  - **Permission:** `ops.entitlements.manage`.
+  - **Audit actions:** `ops.organization_status_changed`, `ops.domain_added`, `ops.domain_verified`, `ops.domain_verification_failed`, `ops.domain_removed`, `ops.entitlements_changed`.
+  - **Job names:** `domain.verify`, `entitlement.expiry`.
+  - **Notification kind:** `organization_status_changed`.
+  - **Problem codes:** `invalid_status_transition` (409), `domain_taken` (409), `domain_not_allowed` (422), `confirmation_mismatch` (422).
+- `machines.ts`: the organisation status machine. Allowed moves:
+  - `active` to `suspended` or `offboarding`;
+  - `suspended` to `active` or `offboarding`;
+  - `offboarding` to `active` or `archived`;
+  - `archived` is final, until the purge of K.8.
+- `0005_saas.sql`:
+  - **New table `platform.organization_status_event`:** organisation, from, to, reason, actor, time.
+  - **`platform.verified_domain`:** adds `status` (`pending`, `verified`, `failed`), `txt_token_hash`, `requested_at`, `verified_at`, `last_checked_at` and `method` (`dns`, `manual`). It gets a unique index on `lower(domain)` where `status = 'verified'`. When duplicates already exist, the migration stops and lists them.
+  - **New table `platform.entitlement`:** primary key `organization_id`; `plan`, `source` (`preset`, `manual`, `signed_licence`), `max_users`, `max_management_systems`, `frameworks`, `storage_adapters`, `features`, `rate_user_per_minute`, `rate_org_per_minute`, `valid_from`, `valid_until`, `grace_days`, `version`, `updated_at`, `updated_by`.
+  - **Access:** grants and RLS like the other platform tables.
+- New profile keys, with defaults that keep on-premise unchanged:
+  - `tenancy.default_region` (default `id`);
+  - `license.plans` (map of preset name to limits; the D-S4 defaults in `saas.yaml`);
+  - `network.dns_resolvers` (default `[]`);
+  - `legal.privacy_url` and `legal.terms_url` (default `null`);
+  - `mail.required` (`true` in `saas.yaml`, `false` elsewhere).
+- Stubs answer 501 `not_implemented`. The pending files list the route ids per package. Record-table entries are added for the new GET routes, and the contract snapshot is updated once.
+
+Acceptance:
+
+```bash
+npm test -w @mscd/shared
+npm run openapi
+npm run test:int -w @mscd/server -- test/int/db test/int/contract test/int/rbac test/int/security
+npm run test:int -w @mscd/server
+test "$(ls apps/server/test/int/m2-pending/M2-S*.json | wc -l)" -eq 3
+node -e "const s=require('fs').readFileSync('apps/server/test/int/contract/__snapshots__/routes.test.ts.snap','utf8');for(const id of ['ops.organizations.status','ops.domains.add','ops.entitlements.set','ops.plans.list'])if(!s.includes(id+' '))process.exit(1)"
+```
+
+#### M2-S07 Backups and restore test
+
+| | |
+|---|---|
+| Wave, depends on | S2; M2-S02, M2-06 |
+| Owns | `deploy/docker/backup.Dockerfile`, `deploy/compose/docker-compose.backup.yml`, `deploy/backup/**`, `deploy/host/systemd/mscd-backup.{service,timer}`, `.github/workflows/restore-test.yml`, `apps/server/src/cli/backup.ts`, `apps/server/src/main.ts`, `apps/server/test/int/backup/**`, `docs/saas/backup-restore.md`, `docs/platform/handoff/M2-S07.md` |
+
+Brief:
+- `backup.Dockerfile`: `postgres:16.15-alpine` plus `restic` and `rclone`. It runs as non-root and mounts the build CA as in R-12.
+- The `backup` service runs on demand only (profile `backup`) on the internal network. A systemd timer on the host runs `deploy/backup/backup.sh` at 02:00 UTC. Each run has three parts, with no downtime:
+  1. `pg_dump --format=custom` of database `mscd`, all `org_` schemas included, into a restic repository on the off-site bucket.
+  2. `rclone sync` of bucket `mscd-vault` from `objectstore:8333` to the off-site bucket while the stack runs. Vault objects are already sealed by the gateway.
+  3. A restic-encrypted copy of `/opt/mscd/secrets`, `.env` and `/opt/mscd/state` under a separate prefix with the separate credentials, plus the last 25 hours of worker `audit.anchor` log lines.
+- Retention: `restic forget` 14 daily, 8 weekly, 12 monthly (D-S6). Each success pings `HEARTBEAT_BACKUP_URL` and writes `mscd_backup_last_success_timestamp_seconds` to `/opt/mscd/metrics/backup.prom` for the node-exporter of M2-S08.
+- The backup secrets of K.2 reach the server through `deploy-prod.yml`, as files under `/opt/mscd/secrets/backup/`.
+- `restore.sh`: a documented full restore onto a new server bootstrapped with M2-S03. It covers secrets, database, vault, start and checks.
+- `mscd-server backup verify [--sample <n>] [--write-probe]`:
+  - checks the database and gateway;
+  - unwraps each tenant data key with `platform.key`;
+  - opens n vault objects per organisation through the gateway;
+  - checks that the head of the audit chain matches the newest signed anchor;
+  - prints a JSON summary and exits 1 on any failure.
+
+  `--write-probe` writes small probe objects. It is refused unless `MSCD_SAAS_TEST=1`.
+- `restore-test.yml`, weekly and on dispatch with an optional `target_version`:
+  - environment `restore-test` (D-S12) on a GitHub runner, so the production server carries no load;
+  - restores the latest dump and a sample of vault objects into scratch containers;
+  - runs migrate of `target_version` (default: the current release) against the restored dump as the migration rehearsal;
+  - starts storage-gateway and api, checks `/readyz`, and runs `backup verify` and SQL checks (organisation count; newest `audit_log` entry under 26 hours old);
+  - writes the measured restore time to the job summary as the restore time objective;
+  - pings `HEARTBEAT_RESTORE_URL`.
+- `restore-test.sh --local`: the same test against the M2-S02 test stack, end to end. It creates two organisations with `tenant create`, writes probes, backs up to a second SeaweedFS container that stands in for the off-site bucket, deletes the stack volumes, restores and verifies.
+
+Acceptance:
+
+```bash
+npm run test:int -w @mscd/server -- test/int/backup
+npm run build -w @mscd/server && node apps/server/dist/main.js backup --help | grep -q verify
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.saas.yml -f deploy/compose/docker-compose.backup.yml --env-file deploy/compose/.env.saas.example config -q
+bash -n deploy/backup/*.sh
+node tools/scripts/check-workflows.mjs .github/workflows/restore-test.yml
+flock /tmp/mscd-stack.lock bash deploy/backup/restore-test.sh --local
+```
+
+#### M2-S08 Monitoring and alerts
+
+| | |
+|---|---|
+| Wave, depends on | S2; M2-S02 |
+| Owns | `deploy/compose/docker-compose.ops.yml`, `deploy/ops/**`, `deploy/compose/config/caddy/conf.d/ops.caddy`, `docs/saas/monitoring.md`, `docs/platform/handoff/M2-S08.md` |
+
+Brief:
+- `docker-compose.ops.yml` runs these services:
+  - **Prometheus:** joins the internal `mscd` network to scrape `api:9464`, `worker:9464` and `storage-gateway:9464`. Retention is 30 days. It publishes no port.
+  - **Alertmanager.**
+  - **node-exporter:** with the textfile collector on `/opt/mscd/metrics`.
+  - **postgres-exporter:** as role `mscd_monitor` with `pg_monitor`. An idempotent `ops-init` one-shot service creates that role.
+  - **blackbox-exporter:** HTTPS probe of the public URL and certificate expiry.
+  - **Grafana (optional profile `grafana`):** behind Caddy at `ops.<domain>` with basic auth from `ops.caddy`.
+
+  The services use about 1.5 GB RAM in total, with limits set.
+- Alert rules in `deploy/ops/prometheus/rules/`:
+  - **Services:** target down for 2 minutes; HTTP 5xx ratio over 2 percent for 10 minutes (from `mscd_http_request_duration_seconds`).
+  - **Audit and licences:** `mscd_audit_chain_broken > 0`; `mscd_licence_days_left < 30` for any organisation.
+  - **Jobs:** a rise in `mscd_job_failures_total`; `mscd_queue_oldest_age_seconds > 900`; `mscd_job_outbox_stuck_rows > 0`.
+  - **Security spikes:** `mscd_mfa_locks_total` and `mscd_authz_denied_total`. These are early breach signals for the 3 x 24 hour deadline.
+  - **Host:** disk over 80 percent; memory pressure; reboot needed.
+  - **Certificates:** expiring in under 14 days.
+  - **Backups:** backup older than 26 hours.
+  - **Watchdog:** always firing.
+- Alertmanager:
+  - email through the SMTP secrets (`smtp_auth_password_file`) to `ALERT_EMAIL_TO`, and Telegram when `TELEGRAM_BOT_TOKEN` is set (`bot_token_file`);
+  - the Watchdog goes to `HEARTBEAT_WATCHDOG_URL` every minute, so the external service alerts the owner when the box itself is down;
+  - `ops-init` renders the config from a template.
+- Promtool unit tests in `deploy/ops/prometheus/tests/` for every rule.
+- `deploy/ops/test-ops.sh`: starts the M2-S02 test stack with the ops overlay, checks that every target is up through the Prometheus API inside the container, fires a test alert with `amtool`, and checks that the email arrives in Mailpit.
+- `docs/saas/monitoring.md`:
+  - what each alert means and the first action, in plain words;
+  - how to set up the external uptime check and heartbeat;
+  - log retention: Docker `local` logs on the box, and anchor lines kept off-site by M2-S07. Write the retention periods into the privacy notice and records of processing.
+
+Acceptance:
+
+```bash
+O="docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.saas.yml -f deploy/compose/docker-compose.ops.yml --env-file deploy/compose/.env.saas.example"
+$O config -q
+$O run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
+$O run --rm --no-deps --entrypoint promtool prometheus test rules /etc/prometheus/tests/alerts.test.yml
+$O run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml.example
+bash -n deploy/ops/test-ops.sh
+flock /tmp/mscd-stack.lock bash deploy/ops/test-ops.sh
+```
+
+#### M2-S09 Operator commands and organisation lifecycle
+
+| | |
+|---|---|
+| Wave, depends on | S3; M2-S06, M2-06, M2-S05 (for `ops-cli.yml`) |
+| Owns | `apps/server/src/modules/ops/**` except `ops/domains/**`, `apps/server/src/modules/tenancy/**`, `apps/server/src/db/tenant-provisioner.ts`, the session revocation helper in `apps/server/src/modules/identity/` it adds (`org-sessions.ts`), the `organization_status_changed` mail template, `apps/server/src/cli/{tenant.ts,diagnostics.ts}`, `apps/server/src/main.ts`, `.github/workflows/ops-cli.yml`, `deploy/scripts/saas-ops.sh`, `apps/server/test/int/saas-ops/**`, `apps/server/test/int/m2-pending/M2-S09.json` (deletes), `docs/saas/operator.md`, `docs/platform/handoff/M2-S09.md` |
+
+Brief:
+- Routes `ops.organizations.get`, `.status` and `.events`. The detail shows status, region, created date, member count, system count, entitlement summary, domains and last sign-in.
+- Status change:
+  - follows the machine of M2-S06 and requires a reason;
+  - `offboarding` and `archived` also need `confirmSlug` equal to the slug;
+  - one transaction writes the status, the status event and a platform-chain audit entry;
+  - `suspended` and `archived` revoke every session whose current organisation is this one, and users keep their other memberships;
+  - a `NOTIFY mscd_tenant_changed` makes every api and worker process drop its tenant resolver and session cache within 2 seconds;
+  - the organisation's Tenant Admins get an email with the new status and reason.
+- CLI:
+  - `tenant list` shows slug, id, status, plan, valid until and members;
+  - `tenant show --org <slug>`;
+  - `tenant set-status --org <slug> --status <status> --reason <text> [--confirm <slug>]`;
+  - `tenant onboard --slug --name --time-zone --site-count --admin-email --admin-name [--preset <name>]` does `tenant create`, the entitlement preset (once M2-S10 is done) and the first administrator invitation in one step, through the same service as `ops.organizations.create`;
+  - `diagnostics --out <file>` writes the redacted archive of `POST /ops/diagnostics` without the api (open follow-up of `CLAUDE.md`).
+- New organisations get `region` from `tenancy.default_region`.
+- With `mail.required` (SaaS), `ops.organizations.create`, `tenant onboard` and `admin create-operator` refuse when SMTP is not configured. They never print or return an invitation or set-password link. They print "Invitation sent to <email>".
+- `saas-ops.sh` is the server-side allow-list wrapper. It accepts only these commands, each with validated arguments, mapped to `docker compose run --rm cli ...`:
+  - `create-operator`, `revoke-operator`;
+  - `tenant-list`, `tenant-show`, `tenant-onboard`, `tenant-set-status`;
+  - `admin-create-user --org`;
+  - `license-entitlements-show`, `license-entitlements-set` (M2-S10);
+  - `diagnostics`.
+- `ops-cli.yml`:
+  - **Inputs:** `target`, `command` (a choice list), and one input field per argument, each checked with a pattern.
+  - **Run:** in the target's environment, so the owner approves each run. It calls `saas-ops.sh` over SSH with the pinned host key.
+  - **Output:** shown in the job summary.
+
+  The owner creates the first operator with it, using the owner's own email.
+- `docs/saas/operator.md`:
+  - onboarding a customer step by step;
+  - what each status means for users, explained in plain words;
+  - offboarding with the D-S5 period;
+  - the commands.
+
+Acceptance:
+
+```bash
+npm run test:int -w @mscd/server -- test/int/saas-ops
+npm run test:int -w @mscd/server -- test/int/ops test/int/identity test/int/onboarding test/int/jobs
+test ! -e apps/server/test/int/m2-pending/M2-S09.json
+npm run build -w @mscd/server && node apps/server/dist/main.js tenant --help | grep -q set-status && node apps/server/dist/main.js tenant --help | grep -q onboard && node apps/server/dist/main.js diagnostics --help >/dev/null
+bash -n deploy/scripts/saas-ops.sh && ! bash deploy/scripts/saas-ops.sh psql 2>/dev/null
+node tools/scripts/check-workflows.mjs .github/workflows/ops-cli.yml
+npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/security
+```
+
+`test/int/saas-ops` covers:
+- every allowed status move, and every refused one with 409 `invalid_status_transition`;
+- 422 `confirmation_mismatch`;
+- sessions revoked, while the other organisation's sessions keep working;
+- a second api process seeing the new status within 2 seconds;
+- jobs skipping suspended organisations;
+- the audit entry and the email;
+- onboarding refused in multi tenancy when mail is missing;
+- 409 `single_tenancy` for each new route in single tenancy.
+
+#### M2-S10 Per-organisation entitlements
+
+| | |
+|---|---|
+| Wave, depends on | S3; M2-S06, M2-06 |
+| Owns | `apps/server/src/modules/license/**`, `apps/server/src/modules/platform/rate-limit.ts`, `apps/server/src/cli/license.ts`, `apps/server/profiles/saas.yaml` (`license.plans` values), `apps/server/test/int/license/**`, `apps/server/test/int/entitlements/**`, `apps/server/test/int/m2-pending/M2-S10.json` (deletes), `docs/saas/entitlements.md`, `docs/platform/handoff/M2-S10.md` |
+
+Brief:
+- In multi tenancy, the effective licence of each organisation is its `platform.entitlement` row. LicenceGate reads it through a cache of up to 60 seconds, which the `NOTIFY` of M2-S09 also clears.
+- What stays the same:
+  - the codes `LIC-USERS`, `LIC-MS`, `LIC-FEATURE`, the adapter checks, read-only after grace, and `license.check`;
+  - single tenancy, which still uses the signed licence file;
+  - `PUT /admin/license {org, licence}` (D-32): it still verifies the signature and now writes the entitlement row with source `signed_licence`, so the M2-16 "Install licence" button keeps working.
+- `ops.entitlements.set`:
+  - accepts a `preset` from `license.plans` or explicit fields;
+  - needs `If-Match`;
+  - writes one audit entry with the old and new values;
+  - when a limit falls below current use, it is accepted with a warning in the response, and new invitations then stop with `LIC-USERS`.
+- `ops.plans.list` returns the presets. `ops.organizations.create` and `tenant onboard` apply the given preset.
+- Rate limits per organisation and per user come from the entitlement, with `DEFAULT_RATE_LIMITS` when a value is null.
+- The daily `entitlement.expiry` job emails platform operators at 30, 7 and 1 days before `valid_until`, and the organisation's Tenant Admins at 30 and 7 days. `mscd_licence_days_left` reads the registry.
+- CLI: `license entitlements show --org <slug>` and `license entitlements set --org <slug> (--preset <name> | --max-users <n> --max-systems <n> --valid-until <date> ...)`.
+- `docs/saas/entitlements.md`: presets, how to change a customer's plan, and what users see at each limit.
+
+Acceptance:
+
+```bash
+npm run test:int -w @mscd/server -- test/int/entitlements test/int/license test/int/platform
+test ! -e apps/server/test/int/m2-pending/M2-S10.json
+npm run build -w @mscd/server && node apps/server/dist/main.js license entitlements --help | grep -q preset
+npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/security
+npm run test:int -w @mscd/server
+```
+
+`test/int/entitlements` covers:
+- preset and explicit set, plus 412 and 428 for `If-Match`;
+- limits enforced per organisation, and a second organisation's limits left unchanged;
+- a lowered limit blocking invitations;
+- the cache refresh across processes;
+- the upload path writing a registry row;
+- per-organisation rate limits answering 429 at the new value;
+- the expiry emails.
+
+#### M2-S11 Organisation discovery at sign-in
+
+| | |
+|---|---|
+| Wave, depends on | S3; M2-S06, M2-10 |
+| Owns | `apps/server/src/modules/identity/oidc/{auth-providers.service.ts,provider-lookup.ts}`, `apps/server/src/modules/ops/domains/**`, the `verify-domain` command block in `apps/server/src/cli/tenant.ts` (coordinated with M2-S09: M2-S11 edits only that block), `apps/server/test/int/domains/**`, `apps/server/test/int/m2-pending/M2-S11.json` (deletes), `apps/web/src/auth/**`, `apps/web/test/auth/**`, `apps/web/e2e/api-only/sign-in-discovery.spec.js`, `tools/mock-providers/**`, `docs/saas/sign-in.md`, `docs/platform/handoff/M2-S11.md` |
+
+Brief:
+- Domain verification by DNS TXT:
+  - `ops.domains.add` normalises the domain (lower case, IDN to punycode). It refuses free mail domains (for example `gmail.com`, `yahoo.com`, `yahoo.co.id`, `outlook.com`, `hotmail.com`) with 422 `domain_not_allowed`.
+  - It returns the record `_mscd-verify.<domain>` TXT `mscd-verify=<token>`, with a 32-byte random token. Only the token's hash is stored.
+  - The worker job `domain.verify` checks pending domains every hour for 7 days, then marks them `failed`. "Verify now" checks at once. Lookups use `node:dns` with `network.dns_resolvers`.
+  - A verified domain belongs to one organisation only. A second claim gets 409 `domain_taken`.
+  - A monthly re-check emails the operators when the record is gone. The status stays verified.
+- `tenant verify-domain --by <name>` stays for on-premise. In multi tenancy it also needs `--manual-reason <text>` and is audited with method `manual`.
+- `GET /auth/providers` gives the same answer shape and status for an unknown slug, an unknown domain and a known organisation without SSO (D-S10). It has its own limit of 20 per minute per address, which answers 429 with `Retry-After`.
+- Login page:
+  - first step "Work email". The second step shows the SSO buttons of the matched organisation and the password field when local sign-in is allowed;
+  - `?org=` still preselects an organisation;
+  - the last slug is remembered in `localStorage` inside try and catch;
+  - footer links to the privacy notice and terms from `system.profile.legal`, hidden when null;
+  - English and Indonesian text, no text under 12px, AA contrast in both themes (R-16).
+- `tools/mock-providers`: a small DNS responder on UDP (random port in tests) for TXT records, with an admin route to set records. The API E2E stack and M2-S13 use it.
+- `docs/saas/sign-in.md`: what the customer's IT team adds to DNS, and how sign-in finds the organisation, in plain words.
+
+Acceptance:
+
+```bash
+npm run test:int -w @mscd/server -- test/int/domains test/int/sso test/int/identity
+test ! -e apps/server/test/int/m2-pending/M2-S11.json
+npm test -w @mscd/mock-providers
+npm test -w @mscd/web -- test/auth
+CI=1 npm run test:e2e -w @mscd/web -- e2e/contrast.spec.js e2e/i18n.spec.js
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/sign-in-discovery.spec.js e2e/api-only/sign-in.spec.js
+npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/security
+```
+
+`test/int/domains` covers:
+- add, verify through the mock DNS, expiry after 7 days, and remove;
+- `domain_taken` and `domain_not_allowed`;
+- the token stored only as a hash;
+- discovery returning SSO providers only for a verified domain;
+- the same answer for unknown slugs and domains;
+- the 429 limit.
+
+#### M2-S12 Operator console: organisations, status, domains and entitlements
+
+| | |
+|---|---|
+| Wave, depends on | S4; M2-16, M2-S09, M2-S10, M2-S11 |
+| Owns | `apps/web/src/screens/ops/**`, `apps/web/test/screens/ops*.test.tsx`, `apps/web/e2e/screens/ops*.spec.js`, `apps/web/e2e/api-only/ops-organizations.spec.js`, `docs/platform/handoff/M2-S12.md` |
+
+Brief:
+- Organisations table:
+  - adds the columns status, plan, users "used of limit", valid until with days left, and verified domains;
+  - filters by status and search by slug or name.
+- "Create organisation" gains the plan preset (`ops.plans.list`) and drops the one-time link in multi tenancy, because mail is required.
+- Organisation drawer tabs:
+  - **Overview:** the `ops.organizations.get` fields.
+  - **Status:** shows the current status with one plain sentence on what users can do. Actions are "Suspend", "Reactivate", "Start offboarding" and "Archive". Each needs a reason, and the last two also need the slug typed again. The effects are listed before confirming.
+  - **Domains:** add a domain; shows the TXT name and value with "Copy", state badges, "Verify now", and "Remove" with confirmation.
+  - **Entitlements:** preset picker, the limit fields and valid until; saves with `If-Match`, shows the conflict message and the over-limit warning from the response.
+  - **History:** `ops.organizations.events`.
+- The sample adapter has two sample organisations so sample-mode specs and contrast cover every tab.
+- Hand-written React as D2-01, both languages, both themes, `expectOverlayReadable` on every drawer and dialog (R-16, R-17).
+
+Acceptance:
+
+```bash
+npm test -w @mscd/web -- test/screens/ops.test.tsx test/screens/ops-organizations.test.tsx
+CI=1 npm run test:e2e -w @mscd/web -- e2e/screens/ops.spec.js e2e/screens/ops-organizations.spec.js e2e/contrast.spec.js e2e/i18n.spec.js
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/ops.spec.js e2e/api-only/ops-organizations.spec.js
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web
+git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/src/styles.css apps/web/e2e/helpers.js
+```
+
+#### M2-S13 SaaS end-to-end run, CI jobs and go-live evidence
+
+| | |
+|---|---|
+| Wave, depends on | S5; every other SaaS package, M2-18 |
+| Owns | `.github/workflows/ci.yml`, `tools/smoke/**`, `apps/server/vitest.int-saas.config.ts`, `apps/server/package.json` (script `test:int:saas` only; lockfile unchanged), `apps/server/test/setup/**` (a multi-tenancy template database), `docs/saas/go-live-checklist.md` (status and evidence columns), `docs/platform/handoff/M2-S13.md` |
+
+Brief:
+- `npm run test:int:saas -w @mscd/server` runs the `security`, `rbac` and `contract` suites, plus `saas-ops`, `entitlements` and `domains`, with tenancy `multi`. Two organisations are in the template database. The route-generated sweeps cover every operator route.
+- `tools/smoke/run-saas.mjs` and script `saas` run the M2-S02 test stack (release-flavour images with throwaway keys, Caddy with `tls internal`, Mailpit, mock providers, mock DNS). Every step runs in the browser:
+  1. `saas-ops.sh create-operator` runs locally, then the operator enrols TOTP.
+  2. The operator creates organisations Alpha (`standard`) and Beta (`trial`) and verifies a domain for Alpha through the mock DNS.
+  3. Each first administrator accepts the invitation from Mailpit. Alpha's administrator signs in by work email discovery.
+  4. Each administrator creates a system and uploads a file.
+  5. Isolation: Beta's administrator opens Alpha's system, file and export URLs and gets 404; discovery answers the same for an unknown slug.
+  6. Suspend Beta: Beta's session ends, sign-in shows the inactive message, and Alpha keeps working. Then reactivate Beta.
+  7. Offboard Beta: reads work and writes answer 403.
+  8. Lower Alpha's user limit to current use: the next invitation shows the `LIC-USERS` message.
+
+  `--with-ops` also checks that every Prometheus target is up. The run fails on any page error, console error or 5xx answer, and runs `expectReadableText` on every operator screen it visits.
+- `ci.yml` adds three jobs:
+  - **`saas-static` on every push:**
+    - `check-workflows.mjs --saas --require-all`;
+    - `compose config -q` for the saas, backup and ops overlays;
+    - promtool and amtool checks;
+    - `bash -n` of every SaaS script;
+    - `check-golive.mjs`.
+  - **`int-saas` on every push:** `test:int:saas`.
+  - **`saas-smoke` on pushes to the default branch and nightly:** makes throwaway keys in the job, builds release-flavour images and runs `npm run saas -w @mscd/smoke`.
+- Go-live checklist: every `agent` row gets status `done` with its evidence (CI job name or command). `owner` rows stay open.
+
+Acceptance:
+
+```bash
+npm run test:int:saas -w @mscd/server
+flock /tmp/mscd-stack.lock npm run saas -w @mscd/smoke -- --with-ops
+flock /tmp/mscd-stack.lock npm run journey -w @mscd/smoke -- --saas
+flock /tmp/mscd-stack.lock npm run test:smoke
+node tools/scripts/check-workflows.mjs --saas --require-all
+node tools/scripts/check-golive.mjs --agent-items-done docs/saas/go-live-checklist.md
+npm run test:int -w @mscd/server
+test -z "$(docker ps -q --filter label=mscd.test=true)"
+```
+
+### K.7 Order of going live
+
+| Step | Who | What |
+|---|---|---|
+| 1 | Owner | Buy the server, staging server, domain, mail provider and backup bucket (K.2). Start the lawyer's work with `docs/saas/legal-inputs.md`. Book the penetration test |
+| 2 | Owner | Run `deploy/scripts/saas-keys.sh` on the owner's own computer, run the printed `gh` commands, store the offline copies, and set up the GitHub environments |
+| 3 | Owner approves | `bootstrap-prod.yml` for staging, then for production. Then set `DEPLOY_*` secrets and delete `BOOTSTRAP_SSH_KEY` |
+| 4 | Owner | Push tag `v1.1.0`. `release.yml` builds, checks, signs and pushes after the owner approves the `release` environment |
+| 5 | Agent starts, owner approves | `deploy-prod.yml` with `target=staging`, then `ops-cli.yml create-operator` with the owner's email on staging |
+| 6 | Vendor | Penetration test on staging. Agents fix the findings in normal packages, then the vendor retests |
+| 7 | Agent starts, owner approves | `restore-test.yml` with `target_version`, then `deploy-prod.yml` with `target=production`, then `create-operator` on production |
+| 8 | Owner | Publish the privacy notice and terms, set `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL`, deploy again, and confirm that the test alert and heartbeat arrive |
+| 9 | Owner | `node tools/scripts/check-golive.mjs --require-done docs/saas/go-live-checklist.md` passes, then sign off |
+| 10 | Operator | Onboard the first customer from the operator console with the signed DPA in place |
+
+### K.8 Not in this track
+
+| Item | Why it waits, and when it is needed |
+|---|---|
+| Full tenant export in open formats and verified purge after offboarding | Needed before the first customer leaves, because the DPA promises return and deletion. Plan it as the next SaaS package set (estimated 11 to 17 working days). Until then, offboarding uses the per-system exports and the `archived` status |
+| Requests from data subjects (export, anonymise or delete one person) | Handled by a manual operator procedure (M2-S04) until a feature exists |
+| Self-service sign-up and billing | D-S1 default is sales-led |
+| Storage quota per organisation and fair job scheduling | Plan limits cover users and systems first |
+| Cloud KMS for the KEKs | Deviation X-03 stays. It needs a provider choice |
+| Second region and a global sign-in directory | One region (D-S2). The `region` column is set from the first day |
+| Break-glass access to tenant data with a second approver | Operators cannot read tenant data today. Recorded as a decision in the checklist |
+| WAL archiving for a recovery point of minutes | Add once customers pay. Daily dumps give 24 hours |
+| Central log store (Loki) and SSH session recording | Docker logs on the box and anchor lines off-site come first |
+| Helm SaaS values and k3s | When a second node is needed |
+| Managed pack channel publish command | New packs arrive with each image and are installed by migrate |
+| Mail provider API driver with bounce handling | SMTP to the provider relay works |
+
+### K.9 Risks
+
+| Risk | Effect | Handling |
+|---|---|---|
+| One VPS has no high availability | A host failure stops every customer | Modest uptime target (D-S7), tested restore with a measured restore time, external heartbeat, restore runbook onto a fresh bootstrapped server |
+| KEKs sit on the same disk as the database, and copies sit in `restore-test` | A full server compromise exposes tenant data keys | File permissions 0400, per-service mounts, separate backup credentials, offline copies, cloud KMS in K.8, D-S12 asks the owner |
+| Port 22 open to the internet | Attack surface | Key-only SSH, ufw limit, fail2ban, named accounts; Tailscale later (M2-S03 doc) |
+| Owner approval needed for every production action | Slower fixes at night | Staging rehearsal first, automatic rollback in the script, rollback is one approved run |
+| Carrier NAT in Indonesia shares one address across an office | Login rate limits lock out a whole office | Generous NGINX defaults, per-email limits stay the main guard, alert on `mscd_mfa_locks_total` spikes |
+| Tenant migrations run one schema after another | Deploys get slower as customers grow | Timeout grows with the schema count, the restore-test rehearsal measures the time before each production run |
+| Legal documents and penetration test booking take weeks | Go-live waits | M2-S04 runs in the first wave and hands the owner the inputs at once |
+| On-premise installs make their own anchor key, which the compiled keys do not include | In-app anchor checks fail on-premise | SaaS is fixed in M2-S05. The on-premise fix (compile the customer key in, or trust the installation's own `audit-anchor.pub`) goes in the M2-S05 handoff note as a follow-up |
+| The demo stack reaches a production server by mistake | Public development keys protect real data | S-7, the refusals in `saas-deploy.sh`, separate GitHub environments, checklist item |
+
 ## Review notes
 
 No issue of the review was rejected. Two fixes differ from the suggestion:
