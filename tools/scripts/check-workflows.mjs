@@ -8,8 +8,14 @@
 //   3. puts a secret into script text: `${{ secrets.* }}` or `${{ github.token }}` inside `run:` (or the
 //      `script:` input of actions/github-script). Secrets reach scripts only through `env`;
 //   4. has a job whose environment is `production` or `staging`, or is chosen by an expression, without a
-//      concurrency group with `cancel-in-progress: false` (on the job or the workflow), so two deploys never
-//      run at once and a running deploy is never cancelled.
+//      concurrency group with `cancel-in-progress: false`, so two deploys never run at once and a running
+//      deploy is never cancelled. GitHub applies the workflow-level and the job-level concurrency both, so
+//      every level that is set needs a group and a literal `cancel-in-progress: false`, and at least one
+//      group must be a name that runs share (a group with github.run_id, run_number or run_attempt never
+//      serialises anything).
+//
+// YAML aliases (`steps: *common`, `run: *script`) are resolved, so aliased content gets every check. Merge
+// keys (`<<: *base`) are refused, because the keys they bring in would not be checked.
 //
 // Usage:
 //   node tools/scripts/check-workflows.mjs <workflow file>...
@@ -24,7 +30,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LineCounter, isMap, isScalar, isSeq, parseDocument } from 'yaml';
+import { LineCounter, isAlias, isMap, isScalar, isSeq, parseDocument, visit } from 'yaml';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOW_DIR = path.join(ROOT, '.github', 'workflows');
@@ -34,6 +40,8 @@ export const SAAS_WORKFLOWS = ['release.yml', 'security-scan.yml', 'bootstrap-pr
 /** Environments whose jobs must never run twice at once or be cancelled half way. */
 const SERIALISED_ENVIRONMENTS = new Set(['production', 'staging']);
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
+/** Context values that differ in every run: a concurrency group that names one never holds two runs. */
+const RUN_UNIQUE = /\bgithub\s*\.\s*(?:run_id|run_number|run_attempt)\b/;
 const IMAGE_DIGEST = /@sha256:[0-9a-f]{64}$/;
 /** An expression `${{ ... }}` that names the secrets context or the job token. */
 const SECRET_EXPRESSION = /\$\{\{(?:(?!\}\}).)*?\b(?:secrets\b|github\s*\.\s*token\b|github\s*\[\s*['"]token['"]\s*\])(?:(?!\}\}).)*\}\}/gs;
@@ -50,20 +58,9 @@ cancel-in-progress: false for jobs of the production and staging environments.
   --self-test     run the built-in cases of every check
 `;
 
-/** Value of `key` in a YAML map node, as a node (or undefined). */
-function child(map, key) {
-  if (!isMap(map)) return undefined;
-  for (const pair of map.items) {
-    const name = isScalar(pair.key) ? pair.key.value : pair.key;
-    if (name === key) return pair.value ?? null;
-  }
-  return undefined;
-}
-
-const scalarValue = (node) => (isScalar(node) ? node.value : undefined);
-
 /**
- * Checks one workflow text. Returns the findings as `{ line, message }`, in file order.
+ * Checks one workflow text. Returns the findings as `{ line, message }`, in file order. A finding in content
+ * that is used through several aliases is reported once.
  */
 export function checkWorkflowText(text) {
   const findings = [];
@@ -76,6 +73,38 @@ export function checkWorkflowText(text) {
     findings.push({ line: error.linePos?.[0]?.line ?? 1, message: `YAML error: ${error.message.split('\n')[0]}` });
   }
   if (doc.errors.length > 0) return findings;
+
+  /** The node an alias stands for (the anchored node, with its own source position), or the node itself. */
+  const resolve = (node) => (isAlias(node) ? node.resolve(doc) : node);
+  /** Value of `key` in a YAML map node, as a node with aliases resolved (null for an empty value, undefined when absent). */
+  const child = (map, key) => {
+    const target = resolve(map);
+    if (!isMap(target)) return undefined;
+    for (const pair of target.items) {
+      const keyNode = resolve(pair.key);
+      const name = isScalar(keyNode) ? keyNode.value : keyNode;
+      if (name === key) return resolve(pair.value) ?? null;
+    }
+    return undefined;
+  };
+  const scalarValue = (node) => {
+    const target = resolve(node);
+    return isScalar(target) ? target.value : undefined;
+  };
+
+  // Merge keys bring in keys that the checks below would not see; an alias needs its anchor before it.
+  visit(doc, {
+    Alias(_, alias) {
+      if (resolve(alias) === undefined) add(alias, `alias *${alias.source} has no anchor before it`);
+    },
+    Pair(_, pair) {
+      const keyNode = resolve(pair.key);
+      if (isScalar(keyNode) && keyNode.value === '<<') {
+        add(keyNode, 'merge key (<<) found; write the keys out, so every check sees them');
+      }
+    },
+  });
+
   const root = doc.contents;
   if (!isMap(root)) {
     findings.push({ line: 1, message: 'a workflow is a YAML mapping with on, permissions and jobs' });
@@ -138,9 +167,37 @@ export function checkWorkflowText(text) {
   }
   const workflowConcurrency = child(root, 'concurrency');
 
+  // 4. Deploy environments are serialised and never cancelled. inspectConcurrency checks one level (the
+  // workflow or the job) and tells whether its group holds runs together.
+  const inspectConcurrency = (node, level, label) => {
+    const where = `the ${level} concurrency`;
+    if (!isMap(node)) {
+      add(node, `${label}: write ${where} as a mapping with group and cancel-in-progress: false`);
+      return { serialises: false };
+    }
+    const group = child(node, 'group');
+    const cancel = child(node, 'cancel-in-progress');
+    const groupValue = scalarValue(group);
+    let serialises = false;
+    let runUnique;
+    if (group === undefined || group === null || groupValue === undefined || groupValue === null || groupValue === '') {
+      add(group ?? node, `${label}: ${where} has no group`);
+    } else if (typeof groupValue === 'string' && RUN_UNIQUE.test(groupValue)) {
+      runUnique = { node: group, text: groupValue.trim(), name: groupValue.match(RUN_UNIQUE)[0].replace(/\s+/g, '') };
+    } else {
+      serialises = true;
+    }
+    if (!isScalar(cancel) || cancel.value !== false) {
+      add(cancel ?? node, `${label}: ${where} needs cancel-in-progress: false, so a running deploy is never cancelled`);
+    }
+    return { serialises, runUnique };
+  };
+  // The workflow-level concurrency applies to every job; it is checked once, for the first deploy job.
+  let workflowLevel;
+
   for (const pair of jobs.items) {
     const jobId = scalarValue(pair.key);
-    const job = pair.value;
+    const job = resolve(pair.value);
     if (!isMap(job)) {
       add(pair.key, `job ${jobId} is not a mapping`);
       continue;
@@ -149,7 +206,8 @@ export function checkWorkflowText(text) {
     if (jobUses !== undefined) checkUses(jobUses);
     const steps = child(job, 'steps');
     if (isSeq(steps)) {
-      for (const step of steps.items) {
+      for (const item of steps.items) {
+        const step = resolve(item);
         if (!isMap(step)) continue;
         const uses = child(step, 'uses');
         if (uses !== undefined) checkUses(uses);
@@ -171,26 +229,39 @@ export function checkWorkflowText(text) {
     const name = environmentName.trim().toLowerCase();
     const dynamic = name.includes('${{');
     if (!dynamic && !SERIALISED_ENVIRONMENTS.has(name)) continue;
-    const jobConcurrency = child(job, 'concurrency');
-    const concurrency = jobConcurrency !== undefined ? jobConcurrency : workflowConcurrency;
     const label = dynamic ? `job ${jobId} (environment ${environmentName.trim()}, which can be production or staging)` : `job ${jobId} (environment ${name})`;
-    if (concurrency === undefined || concurrency === null) {
+    const jobConcurrency = child(job, 'concurrency');
+    const hasJobLevel = jobConcurrency !== undefined && jobConcurrency !== null;
+    const hasWorkflowLevel = workflowConcurrency !== undefined && workflowConcurrency !== null;
+    if (!hasJobLevel && !hasWorkflowLevel) {
       add(pair.key, `${label} has no concurrency group; add concurrency: { group: <name>, cancel-in-progress: false }`);
-    } else if (!isMap(concurrency)) {
-      add(concurrency, `${label}: write concurrency as a mapping with group and cancel-in-progress: false`);
-    } else {
-      const group = child(concurrency, 'group');
-      const cancel = child(concurrency, 'cancel-in-progress');
-      if (group === undefined || group === null || scalarValue(group) === '' || scalarValue(group) === null) {
-        add(concurrency, `${label}: the concurrency has no group`);
-      }
-      if (!isScalar(cancel) || cancel.value !== false) {
-        add(cancel ?? concurrency, `${label}: the concurrency needs cancel-in-progress: false, so a running deploy is never cancelled`);
-      }
+      continue;
+    }
+    // GitHub applies both levels: each one that is set must never cancel a running deploy.
+    const results = [];
+    if (hasWorkflowLevel) {
+      workflowLevel ??= inspectConcurrency(workflowConcurrency, 'workflow', label);
+      results.push(workflowLevel);
+    }
+    if (hasJobLevel) results.push(inspectConcurrency(jobConcurrency, 'job', label));
+    const runUnique = results.find((result) => result.runUnique)?.runUnique;
+    if (runUnique && !results.some((result) => result.serialises)) {
+      add(
+        runUnique.node,
+        `${label}: the concurrency group ${runUnique.text} names ${runUnique.name}, which differs in every run, so two deploys can run at once; use a fixed name such as deploy-production`,
+      );
     }
   }
-  findings.sort((a, b) => a.line - b.line);
-  return findings;
+  // One finding per place and message, also when aliased content is used more than once.
+  const seen = new Set();
+  return findings
+    .sort((a, b) => a.line - b.line)
+    .filter((finding) => {
+      const key = `${finding.line}\u0000${finding.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -266,7 +337,7 @@ const SELF_TESTS = [
   {
     name: 'concurrency as a plain group name',
     text: GOOD.replace('concurrency:\n  group: deploy\n  cancel-in-progress: false\n', 'concurrency: deploy\n'),
-    expect: ['write concurrency as a mapping'],
+    expect: ['write the workflow concurrency as a mapping'],
   },
   {
     name: 'expression environment needs concurrency',
@@ -280,6 +351,90 @@ const SELF_TESTS = [
       '    environment:\n      name: production\n      url: https://example.test\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: false\n',
     ),
     expect: [],
+  },
+  {
+    name: 'workflow-level cancel-in-progress true with job-level false',
+    text: GOOD.replace('cancel-in-progress: false', 'cancel-in-progress: true').replace(
+      '    environment: production\n',
+      '    environment: production\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: false\n',
+    ),
+    expect: ['the workflow concurrency needs cancel-in-progress: false'],
+  },
+  {
+    name: 'workflow-level cancel-in-progress as an expression',
+    text: GOOD.replace('cancel-in-progress: false', "cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}").replace(
+      '    environment: production\n',
+      '    environment: production\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: false\n',
+    ),
+    expect: ['the workflow concurrency needs cancel-in-progress: false'],
+  },
+  {
+    name: 'workflow-level plain group with job-level mapping',
+    text: GOOD.replace('concurrency:\n  group: deploy\n  cancel-in-progress: false\n', 'concurrency: deploy\n').replace(
+      '    environment: production\n',
+      '    environment: production\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: false\n',
+    ),
+    expect: ['write the workflow concurrency as a mapping'],
+  },
+  {
+    name: 'job-level cancel-in-progress true with workflow-level false',
+    text: GOOD.replace(
+      '    environment: production\n',
+      '    environment: production\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: true\n',
+    ),
+    expect: ['the job concurrency needs cancel-in-progress: false'],
+  },
+  {
+    name: 'a group of one run never serialises',
+    text: GOOD.replace('group: deploy', 'group: deploy-${{ github.run_id }}'),
+    expect: ['names github.run_id, which differs in every run'],
+  },
+  {
+    name: 'a group of one run next to a shared job group',
+    text: GOOD.replace('group: deploy', 'group: run-${{ github.run_id }}').replace(
+      '    environment: production\n',
+      '    environment: production\n    concurrency:\n      group: deploy-production\n      cancel-in-progress: false\n',
+    ),
+    expect: [],
+  },
+  {
+    name: 'two deploy jobs report the workflow level once',
+    text: `${GOOD.replace('cancel-in-progress: false', 'cancel-in-progress: true')}  again:\n    runs-on: ubuntu-24.04\n    environment: staging\n    steps:\n      - run: echo hi\n`,
+    expect: ['the workflow concurrency needs cancel-in-progress: false'],
+  },
+  {
+    name: 'aliased steps are checked',
+    text: GOOD.replace(
+      'jobs:\n',
+      'jobs:\n  first:\n    runs-on: ubuntu-24.04\n    steps: &steps\n      - uses: actions/checkout@v4\n      - run: echo "${{ secrets.TOKEN }}"\n  second:\n    runs-on: ubuntu-24.04\n    steps: *steps\n',
+    ),
+    expect: ['not pinned to a full 40-character commit SHA', 'job first: run: contains ${{ secrets.TOKEN }}', 'job second: run: contains ${{ secrets.TOKEN }}'],
+  },
+  {
+    name: 'aliased steps defined outside the jobs are checked',
+    text: GOOD.replace('jobs:\n', 'env:\n  NOTE: &script echo "${{ secrets.TOKEN }}"\njobs:\n').replace(
+      'run: echo "$TOKEN" | wc -c',
+      'run: *script',
+    ),
+    expect: ['job build: run: contains ${{ secrets.TOKEN }}'],
+  },
+  {
+    name: 'aliased uses and concurrency are checked',
+    text: GOOD.replace('concurrency:\n  group: deploy\n  cancel-in-progress: false\n', 'concurrency: &serial\n  group: deploy\n  cancel-in-progress: true\n')
+      .replace(`${PIN} # v7.0.1`, '&checkout actions/checkout@v7')
+      .replace('      - uses: ./.github/actions/local\n', '      - uses: ./.github/actions/local\n      - uses: *checkout\n')
+      .replace('    environment: production\n', '    environment: production\n    concurrency: *serial\n'),
+    expect: ['the workflow concurrency needs cancel-in-progress: false', 'the job concurrency needs cancel-in-progress: false', 'not pinned to a full 40-character commit SHA'],
+  },
+  {
+    name: 'merge keys are refused',
+    text: `${GOOD}      - <<: *base\n        name: Merged\n`.replace('      - name: Secret through env\n', '      - &base\n        name: Secret through env\n'),
+    expect: ['merge key (<<) found'],
+  },
+  {
+    name: 'an alias without its anchor',
+    text: GOOD.replace('      - uses: ./.github/actions/local\n', '      - uses: ./.github/actions/local\n      - *missing\n'),
+    expect: ['alias *missing has no anchor before it'],
   },
   {
     name: 'other environments need no concurrency',
