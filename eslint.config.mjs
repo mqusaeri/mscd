@@ -205,6 +205,7 @@ export default defineConfig([
       '**/test-results/',
       '**/e2e-report/',
       'packs/sources/',
+      '.claude/',
       'packs/dist/',
       'deploy/dist/',
       'deploy/helm/mscd/ci/.schema-cache/',
