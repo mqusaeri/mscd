@@ -38,10 +38,11 @@ export const test = base.extend({
       if (r.failure()?.errorText === 'net::ERR_ABORTED') {
         // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
         if (await r.response().catch(() => null)) return;
-        // A read that a later page load of the test cut off: an api read, a lazy screen chunk, a font or an image.
-        const started = starts.get(r);
-        if (!r.isNavigationRequest() && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
       }
+      // A read that a later page load of the test cut off: an api read, a lazy screen chunk, a font or an image. Under
+      // page.route the cut-off read can report another error than net::ERR_ABORTED, so the error text is not checked.
+      const started = starts.get(r);
+      if (!r.isNavigationRequest() && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
       problems.push('requestfailed: ' + r.url());
     });
     await use(page);
