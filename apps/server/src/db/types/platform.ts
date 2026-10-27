@@ -1,4 +1,4 @@
-// Kysely row types of the platform tables (migrations/platform/0001 to 0004, build plan C.4).
+// Kysely row types of the platform tables (migrations/platform/0001 to 0005, build plan C.4 and Milestone 2 D.3).
 // Hand-maintained (C.7): a migration that adds or changes these tables updates this file in the same change;
 // test/int/db/schema-types.test.ts compares TABLE_COLUMNS with the migrated database and fails on any difference.
 // Conventions: columns with a database default are Generated<T>, columns only a trigger writes are
@@ -25,12 +25,48 @@ export interface OrganizationTable {
   deleted_at: Date | null;
 }
 
-/** `platform.verified_domain` */
+/** `platform.verified_domain`; status, method and the DNS columns are Milestone 2 (0005, M2-S11). */
 export interface VerifiedDomainTable {
   organization_id: string;
   domain: string;
-  verified_at: Generated<Date>;
-  verified_by: string;
+  verified_at: Generated<Date | null>;
+  verified_by: string | null;
+  status: Generated<'pending' | 'verified' | 'failed'>;
+  txt_token_hash: Buffer | null;
+  requested_at: Date | null;
+  last_checked_at: Date | null;
+  method: Generated<'dns' | 'manual'>;
+}
+
+/** `platform.organization_status_event` (Milestone 2 0005): one row per status move, append-only. */
+export interface OrganizationStatusEventTable {
+  id: Generated<string>;
+  organization_id: string;
+  from_status: 'active' | 'suspended' | 'offboarding' | 'archived';
+  to_status: 'active' | 'suspended' | 'offboarding' | 'archived';
+  reason: string;
+  actor_user_id: string | null;
+  created_at: Generated<Date>;
+}
+
+/** `platform.entitlement` (Milestone 2 0005): the effective licence of an organisation in multi tenancy (M2-S10). */
+export interface EntitlementTable {
+  organization_id: string;
+  plan: string | null;
+  source: 'preset' | 'manual' | 'signed_licence';
+  max_users: number;
+  max_management_systems: number;
+  frameworks: Generated<string[]>;
+  storage_adapters: Generated<string[]>;
+  features: Generated<string[]>;
+  rate_user_per_minute: number | null;
+  rate_org_per_minute: number | null;
+  valid_from: string;
+  valid_until: string | null;
+  grace_days: Generated<number>;
+  version: Generated<number>;
+  updated_at: Generated<Date>;
+  updated_by: string | null;
 }
 
 /** `platform.app_user` */
@@ -406,6 +442,8 @@ export interface PlatformTables {
   'platform.idempotency_key': IdempotencyKeyTable;
   'platform.job_outbox': JobOutboxTable;
   'platform.system_setting': SystemSettingTable;
+  'platform.organization_status_event': OrganizationStatusEventTable;
+  'platform.entitlement': EntitlementTable;
 }
 
 /**
@@ -431,7 +469,9 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
     'id', 'slug', 'name', 'schema_name', 'time_zone', 'site_count', 'status', 'local_login', 'region',
     'demo_deploy_label', 'position', 'created_at', 'updated_at', 'deleted_at',
   ],
-  'platform.verified_domain': ['organization_id', 'domain', 'verified_at', 'verified_by'],
+  'platform.verified_domain': [
+    'organization_id', 'domain', 'verified_at', 'verified_by', 'status', 'txt_token_hash', 'requested_at', 'last_checked_at', 'method',
+  ],
   'platform.app_user': [
     'id', 'handle', 'email', 'display_name', 'job_title', 'kind', 'status', 'password_hash', 'password_changed_at',
     'failed_login_count', 'locked_until', 'mfa_required', 'mfa_failed_count', 'mfa_lock_level', 'mfa_locked_until',
@@ -503,4 +543,9 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
     'id', 'queue', 'payload', 'singleton_key', 'run_at', 'created_at', 'dispatched_at', 'attempts', 'last_error',
   ],
   'platform.system_setting': ['key', 'value', 'updated_at'],
+  'platform.organization_status_event': ['id', 'organization_id', 'from_status', 'to_status', 'reason', 'actor_user_id', 'created_at'],
+  'platform.entitlement': [
+    'organization_id', 'plan', 'source', 'max_users', 'max_management_systems', 'frameworks', 'storage_adapters', 'features',
+    'rate_user_per_minute', 'rate_org_per_minute', 'valid_from', 'valid_until', 'grace_days', 'version', 'updated_at', 'updated_by',
+  ],
 });

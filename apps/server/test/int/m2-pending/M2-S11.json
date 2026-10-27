@@ -1,0 +1,9 @@
+{
+  "workPackage": "M2-S11",
+  "routes": [
+    "ops.domains.list",
+    "ops.domains.add",
+    "ops.domains.verify",
+    "ops.domains.remove"
+  ]
+}

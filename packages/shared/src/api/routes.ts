@@ -15,11 +15,14 @@ import { routes as exportsArea } from './exports.js';
 import { routes as files } from './files.js';
 import { routes as gateway } from './gateway.js';
 import { routes as implementation } from './implementation.js';
+import { routes as imports } from './imports.js';
 import { routes as license } from './license.js';
 import { routes as linkHealth } from './link-health.js';
 import { routes as me } from './me.js';
 import { routes as notifications } from './notifications.js';
 import { routes as ops } from './ops.js';
+import { routes as opsDomains } from './ops-domains.js';
+import { routes as opsEntitlements } from './ops-entitlements.js';
 import { routes as packs } from './packs.js';
 import { routes as readmodel } from './readmodel.js';
 import { routes as records } from './records.js';
@@ -59,6 +62,10 @@ export const ROUTE_AREAS: Readonly<Record<string, readonly RouteDef[]>> = {
   'auditor-access': auditorAccess,
   'ops': ops,
   'audit-trail': auditTrail,
+  // Milestone 2 (D.1)
+  'imports': imports,
+  'ops-domains': opsDomains,
+  'ops-entitlements': opsEntitlements,
   'test-support': testSupport,
 };
 

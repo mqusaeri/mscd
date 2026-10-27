@@ -1,0 +1,4 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+# The admin account signs in with an SSH key and has no password, so sudo
+# asks for none. docs/saas/bootstrap.md shows how to require a password.
+@ADMIN_USER@ ALL=(ALL:ALL) NOPASSWD: ALL

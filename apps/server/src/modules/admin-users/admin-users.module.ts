@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminUsersController } from './admin-users.controller';
+import { OnboardingModule } from './onboarding.module';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
 import { UsersService } from './users.service';
@@ -11,6 +12,8 @@ import { UsersService } from './users.service';
  * audit, notifications and the licence gate.
  */
 @Module({
+  // Milestone 2 sub-module (D.3): the onboarding checklist (M2-06).
+  imports: [OnboardingModule],
   controllers: [AdminUsersController],
   providers: [UsersService, OrganizationService, RoleGrantsService],
 })

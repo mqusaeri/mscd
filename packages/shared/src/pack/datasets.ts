@@ -239,11 +239,18 @@ export const DocumentTemplateRow = named(
 );
 export type DocumentTemplateRow = z.output<typeof DocumentTemplateRow>;
 
+/**
+ * Event types of `audit_activities.csv`: every audit event type except `internal_audit`, which the pack format accepts
+ * only from pack engine 1.1.0 on, together with the ref migration that widens the CHECK of
+ * `ref.audit_activity_template.event_type` (Milestone 2 D.3, M2-03).
+ */
+const TemplateEventType = AuditEventType.exclude(['internal_audit']);
+
 export const AuditActivityRow = named(
   'AuditActivityRow',
   z.strictObject({
     code: CODE_30,
-    event_type: AuditEventType,
+    event_type: TemplateEventType,
     clause_ref: csvOptional(40),
     title: csvRequired(255),
     auditee_role: csvOptional(40),
@@ -254,7 +261,10 @@ export const AuditActivityRow = named(
   'audit_activities.csv row (ref.audit_activity_template)',
   {
     valid: [{ code: 'AA-S1-01', event_type: 'stage1', clause_ref: '4.3', title: 'Review ISMS scope and context', auditee_role: 'ISMS Manager', key_questions: 'Are the scope, boundaries and interfaces documented?', evidence_to_request: 'Scope statement', sort_order: '1' }],
-    invalid: [{ code: 'AA-S1-01', event_type: 'stage3', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' }],
+    invalid: [
+      { code: 'AA-S1-01', event_type: 'stage3', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' },
+      { code: 'AA-IA-01', event_type: 'internal_audit', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' },
+    ],
   },
 );
 export type AuditActivityRow = z.output<typeof AuditActivityRow>;

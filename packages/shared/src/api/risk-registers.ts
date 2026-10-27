@@ -1,6 +1,7 @@
 // Area `risk-registers` (owner from wave 9: WP-36): context issues, interested parties, assets, risks and metrics,
 // metric values, risk treatments (C.13), residual acceptance (BR-04), evidence records and targets (BR-23), entity
-// links (A-29) (D.2, D.3 "Registers and workflows: risk side").
+// links (A-29) (D.2, D.3 "Registers and workflows: risk side"). Milestone 2 (D.2, D.3) adds the register kinds
+// `objectives` (quality_objective) and `competence` (competence_record), built by M2-07.
 import { z } from 'zod';
 import { ApplicabilityTarget, Classification, IssueType, ShareableEntityType, TreatmentStatus } from '../enums.js';
 import {
@@ -9,7 +10,7 @@ import {
 } from './common.js';
 import type { PermissionByMember, RouteDef } from './common.js';
 
-export const REGISTER_KINDS = ['context-issues', 'interested-parties', 'assets', 'risks', 'metrics'] as const;
+export const REGISTER_KINDS = ['context-issues', 'interested-parties', 'assets', 'risks', 'metrics', 'objectives', 'competence'] as const;
 export const RegisterKind = z.enum(REGISTER_KINDS).meta({ id: 'RegisterKind', description: 'Path value of {register} (D.2)' });
 export type RegisterKind = z.infer<typeof RegisterKind>;
 
@@ -20,6 +21,8 @@ export const REGISTER_ENTITY_TYPES: Readonly<Record<RegisterKind, string>> = {
   'assets': 'asset',
   'risks': 'risk',
   'metrics': 'metric',
+  'objectives': 'quality_objective',
+  'competence': 'competence_record',
 };
 
 const Title = z.string().trim().min(1).max(255);
@@ -215,12 +218,17 @@ export type EntityLinkRequest = z.infer<typeof EntityLinkRequest>;
 
 const ms = { auth: 'session' as const, scope: 'ms' as const, msSource: 'path' as const, owner: 'WP-36' as const };
 
-/** D.3: risks need `risk.manage`; the other register kinds need `register.manage` (own). */
+/**
+ * D.3: risks need `risk.manage`; the other register kinds need `register.manage` (own). Milestone 2 D.2 names the
+ * kinds `objectives` and `competence` (own rows, owner required) as cases of their own.
+ */
 const registerPermission = {
   source: 'path',
   member: 'register',
   cases: {
     'risks': { permission: 'risk.manage', scope: 'ms' },
+    'objectives': { permission: 'register.manage', scope: 'ms' },
+    'competence': { permission: 'register.manage', scope: 'ms' },
     '*': { permission: 'register.manage', scope: 'ms' },
   },
 } as const satisfies PermissionByMember;

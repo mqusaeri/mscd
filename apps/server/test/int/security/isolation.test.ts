@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
 import { inScope } from '../db/helpers';
 import {
-  ORG_IDS, callRoute, createFullApp, demoSession, exampleInput, examplesOf, msIdOf, resetRateLimits, rowsIn, type Client, type FullApp,
+  ORG_IDS, callRoute, createFullApp, demoSession, exampleInput, examplesOf, msIdOf, pendingStub, resetRateLimits, rowsIn, type Client, type FullApp,
 } from '../contract/harness';
 import { DIRECT, ID_TABLES } from './record-tables';
 
@@ -72,9 +72,11 @@ describe('J.5 isolation between organisations', () => {
       if (routeId === 'registers.update') params.register = 'risks';
       if (routeId === 'evidence.targets.remove') params.targetId = id;
       await resetRateLimits(db);
-      const reply = await callRoute(rinaTst, def, exampleInput(def, { ms: 'isms', ids: { id }, override: { params } }));
+      const input = exampleInput(def, { ms: 'isms', ids: { id }, override: { params } });
+      const reply = await callRoute(rinaTst, def, input);
       checked += 1;
-      if (reply.status !== 404) problems.push(`${routeId} (${table}): ${reply.status} ${reply.text.slice(0, 160)}`);
+      // A pending Milestone 2 stub answers 501 after the guard; its building package makes it 404 (m2-pending).
+      if (reply.status !== 404 && !pendingStub(def, input, reply)) problems.push(`${routeId} (${table}): ${reply.status} ${reply.text.slice(0, 160)}`);
       problems.push(...reply.violations);
     }
     expect(checked).toBeGreaterThan(20);

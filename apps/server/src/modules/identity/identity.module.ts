@@ -7,8 +7,10 @@ import { GuestOtpResolverRegistry } from './guest-otp';
 import { IdentityInfra } from './identity-infra';
 import { InvitationService } from './invitation.service';
 import { MfaService } from './mfa.service';
+import { OrgSessionsModule } from './org-sessions.module';
 import { commonPasswords } from './password-policy';
 import { PreferencesService } from './preferences.service';
+import { RecoveryCodesModule } from './recovery-codes.module';
 import { IdentitySessionResolver } from './session-resolver';
 import { SessionService } from './session.service';
 import { SignInResponder } from './sign-in-responder';
@@ -23,6 +25,8 @@ import { SignInResponder } from './sign-in-responder';
  */
 @Global()
 @Module({
+  // Milestone 2 sub-modules (D.3): recovery codes (M2-06) and session revocation per organisation (M2-S09).
+  imports: [RecoveryCodesModule, OrgSessionsModule],
   controllers: [AuthController],
   providers: [
     IdentityInfra,

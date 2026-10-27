@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DiagnosticsService } from './diagnostics.service';
+import { DomainsModule } from './domains/domains.module';
 import { OpsMetricsCollector } from './ops-metrics.collector';
 import { OpsController } from './ops.controller';
 import { OpsService } from './ops.service';
@@ -10,6 +11,8 @@ import { OpsService } from './ops.service';
  * queue and platform providers.
  */
 @Module({
+  // Milestone 2 sub-module (D.3): email domain verification of the SaaS track (M2-S11).
+  imports: [DomainsModule],
   controllers: [OpsController],
   providers: [OpsMetricsCollector, OpsService, DiagnosticsService],
   exports: [OpsMetricsCollector, OpsService, DiagnosticsService],

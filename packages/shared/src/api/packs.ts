@@ -48,10 +48,12 @@ export const packsListRoute = defineRoute({
   owner: 'WP-12',
   method: 'GET',
   path: '/api/v1/admin/packs',
-  summary: 'Installed packs',
+  summary: 'Installed packs (pack.read in the organisation, or the installer of packs: the platform operator with tenancy.mode multi, Milestone 2 D.2)',
   auth: 'session',
-  permission: 'pack.read',
-  scope: 'org',
+  anyOf: [
+    { permission: 'pack.read', scope: 'org' },
+    { permission: 'pack.install', scope: 'platform' },
+  ],
   response: z.array(PackSummary),
   errors: [],
 });

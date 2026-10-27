@@ -1,10 +1,10 @@
-// The permission matrix against build plan F.6, the decision helpers of F.7 and the UI role mapping.
+// The permission matrix against build plan F.6 and Milestone 2 J.2, the decision helpers of F.7 and the UI role mapping.
 import { describe, expect, it } from 'vitest';
 import {
   BUSINESS_ROLES, PERMISSIONS, PERMISSION_MATRIX, effectiveGrant, evaluatePermission, permissionsFor, rolesHolding, uiRoleFor,
 } from '../src/index.js';
 import type { BusinessRole, OrgRole, Permission, PermissionGrant, PlatformRole, RoleContext, TenancyMode } from '../src/index.js';
-import { planPermissionRows } from './helpers.js';
+import { m2PermissionRows, planPermissionRows } from './helpers.js';
 
 const COLUMNS = [
   'ms_manager', 'programme_owner', 'domain_owner', 'risk_owner', 'internal_auditor', 'top_management', 'external_auditor',
@@ -44,10 +44,25 @@ describe('PERMISSION_MATRIX', () => {
   const rows = planPermissionRows();
   const planned = rows.flatMap((r) => r.permissions);
 
-  it('has exactly the permissions of F.6, in plan order', () => {
+  it('has exactly the permissions of F.6 and Milestone 2 J.2, in plan order', () => {
     expect(planned.length).toBeGreaterThan(55);
     expect([...PERMISSIONS]).toEqual(planned);
     expect(Object.keys(PERMISSION_MATRIX).sort()).toEqual([...planned].sort());
+    expect(m2PermissionRows().flatMap((r) => r.permissions)).toEqual(['internal_audit.manage', 'ops.tenants.manage', 'ops.entitlements.manage']);
+  });
+
+  it('lets MS Managers and Internal Auditors plan internal audits and keeps the new operator rights to the platform (Milestone 2 J.2)', () => {
+    expect(evaluatePermission('internal_audit.manage', ctx({ msRoles: ['internal_auditor'] }))).toBe('full');
+    expect(evaluatePermission('internal_audit.manage', ctx({ msRoles: ['ms_manager'] }))).toBe('full');
+    for (const role of ['programme_owner', 'domain_owner', 'top_management', 'external_auditor'] as const) {
+      expect(evaluatePermission('internal_audit.manage', ctx({ msRoles: [role] })), role).toBeNull();
+    }
+    expect(evaluatePermission('audit_event.manage', ctx({ msRoles: ['internal_auditor'] }))).toBeNull();
+    for (const p of ['ops.tenants.manage', 'ops.entitlements.manage'] as const) {
+      expect(evaluatePermission(p, ctx({ tenancy: 'multi', platformRoles: ['platform_operator'] })), p).toBe('full');
+      expect(evaluatePermission(p, ctx({ tenancy: 'multi', orgRoles: ['tenant_admin'] })), p).toBeNull();
+    }
+    expect(PERMISSION_MATRIX['register.manage'].conditions?.ms_manager).toBe('context, interested parties, assets, metrics, objectives, competence');
   });
 
   for (const row of rows) {
@@ -133,7 +148,10 @@ describe('permissionsFor and rolesHolding', () => {
       'storage.repository.read', 'storage.repository.manage', 'storage.repository.test', 'storage.routing.manage', 'storage.object.metadata.read',
     ]);
     expect(permissionsFor('platform', ctx({ tenancy: 'multi', platformRoles: ['platform_operator'] }))).toEqual([
-      'pack.install', 'license.manage', 'ops.read', 'ops.jobs.run', 'ops.users.manage',
+      'pack.install', 'license.manage', 'ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage',
+    ]);
+    expect(permissionsFor('platform', ctx({ tenancy: 'single', platformRoles: ['platform_operator'] }))).toEqual([
+      'ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage',
     ]);
   });
 

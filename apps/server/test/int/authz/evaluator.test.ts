@@ -80,6 +80,10 @@ const F6: Record<Permission, Partial<Record<Column, Cell>>> = {
   'ops.read': { OP: 'full' },
   'ops.jobs.run': { OP: 'full' },
   'ops.users.manage': { OP: 'full' },
+  // Milestone 2 J.2
+  'internal_audit.manage': { MM: 'full', IA: 'full' },
+  'ops.tenants.manage': { OP: 'full' },
+  'ops.entitlements.manage': { OP: 'full' },
 };
 
 /** Where each permission is checked with `tenancy.mode: single` (the test profile). */
@@ -88,7 +92,7 @@ const ORG_SCOPED = new Set<Permission>([
   'pack.read', 'pack.activate', 'pack.install', 'license.read', 'license.manage', 'user.manage', 'idp.manage', 'org.settings.manage', 'ms.admin',
   'audit_trail.metadata.read',
 ]);
-const PLATFORM_SCOPED = new Set<Permission>(['ops.read', 'ops.jobs.run', 'ops.users.manage']);
+const PLATFORM_SCOPED = new Set<Permission>(['ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage']);
 
 const BUSINESS: Record<Exclude<Column, 'TA' | 'SA' | 'OP'>, BusinessRole> = {
   MM: 'ms_manager',
@@ -243,7 +247,8 @@ describe('WP-39 role resolution and permission evaluator (F.6, F.7)', () => {
     expect(await evaluator.evaluate(op, 'ops.read', { scope: 'platform' })).toBe('full');
     expect(await evaluator.evaluate(op, 'user.manage', { scope: 'org' })).toBeNull();
     await expect(evaluator.evaluate(op, 'ms.read', { scope: 'ms', ms: 'isms' })).rejects.toBeInstanceOf(NotFoundError);
-    expect(await evaluator.permissionSet(op)).toEqual({ org: ['ops.read', 'ops.jobs.run', 'ops.users.manage'], ms: {} });
+    // Milestone 2 J.2 adds ops.tenants.manage and ops.entitlements.manage to the platform operator.
+    expect(await evaluator.permissionSet(op)).toEqual({ org: ['ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage'], ms: {} });
   });
 
   it('returns Me with roles, UI roles and permissions per system of a fixture organisation (D.2, F.7)', async () => {
@@ -282,7 +287,10 @@ describe('WP-39 role resolution and permission evaluator (F.6, F.7)', () => {
     const op = await sessionFor(ctx, users.OP!, { org: null });
     const opMe = (await op.get('/api/v1/me')).json() as Me;
     expect(Me.safeParse(opMe).success).toBe(true);
-    expect(opMe).toMatchObject({ org: null, platformRoles: ['platform_operator'], permissions: { org: ['ops.read', 'ops.jobs.run', 'ops.users.manage'], ms: {} } });
+    expect(opMe).toMatchObject({
+      org: null, platformRoles: ['platform_operator'],
+      permissions: { org: ['ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage'], ms: {} },
+    });
     expect(opMe.orgs.map((o) => o.id)).toEqual(['ndt']);
   });
 });

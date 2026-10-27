@@ -406,10 +406,21 @@ export const RequiredReason = named('RequiredReason', z.string().trim().min(10).
 // Route definitions (D.1)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Work packages of the build plan (K.2); `RouteDef.owner` names one of them. */
-export const WORK_PACKAGE_IDS = Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const);
+/**
+ * A work package id: `WP-nn` of the build plan (K.2), or `M2-nn` (core track) and `M2-Snn` (SaaS track) of the
+ * Milestone 2 plan (docs/platform/MILESTONE-2.md G.2, K.6).
+ */
+export type WorkPackageId = `WP-${string}` | `M2-${string}`;
 
-export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH'] as const;
+/** Work packages of the build plan (K.2) and of Milestone 2 (G.2, K.6); `RouteDef.owner` names one of them. */
+export const WORK_PACKAGE_IDS: readonly WorkPackageId[] = [
+  ...Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 18 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 13 }, (_, i) => `M2-S${String(i + 1).padStart(2, '0')}` as const),
+];
+
+/** HTTP methods of the contract; `DELETE` serves the domain removal of the SaaS track (Milestone 2 D.1). */
+export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 /**
@@ -487,7 +498,7 @@ export interface RouteDef {
   /** Unique id, `<area>.<action>`, for example `applicability.transition`. */
   id: string;
   /** The work package that implements the route (contract and RBAC tests read it). */
-  owner: `WP-${string}`;
+  owner: WorkPackageId;
   method: HttpMethod;
   /** Fastify path with `:param` segments; `/api/v1/...`, or `/v1/...` for storage gateway routes. */
   path: string;

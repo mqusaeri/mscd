@@ -140,7 +140,8 @@ describe('tenant isolation and privileges (J.5)', () => {
         .insertInto('platform.identity_provider')
         .values({ organization_id: orgId, slug: `idp-${org.tenant.slug.replace('_', '-')}`, kind: 'oidc', display_name: 'Entra', oidc_issuer: 'https://login.example', oidc_client_id: 'mscd' })
         .execute();
-      await trx.insertInto('platform.verified_domain').values({ organization_id: orgId, domain: 'bank.co.id', verified_by: 'operator' }).execute();
+      // One organisation per verified domain (Milestone 2 D.3, platform 0005): each organisation has its own.
+      await trx.insertInto('platform.verified_domain').values({ organization_id: orgId, domain: `${org.tenant.slug.replace(/_/g, '-')}.co.id`, verified_by: 'operator' }).execute();
       await trx
         .insertInto('platform.invitation')
         .values({ token_hash: randomBytes(32), organization_id: orgId, user_id: member, email: `${member}@test.invalid`, created_by: SYSTEM_USER, expires_at: new Date(Date.now() + 86_400_000) })
@@ -236,7 +237,7 @@ describe('tenant isolation and privileges (J.5)', () => {
     });
 
     it('never let mscd_app DELETE or TRUNCATE a tenant table', async () => {
-      expect(tenantTables).toHaveLength(66);
+      expect(tenantTables).toHaveLength(66 + 3); // Milestone 2 tenant 0008: document_code_link, competence_record, import_run
       for (const table of tenantTables) {
         for (const statement of [sql`delete from ${sql.id(a.tenant.schemaName, table)}`, sql`truncate ${sql.id(a.tenant.schemaName, table)}`]) {
           await expectPgError(
@@ -276,7 +277,7 @@ describe('tenant isolation and privileges (J.5)', () => {
                (select pg_get_expr(p.polqual, p.polrelid) from pg_policy p where p.polrelid = c.oid limit 1) as qual
         from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = ${a.tenant.schemaName} and c.relkind in ('r', 'p') and c.relname not like 'kysely\\_%'`.execute(admin);
-      expect(rows).toHaveLength(66);
+      expect(rows).toHaveLength(66 + 3);
       for (const row of rows) {
         expect({ table: row.relname, rls: row.rls, forced: row.forced, policies: row.policies }).toEqual({
           table: row.relname,
@@ -422,7 +423,7 @@ describe('tenant isolation and privileges (J.5)', () => {
         app_user: ['SELECT', 'INSERT', 'UPDATE'],
         org_membership: ['SELECT', 'INSERT', 'UPDATE'],
         platform_role: ['SELECT'],
-        verified_domain: ['SELECT'],
+        verified_domain: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         identity_provider: ['SELECT', 'INSERT', 'UPDATE'],
         user_identity: ['SELECT', 'INSERT', 'UPDATE'],
         session: ['SELECT', 'INSERT', 'UPDATE'],
@@ -444,6 +445,9 @@ describe('tenant isolation and privileges (J.5)', () => {
         idempotency_key: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         job_outbox: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         system_setting: ['SELECT'],
+        // Milestone 2 platform 0005 (M2-02).
+        organization_status_event: ['SELECT', 'INSERT'],
+        entitlement: ['SELECT', 'INSERT', 'UPDATE'],
       };
       const packExpected: Record<string, string[]> = {
         pack_install: ['SELECT', 'INSERT', 'UPDATE'],
@@ -471,6 +475,8 @@ describe('tenant isolation and privileges (J.5)', () => {
         'organization.local_login',
         'organization.name',
         'organization.site_count',
+        // Milestone 2 platform 0005: the operator's status changes run in the api (J.8, M2-S09).
+        'organization.status',
         'organization.time_zone',
       ]);
     });
@@ -481,7 +487,10 @@ describe('tenant isolation and privileges (J.5)', () => {
         where n.nspname = 'platform' and c.relkind = 'r' and c.relrowsecurity and c.relforcerowsecurity
         order by c.relname`.execute(admin);
       expect(rows.map((r) => r.relname)).toEqual(
-        ['audit_log', 'identity_provider', 'idempotency_key', 'invitation', 'licence', 'org_membership', 'session', 'tenant_key', 'verified_domain'].sort(),
+        [
+          'audit_log', 'identity_provider', 'idempotency_key', 'invitation', 'licence', 'org_membership', 'session', 'tenant_key', 'verified_domain',
+          'organization_status_event', 'entitlement',
+        ].sort(),
       );
     });
 

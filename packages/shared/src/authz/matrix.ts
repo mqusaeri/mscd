@@ -1,4 +1,4 @@
-// Permission matrix of build plan F.6 as data, read by the authorisation guard, `Me.permissions`, the auth fakes of
+// Permission matrix of build plan F.6 (with the rows of Milestone 2 J.2) as data, read by the authorisation guard, `Me.permissions`, the auth fakes of
 // the tests (J.2) and the generated RBAC tests (J.5). F.7 states how the guard applies it.
 import { PERMISSIONS } from '../enums.js';
 import type { BusinessRole, OrgRole, Permission, PermissionScope, PlatformRole, TenancyMode, UiRole } from '../enums.js';
@@ -74,7 +74,7 @@ export const PERMISSION_MATRIX: Readonly<Record<Permission, PermissionGrant>> = 
   'document.version.create': ms([MM], [DO]),
   'evidence.file.submit': ms([MM], [DO, RO]),
   'evidence.manage': ms([MM], [DO, RO]),
-  'register.manage': ms([MM], [DO, RO], { conditions: { [MM]: 'context issues, interested parties, assets and metrics' } }),
+  'register.manage': ms([MM], [DO, RO], { conditions: { [MM]: 'context, interested parties, assets, metrics, objectives, competence' } }),
   'metric.record': ms([MM], [DO, RO]),
   'risk.manage': ms([MM], [RO], { conditions: { [RO]: 'assessment fields of own risks' } }),
   'risk.treatment.update': ms([MM], [DO, RO]),
@@ -119,6 +119,11 @@ export const PERMISSION_MATRIX: Readonly<Record<Permission, PermissionGrant>> = 
   'ops.read': platform([OP]),
   'ops.jobs.run': platform([OP]),
   'ops.users.manage': platform([OP]),
+  // Milestone 2 J.2: internal audits are planned and run by MS Managers and Internal Auditors (H.11); organisations
+  // and their entitlements are managed by the platform operator (SaaS track).
+  'internal_audit.manage': ms([MM, IA]),
+  'ops.tenants.manage': platform([OP]),
+  'ops.entitlements.manage': platform([OP]),
 };
 
 /** The row of a permission with the tenancy rule applied (`tenancy` of `PermissionGrant`). */

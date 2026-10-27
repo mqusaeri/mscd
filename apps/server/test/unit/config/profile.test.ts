@@ -44,8 +44,8 @@ describe('shipped profiles', () => {
     const onprem = loadProfile({ env: { MSCD_PROFILE_FILE: profile('onprem') }, flavor: 'dev' }).profile;
     const saas = loadProfile({ env: { MSCD_PROFILE_FILE: profile('saas') }, flavor: 'dev' }).profile;
     const test = loadProfile({ env: { MSCD_PROFILE_FILE: profile('test') }, flavor: 'dev' }).profile;
-    expect(onprem.tenancy).toEqual({ mode: 'single', isolation: 'database' });
-    expect(saas.tenancy).toEqual({ mode: 'multi', isolation: 'schema' });
+    expect(onprem.tenancy).toEqual({ mode: 'single', isolation: 'database', default_region: 'id' });
+    expect(saas.tenancy).toEqual({ mode: 'multi', isolation: 'schema', default_region: 'id' });
     expect(saas.license.validation).toBe('online');
     expect(saas.packs.channel).toBe('managed');
     expect(onprem.http.trust_proxy).toEqual({ cidrs: ['172.31.250.10/32'] });

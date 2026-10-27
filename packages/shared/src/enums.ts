@@ -1,4 +1,5 @@
-// Enumerations of the MSCD contract (build plan C.4 to C.6, C.11, C.12, D.1, E.2, E.6, F.6, F.11).
+// Enumerations of the MSCD contract (build plan C.4 to C.6, C.11, C.12, D.1, E.2, E.6, F.6, F.11), with the values
+// that Milestone 2 adds (docs/platform/MILESTONE-2.md D.3 and J; marked "Milestone 2" below).
 //
 // Every database enumeration is a `varchar` column with a CHECK constraint; the arrays below hold exactly the
 // values of those constraints, in the order the DDL lists them (R-07). Each array has a zod schema of the same
@@ -101,6 +102,21 @@ export const ACTOR_KINDS = ['user', 'system', 'guest', 'operator'] as const;
 export const ActorKind = enumSchema('ActorKind', ACTOR_KINDS, 'platform.audit_log.actor_kind and audit_trail.actor_kind');
 export type ActorKind = z.infer<typeof ActorKind>;
 
+/** Verification state of an email domain of an organisation (Milestone 2 J.7 `platform.verified_domain.status`). */
+export const DOMAIN_STATUSES = ['pending', 'verified', 'failed'] as const;
+export const DomainStatus = enumSchema('DomainStatus', DOMAIN_STATUSES, 'platform.verified_domain.status (Milestone 2 J.7)');
+export type DomainStatus = z.infer<typeof DomainStatus>;
+
+/** How a domain was verified: a DNS TXT record (SaaS) or the operator command (on-premise) (Milestone 2 J.7). */
+export const DOMAIN_VERIFICATION_METHODS = ['dns', 'manual'] as const;
+export const DomainVerificationMethod = enumSchema('DomainVerificationMethod', DOMAIN_VERIFICATION_METHODS, 'platform.verified_domain.method (Milestone 2 J.7)');
+export type DomainVerificationMethod = z.infer<typeof DomainVerificationMethod>;
+
+/** Where the entitlement row of an organisation comes from (Milestone 2 J.7 `platform.entitlement.source`). */
+export const ENTITLEMENT_SOURCES = ['preset', 'manual', 'signed_licence'] as const;
+export const EntitlementSource = enumSchema('EntitlementSource', ENTITLEMENT_SOURCES, 'platform.entitlement.source (Milestone 2 J.7)');
+export type EntitlementSource = z.infer<typeof EntitlementSource>;
+
 // ---------------------------------------------------------------------------------------------------------------
 // Reference schema (C.5)
 // ---------------------------------------------------------------------------------------------------------------
@@ -141,9 +157,19 @@ export const FINDING_CLASSIFICATIONS = ['major', 'minor', 'ofi', 'signal', 'not_
 export const FindingClassification = enumSchema('FindingClassification', FINDING_CLASSIFICATIONS, 'finding.classification and ref.finding_condition.classification');
 export type FindingClassification = z.infer<typeof FindingClassification>;
 
-export const AUDIT_EVENT_TYPES = ['stage1', 'stage2', 'surveillance', 'recertification', 'transition', 'special'] as const;
-export const AuditEventType = enumSchema('AuditEventType', AUDIT_EVENT_TYPES, 'audit_event.event_type and ref.audit_activity_template.event_type');
+export const AUDIT_EVENT_TYPES = ['stage1', 'stage2', 'surveillance', 'recertification', 'transition', 'special', 'internal_audit'] as const;
+export const AuditEventType = enumSchema('AuditEventType', AUDIT_EVENT_TYPES, 'audit_event.event_type and ref.audit_activity_template.event_type (internal_audit: Milestone 2 J.7)');
 export type AuditEventType = z.infer<typeof AuditEventType>;
+
+/** Kinds of required documented information (Milestone 2 J.7 `ref.documented_info.kind`): documents to maintain, records to retain. */
+export const DOCUMENTED_INFO_KINDS = ['maintain', 'retain'] as const;
+export const DocumentedInfoKind = enumSchema('DocumentedInfoKind', DOCUMENTED_INFO_KINDS, 'ref.documented_info.kind (Milestone 2 J.7)');
+export type DocumentedInfoKind = z.infer<typeof DocumentedInfoKind>;
+
+/** Review kinds of a review input (Milestone 2 J.7 `ref.review_input_def.review_kind`). */
+export const REVIEW_KINDS = ['management', 'governing_body'] as const;
+export const ReviewKind = enumSchema('ReviewKind', REVIEW_KINDS, 'ref.review_input_def.review_kind (Milestone 2 J.7)');
+export type ReviewKind = z.infer<typeof ReviewKind>;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Tenant schemas (C.6)
@@ -172,8 +198,9 @@ export type ApprovalStatus = z.infer<typeof ApprovalStatus>;
 /** Entity types shared between management systems through `entity_ms_link` (TS 4.2). */
 export const SHAREABLE_ENTITY_TYPES = [
   'context_issue', 'interested_party', 'asset', 'document', 'evidence', 'risk', 'audit_event', 'management_review', 'metric',
+  'competence_record',
 ] as const;
-export const ShareableEntityType = enumSchema('ShareableEntityType', SHAREABLE_ENTITY_TYPES, 'entity_ms_link.entity_type');
+export const ShareableEntityType = enumSchema('ShareableEntityType', SHAREABLE_ENTITY_TYPES, 'entity_ms_link.entity_type (competence_record: Milestone 2 J.7)');
 export type ShareableEntityType = z.infer<typeof ShareableEntityType>;
 
 export const CERTIFICATION_CYCLE_STATUSES = ['planned', 'active', 'certified', 'suspended', 'withdrawn', 'expired', 'closed'] as const;
@@ -260,6 +287,25 @@ export const MOVE_REQUEST_STATUSES = ['open', 'done', 'rejected'] as const;
 export const MoveRequestStatus = enumSchema('MoveRequestStatus', MOVE_REQUEST_STATUSES, 'repository_move_request.status');
 export type MoveRequestStatus = z.infer<typeof MoveRequestStatus>;
 
+/** Status of a quality objective (Milestone 2 D.3, J.7). */
+export const QUALITY_OBJECTIVE_STATUSES = ['planned', 'on_track', 'at_risk', 'achieved', 'missed'] as const;
+export const QualityObjectiveStatus = enumSchema('QualityObjectiveStatus', QUALITY_OBJECTIVE_STATUSES, 'quality_objective.status (Milestone 2 J.7)');
+export type QualityObjectiveStatus = z.infer<typeof QualityObjectiveStatus>;
+
+/** Proof kinds of a competence record (Milestone 2 D.3, J.7). */
+export const COMPETENCE_PROOF_TYPES = ['certificate', 'training', 'experience', 'assessment'] as const;
+export const CompetenceProofType = enumSchema('CompetenceProofType', COMPETENCE_PROOF_TYPES, 'competence_record.proof_type (Milestone 2 J.7)');
+export type CompetenceProofType = z.infer<typeof CompetenceProofType>;
+
+/** Kinds of bulk import (Milestone 2 D2-13, J.7): one dry run and one commit per file. */
+export const IMPORT_KINDS = ['applicability', 'documents', 'risks', 'evidence'] as const;
+export const ImportKind = enumSchema('ImportKind', IMPORT_KINDS, 'import_run.kind and the {kind} path member of the import routes (Milestone 2 J.7)');
+export type ImportKind = z.infer<typeof ImportKind>;
+
+export const IMPORT_RUN_STATUSES = ['validated', 'committing', 'committed', 'failed', 'expired'] as const;
+export const ImportRunStatus = enumSchema('ImportRunStatus', IMPORT_RUN_STATUSES, 'import_run.status (Milestone 2 J.7)');
+export type ImportRunStatus = z.infer<typeof ImportRunStatus>;
+
 export const ISSUE_TYPES = ['internal', 'external'] as const;
 export const IssueType = enumSchema('IssueType', ISSUE_TYPES, 'context_issue.issue_type');
 export type IssueType = z.infer<typeof IssueType>;
@@ -287,6 +333,11 @@ export type ReferenceDirection = z.infer<typeof ReferenceDirection>;
 export const DOCUMENT_STATUSES = ['draft', 'in_review', 'approved', 'expired'] as const;
 export const DocumentStatus = enumSchema('DocumentStatus', DOCUMENT_STATUSES, 'document.status (C.13)');
 export type DocumentStatus = z.infer<typeof DocumentStatus>;
+
+/** Origin of a registered document (Milestone 2 D.3, J.7): written by the organisation or received from outside. */
+export const DOCUMENT_ORIGINS = ['internal', 'external'] as const;
+export const DocumentOrigin = enumSchema('DocumentOrigin', DOCUMENT_ORIGINS, 'document.origin (Milestone 2 J.7)');
+export type DocumentOrigin = z.infer<typeof DocumentOrigin>;
 
 export const DOCUMENT_VERSION_STATUSES = ['draft', 'in_review', 'approved', 'rejected', 'superseded'] as const;
 export const DocumentVersionStatus = enumSchema('DocumentVersionStatus', DOCUMENT_VERSION_STATUSES, 'document_version.status');
@@ -387,8 +438,10 @@ export const NOTIFICATION_KINDS = [
   'document_expired', 'task_overdue', 'finding_overdue', 'prep_task_assigned', 'audit_date_changed', 'drift_detected',
   'connector_revoked', 'credential_expiring', 'licence_state', 'licence_expiring', 'edition_withdrawn', 'move_request',
   'role_grant_pending', 'export_ready', 'evidence_pack_ready', 'account', 'security',
+  // Milestone 2 J.4
+  'membership_invited', 'certificate_expiring', 'import_finished', 'pack_content_updated', 'organization_status_changed',
 ] as const;
-export const NotificationKind = enumSchema('NotificationKind', NOTIFICATION_KINDS, 'notification.kind (E.6)');
+export const NotificationKind = enumSchema('NotificationKind', NOTIFICATION_KINDS, 'notification.kind (E.6, Milestone 2 J.4)');
 export type NotificationKind = z.infer<typeof NotificationKind>;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -509,8 +562,10 @@ export const PERMISSIONS = [
   'user.manage', 'idp.manage', 'org.settings.manage', 'ms.admin',
   'audit_trail.metadata.read',
   'ops.read', 'ops.jobs.run', 'ops.users.manage',
+  // Milestone 2 J.2
+  'internal_audit.manage', 'ops.tenants.manage', 'ops.entitlements.manage',
 ] as const;
-export const Permission = enumSchema('Permission', PERMISSIONS, 'Permission code (F.6)');
+export const Permission = enumSchema('Permission', PERMISSIONS, 'Permission code (F.6, Milestone 2 J.2)');
 export type Permission = z.infer<typeof Permission>;
 
 export const PERMISSION_SCOPES = ['ms', 'org', 'platform'] as const;
@@ -533,8 +588,10 @@ export const PROBLEM_SLUGS = [
   'validation', 'unauthenticated', 'csrf', 'forbidden', 'read-only-mode', 'organisation-inactive', 'not-found',
   'transition-not-allowed', 'confirmation-required', 'reauth-required', 'conflict', 'precondition-failed',
   'payload-too-large', 'business-rule', 'rate-limited', 'dependency-unavailable', 'internal',
+  // Milestone 2 J.6: a route stub whose building package has not landed yet.
+  'not-implemented',
 ] as const;
-export const ProblemSlug = enumSchema('ProblemSlug', PROBLEM_SLUGS, 'Problem slug of the api (D.1)');
+export const ProblemSlug = enumSchema('ProblemSlug', PROBLEM_SLUGS, 'Problem slug of the api (D.1, Milestone 2 J.6)');
 export type ProblemSlug = z.infer<typeof ProblemSlug>;
 
 /** HTTP status of every problem slug (D.1). */
@@ -556,6 +613,7 @@ export const PROBLEM_STATUS: Readonly<Record<ProblemSlug, number>> = {
   'rate-limited': 429,
   'dependency-unavailable': 503,
   'internal': 500,
+  'not-implemented': 501,
 };
 
 /** The problem `type` URI of a slug (D.1). */
@@ -581,16 +639,27 @@ export const BUSINESS_RULE_IDS = [
 export const BusinessRuleId = enumSchema('BusinessRuleId', BUSINESS_RULE_IDS, 'Business rule id (digest 6.2 to 6.4)');
 export type BusinessRuleId = z.infer<typeof BusinessRuleId>;
 
-/** Rule ids of the problem `rule` member besides the business rules (D.1). */
+/**
+ * Rule ids of the problem `rule` member besides the business rules (D.1), then the platform rule ids of Milestone 2
+ * (J.6): `APPL-ASSESS` (a clause row can never be marked not applicable) and `PACK-ROW-REMOVED` (a pack version drops
+ * a code without marking it retired).
+ */
 export const PLATFORM_RULE_IDS = [
   'LIC-USERS', 'LIC-MS', 'LIC-FEATURE', 'LIC-BINDING', 'VERIFY-SELF', 'NOT-A-MEMBER', 'SOD-SELF-GRANT',
+  'APPL-ASSESS', 'PACK-ROW-REMOVED',
 ] as const;
-export const RULE_IDS = [...BUSINESS_RULE_IDS, ...PLATFORM_RULE_IDS] as const;
-export const RuleId = enumSchema('RuleId', RULE_IDS, 'Rule id of a problem or warning (D.1)');
+
+/** Warning rule ids that are not business rules (Milestone 2 J.6): `AUD-INDEP`, auditor independence. */
+export const PLATFORM_WARNING_RULE_IDS = ['AUD-INDEP'] as const;
+
+export const RULE_IDS = [...BUSINESS_RULE_IDS, ...PLATFORM_RULE_IDS, ...PLATFORM_WARNING_RULE_IDS] as const;
+export const RuleId = enumSchema('RuleId', RULE_IDS, 'Rule id of a problem or warning (D.1, Milestone 2 J.6)');
 export type RuleId = z.infer<typeof RuleId>;
 
-/** Warn-and-allow rules: the command succeeds with `warnings` (D.1). */
-export const WARNING_RULE_IDS = ['BR-03', 'BR-17', 'BR-23', 'BR-30', 'BR-32', 'BR-36', 'BR-41', 'BR-47'] as const satisfies readonly RuleId[];
+/** Warn-and-allow rules: the command succeeds with `warnings` (D.1, Milestone 2 J.6). */
+export const WARNING_RULE_IDS = [
+  'BR-03', 'BR-17', 'BR-23', 'BR-30', 'BR-32', 'BR-36', 'BR-41', 'BR-47', ...PLATFORM_WARNING_RULE_IDS,
+] as const satisfies readonly RuleId[];
 
 /** Rules that answer 409 `confirmation-required` until the request carries `confirm: true` (D.1). */
 export const CONFIRMATION_RULE_IDS = ['BR-22', 'BR-38'] as const satisfies readonly RuleId[];
@@ -613,8 +682,10 @@ export const JOB_NAMES = [
   'link-health.check', 'link-health.repository', 'drift.evaluate', 'integrity.rehash', 'cycle.derive',
   'notifications.dispatch', 'notifications.digest', 'evidence-pack.build', 'export.build', 'pack.install',
   'audit.verify-chain', 'cleanup.expired',
+  // Milestone 2 J.3
+  'readiness.recompute', 'certificate.expiry', 'import.run', 'applicability.sync', 'entitlement.expiry', 'domain.verify',
 ] as const;
-export const JobName = enumSchema('JobName', JOB_NAMES, 'Worker job name (E.2)');
+export const JobName = enumSchema('JobName', JOB_NAMES, 'Worker job name (E.2, Milestone 2 J.3)');
 export type JobName = z.infer<typeof JobName>;
 
 /** Jobs an operator may start with `POST /ops/jobs/{name}/run` (D.3 Operations). */
@@ -654,8 +725,16 @@ export const AUDIT_ACTIONS = [
   'export.created', 'export.downloaded', 'calendar_feed.created', 'calendar_feed.revoked',
   'auditor_access.granted', 'auditor_access.revoked', 'auditor.read', 'authz.denied',
   'ops.job_run', 'ops.diagnostics_exported',
+  // Milestone 2 J.5
+  'ms.certified', 'certification_cycle.created', 'certification_cycle.expired', 'certification_cycle.closed',
+  'certification_cycle.transitioned', 'org.updated', 'freshness_threshold.changed', 'auth.recovery_codes_regenerated',
+  'membership.declined', 'holdings.reassigned', 'import.validated', 'import.committed', 'ops.organization_created',
+  'ops.operator_created', 'ops.operator_revoked', 'applicability.seeded', 'pack.content_synced', 'document_code.linked',
+  // Milestone 2 J.5, SaaS track
+  'ops.organization_status_changed', 'ops.domain_added', 'ops.domain_verified', 'ops.domain_verification_failed',
+  'ops.domain_removed', 'ops.entitlements_changed',
 ] as const;
-export const AuditAction = enumSchema('AuditAction', AUDIT_ACTIONS, 'Audit trail action (F.11)');
+export const AuditAction = enumSchema('AuditAction', AUDIT_ACTIONS, 'Audit trail action (F.11, Milestone 2 J.5)');
 export type AuditAction = z.infer<typeof AuditAction>;
 
 /** Action prefixes written to `platform.audit_log`; every other action goes to the tenant `audit_trail` (F.11). */

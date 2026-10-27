@@ -1,0 +1,10 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+[Unit]
+Description=Update the MSCD reboot-needed marker every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

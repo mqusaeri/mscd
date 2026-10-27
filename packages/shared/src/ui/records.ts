@@ -3,11 +3,11 @@
 // sample does. Fields that the external auditor projection removes (G.5 `EaProjection`) are optional.
 import { z } from 'zod';
 import {
-  ActStatus, AlertTone, ChainItemKind, DeployLabel, DocStatus, FreshnessStatus, IntegId, ItemStatus, MsAlertKind, ReqStatus,
+  ActStatus, AlertTone, ChainItemKind, DeployLabel, DocStatus, DocumentOrigin, FreshnessStatus, IntegId, ItemStatus, MsAlertKind, ReqStatus,
   StageSrc,
 } from '../enums.js';
 import {
-  Color, FreqId, IsoDate, IsoDateOrEmpty, MsId, OrgSlug, Pair, PersonId, RecordKey, RepositorySlug, StageKey, Text, named,
+  Color, FreqId, Instant, IsoDate, IsoDateOrEmpty, MsId, OrgSlug, Pair, PersonId, RecordKey, RepositorySlug, StageKey, Text, named,
 } from '../api/common.js';
 import {
   EXAMPLE_ACTIVITY, EXAMPLE_CHAIN_ITEM, EXAMPLE_DOCUMENT, EXAMPLE_EVIDENCE, EXAMPLE_GATE_ITEM, EXAMPLE_MS, EXAMPLE_ORGANISATION,
@@ -55,6 +55,34 @@ export const MsBanner = named(
 );
 export type MsBanner = z.infer<typeof MsBanner>;
 
+/** A readiness percentage of one clause group; null while `readiness.recompute` has not computed it (Milestone 2 D.6). */
+const ReadinessPct = z.int().min(0).max(100).nullable();
+
+export const ClauseReadinessGroup = named(
+  'ClauseReadinessGroup',
+  z.object({ documented: ReadinessPct, implemented: ReadinessPct, evidenced: ReadinessPct, measured: ReadinessPct }),
+  'The four readiness dimensions of one clause group (Milestone 2 D.6): documented information in place, entries implemented, evidence fresh, metrics current; null when not computed or when the group has no rows of that kind',
+  {
+    valid: [{ documented: 80, implemented: 64, evidenced: 90, measured: null }, { documented: null, implemented: null, evidenced: null, measured: null }],
+    invalid: [{ documented: 101, implemented: 0, evidenced: 0, measured: 0 }, { documented: 50, implemented: 50, evidenced: 50 }],
+  },
+);
+export type ClauseReadinessGroup = z.infer<typeof ClauseReadinessGroup>;
+
+export const ClauseReadiness = named(
+  'ClauseReadiness',
+  z.object({ computedAt: Instant.nullable(), groups: z.array(ClauseReadinessGroup).length(7) }),
+  'Stored readiness dimensions of clause groups 4 to 10 and when readiness.recompute last wrote them (Milestone 2 D.3, D.6); null computedAt for seeded or manual rows',
+  {
+    valid: [
+      { computedAt: '2026-10-28T02:30:00Z', groups: Array.from({ length: 7 }, () => ({ documented: 50, implemented: 40, evidenced: 75, measured: null })) },
+      { computedAt: null, groups: Array.from({ length: 7 }, () => ({ documented: null, implemented: null, evidenced: null, measured: null })) },
+    ],
+    invalid: [{ computedAt: null, groups: [] }, { computedAt: 'today', groups: Array.from({ length: 7 }, () => ({ documented: null, implemented: null, evidenced: null, measured: null })) }],
+  },
+);
+export type ClauseReadiness = z.infer<typeof ClauseReadiness>;
+
 export const ManagementSystem = named(
   'ManagementSystem',
   z.object({
@@ -72,7 +100,8 @@ export const ManagementSystem = named(
     cert: Text,
     stage: Pair,
     audit: MsAudit.nullable(),
-    clauses: z.array(z.int().min(0).max(100)).length(7),
+    clauses: z.array(ReadinessPct).length(7),
+    readiness: ClauseReadiness.optional(),
     findings: z.object({ open: z.int().min(0), major: z.int().min(0) }),
     banner: MsBanner.optional(),
     loc: RepositorySlug,
@@ -85,10 +114,11 @@ export const ManagementSystem = named(
     gtSuggestions: z.array(z.string()).optional(),
     approver: PersonId.optional(),
   }),
-  'Management system card and header fields (UI 1.2, G.5 MS[])',
+  'Management system card and header fields (UI 1.2, G.5 MS[]); a clause readiness value is null until readiness.recompute computes it (Milestone 2 D.3), and the web shows it as Not computed yet',
   {
     valid: [
       EXAMPLE_MS,
+      { ...EXAMPLE_MS, clauses: [null, null, null, null, null, null, null], readiness: { computedAt: null, groups: Array.from({ length: 7 }, () => ({ documented: null, implemented: null, evidenced: null, measured: null })) } },
       {
         ...EXAMPLE_MS, id: 'abms', code: 'ISO 37001', ed: '2025', short: 'ABMS', audit: null, lead: '-', unit: 'req', theme: undefined,
         banner: { tone: 'warn', text: ['Beta pack', 'Pack beta'], kind: 'beta' },
@@ -96,6 +126,7 @@ export const ManagementSystem = named(
     ],
     invalid: [
       { ...EXAMPLE_MS, clauses: [100, 100] },
+      { ...EXAMPLE_MS, clauses: [100, 100, 88, 72, 94, 81, 101] },
       { ...EXAMPLE_MS, unit: 'control' },
       { ...EXAMPLE_MS, color: 'orange' },
       { ...EXAMPLE_MS, audit: { name: ['a', 'b'], date: '2026-11-12', days: 2 } },
@@ -126,7 +157,7 @@ export const Requirement = named(
     by: PersonId.nullable().optional(),
     due: IsoDate.nullable().optional(),
   }),
-  'Requirement or control of a system (UI 1.5, G.5 bundle.reqs); owner, by and note are absent in the external auditor projection',
+  'Requirement or control of a system (UI 1.5, G.5 bundle.reqs); owner, by and note are absent in the external auditor projection. In a catalogue system the key of a clause entry is cl-<code> (Milestone 2 D2-09, clauseEntryKey), so it never equals the key of the Annex A control of the same number',
   {
     valid: [EXAMPLE_REQUIREMENT, { ...EXAMPLE_REQUIREMENT, st: 'complete', by: 'bagus' }, { ...EXAMPLE_REQUIREMENT, owner: undefined, note: undefined, by: undefined }],
     invalid: [{ ...EXAMPLE_REQUIREMENT, st: 'partially_implemented' }, { ...EXAMPLE_REQUIREMENT, risks: 'R-014' }, { ...EXAMPLE_REQUIREMENT, gate: 'no' }],
@@ -151,11 +182,16 @@ export const Document = named(
     path: z.string().optional(),
     hashAlg: z.string().optional(),
     usedBy: z.array(z.string()).optional(),
+    origin: DocumentOrigin.optional(),
+    changeSummary: z.string().max(500).nullable().optional(),
   }),
-  'Controlled document linked to a system (UI 1.6, G.5 bundle.docs); owner, approver and path are absent in the external auditor projection',
+  'Controlled document linked to a system (UI 1.6, G.5 bundle.docs); owner, approver and path are absent in the external auditor projection. origin says whether the document is internal or external, changeSummary is the change note of the current version (Milestone 2 D.2, D.3)',
   {
-    valid: [EXAMPLE_DOCUMENT, { ...EXAMPLE_DOCUMENT, id: 'IMS-01', st: 'approved', shared: true, usedBy: ['QMS', 'BCMS'] }, { ...EXAMPLE_DOCUMENT, ver: '-', appr: '', st: 'draft' }],
-    invalid: [{ ...EXAMPLE_DOCUMENT, st: 'in_review' }, { ...EXAMPLE_DOCUMENT, appr: '24 Sep 2025' }, { ...EXAMPLE_DOCUMENT, shared: undefined }],
+    valid: [
+      EXAMPLE_DOCUMENT, { ...EXAMPLE_DOCUMENT, id: 'IMS-01', st: 'approved', shared: true, usedBy: ['QMS', 'BCMS'] }, { ...EXAMPLE_DOCUMENT, ver: '-', appr: '', st: 'draft' },
+      { ...EXAMPLE_DOCUMENT, origin: 'external', changeSummary: null }, { ...EXAMPLE_DOCUMENT, origin: 'internal', changeSummary: 'Section 4 rewritten for the new VPN' },
+    ],
+    invalid: [{ ...EXAMPLE_DOCUMENT, st: 'in_review' }, { ...EXAMPLE_DOCUMENT, appr: '24 Sep 2025' }, { ...EXAMPLE_DOCUMENT, shared: undefined }, { ...EXAMPLE_DOCUMENT, origin: 'supplier' }],
   },
 );
 export type Document = z.infer<typeof Document>;

@@ -4,7 +4,7 @@
 // `callRoute`, which sends one contract route and checks the answer against its `RouteDef`: the status must be the
 // success status or one the route declares (400 for every route, 401 and 403 for every route that is not public),
 // a JSON success body must parse with `def.response`, an error body with `Problem`, and file routes carry the F.13
-// headers.
+// headers. A route stub of Milestone 2 that is still pending (`../m2-pending`) may also answer 501 `not-implemented`.
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -23,6 +23,7 @@ import { MetricsService } from '../../../src/modules/platform/metrics';
 import { TenantScope } from '../../../src/modules/tenancy/tenant-scope';
 import type { TestDatabase } from '../../setup/test-db';
 import { inScope } from '../db/helpers';
+import { isPending } from '../m2-pending/pending';
 
 export const COOKIE = 'mscd_session';
 export const APP_ORIGIN = 'http://localhost:4174';
@@ -256,6 +257,10 @@ export class Client {
   put<T = unknown>(url: string, body?: unknown, headers?: Record<string, string>) {
     return this.request<T>('PUT', url, { body, ...(headers ? { headers } : {}) });
   }
+
+  delete<T = unknown>(url: string, headers?: Record<string, string>) {
+    return this.request<T>('DELETE', url, { ...(headers ? { headers } : {}) });
+  }
 }
 
 /** A client without a session (public routes). */
@@ -384,14 +389,29 @@ export interface RouteCall<T = unknown> extends Reply<T> {
   violations: string[];
 }
 
-/** Status codes a route may answer (J.3): its success status, 400, 401 and 403 unless public, and `errors`. */
-export function allowedStatuses(def: RouteDef): Set<number> {
+/**
+ * Status codes a route may answer (J.3): its success status, 400, 401 and 403 unless public, and `errors`; 501 while
+ * its Milestone 2 stub is pending for this input (`m2-pending`, Milestone 2 D.1).
+ */
+export function allowedStatuses(def: RouteDef, input?: RouteInput): Set<number> {
   const allowed = new Set<number>([def.status ?? 200, 400, ...def.errors]);
   if (def.auth !== 'public') {
     allowed.add(401);
     allowed.add(403);
   }
+  if (isPending(def, input)) allowed.add(501);
   return allowed;
+}
+
+/** The problem type of a pending route stub (Milestone 2 J.6). */
+export const NOT_IMPLEMENTED_TYPE = 'https://mscd.cyberlentera.com/problems/not-implemented';
+
+/**
+ * True when the answer is the 501 `not-implemented` of a pending Milestone 2 stub: the guard passed and the handler is
+ * pending, so a sweep counts the route as admitted and has nothing else to check (Milestone 2 D.1).
+ */
+export function pendingStub(def: RouteDef, input: RouteInput, reply: Reply): boolean {
+  return reply.status === 501 && isPending(def, input) && (reply.body as { type?: unknown } | undefined)?.type === NOT_IMPLEMENTED_TYPE;
 }
 
 /**
@@ -404,13 +424,13 @@ export async function callRoute<T = unknown>(client: Client, def: RouteDef, inpu
     ...(payload.body !== undefined ? { body: payload.body } : {}),
     headers: { ...payload.headers, ...(input.headers ?? {}), ...extraHeaders },
   });
-  return { ...reply, violations: contractViolations(def, reply) };
+  return { ...reply, violations: contractViolations(def, reply, input) };
 }
 
-/** What is wrong with an answer of `def` (J.3). */
-export function contractViolations(def: RouteDef, reply: Reply): string[] {
+/** What is wrong with an answer of `def` to `input` (J.3). */
+export function contractViolations(def: RouteDef, reply: Reply, input?: RouteInput): string[] {
   const out: string[] = [];
-  const allowed = allowedStatuses(def);
+  const allowed = allowedStatuses(def, input);
   const tag = `${def.id} answered ${reply.status}`;
   if (!allowed.has(reply.status)) out.push(`${tag}, not in [${[...allowed].sort().join(', ')}]: ${reply.text.slice(0, 300)}`);
   const type = String(reply.headers['content-type'] ?? '');
@@ -421,6 +441,7 @@ export function contractViolations(def: RouteDef, reply: Reply): string[] {
       const parsed = Problem.safeParse(reply.body);
       if (!parsed.success) out.push(`${tag}: the problem body does not parse: ${parsed.error.message.slice(0, 300)}`);
       else if (parsed.data.status !== reply.status) out.push(`${tag}: the problem says status ${parsed.data.status}`);
+      else if (reply.status === 501 && parsed.data.type !== NOT_IMPLEMENTED_TYPE) out.push(`${tag} with problem type ${parsed.data.type}, not not-implemented`);
     }
     return out;
   }

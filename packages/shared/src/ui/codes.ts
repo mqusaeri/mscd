@@ -103,3 +103,19 @@ export function uiHashAlg(algorithm: HashAlgorithm, source: HashSource): string 
     case 'none': return 'none';
   }
 }
+
+/** Prefix of the read model key of a clause entry of a catalogue system (Milestone 2 D2-09). */
+export const CLAUSE_ENTRY_KEY_PREFIX = 'cl-';
+
+/**
+ * Read model key of a clause entry (a requirement row) of a catalogue system (Milestone 2 D2-09): `cl-<code>`, for
+ * example `cl-5.1`, so it never shares a key with the Annex A control of the same number (`5.1`).
+ */
+export function clauseEntryKey(code: string): string {
+  return `${CLAUSE_ENTRY_KEY_PREFIX}${code}`;
+}
+
+/** True for the key of a clause entry of a catalogue system (`cl-5.1`). */
+export function isClauseEntryKey(key: string): boolean {
+  return key.startsWith(CLAUSE_ENTRY_KEY_PREFIX);
+}

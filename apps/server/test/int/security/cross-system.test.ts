@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
 import {
-  callRoute, createFullApp, demoSession, exampleInput, inOrg, msIdOf, resetRateLimits, rowsIn, type Client, type FullApp,
+  callRoute, createFullApp, demoSession, exampleInput, inOrg, msIdOf, pendingStub, resetRateLimits, rowsIn, type Client, type FullApp,
 } from '../contract/harness';
 import { DIRECT, ID_TABLES } from './record-tables';
 
@@ -79,6 +79,13 @@ describe('J.5 records of another system of the same organisation', () => {
       case 'auditor_access_grant':
         return insertReturning(sql`insert into auditor_access_grant (management_system_id, email, token_hash, expires_at)
           values (${qms}, 'qms.auditor@wp30.test', ${randomBytes(32)}, now() + interval '7 days') returning id`);
+      // Milestone 2 tables (record-tables/M2-nn.ts).
+      case 'certification_cycle':
+        return insertReturning(sql`insert into certification_cycle (management_system_id, cycle_start, cycle_end, status)
+          values (${qms}, '2020-01-01', '2022-12-31', 'closed') returning id`);
+      case 'import_run':
+        return insertReturning(sql`insert into import_run (management_system_id, kind, file_name, file_sha256, status)
+          values (${qms}, 'documents', 'qms-documents.csv', ${'0'.repeat(64)}, 'validated') returning id`);
       default:
         throw new Error(`No QMS-only ${table} in the demo data and no fixture for it`);
     }
@@ -113,8 +120,10 @@ describe('J.5 records of another system of the same organisation', () => {
       if (def.id === 'registers.update') params.register = 'risks';
       const input = exampleInput(def, { ms: 'isms', ids, override: { params } });
       const reply = await callRoute(rina, def, input);
-      expect(reply.status, reply.text.slice(0, 300)).toBe(404);
       expect(reply.violations).toEqual([]);
+      // A pending Milestone 2 stub answers 501 after the guard; its building package makes it 404 (m2-pending).
+      if (pendingStub(def, input, reply)) return;
+      expect(reply.status, reply.text.slice(0, 300)).toBe(404);
     });
   }
 

@@ -1,0 +1,10 @@
+{
+  "workPackage": "M2-05",
+  "routes": [
+    "ms.cycles.list",
+    "ms.cycles.create",
+    "ms.certification",
+    "ms.cycles.transition",
+    "internal-audit.programme"
+  ]
+}

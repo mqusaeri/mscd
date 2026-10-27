@@ -1,0 +1,14 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+[Unit]
+Description=MSCD reboot-needed marker for the monitoring
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/mscd/reboot-marker
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=-/opt/mscd/metrics

@@ -207,6 +207,12 @@ export interface QualityObjectiveTable {
   metric_id: string | null;
   target_text: string | null;
   due_at: string | null;
+  /** Milestone 2 (tenant 0008, D.2 register kind objectives). */
+  resources: string | null;
+  evaluation_method: string | null;
+  status: 'planned' | 'on_track' | 'at_risk' | 'achieved' | 'missed' | null;
+  result: string | null;
+  achieved_at: string | null;
 }
 
 /** `process` */
@@ -485,7 +491,8 @@ export const TABLE_COLUMNS = tableColumns<TenantRegisterTables>()({
   quality_objective: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'code', 'title', 'owner_user_id', 'pending_action', 'action_due_at', 'action_completed_at',
-    'action_completed_by', 'is_gate_item', 'position', 'statement', 'metric_id', 'target_text', 'due_at',
+    'action_completed_by', 'is_gate_item', 'position', 'statement', 'metric_id', 'target_text', 'due_at', 'resources',
+    'evaluation_method', 'status', 'result', 'achieved_at',
   ],
   process: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',

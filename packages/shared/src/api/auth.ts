@@ -248,11 +248,13 @@ export const authProvidersRoute = defineRoute({
   owner: 'WP-16',
   method: 'GET',
   path: '/api/v1/auth/providers',
-  summary: 'Sign-in methods for the login page (organisation by org or email domain in multi-tenant mode)',
+  summary: 'Sign-in methods for the login page (organisation by org or email domain in multi-tenant mode); the same answer for an unknown slug, an unknown domain and an organisation without SSO; 20 per minute per address',
   auth: 'public',
   query: AuthProvidersQuery,
   response: AuthProviders,
-  errors: [],
+  errors: [429],
+  // Milestone 2 D.2, D-S10: discovery must not reveal which organisations are customers, and is limited per address.
+  rateLimits: [{ key: 'ip', max: 20, windowSeconds: 60 }],
 });
 
 export const authLoginRoute = defineRoute({

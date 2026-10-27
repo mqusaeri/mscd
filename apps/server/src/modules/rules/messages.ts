@@ -262,6 +262,22 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: '{who} bukan anggota organisasi ini.',
     defaults: { who: { en: 'The person', id: 'Orang tersebut' } },
   },
+  // Milestone 2 J.6
+  'APPL-ASSESS': {
+    en: '{code} is a clause requirement. Clause requirements always apply and cannot be marked not applicable.',
+    id: '{code} adalah persyaratan klausul. Persyaratan klausul selalu berlaku dan tidak dapat ditandai tidak berlaku.',
+    defaults: { code: { en: 'This entry', id: 'Entri ini' } },
+  },
+  'PACK-ROW-REMOVED': {
+    en: 'This pack version drops {codes} without marking them retired. Codes of an installed version can only be retired, never removed.',
+    id: 'Versi paket ini menghapus {codes} tanpa menandainya sebagai tidak berlaku lagi. Kode dari versi terpasang hanya dapat ditandai tidak berlaku, tidak dapat dihapus.',
+    defaults: { codes: { en: 'codes of the installed version', id: 'kode dari versi terpasang' } },
+  },
+  'AUD-INDEP': {
+    en: '{auditor} owns an entry, document or evidence of {target}. An auditor should not audit their own work.',
+    id: '{auditor} memiliki entri, dokumen, atau bukti dari {target}. Auditor sebaiknya tidak mengaudit pekerjaannya sendiri.',
+    defaults: { auditor: { en: 'The auditor', id: 'Auditor' }, target: { en: 'this clause or control', id: 'klausul atau kontrol ini' } },
+  },
   'SOD-SELF-GRANT': {
     en: 'You cannot decide a role grant that you requested or that names you. Another Tenant Admin must decide it.',
     id: 'Anda tidak dapat memutuskan pemberian peran yang Anda minta atau yang menyebut Anda. Admin Tenant lain harus memutuskannya.',

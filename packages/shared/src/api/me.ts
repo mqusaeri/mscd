@@ -1,11 +1,12 @@
 // Area `me` (owner from wave 6: WP-39): the session user, organisation switch (D-26), memberships, preferences and
-// the demo persona switch (D-20).
+// the demo persona switch (D-20). Milestone 2 (D.1) adds declining an invited membership, the security overview of
+// the account and new recovery codes, built by M2-06.
 import { z } from 'zod';
-import { AuthMethod, BusinessRole, OrgRole, PlatformRole, UiRole } from '../enums.js';
+import { AuthMethod, BusinessRole, IdentityProviderKind, OrgRole, PlatformRole, UiRole } from '../enums.js';
 import { Organisation } from '../ui/records.js';
 import { RolesMap } from '../ui/snapshot.js';
 import { EXAMPLE_ME } from '../examples.js';
-import { Handle, Instant, MsId, NoBody, OrgSlug, PermissionSet, Uuid, defineRoute, named, utf8ByteLength } from './common.js';
+import { Handle, Instant, MsId, NoBody, OrgSlug, PermissionSet, ProviderSlug, Uuid, defineRoute, named, utf8ByteLength } from './common.js';
 import type { RouteDef } from './common.js';
 
 
@@ -95,6 +96,47 @@ export const MembershipParams = named('MembershipParams', z.strictObject({ org: 
   invalid: [{ org: 'B' }],
 });
 
+const EXAMPLE_SECURITY = {
+  passwordSet: true, ssoOnly: false, authenticatorSetUpAt: '2026-02-03T04:05:06Z', recoveryCodesLeft: 8,
+  identities: [{ provider: 'keycloak', kind: 'oidc', label: 'Sign in with Keycloak', linkedAt: '2026-03-01T02:00:00Z' }],
+} as const;
+
+export const MeSecurity = named(
+  'MeSecurity',
+  z.object({
+    passwordSet: z.boolean(),
+    ssoOnly: z.boolean(),
+    authenticatorSetUpAt: Instant.nullable(),
+    recoveryCodesLeft: z.int().min(0).max(10),
+    identities: z.array(z.object({ provider: ProviderSlug, kind: IdentityProviderKind, label: z.string(), linkedAt: Instant })),
+  }),
+  'GET /me/security: password set, SSO only, authenticator set up at, recovery codes left and linked identities of the session user (Milestone 2 D.1)',
+  {
+    valid: [EXAMPLE_SECURITY, { ...EXAMPLE_SECURITY, passwordSet: false, ssoOnly: true, authenticatorSetUpAt: null, recoveryCodesLeft: 0, identities: [] }],
+    invalid: [{ ...EXAMPLE_SECURITY, recoveryCodesLeft: 11 }, { ...EXAMPLE_SECURITY, identities: [{ provider: 'keycloak', kind: 'ldap', label: 'x', linkedAt: '2026-03-01T02:00:00Z' }] }],
+  },
+);
+export type MeSecurity = z.infer<typeof MeSecurity>;
+
+export const RecoveryCodesRequest = named(
+  'RecoveryCodesRequest',
+  z.strictObject({ code: z.string().regex(/^\d{6}$/).optional() }),
+  'POST /me/mfa/recovery-codes body: the current authenticator code, unless one was given in the last 5 minutes (Milestone 2 D.1)',
+  { valid: [{ code: '492039' }, {}], invalid: [{ code: '49203' }, { code: 'abcdef' }, { recoveryCode: 'x' }] },
+);
+export type RecoveryCodesRequest = z.infer<typeof RecoveryCodesRequest>;
+
+export const RecoveryCodesResponse = named(
+  'RecoveryCodesResponse',
+  z.object({ codes: z.array(z.string().min(8).max(32)).length(10) }),
+  'Ten new recovery codes, shown once; the old codes stop working (Milestone 2 D.1)',
+  {
+    valid: [{ codes: Array.from({ length: 10 }, (_, i) => `k3f9-${String(i).padStart(4, '0')}-x7qa`) }],
+    invalid: [{ codes: ['k3f9-0000-x7qa'] }, { codes: [] }],
+  },
+);
+export type RecoveryCodesResponse = z.infer<typeof RecoveryCodesResponse>;
+
 export const meGetRoute = defineRoute({
   id: 'me.get',
   owner: 'WP-39',
@@ -131,6 +173,43 @@ export const meAcceptMembershipRoute = defineRoute({
   errors: [404, 422],
 });
 
+export const meDeclineMembershipRoute = defineRoute({
+  id: 'me.membership.decline',
+  owner: 'M2-06',
+  method: 'POST',
+  path: '/api/v1/me/memberships/:org/decline',
+  summary: 'Decline an invited membership of another organisation (audited membership.declined)',
+  auth: 'session',
+  params: MembershipParams,
+  response: NoBody,
+  status: 204,
+  errors: [404],
+});
+
+export const meSecurityRoute = defineRoute({
+  id: 'me.security',
+  owner: 'M2-06',
+  method: 'GET',
+  path: '/api/v1/me/security',
+  summary: 'Security overview of the session user: password, SSO, authenticator, recovery codes left, linked identities',
+  auth: 'session',
+  response: MeSecurity,
+  errors: [],
+});
+
+export const meRecoveryCodesRoute = defineRoute({
+  id: 'me.recovery-codes',
+  owner: 'M2-06',
+  method: 'POST',
+  path: '/api/v1/me/mfa/recovery-codes',
+  summary: 'Ten new recovery codes while keeping the authenticator; the authenticator code is needed unless one was given in the last 5 minutes (audited auth.recovery_codes_regenerated)',
+  auth: 'session',
+  body: RecoveryCodesRequest,
+  response: RecoveryCodesResponse,
+  errors: [409, 422, 429],
+  rateLimits: [{ key: 'user', max: 10, windowSeconds: 900 }],
+});
+
 export const mePreferencesRoute = defineRoute({
   id: 'me.preferences',
   owner: 'WP-11',
@@ -158,4 +237,7 @@ export const authDemoPersonaRoute = defineRoute({
   readOnlyAllowed: true,
 });
 
-export const routes: RouteDef[] = [meGetRoute, meSwitchOrgRoute, meAcceptMembershipRoute, mePreferencesRoute, authDemoPersonaRoute];
+export const routes: RouteDef[] = [
+  meGetRoute, meSwitchOrgRoute, meAcceptMembershipRoute, mePreferencesRoute, authDemoPersonaRoute,
+  meDeclineMembershipRoute, meSecurityRoute, meRecoveryCodesRoute,
+];

@@ -1,0 +1,265 @@
+# Prepares a new staging or production server for MSCD SaaS with
+# deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md). Started by hand:
+# Actions > Bootstrap server > Run workflow, or
+#   gh workflow run bootstrap-prod.yml -f target=staging -f admin_user=owner \
+#     -f admin_public_key="$(cat ~/.ssh/id_ed25519.pub)" \
+#     -f deploy_public_key="$(cat mscd-deploy-staging.pub)" \
+#     -f host_key_fingerprint=SHA256:...
+# The job waits for the approval of the environment (rule S-1 of the plan).
+#
+# Secrets of the environment (Settings > Environments > staging or production):
+#   DEPLOY_HOST        public IPv4 address or host name of the server
+#   BOOTSTRAP_SSH_KEY  private key whose public half the provider placed in
+#                      root's authorized_keys. Delete it after the bootstrap.
+#
+# The run connects as root once, checks the server's host key against the
+# fingerprint from the provider console, copies the script and runs it. The
+# script turns root and password logins off at the end, so the workflow works
+# only on a new server. Later runs of the script are made by the admin account
+# with sudo (docs/saas/bootstrap.md).
+name: Bootstrap server
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Server to prepare
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      admin_user:
+        description: Name of the owner's admin account (sudo, SSH key only)
+        type: string
+        required: true
+      admin_public_key:
+        description: The owner's SSH public key for the admin account (one line, ssh-ed25519 AAAA...)
+        type: string
+        required: true
+      deploy_public_key:
+        description: Public half of the deploy key (one line). Its private half becomes DEPLOY_SSH_KEY
+        type: string
+        required: true
+      host_key_fingerprint:
+        description: SHA256 fingerprint of the server's SSH host key, from the provider console
+        type: string
+        required: true
+      data_device:
+        description: Block volume for the Docker data, for example /dev/sdb (leave empty for none)
+        type: string
+        required: false
+        default: ''
+      format_data_device:
+        description: Format the block volume as ext4 (only when it is empty)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bootstrap:
+    name: Bootstrap ${{ inputs.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.target }}
+    # Same group as deploy-prod.yml, so a bootstrap and a deploy never run on
+    # one server at the same time.
+    concurrency:
+      group: deploy-${{ inputs.target }}
+      cancel-in-progress: false
+    steps:
+      - name: Prepare
+        run: |
+          {
+            echo "SSH_DIR=$RUNNER_TEMP/mscd-ssh"
+            echo "STAGE_DIR=$RUNNER_TEMP/mscd-bootstrap"
+          } >>"$GITHUB_ENV"
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the inputs
+        env:
+          TARGET: ${{ inputs.target }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          BOOTSTRAP_SSH_KEY: ${{ secrets.BOOTSTRAP_SSH_KEY }}
+          ADMIN_USER: ${{ inputs.admin_user }}
+          ADMIN_PUBLIC_KEY: ${{ inputs.admin_public_key }}
+          DEPLOY_PUBLIC_KEY: ${{ inputs.deploy_public_key }}
+          HOST_KEY_FINGERPRINT: ${{ inputs.host_key_fingerprint }}
+          DATA_DEVICE: ${{ inputs.data_device }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ -n $DEPLOY_HOST ]] || fail "The secret DEPLOY_HOST is not set in the environment $TARGET."
+          [[ $DEPLOY_HOST =~ ^[A-Za-z0-9.:-]+$ ]] || fail "DEPLOY_HOST must be a host name or an IP address."
+          [[ -n $BOOTSTRAP_SSH_KEY ]] || fail "The secret BOOTSTRAP_SSH_KEY is not set in the environment $TARGET."
+          [[ $ADMIN_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] ||
+            fail "admin_user: use lower-case letters, digits, - and _ (at most 32 characters)."
+          case $ADMIN_USER in root | deploy | mscd) fail "admin_user cannot be $ADMIN_USER." ;; esac
+          key_re='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
+          [[ $ADMIN_PUBLIC_KEY =~ $key_re ]] || fail "admin_public_key is not one line of an SSH public key."
+          [[ $DEPLOY_PUBLIC_KEY =~ $key_re ]] || fail "deploy_public_key is not one line of an SSH public key."
+          read -r _ admin_b64 _ <<<"$ADMIN_PUBLIC_KEY"
+          read -r _ deploy_b64 _ <<<"$DEPLOY_PUBLIC_KEY"
+          [[ $admin_b64 != "$deploy_b64" ]] || fail "Use two different keys for the admin and the deploy account."
+          fp=${HOST_KEY_FINGERPRINT#SHA256:}
+          [[ ${fp%=} =~ ^[A-Za-z0-9+/]{43}$ ]] ||
+            fail "host_key_fingerprint must be a SHA256 fingerprint: SHA256: and 43 letters, digits, + or /."
+          if [[ -n $DATA_DEVICE && ! $DATA_DEVICE =~ ^/dev/[A-Za-z0-9/_.:-]+$ ]]; then
+            fail "data_device must be a device path under /dev, for example /dev/sdb."
+          fi
+          install -d -m 0700 "$SSH_DIR"
+          printf '%s\n' "$BOOTSTRAP_SSH_KEY" >"$SSH_DIR/bootstrap_key"
+          chmod 0600 "$SSH_DIR/bootstrap_key"
+          bootstrap_pub=$(ssh-keygen -y -f "$SSH_DIR/bootstrap_key" 2>/dev/null) ||
+            fail "BOOTSTRAP_SSH_KEY is not a private SSH key without a passphrase."
+          read -r _ bootstrap_b64 _ <<<"$bootstrap_pub"
+          if [[ $bootstrap_b64 == "$admin_b64" || $bootstrap_b64 == "$deploy_b64" ]]; then
+            fail "The admin and deploy keys must differ from the bootstrap key, which is deleted after this run."
+          fi
+          echo "Inputs are valid."
+
+      - name: Check the server's host key
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          HOST_KEY_FINGERPRINT: ${{ inputs.host_key_fingerprint }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          expected=SHA256:${HOST_KEY_FINGERPRINT#SHA256:}
+          expected=${expected%=}
+          ssh-keyscan -T 20 -p 22 -t ed25519,ecdsa,rsa "$DEPLOY_HOST" 2>/dev/null | grep -v '^#' >"$SSH_DIR/scanned" || true
+          [[ -s $SSH_DIR/scanned ]] || fail "The server does not answer on port 22. Check DEPLOY_HOST and the provider firewall."
+          : >"$SSH_DIR/known_hosts"
+          algorithms=''
+          echo "Host keys of the server:"
+          while read -r _ type key; do
+            printf '%s %s\n' "$type" "$key" >"$SSH_DIR/one.pub"
+            fp=$(ssh-keygen -l -E sha256 -f "$SSH_DIR/one.pub" | awk '{print $2}')
+            echo "  $type $fp"
+            if [[ ${fp%=} == "$expected" ]]; then
+              printf '%s %s %s\n' "$DEPLOY_HOST" "$type" "$key" >"$SSH_DIR/known_hosts"
+              case $type in
+                ssh-rsa) algorithms=rsa-sha2-512,rsa-sha2-256 ;;
+                *) algorithms=$type ;;
+              esac
+              echo "$type $fp" >"$SSH_DIR/pinned"
+            fi
+          done <"$SSH_DIR/scanned"
+          rm -f "$SSH_DIR/one.pub"
+          [[ -s $SSH_DIR/known_hosts ]] ||
+            fail "No host key of the server has the fingerprint $expected. Stop here: this can be another server or a machine in between. Compare the fingerprint in the provider console again."
+          echo "Pinned: $(cat "$SSH_DIR/pinned")"
+          cat >"$SSH_DIR/config" <<EOF
+          Host mscd-target
+            HostName $DEPLOY_HOST
+            Port 22
+            User root
+            IdentityFile $SSH_DIR/bootstrap_key
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $SSH_DIR/known_hosts
+            GlobalKnownHostsFile /dev/null
+            HostKeyAlgorithms $algorithms
+            ControlMaster auto
+            ControlPath $SSH_DIR/control-%C
+            ControlPersist 30m
+            ServerAliveInterval 30
+            ConnectTimeout 20
+          EOF
+          # One connection for the whole run. The script turns root logins
+          # off at its end; this connection stays open for the last steps.
+          ssh -F "$SSH_DIR/config" mscd-target true
+          echo "Connected as root with the pinned host key."
+
+      - name: Copy the bootstrap files
+        env:
+          ADMIN_PUBLIC_KEY: ${{ inputs.admin_public_key }}
+          DEPLOY_PUBLIC_KEY: ${{ inputs.deploy_public_key }}
+        run: |
+          install -d -m 0700 "$STAGE_DIR/scripts" "$STAGE_DIR/host" "$STAGE_DIR/keys"
+          install -m 0755 deploy/scripts/bootstrap-host.sh "$STAGE_DIR/scripts/"
+          cp -R deploy/host/ssh deploy/host/docker deploy/host/firewall deploy/host/system "$STAGE_DIR/host/"
+          printf '%s\n' "$ADMIN_PUBLIC_KEY" >"$STAGE_DIR/keys/admin.pub"
+          printf '%s\n' "$DEPLOY_PUBLIC_KEY" >"$STAGE_DIR/keys/deploy.pub"
+          tar -C "$STAGE_DIR" -cf - scripts host keys |
+            ssh -F "$SSH_DIR/config" mscd-target \
+              'set -e; rm -rf /root/mscd-bootstrap; install -d -m 0700 /root/mscd-bootstrap; tar -C /root/mscd-bootstrap --no-same-owner -xf -'
+          echo "Copied to /root/mscd-bootstrap on the server."
+
+      - name: Run bootstrap-host.sh
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          ADMIN_USER: ${{ inputs.admin_user }}
+          DATA_DEVICE: ${{ inputs.data_device }}
+          FORMAT_DATA_DEVICE: ${{ inputs.format_data_device && 'true' || 'false' }}
+        run: |
+          args=(--admin-user "$ADMIN_USER"
+            --admin-key-file /root/mscd-bootstrap/keys/admin.pub
+            --deploy-key-file /root/mscd-bootstrap/keys/deploy.pub
+            --ssh-host "$DEPLOY_HOST")
+          [[ -z $DATA_DEVICE ]] || args+=(--data-device "$DATA_DEVICE")
+          [[ $FORMAT_DATA_DEVICE != true ]] || args+=(--format-data-device)
+          ssh -F "$SSH_DIR/config" mscd-target \
+            "NO_COLOR=1 bash /root/mscd-bootstrap/scripts/bootstrap-host.sh $(printf '%q ' "${args[@]}")"
+
+      - name: Read the host keys and write the summary
+        env:
+          TARGET: ${{ inputs.target }}
+          ADMIN_USER: ${{ inputs.admin_user }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          ssh -F "$SSH_DIR/config" mscd-target cat /opt/mscd/state/ssh-known-hosts >"$SSH_DIR/server_known_hosts"
+          read -r _ pinned_type pinned_key <"$SSH_DIR/known_hosts"
+          grep -qF -- "$pinned_type $pinned_key" "$SSH_DIR/server_known_hosts" ||
+            fail "The host keys that the server reports do not include the pinned key."
+          # Hashed host names, so the lines can be shown here without the
+          # address (the address is the secret DEPLOY_HOST).
+          ssh-keygen -H -f "$SSH_DIR/server_known_hosts" >/dev/null 2>&1
+          rm -f "$SSH_DIR/server_known_hosts.old"
+          reboot=$(ssh -F "$SSH_DIR/config" mscd-target 'if test -e /run/reboot-required; then echo yes; else echo no; fi')
+          {
+            echo "## Server bootstrap of \`$TARGET\` finished"
+            echo
+            echo "Pinned host key: \`$(cat "$SSH_DIR/pinned")\`. Root and password logins are now off."
+            echo "Sign in as \`$ADMIN_USER\` with your own key. GitHub Actions signs in as \`deploy\`."
+            echo
+            echo "### Do these steps now"
+            echo
+            echo "1. Delete the bootstrap key. Nothing needs root access over SSH any more:"
+            echo "   \`gh secret delete BOOTSTRAP_SSH_KEY --env $TARGET\`"
+            echo "2. Copy the lines under **DEPLOY_SSH_KNOWN_HOSTS** into a file \`known_hosts\`, then:"
+            echo "   \`gh secret set DEPLOY_SSH_KNOWN_HOSTS --env $TARGET < known_hosts\`"
+            echo "3. Save the private half of the deploy key:"
+            echo "   \`gh secret set DEPLOY_SSH_KEY --env $TARGET < mscd-deploy-$TARGET\`"
+            echo "4. Save the deploy account and the SSH port:"
+            echo "   \`gh secret set DEPLOY_USER --env $TARGET --body deploy\` and"
+            echo "   \`gh variable set DEPLOY_SSH_PORT --env $TARGET --body 22\`"
+            if [[ $reboot == yes ]]; then
+              echo "5. Installed updates need a reboot. Sign in as \`$ADMIN_USER\` and run \`sudo reboot\`."
+            fi
+            echo
+            echo "### DEPLOY_SSH_KNOWN_HOSTS"
+            echo
+            echo '```text'
+            grep -v '^#' "$SSH_DIR/server_known_hosts"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "Summary written."
+
+      - name: Close the connection and remove the key
+        if: always()
+        run: |
+          if [[ -f $SSH_DIR/config ]]; then
+            ssh -F "$SSH_DIR/config" -O exit mscd-target 2>/dev/null || true
+          fi
+          rm -rf "$SSH_DIR" "$STAGE_DIR"

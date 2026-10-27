@@ -74,7 +74,7 @@ export interface EntityMsLinkTable {
   created_by: string | null;
   updated_by: string | null;
   deleted_at: Date | null;
-  entity_type: 'context_issue' | 'interested_party' | 'asset' | 'document' | 'evidence' | 'risk' | 'audit_event' | 'management_review' | 'metric';
+  entity_type: 'context_issue' | 'interested_party' | 'asset' | 'document' | 'evidence' | 'risk' | 'audit_event' | 'management_review' | 'metric' | 'competence_record';
   entity_id: string;
   management_system_id: string;
   is_primary: Generated<boolean>;
@@ -96,6 +96,10 @@ export interface CertificationCycleTable {
   status: 'planned' | 'active' | 'certified' | 'suspended' | 'withdrawn' | 'expired' | 'closed';
   certified_at: string | null;
   certificate_no: string | null;
+  /** Milestone 2 (tenant 0008, D.4). */
+  certificate_expires_at: string | null;
+  certification_body: string | null;
+  certified_scope: string | null;
 }
 
 /** `ms_alert` */
@@ -128,8 +132,14 @@ export interface ClauseReadinessTable {
   deleted_at: Date | null;
   management_system_id: string;
   clause_group: number;
-  readiness_pct: number;
+  /** Null until readiness.recompute computes it (Milestone 2 D.6). */
+  readiness_pct: number | null;
   source: Generated<'seeded' | 'manual' | 'computed'>;
+  documented_pct: number | null;
+  implemented_pct: number | null;
+  evidenced_pct: number | null;
+  measured_pct: number | null;
+  computed_at: Date | null;
 }
 
 /** `audit_trail` */
@@ -194,7 +204,8 @@ export const TABLE_COLUMNS = tableColumns<TenantCoreTables>()({
   ],
   certification_cycle: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
-    'management_system_id', 'cycle_start', 'cycle_end', 'status', 'certified_at', 'certificate_no',
+    'management_system_id', 'cycle_start', 'cycle_end', 'status', 'certified_at', 'certificate_no', 'certificate_expires_at',
+    'certification_body', 'certified_scope',
   ],
   ms_alert: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
@@ -202,7 +213,8 @@ export const TABLE_COLUMNS = tableColumns<TenantCoreTables>()({
   ],
   clause_readiness: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
-    'management_system_id', 'clause_group', 'readiness_pct', 'source',
+    'management_system_id', 'clause_group', 'readiness_pct', 'source', 'documented_pct', 'implemented_pct', 'evidenced_pct',
+    'measured_pct', 'computed_at',
   ],
   audit_trail: [
     'seq', 'id', 'occurred_at', 'organization_id', 'management_system_id', 'actor_user_id', 'actor_kind', 'action',

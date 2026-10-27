@@ -19,6 +19,8 @@ const METHODS: Readonly<Record<RouteDef['method'], RequestMethod>> = {
   POST: RequestMethod.POST,
   PUT: RequestMethod.PUT,
   PATCH: RequestMethod.PATCH,
+  // Milestone 2 D.1: the domain removal of the SaaS track (ops.domains.remove).
+  DELETE: RequestMethod.DELETE,
 };
 
 /**

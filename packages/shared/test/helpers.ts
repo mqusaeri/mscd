@@ -1,5 +1,6 @@
-// Test helpers: repository paths, a small RFC 4180 CSV reader for the pack sources, and readers of the build plan
-// tables that the contract must match.
+// Test helpers: repository paths, a small RFC 4180 CSV reader for the pack sources, and readers of the plan tables
+// that the contract must match: the build plan (Milestone 1, cited as BP) and section J of the Milestone 2 plan
+// (docs/platform/MILESTONE-2.md), merged so the shared tests stay as strict as in Milestone 1 (Milestone 2 F, M2-02).
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,20 +52,41 @@ export function csvRecords(text: string): { header: string[]; records: Record<st
   };
 }
 
-/** The text of the build plan between two headings (start inclusive, end exclusive). */
-export function planSection(startHeading: string, endHeading: string): string {
-  const md = readRepoFile('docs/platform/BUILD-PLAN.md');
+export const BUILD_PLAN = 'docs/platform/BUILD-PLAN.md';
+export const MILESTONE_2_PLAN = 'docs/platform/MILESTONE-2.md';
+
+function sectionOf(file: string, startHeading: string, endHeading: string): string {
+  const md = readRepoFile(file);
   const start = md.indexOf(startHeading);
   const end = md.indexOf(endHeading, start + 1);
-  if (start < 0 || end < 0) throw new Error(`Plan headings not found: ${startHeading} / ${endHeading}`);
+  if (start < 0 || end < 0) throw new Error(`Headings not found in ${file}: ${startHeading} / ${endHeading}`);
   return md.slice(start, end);
 }
 
-/** Every `varchar` or `text[]` column CHECK list of the DDL in C.4 to C.6, keyed `table.column`. */
-export function planCheckLists(): Map<string, string[]> {
-  const part = planSection('### C.4 Platform migrations', '### C.6a');
-  const sql = [...part.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
-  const out = new Map<string, string[]>();
+/** The text of the build plan between two headings (start inclusive, end exclusive). */
+export function planSection(startHeading: string, endHeading: string): string {
+  return sectionOf(BUILD_PLAN, startHeading, endHeading);
+}
+
+/** The text of the Milestone 2 plan between two headings (start inclusive, end exclusive). */
+export function m2Section(startHeading: string, endHeading: string): string {
+  return sectionOf(MILESTONE_2_PLAN, startHeading, endHeading);
+}
+
+/** Backticked codes of a line of text. */
+export function codesOf(text: string): string[] {
+  return [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1] as string);
+}
+
+/** The row of a two-column table whose first cell starts with `label` (`| Problem slugs | ... |`). */
+export function tableRow(section: string, label: string): string {
+  const row = section.split('\n').find((l) => l.startsWith(`| ${label}`));
+  if (!row) throw new Error(`No table row ${label}`);
+  return row;
+}
+
+/** CHECK lists of the `CREATE TABLE` fragments of some SQL, keyed `table.column` (schema prefix dropped). */
+function checkListsOf(sql: string, out: Map<string, string[]>): Map<string, string[]> {
   for (const statement of sql.split(/CREATE TABLE /).slice(1)) {
     const table = (statement.match(/^([\w.]+)/)?.[1] ?? '').replace(/^(platform|ref)\./, '');
     const re = /(\w+)\s+(?:varchar\(\d+\)|text\[\])[^,]*?CHECK\s*\(\s*(?:\1\s+IN\s*\(([^)]*)\)|cardinality\(\1\)\s*>=\s*\d+\s+AND\s+\1\s*<@\s*ARRAY\[([^\]]*)\]|\1\s*<@\s*ARRAY\[([^\]]*)\])/g;
@@ -76,10 +98,33 @@ export function planCheckLists(): Map<string, string[]> {
   return out;
 }
 
-/** Rows of the F.6 permission matrix: permission codes, scope cell and the eleven role cells. */
-export function planPermissionRows(): { permissions: string[]; scope: string; cells: string[] }[] {
-  const part = planSection('### F.6 Permission matrix', '### F.7');
-  const rows: { permissions: string[]; scope: string; cells: string[] }[] = [];
+function sqlBlocks(text: string): string {
+  return [...text.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
+}
+
+/** CHECK lists of the Milestone 2 migrations (J.7), keyed `table.column`. */
+export function m2CheckLists(): Map<string, string[]> {
+  return checkListsOf(sqlBlocks(m2Section('### J.7 CHECK lists', '### J.8')), new Map());
+}
+
+/**
+ * Every `varchar` or `text[]` column CHECK list of the DDL in C.4 to C.6, keyed `table.column`, with the lists of
+ * Milestone 2 J.7 merged in: a J.7 list replaces the BP list of the same column.
+ */
+export function planCheckLists(): Map<string, string[]> {
+  const out = checkListsOf(sqlBlocks(planSection('### C.4 Platform migrations', '### C.6a')), new Map());
+  for (const [column, values] of m2CheckLists()) out.set(column, values);
+  return out;
+}
+
+export interface PermissionRow {
+  permissions: string[];
+  scope: string;
+  cells: string[];
+}
+
+function permissionRowsOf(part: string): PermissionRow[] {
+  const rows: PermissionRow[] = [];
   for (const line of part.split('\n')) {
     if (!line.startsWith('| `')) continue;
     const cells = line.split('|').slice(1, -1).map((c) => c.trim());
@@ -87,6 +132,16 @@ export function planPermissionRows(): { permissions: string[]; scope: string; ce
     rows.push({ permissions, scope: cells[1] ?? '', cells: cells.slice(2) });
   }
   return rows;
+}
+
+/** Rows of the Milestone 2 permission matrix (J.2), in the F.6 format. */
+export function m2PermissionRows(): PermissionRow[] {
+  return permissionRowsOf(m2Section('### J.2 Permission matrix', '### J.3'));
+}
+
+/** Rows of the F.6 permission matrix, then the rows of Milestone 2 J.2: permission codes, scope cell and the eleven role cells. */
+export function planPermissionRows(): PermissionRow[] {
+  return [...permissionRowsOf(planSection('### F.6 Permission matrix', '### F.7')), ...m2PermissionRows()];
 }
 
 export interface PlanEndpoint {
@@ -118,8 +173,34 @@ function endpointsOfCell(cell: string, defaultMethod: string | null): PlanEndpoi
   return out;
 }
 
-/** Every endpoint of the D.3 tables (paths below `/api/v1`), health and metrics excluded. */
+/** A route of the Milestone 2 endpoint table (J.1): method and path below `/api/v1`, route id and building package. */
+export interface M2PlanRoute extends PlanEndpoint {
+  id: string;
+  owner: string;
+}
+
+/** Every row of the Milestone 2 endpoint table (J.1). */
+export function m2PlanRoutes(): M2PlanRoute[] {
+  const part = m2Section('### J.1 Endpoints', '### J.2');
+  const out: M2PlanRoute[] = [];
+  for (const line of part.split('\n')) {
+    if (!line.startsWith('| `')) continue;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    const [endpoint] = endpointsOfCell(cells[0] ?? '', null);
+    const id = codesOf(cells[1] ?? '')[0];
+    if (!endpoint || !id) throw new Error(`Unreadable J.1 row: ${line}`);
+    out.push({ ...endpoint, id, owner: cells[2] ?? '' });
+  }
+  return out;
+}
+
+/** Every endpoint of the D.3 tables and of Milestone 2 J.1 (paths below `/api/v1`), health and metrics excluded. */
 export function planApiEndpoints(): PlanEndpoint[] {
+  return [...bpApiEndpoints(), ...m2PlanRoutes().map(({ method, path }) => ({ method, path }))];
+}
+
+/** Every endpoint of the BP D.3 tables (paths below `/api/v1`), health and metrics excluded. */
+export function bpApiEndpoints(): PlanEndpoint[] {
   const part = planSection('### D.3 Endpoints', '**Health and metrics**');
   const out: PlanEndpoint[] = [];
   let defaultMethod: string | null = null;
@@ -149,7 +230,66 @@ export function fastifyPath(planPath: string, prefix: string): string {
   return `${prefix}${planPath.replace(/\{([A-Za-z]+)\}/g, ':$1')}`;
 }
 
-/** The work package ids of section K.2 (`#### WP-nn`). */
+/** The work package ids of BP K.2 (`#### WP-nn`) and of Milestone 2 G.2 and K.6 (`#### M2-nn`, `#### M2-Snn`). */
 export function planWorkPackages(): string[] {
-  return [...readRepoFile('docs/platform/BUILD-PLAN.md').matchAll(/^#### (WP-\d\d)\b/gm)].map((m) => m[1] as string);
+  return [
+    ...[...readRepoFile(BUILD_PLAN).matchAll(/^#### (WP-\d\d)\b/gm)].map((m) => m[1] as string),
+    ...[...readRepoFile(MILESTONE_2_PLAN).matchAll(/^#### (M2-S?\d\d)\b/gm)].map((m) => m[1] as string),
+  ];
+}
+
+/** Problem slugs with their status: the 17 of BP D.1, then the slugs Milestone 2 J.6 adds. */
+export function planProblemSlugs(): [string, number][] {
+  const read = (row: string) => [...row.matchAll(/`([a-z-]+)` (\d{3})/g)].map((m) => [m[1] as string, Number(m[2])] as [string, number]);
+  return [
+    ...read(tableRow(planSection('### D.1 Conventions', '### D.2'), 'Problem slugs')),
+    ...read(tableRow(m2Section('### J.6 Problems and rules', '### J.7'), 'Problem slugs')),
+  ];
+}
+
+/** Platform rule ids of the problem `rule` member: BP D.1, then Milestone 2 J.6. */
+export function planPlatformRuleIds(): string[] {
+  const read = (row: string) => codesOf(row.slice(row.indexOf('`rule`'))).filter((c) => /^[A-Z]+(-[A-Z]+)+$/.test(c));
+  return [
+    ...read(tableRow(planSection('### D.1 Conventions', '### D.2'), 'Errors')),
+    ...read(tableRow(m2Section('### J.6 Problems and rules', '### J.7'), 'Errors')),
+  ];
+}
+
+/** Warning rule ids: the business rules of BP D.1, then the rule ids of Milestone 2 J.6. */
+export function planWarningRuleIds(): string[] {
+  return [
+    ...[...tableRow(planSection('### D.1 Conventions', '### D.2'), 'Warnings').matchAll(/BR-\d\d/g)].map((m) => m[0]),
+    ...codesOf(tableRow(m2Section('### J.6 Problems and rules', '### J.7'), 'Warnings')).filter((c) => /^[A-Z]+(-[A-Z]+)+$/.test(c)),
+  ];
+}
+
+/** Job names of BP E.2, then of Milestone 2 J.3, in plan order. */
+export function planJobNames(): string[] {
+  const read = (part: string) => part.split('\n').filter((l) => /^\| `[a-z-]+\.[a-z-]+`/.test(l)).map((l) => codesOf(l)[0] as string);
+  return [...read(planSection('### E.2 Jobs', '### E.3')), ...read(m2Section('### J.3 Jobs', '### J.4'))];
+}
+
+/** Notification kinds of BP E.6 and Milestone 2 J.4 (first column codes). */
+export function planNotificationKinds(): string[] {
+  const read = (part: string) => part.split('\n').filter((l) => l.startsWith('| `')).flatMap((l) => codesOf(l.split('|')[1] ?? ''));
+  return [...read(planSection('### E.6 Notifications', '### E.7')), ...read(m2Section('### J.4 Notifications', '### J.5'))];
+}
+
+/** Audit actions of the BP F.11 actions line and of the Milestone 2 J.5 lists. */
+export function planAuditActions(): string[] {
+  const actionCodes = (line: string) => codesOf(line).filter((c) => /^[a-z_]+(\.[a-z_]+)+$/.test(c) && c !== 'platform.audit_log');
+  const f11 = planSection('### F.11 Keys, secrets and the audit chain', '### F.12').split('\n').find((l) => l.startsWith('- Actions:')) as string;
+  const j5 = m2Section('### J.5 Audit actions', '### J.6').split('\n').filter((l) => l.startsWith('- '));
+  return [...actionCodes(f11), ...j5.flatMap(actionCodes)];
+}
+
+/** Machine entities with their owner work package: the rows of BP C.13, then of Milestone 2 J.8. */
+export function planMachines(): [string, string][] {
+  const read = (part: string) =>
+    [...part.matchAll(/^\| `([a-z_]+\.[a-z_]+)`(?:, `([a-z_]+\.[a-z_]+)`)? \(((?:WP|M2)-S?\d\d)\)/gm)].flatMap((m) => [
+      [m[1] as string, m[3] as string] as [string, string],
+      ...(m[2] ? [[m[2], m[3] as string] as [string, string]] : []),
+    ]);
+  return [...read(planSection('### C.13 State machines', '## D. API contract')), ...read(m2Section('### J.8 State machines', '## K. SaaS'))];
 }

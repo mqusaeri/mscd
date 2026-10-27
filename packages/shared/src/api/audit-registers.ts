@@ -1,5 +1,7 @@
 // Area `audit-registers` (owner from wave 10: WP-37): findings, corrective actions, self-assessment, the audit activity
-// planner and management reviews (D.2, D.3 "Registers and workflows: audit side", C.13).
+// planner and management reviews (D.2, D.3 "Registers and workflows: audit side", C.13). Milestone 2 (D.2): findings
+// carry the clause or control code they concern (`targetCode`, stored by M2-05), audit activities may be planned by
+// Internal Auditors on internal audits, and a planned or held management review can be changed (M2-07).
 import { z } from 'zod';
 import {
   AuditActivityStatus, CorrectiveActionStatus, FindingClassification, FindingSource, FindingStatus, ManagementReviewStatus,
@@ -9,6 +11,7 @@ import {
   Code, CommandResult, IsoDate, MsId, MsParams, MsRecordParams, PersonId, RecordRef, Uuid, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
+import { AUDIT_EVENT_OR_INTERNAL_AUDIT } from './audit-events.js';
 
 const Title = z.string().trim().min(1).max(255);
 const Text = z.string().trim().min(1).max(8000);
@@ -24,9 +27,12 @@ const CA_REF = { module: 'audit', entityType: 'corrective_action', id: '1d2e3f4a
 
 export const FindingListQuery = named(
   'FindingListQuery',
-  z.strictObject({ ...pageQueryShape, status: FindingStatus.optional(), classification: FindingClassification.optional(), source: FindingSource.optional(), q: Search.optional() }),
-  'GET /ms/{ms}/findings query',
-  { valid: [{}, { status: 'open', classification: 'major', source: 'internal_audit' }], invalid: [{ classification: 'Major' }] },
+  z.strictObject({
+    ...pageQueryShape, status: FindingStatus.optional(), classification: FindingClassification.optional(), source: FindingSource.optional(), q: Search.optional(),
+    targetCode: Code.optional(),
+  }),
+  'GET /ms/{ms}/findings query; targetCode filters by the clause or control code of the finding (Milestone 2 D.2)',
+  { valid: [{}, { status: 'open', classification: 'major', source: 'internal_audit' }, { targetCode: 'A.5.18' }], invalid: [{ classification: 'Major' }, { targetCode: '' }] },
 );
 export type FindingListQuery = z.infer<typeof FindingListQuery>;
 
@@ -46,6 +52,7 @@ export const FindingItem = named(
     classification: FindingClassification,
     source: FindingSource,
     clauseRef: z.string().nullable(),
+    targetCode: z.string().nullable().optional(),
     status: FindingStatus,
     owner: PersonId,
     raisedAt: IsoDate.nullable(),
@@ -53,8 +60,8 @@ export const FindingItem = named(
     auditEvent: z.object({ id: Uuid, shortLabel: z.string() }).nullable(),
     correctiveActions: z.array(z.object({ ref: RecordRef, code: z.string(), status: CorrectiveActionStatus })),
   }),
-  'Finding register row with its linked corrective actions',
-  { valid: [EXAMPLE_FINDING, { ...EXAMPLE_FINDING, auditEvent: null, correctiveActions: [] }], invalid: [{ ...EXAMPLE_FINDING, classification: 'Minor' }] },
+  'Finding register row with its linked corrective actions; targetCode is the clause or control code of the edition the finding concerns (Milestone 2 D.2)',
+  { valid: [EXAMPLE_FINDING, { ...EXAMPLE_FINDING, auditEvent: null, correctiveActions: [] }, { ...EXAMPLE_FINDING, targetCode: 'A.8.8' }], invalid: [{ ...EXAMPLE_FINDING, classification: 'Minor' }] },
 );
 export type FindingItem = z.infer<typeof FindingItem>;
 
@@ -62,9 +69,9 @@ export const FindingCreate = named(
   'FindingCreate',
   z.strictObject({
     code: Code, title: Title, classification: FindingClassification, clauseRef: z.string().trim().min(1).max(40).optional(), source: FindingSource,
-    auditEventId: Uuid.optional(), ownerHandle: PersonId, dueAt: IsoDate.optional(),
+    auditEventId: Uuid.optional(), ownerHandle: PersonId, dueAt: IsoDate.optional(), targetCode: Code.optional(),
   }),
-  'POST /ms/{ms}/findings body',
+  'POST /ms/{ms}/findings body; targetCode is a code of applicability.targets, next to the free-text clauseRef (Milestone 2 D.2)',
   { valid: [{ code: 'IA-2026-04', title: 'Access reviews not documented for Q2', classification: 'minor', clauseRef: 'A.5.18', source: 'internal_audit', ownerHandle: 'bagus', dueAt: '2026-12-01' }], invalid: [{ code: 'IA-2026-04', title: 'x', classification: 'minor', source: 'customer', ownerHandle: 'bagus' }] },
 );
 export type FindingCreate = z.infer<typeof FindingCreate>;
@@ -74,7 +81,7 @@ export const FindingPatch = named(
   z.strictObject({
     title: Title.optional(), classification: FindingClassification.optional(), clauseRef: z.string().trim().min(1).max(40).nullable().optional(),
     ownerHandle: PersonId.optional(), dueAt: IsoDate.nullable().optional(), rcaText: Text.nullable().optional(),
-    systemicCheckText: Text.nullable().optional(), statusNote: Note.nullable().optional(),
+    systemicCheckText: Text.nullable().optional(), statusNote: Note.nullable().optional(), targetCode: Code.nullable().optional(),
   }).refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
   'PATCH /ms/{ms}/findings/{id} body',
   { valid: [{ rcaText: 'Patch window not aligned with SLA', systemicCheckText: 'Other platforms checked' }], invalid: [{}, { status: 'closed' }] },
@@ -245,6 +252,15 @@ export const ManagementReviewCreate = named(
 );
 export type ManagementReviewCreate = z.infer<typeof ManagementReviewCreate>;
 
+export const ManagementReviewPatch = named(
+  'ManagementReviewPatch',
+  z.strictObject({ title: Title.optional(), plannedAt: IsoDate.optional(), ownerHandle: PersonId.optional(), linkedMs: z.array(MsId).min(1).optional() })
+    .refine((p) => Object.values(p).some((v) => v !== undefined), { message: 'Give at least one field' }),
+  'PATCH /ms/{ms}/management-reviews/{id} body: title, planned date, owner and linked systems while the review is planned or held (Milestone 2 D.1)',
+  { valid: [{ plannedAt: '2027-11-03' }, { title: 'Management review 2027 (joint)', linkedMs: ['isms', 'qms'] }], invalid: [{}, { linkedMs: [] }, { status: 'held' }] },
+);
+export type ManagementReviewPatch = z.infer<typeof ManagementReviewPatch>;
+
 export const ManagementReviewInputParams = named('ManagementReviewInputParams', z.strictObject({ ms: MsId, id: Uuid, defCode: Code }), 'Path parameters {ms}, {id} (management review) and {defCode} (ref.review_input_def.code)', {
   valid: [{ ms: 'isms', id: '4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d', defCode: 'MRI-01' }],
   invalid: [{ ms: 'isms', id: '4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d' }],
@@ -324,14 +340,17 @@ export const auditActivitiesListRoute = defineRoute({
   ...ms, id: 'audit-activities.list', method: 'GET', path: '/api/v1/ms/:ms/audit-events/:id/activities', summary: 'Audit activities of an audit event',
   permission: 'ms.read', params: MsRecordParams, response: z.array(AuditActivityItem), errors: [404],
 });
+/** Milestone 2 D.2: audit_event.manage, or internal_audit.manage for activities of an internal audit (checked by the service). */
+const activityChecks = { auth: 'session' as const, msSource: 'path' as const, owner: 'WP-37' as const, anyOf: AUDIT_EVENT_OR_INTERNAL_AUDIT };
 export const auditActivitiesGenerateRoute = defineRoute({
-  ...ms, id: 'audit-activities.generate', method: 'POST', path: '/api/v1/ms/:ms/audit-events/:id/activities/generate',
-  summary: 'Create the audit activities of the event type from the pack templates (existing codes skipped)', permission: 'audit_event.manage',
+  ...activityChecks, id: 'audit-activities.generate', method: 'POST', path: '/api/v1/ms/:ms/audit-events/:id/activities/generate',
+  summary: 'Create the audit activities of the event type from the pack templates (existing codes skipped); an Internal Auditor on internal audits only',
   params: MsRecordParams, response: CommandResult, errors: [404],
 });
 export const auditActivitiesUpdateRoute = defineRoute({
-  ...ms, id: 'audit-activities.update', method: 'PATCH', path: '/api/v1/ms/:ms/audit-activities/:id', summary: 'Plan or update an audit activity',
-  permission: 'audit_event.manage', params: MsRecordParams, body: AuditActivityPatch, response: CommandResult, errors: [404, 422],
+  ...activityChecks, id: 'audit-activities.update', method: 'PATCH', path: '/api/v1/ms/:ms/audit-activities/:id',
+  summary: 'Plan or update an audit activity; an Internal Auditor on internal audits only', params: MsRecordParams, body: AuditActivityPatch,
+  response: CommandResult, errors: [404, 422],
 });
 export const managementReviewsListRoute = defineRoute({
   ...ms, id: 'management-reviews.list', method: 'GET', path: '/api/v1/ms/:ms/management-reviews', summary: 'Management reviews linked to the system with input completeness',
@@ -353,10 +372,17 @@ export const managementReviewsTransitionRoute = defineRoute({
   params: MsRecordParams, body: ManagementReviewTransition, response: CommandResult, errors: [404, 409, 422],
 });
 
+export const managementReviewsUpdateRoute = defineRoute({
+  ...ms, owner: 'M2-07', id: 'management-reviews.update', method: 'PATCH', path: '/api/v1/ms/:ms/management-reviews/:id',
+  summary: 'Change title, planned date, owner or linked systems of a planned or held management review',
+  permission: 'management_review.manage', params: MsRecordParams, body: ManagementReviewPatch, response: CommandResult, errors: [404, 409, 412, 422], ifMatch: true,
+});
+
 export const routes: RouteDef[] = [
   findingsListRoute, findingsCreateRoute, findingsUpdateRoute, findingsTransitionRoute,
   correctiveActionsListRoute, correctiveActionsCreateRoute, correctiveActionsUpdateRoute, correctiveActionsTransitionRoute,
   selfAssessmentsListRoute, selfAssessmentsUpdateRoute, selfAssessmentsRaiseFindingRoute,
   auditActivitiesListRoute, auditActivitiesGenerateRoute, auditActivitiesUpdateRoute,
   managementReviewsListRoute, managementReviewsCreateRoute, managementReviewsInputRoute, managementReviewsTransitionRoute,
+  managementReviewsUpdateRoute,
 ];

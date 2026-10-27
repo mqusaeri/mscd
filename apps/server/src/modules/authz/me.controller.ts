@@ -3,7 +3,9 @@ import { Controller, Req, Res } from '@nestjs/common';
 import {
   authDemoPersonaRoute,
   meAcceptMembershipRoute,
+  meDeclineMembershipRoute,
   meGetRoute,
+  meSecurityRoute,
   meSwitchOrgRoute,
   type DemoPersonaRequest,
   type Me,
@@ -11,6 +13,7 @@ import {
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import { routeStub } from '../../common/problems';
 import type { Principal } from '../../common/tokens';
 import { MeService } from './me.service';
 
@@ -50,5 +53,16 @@ export class MeController {
     @RouteInputParam('body') body: DemoPersonaRequest,
   ): Promise<Me> {
     return this.me.switchPersona(request, reply, principal, body.role);
+  }
+
+  // Milestone 2 D.1 stubs (M2-02); M2-06 replaces them.
+  @ApiRoute(meDeclineMembershipRoute)
+  declineMembership(): never {
+    return routeStub(meDeclineMembershipRoute);
+  }
+
+  @ApiRoute(meSecurityRoute)
+  security(): never {
+    return routeStub(meSecurityRoute);
   }
 }

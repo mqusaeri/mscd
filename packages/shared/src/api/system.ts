@@ -1,4 +1,6 @@
-// Area `system` (owner from wave 4: WP-08): the public system profile (D.2 `SystemProfile`, I.1).
+// Area `system` (owner from wave 4: WP-08): the public system profile (D.2 `SystemProfile`, I.1). Milestone 2 (D.2)
+// adds the links of the privacy notice and the terms for the sign-in page footer (`legal`, from the profile keys
+// legal.privacy_url and legal.terms_url), which M2-S11 serves.
 import { z } from 'zod';
 import { DeployLabel, PackCatalogChannel } from '../enums.js';
 import { IsoDate, defineRoute, named } from './common.js';
@@ -34,11 +36,19 @@ export const SystemProfile = named(
     }),
     demo: z.object({ enabled: z.boolean(), personas: z.boolean(), fixedToday: IsoDate.optional() }),
     login: z.object({ regionLabel: z.string().optional(), mfaEnforced: z.boolean() }),
+    legal: z.object({ privacyUrl: z.url().nullable(), termsUrl: z.url().nullable() }).optional(),
   }),
   'Public description of the installation: version, deployment label (onprem when license.validation is offline), capabilities, demo flags and login hints (D.2, I.1)',
   {
-    valid: [EXAMPLE_PROFILE, { ...EXAMPLE_PROFILE, deploy: 'saas', demo: { enabled: true, personas: true, fixedToday: '2026-09-29' }, login: { regionLabel: 'Jakarta', mfaEnforced: true } }],
-    invalid: [{ ...EXAMPLE_PROFILE, deploy: 'cloud' }, { ...EXAMPLE_PROFILE, capabilities: { ...EXAMPLE_PROFILE.capabilities, mailTransport: 'ses' } }, { version: '1.0.0' }],
+    valid: [
+      EXAMPLE_PROFILE, { ...EXAMPLE_PROFILE, deploy: 'saas', demo: { enabled: true, personas: true, fixedToday: '2026-09-29' }, login: { regionLabel: 'Jakarta', mfaEnforced: true } },
+      { ...EXAMPLE_PROFILE, deploy: 'saas', legal: { privacyUrl: 'https://mscd.example.id/privacy', termsUrl: 'https://mscd.example.id/terms' } },
+      { ...EXAMPLE_PROFILE, legal: { privacyUrl: null, termsUrl: null } },
+    ],
+    invalid: [
+      { ...EXAMPLE_PROFILE, deploy: 'cloud' }, { ...EXAMPLE_PROFILE, capabilities: { ...EXAMPLE_PROFILE.capabilities, mailTransport: 'ses' } }, { version: '1.0.0' },
+      { ...EXAMPLE_PROFILE, legal: { privacyUrl: 'privacy page', termsUrl: null } },
+    ],
   },
 );
 export type SystemProfile = z.infer<typeof SystemProfile>;

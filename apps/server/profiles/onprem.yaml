@@ -3,8 +3,8 @@
 # environment variable MSCD__<SECTION>__<KEY>=<YAML value>, for example MSCD__HTTP__PORT=3001.
 # Shorthand variables MSCD_DATABASE_URL, MSCD_DATABASE_MIGRATOR_URL, MSCD_DATABASE_PACK_URL and
 # MSCD_DATABASE_ADMIN_URL (or their _FILE forms) win over the database.*_file entries.
-tenancy:   { mode: single, isolation: database }
-license:   { validation: offline }                        # trusted keys are compiled into the build (D-16)
+tenancy:   { mode: single, isolation: database, default_region: id }
+license:   { validation: offline, plans: {} }                        # trusted keys are compiled into the build (D-16)
 updates:   { channel: offline }
 packs:     { channel: offline, dir: /app/packs, channel_url: null }
 telemetry: { enabled: false, otlp_endpoint: null }
@@ -14,13 +14,14 @@ identity:
   local: { mfa_required: true }
   oidc: { allow_insecure_http: false }
   session: { idle_minutes: 60, absolute_hours: 8, remember_hours: 12, guest_idle_minutes: 30, guest_absolute_hours: 4 }
-mail:      { transport: smtp, from: "MSCD <mscd@example.internal>", smtp: { host: smtp, port: 25, secure: false, user: null, password_file: null } }
+mail:      { transport: smtp, required: false, from: "MSCD <mscd@example.internal>", smtp: { host: smtp, port: 25, secure: false, user: null, password_file: null } }
 storage:
   adapters: { enabled: [managed_vault, m365, google_drive] }
   max_upload_bytes: 104857600
   gateway: { url: "https://storage-gateway:8443", token_file: /run/secrets/gateway.token,
              tls: { mode: mtls, ca_file: /run/secrets/ca.crt, cert_file: /run/secrets/client.crt, key_file: /run/secrets/client.key } }
-network:   { egress_allowlist: [] }
+network:   { egress_allowlist: [], dns_resolvers: [] }
+legal:     { privacy_url: null, terms_url: null }            # sign-in page footer links (Milestone 2 D.2)
 jobs:      { driver: pgboss, schedules_enabled: true, bullmq: { url: null } }
 http:      { port: 3000, public_url: "https://mscd.example.internal", trust_proxy: { cidrs: ["172.31.250.10/32"] } }
 security:  { cookie_secure: true }

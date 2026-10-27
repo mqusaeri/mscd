@@ -3,8 +3,8 @@
 # Secret files point to the committed development values in apps/server/test/fixtures/secrets (R-11), whose
 # database URLs reach the developer stack (deploy/compose/dev) on localhost:55432; the Compose overlay overrides
 # them with its own secrets. Relative paths resolve against the folder of this file.
-tenancy:   { mode: single, isolation: database }
-license:   { validation: offline }
+tenancy:   { mode: single, isolation: database, default_region: id }
+license:   { validation: offline, plans: {} }
 updates:   { channel: offline }
 packs:     { channel: offline, dir: ../../../packs/dist, channel_url: null }
 telemetry: { enabled: false, otlp_endpoint: null }
@@ -14,13 +14,14 @@ identity:
   local: { mfa_required: true }
   oidc: { allow_insecure_http: true }
   session: { idle_minutes: 60, absolute_hours: 8, remember_hours: 12, guest_idle_minutes: 30, guest_absolute_hours: 4 }
-mail:      { transport: smtp, from: "MSCD Demo <mscd@demo.invalid>", smtp: { host: mailpit, port: 1025, secure: false, user: null, password_file: null } }
+mail:      { transport: smtp, required: false, from: "MSCD Demo <mscd@demo.invalid>", smtp: { host: mailpit, port: 1025, secure: false, user: null, password_file: null } }
 storage:
   adapters: { enabled: [managed_vault, m365, google_drive] }
   max_upload_bytes: 104857600
   gateway: { url: "http://storage-gateway:8443", token_file: ../test/fixtures/secrets/gateway.token,
              tls: { mode: "off", ca_file: null, cert_file: null, key_file: null } }
-network:   { egress_allowlist: [] }
+network:   { egress_allowlist: [], dns_resolvers: [] }
+legal:     { privacy_url: null, terms_url: null }            # sign-in page footer links (Milestone 2 D.2)
 jobs:      { driver: pgboss, schedules_enabled: true, bullmq: { url: null } }
 http:      { port: 3000, public_url: "http://localhost:18080", trust_proxy: { cidrs: ["172.31.250.10/32"] } }
 security:  { cookie_secure: false }

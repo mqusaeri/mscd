@@ -20,7 +20,7 @@ import {
 } from '@mscd/shared';
 import { sql, type RawBuilder } from 'kysely';
 import { assertIfMatch } from '../../common/etag';
-import { ConflictError, ForbiddenError, ValidationError } from '../../common/problems';
+import { ConflictError, ForbiddenError, NotImplementedError, ValidationError } from '../../common/problems';
 import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type LicenceGate,
   type MembershipService, type MsRef, type Principal, type RecordResolver, type ScopePolicy, type Trx,
@@ -90,7 +90,17 @@ const FIELDS: Readonly<Record<RegisterKind, readonly FieldSpec[]>> = {
     { key: 'frequencyCode', column: 'frequency_code', type: 'text' },
     { key: 'lastMeasuredAt', column: 'last_measured_at', type: 'date', readOnly: 'Recording a metric value sets it (POST .../values)' },
   ],
+  // Milestone 2 register kinds (D.2): the contract exists from wave 1a, M2-07 adds their fields and behaviour.
+  'objectives': [],
+  'competence': [],
 };
+
+/** Register kinds whose behaviour M2-07 builds; until then every route answers 501 `not-implemented` for them. */
+const PENDING_KINDS: ReadonlySet<RegisterKind> = new Set(['objectives', 'competence']);
+
+function assertKindBuilt(kind: RegisterKind, routeId: string): void {
+  if (PENDING_KINDS.has(kind)) throw new NotImplementedError(`${routeId} ${kind}`, 'M2-07');
+}
 
 /** Fields the Risk Owner may change on own risks (F.6 `risk.manage` own: assessment fields). */
 export const RISK_ASSESSMENT_KEYS: ReadonlySet<string> = new Set([
@@ -154,6 +164,7 @@ export class RegistersService {
   // -------------------------------------------------------------------------------------------------------------
 
   async list(principal: Principal, authz: AuthzState | null, ms: string, kind: RegisterKind, query: RegisterListQuery): Promise<Page<RegisterItem>> {
+    assertKindBuilt(kind, 'registers.list');
     const table = REGISTER_ENTITY_TYPES[kind];
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
@@ -227,6 +238,7 @@ export class RegistersService {
   // -------------------------------------------------------------------------------------------------------------
 
   async create(principal: Principal, authz: AuthzState | null, ms: string, kind: RegisterKind, body: RegisterCreate): Promise<CommandResult> {
+    assertKindBuilt(kind, 'registers.create');
     const org = orgOf(principal);
     const actor = principal.user.id;
     const table = REGISTER_ENTITY_TYPES[kind];
@@ -315,6 +327,7 @@ export class RegistersService {
     patch: RegisterPatch,
     ifMatch: string | undefined,
   ): Promise<CommandResult> {
+    assertKindBuilt(kind, 'registers.update');
     const org = orgOf(principal);
     const actor = principal.user.id;
     const table = REGISTER_ENTITY_TYPES[kind];

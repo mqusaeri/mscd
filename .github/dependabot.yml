@@ -1,0 +1,63 @@
+# Dependabot version updates (Milestone 2, package M2-S01): one weekly pull
+# request per ecosystem group, for the npm workspaces (package-lock.json), the
+# GitHub Actions of .github/workflows (pinned to commit SHAs with the tag in a
+# comment, rule S-4, which Dependabot keeps in step) and the base images of the
+# Dockerfiles in deploy/docker. A release must be 14 days old before it is
+# proposed, the same age rule as for pinned images (S-5).
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: deps
+    groups:
+      npm-production:
+        dependency-type: production
+        update-types: [minor, patch]
+      npm-development:
+        dependency-type: development
+        update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    cooldown:
+      default-days: 14
+    labels: [dependencies]
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    cooldown:
+      default-days: 14
+    labels: [dependencies]
+    commit-message:
+      prefix: images
+    groups:
+      base-images:
+        patterns: ['*']

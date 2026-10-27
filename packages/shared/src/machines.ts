@@ -5,13 +5,16 @@
 // pair are alternatives: the actor needs the permission of one of them (for example `activity.transition` on an own
 // record, or `activity.verify`). A row or rejection with `via` belongs to that dedicated route only; the machine's
 // transition route performs the rows without `via`. A row with `permission: null` is performed by the system only
-// (jobs). The RBAC suite and the contract tests read the same tables (J.5).
+// (jobs). The RBAC suite and the contract tests read the same tables (J.5). Milestone 2 (docs/platform/MILESTONE-2.md
+// J.8) adds the certification cycle and organisation status machines and moves the first certification of a system to
+// `ms.certification` (D.2).
 import {
-  ACTIVITY_STATUSES, APPROVAL_STATUSES, CORRECTIVE_ACTION_STATUSES, DOCUMENT_STATUSES, FINDING_STATUSES,
-  IMPLEMENTATION_STATUSES, MANAGEMENT_REVIEW_STATUSES, MS_STATUSES, SELF_ASSESSMENT_STATUSES, TASK_PROGRESS_STATUSES,
-  TREATMENT_STATUSES,
+  ACTIVITY_STATUSES, APPROVAL_STATUSES, CERTIFICATION_CYCLE_STATUSES, CORRECTIVE_ACTION_STATUSES, DOCUMENT_STATUSES, FINDING_STATUSES,
+  IMPLEMENTATION_STATUSES, MANAGEMENT_REVIEW_STATUSES, MS_STATUSES, ORGANIZATION_STATUSES, SELF_ASSESSMENT_STATUSES,
+  TASK_PROGRESS_STATUSES, TREATMENT_STATUSES,
 } from './enums.js';
 import type { Permission, RuleId } from './enums.js';
+import type { WorkPackageId } from './api/common.js';
 
 export const MACHINE_ENTITIES = [
   'applicability_entry.implementation_status',
@@ -26,6 +29,9 @@ export const MACHINE_ENTITIES = [
   'cycle_requirement_status.status',
   'user_ms_role.approval_status',
   'management_system.status',
+  // Milestone 2 J.8
+  'certification_cycle.status',
+  'organization.status',
 ] as const;
 export type MachineEntity = (typeof MACHINE_ENTITIES)[number];
 
@@ -70,7 +76,7 @@ export interface Rejection {
 /** A machine: its states, its owner work package, its rows and the pairs rejected with a rule. */
 export interface Machine {
   entity: MachineEntity;
-  owner: `WP-${string}`;
+  owner: WorkPackageId;
   states: readonly string[];
   transitions: readonly Transition[];
   rejections: readonly Rejection[];
@@ -365,7 +371,64 @@ const managementSystem: Machine = {
     ...rows<MsState>(MANAGEMENT_SYSTEM, 'transitioning', 'certified', 'ms.transition', {
       rules: ['LIC-FEATURE'], note: 'After the transition audit recommended certification; feature edition_transition',
     }),
-    ...rows<MsState>(MANAGEMENT_SYSTEM, 'implementing', 'certified', null, { note: 'When the certification cycle is certified' }),
+    ...rows<MsState>(MANAGEMENT_SYSTEM, 'implementing', 'certified', 'ms.transition', {
+      via: 'ms.certification', requires: ['certificateNo', 'issuedAt', 'expiresAt', 'certificationBody'],
+      note: 'Recording the first certificate after a Stage 2 audit with outcome recommended or recommended_with_conditions (Milestone 2 D.2, D.4)',
+    }),
+  ],
+  rejections: [],
+};
+
+type CycleState = (typeof CERTIFICATION_CYCLE_STATUSES)[number];
+const CYCLE = 'certification_cycle.status' as const;
+const CYCLE_MOVE = { via: 'ms.cycles.transition', requires: ['reason'] } as const;
+/** Milestone 2 J.8, D.4: one open cycle (`planned` or `active`) per system; a certified cycle stays while the next one runs. */
+const certificationCycle: Machine = {
+  entity: CYCLE,
+  owner: 'M2-02',
+  states: CERTIFICATION_CYCLE_STATUSES,
+  transitions: [
+    ...(['planned', 'active'] as const).flatMap((to) => rows<CycleState>(CYCLE, null, to, 'audit_event.manage', {
+      via: 'ms.cycles.create', requires: ['cycleStart'], note: 'Start certification cycle on screen, with its cycle items (D.4)',
+    })),
+    ...rows<CycleState>(CYCLE, null, 'active', null, {
+      sets: ['cycle_start', 'cycle_end'], note: 'The first stage1 or recertification audit event of a system without an open cycle (D.4)',
+    }),
+    ...rows<CycleState>(CYCLE, 'planned', 'active', null, { note: 'The first stage1 audit event activates a planned cycle and copies its cycle items (D.4)' }),
+    ...rows<CycleState>(CYCLE, 'planned', 'active', 'audit_event.manage', { via: 'ms.cycles.create', note: 'Start certification cycle on a system with a planned cycle' }),
+    ...rows<CycleState>(CYCLE, 'active', 'certified', 'ms.transition', {
+      via: 'ms.certification', requires: ['certificateNo', 'issuedAt', 'expiresAt', 'certificationBody'],
+      sets: ['certificate_no', 'certified_at', 'certificate_expires_at', 'certification_body', 'certified_scope'],
+      note: 'Only after a stage2 or recertification event of the cycle with outcome recommended or recommended_with_conditions (D.4)',
+    }),
+    ...rows<CycleState>(CYCLE, 'certified', 'closed', null, { note: 'The next cycle of the system is certified (D.4 recertification)' }),
+    ...rows<CycleState>(CYCLE, 'certified', 'expired', null, { note: 'certificate.expiry: certificate_expires_at has passed (D.4)' }),
+    ...rows<CycleState>(CYCLE, 'certified', 'suspended', 'ms.transition', { ...CYCLE_MOVE, note: 'Suspension decided by the certification body' }),
+    ...rows<CycleState>(CYCLE, 'suspended', 'certified', 'ms.transition', { ...CYCLE_MOVE, note: 'Reinstatement decided by the certification body' }),
+    ...rows<CycleState>(CYCLE, 'suspended', 'withdrawn', 'ms.transition', { ...CYCLE_MOVE, note: 'Withdrawal decided by the certification body' }),
+    ...rows<CycleState>(CYCLE, 'active', 'closed', 'ms.transition', { ...CYCLE_MOVE, note: 'An active cycle that will not reach certification' }),
+  ],
+  rejections: [],
+};
+
+type OrganizationState = (typeof ORGANIZATION_STATUSES)[number];
+const ORGANIZATION = 'organization.status' as const;
+/** Milestone 2 J.8 (SaaS track): the platform operator moves an organisation through `ops.organizations.status` or `tenant set-status`. */
+const STATUS_MOVE = { via: 'ops.organizations.status', requires: ['reason'], note: 'Also the operator command tenant set-status' } as const;
+const STATUS_MOVE_CONFIRMED = { ...STATUS_MOVE, requires: ['reason', 'confirmSlug'], note: 'confirmSlug equal to the slug; also the operator command tenant set-status' } as const;
+const organization: Machine = {
+  entity: ORGANIZATION,
+  owner: 'M2-02',
+  states: ORGANIZATION_STATUSES,
+  transitions: [
+    ...rows<OrganizationState>(ORGANIZATION, 'active', 'suspended', 'ops.tenants.manage', STATUS_MOVE),
+    ...rows<OrganizationState>(ORGANIZATION, 'active', 'offboarding', 'ops.tenants.manage', STATUS_MOVE_CONFIRMED),
+    ...rows<OrganizationState>(ORGANIZATION, 'suspended', 'active', 'ops.tenants.manage', STATUS_MOVE),
+    ...rows<OrganizationState>(ORGANIZATION, 'suspended', 'offboarding', 'ops.tenants.manage', STATUS_MOVE_CONFIRMED),
+    ...rows<OrganizationState>(ORGANIZATION, 'offboarding', 'active', 'ops.tenants.manage', STATUS_MOVE),
+    ...rows<OrganizationState>(ORGANIZATION, 'offboarding', 'archived', 'ops.tenants.manage', {
+      ...STATUS_MOVE_CONFIRMED, note: 'archived is final until the purge of Milestone 2 K.8; confirmSlug equal to the slug',
+    }),
   ],
   rejections: [],
 };
@@ -384,6 +447,8 @@ export const MACHINES: Readonly<Record<MachineEntity, Machine>> = {
   'cycle_requirement_status.status': progressMachine('cycle_requirement_status.status', 'cycle_item.update'),
   'user_ms_role.approval_status': roleApproval,
   'management_system.status': managementSystem,
+  'certification_cycle.status': certificationCycle,
+  'organization.status': organization,
 };
 
 /** Every transition row of every machine. */

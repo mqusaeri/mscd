@@ -1,9 +1,12 @@
 // Area `audit-events` (owner from wave 9: WP-35): audit events (BR-42), preparation tasks (BR-43, A-23) and cycle
-// items (TS 6.8) (D.2, D.3, C.13).
+// items (TS 6.8) (D.2, D.3, C.13). Milestone 2 (D.2) lets MS Managers and Internal Auditors plan internal audits:
+// creating an event needs `internal_audit.manage` for type `internal_audit` and `audit_event.manage` for every other
+// type; changing one needs either permission, and the service refuses an Internal Auditor on an event that is not
+// an internal audit (M2-05). The internal audit programme (D.1) is built by M2-05.
 import { z } from 'zod';
-import { AuditEventType, AuditOutcome, TaskProgressStatus } from '../enums.js';
-import { CommandResult, IsoDate, MsParams, MsRecordParams, PersonId, defineRoute, named } from './common.js';
-import type { RouteDef } from './common.js';
+import { AuditEventType, AuditOutcome, ClauseGroup, TaskProgressStatus } from '../enums.js';
+import { Code, CommandResult, IsoDate, MsParams, MsRecordParams, PersonId, Uuid, defineRoute, named } from './common.js';
+import type { PermissionByMember, RouteDef } from './common.js';
 
 const Note = z.string().trim().min(1).max(2000);
 
@@ -24,7 +27,10 @@ export const AuditEventCreateRequest = named(
   z.strictObject(auditEventShape),
   'POST /ms/{ms}/audit-events body',
   {
-    valid: [{ eventType: 'stage1', nameEn: 'Stage 1 audit', nameId: 'Audit tahap 1', shortLabel: 'Stage 1', scheduledAt: '2027-02-10', auditDays: 1, prepWindowDays: 60 }],
+    valid: [
+      { eventType: 'stage1', nameEn: 'Stage 1 audit', nameId: 'Audit tahap 1', shortLabel: 'Stage 1', scheduledAt: '2027-02-10', auditDays: 1, prepWindowDays: 60 },
+      { eventType: 'internal_audit', nameEn: 'Internal audit 2026', nameId: 'Audit internal 2026', shortLabel: 'IA 2026', scheduledAt: '2026-12-08', auditDays: 2, prepWindowDays: 30 },
+    ],
     invalid: [{ eventType: 'stage3', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10' }, { eventType: 'stage1', nameEn: 'x', nameId: 'x', shortLabel: 'x', scheduledAt: '2027-02-10', prepWindowDays: 400 }],
   },
 );
@@ -76,15 +82,30 @@ export const CycleItemPatch = named(
 );
 export type CycleItemPatch = z.infer<typeof CycleItemPatch>;
 
+/** Milestone 2 D.2: internal audits need internal_audit.manage [MM, IA], every other event type audit_event.manage [MM]. */
+const auditEventPermission = {
+  source: 'body',
+  member: 'eventType',
+  cases: {
+    'internal_audit': { permission: 'internal_audit.manage', scope: 'ms' },
+    '*': { permission: 'audit_event.manage', scope: 'ms' },
+  },
+} as const satisfies PermissionByMember;
+
+/** Milestone 2 D.2: either permission; the service checks the event type for holders of internal_audit.manage only. */
+export const AUDIT_EVENT_OR_INTERNAL_AUDIT = [
+  { permission: 'audit_event.manage', scope: 'ms' },
+  { permission: 'internal_audit.manage', scope: 'ms' },
+] as const;
+
 export const auditEventsCreateRoute = defineRoute({
   id: 'audit-events.create',
   owner: 'WP-35',
   method: 'POST',
   path: '/api/v1/ms/:ms/audit-events',
-  summary: 'Plan an audit event',
+  summary: 'Plan an audit event: internal_audit.manage for an internal audit, audit_event.manage for every other type',
   auth: 'session',
-  permission: 'audit_event.manage',
-  scope: 'ms',
+  permissionBy: auditEventPermission,
   msSource: 'path',
   params: MsParams,
   body: AuditEventCreateRequest,
@@ -99,10 +120,9 @@ export const auditEventsUpdateRoute = defineRoute({
   owner: 'WP-35',
   method: 'PATCH',
   path: '/api/v1/ms/:ms/audit-events/:id',
-  summary: 'Change an audit event; count is the number of holders notified of a date change (BR-42)',
+  summary: 'Change an audit event; count is the number of holders notified of a date change (BR-42); an Internal Auditor may change internal audits only',
   auth: 'session',
-  permission: 'audit_event.manage',
-  scope: 'ms',
+  anyOf: AUDIT_EVENT_OR_INTERNAL_AUDIT,
   msSource: 'path',
   params: MsRecordParams,
   body: AuditEventPatch,
@@ -165,4 +185,60 @@ export const cycleItemsUpdateRoute = defineRoute({
   ifMatch: true,
 });
 
-export const routes: RouteDef[] = [auditEventsCreateRoute, auditEventsUpdateRoute, prepTasksCreateRoute, prepTasksUpdateRoute, cycleItemsUpdateRoute];
+// ---------------------------------------------------------------------------------------------------------------
+// Internal audit programme (Milestone 2 D.1, M2-05)
+// ---------------------------------------------------------------------------------------------------------------
+
+export const InternalAuditProgrammeQuery = named(
+  'InternalAuditProgrammeQuery',
+  z.strictObject({ cycle: Uuid.optional() }),
+  'GET /ms/{ms}/internal-audit/programme query: the certification cycle (default: the open or newest cycle)',
+  { valid: [{}, { cycle: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d' }], invalid: [{ cycle: 'current' }, { year: 2026 }] },
+);
+export type InternalAuditProgrammeQuery = z.infer<typeof InternalAuditProgrammeQuery>;
+
+const EXAMPLE_PROGRAMME_ROW = {
+  code: '9.2', title: 'Internal audit', kind: 'clause', clauseGroup: '9', covered: true,
+  audits: [{ eventId: '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e', shortLabel: 'IA 2026', scheduledAt: '2026-12-08', activities: 2 }],
+} as const;
+
+export const InternalAuditProgramme = named(
+  'InternalAuditProgramme',
+  z.object({
+    cycle: z.object({ id: Uuid, cycleStart: IsoDate, cycleEnd: IsoDate }).nullable(),
+    rows: z.array(z.object({
+      code: Code,
+      title: z.string(),
+      kind: z.enum(['clause', 'control']),
+      clauseGroup: ClauseGroup.nullable(),
+      covered: z.boolean(),
+      audits: z.array(z.object({ eventId: Uuid, shortLabel: z.string(), scheduledAt: IsoDate, activities: z.int().min(0) })),
+    })),
+  }),
+  'Clauses 4 to 10 and the applicable controls of a cycle with the internal audits that covered them; uncovered rows have no audits (Milestone 2 D.1)',
+  {
+    valid: [{ cycle: { id: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d', cycleStart: '2025-03-14', cycleEnd: '2028-03-13' }, rows: [EXAMPLE_PROGRAMME_ROW, { ...EXAMPLE_PROGRAMME_ROW, code: 'A.5.23', title: 'Cloud services', kind: 'control', clauseGroup: null, covered: false, audits: [] }] }, { cycle: null, rows: [] }],
+    invalid: [{ cycle: null, rows: [{ ...EXAMPLE_PROGRAMME_ROW, kind: 'annex' }] }, { rows: [] }],
+  },
+);
+export type InternalAuditProgramme = z.infer<typeof InternalAuditProgramme>;
+
+export const internalAuditProgrammeRoute = defineRoute({
+  id: 'internal-audit.programme',
+  owner: 'M2-05',
+  method: 'GET',
+  path: '/api/v1/ms/:ms/internal-audit/programme',
+  summary: 'Internal audit programme of a cycle: clauses 4 to 10 and applicable controls with the internal audits that covered them',
+  auth: 'session',
+  permission: 'ms.read',
+  scope: 'ms',
+  msSource: 'path',
+  params: MsParams,
+  query: InternalAuditProgrammeQuery,
+  response: InternalAuditProgramme,
+  errors: [404],
+});
+
+export const routes: RouteDef[] = [
+  auditEventsCreateRoute, auditEventsUpdateRoute, prepTasksCreateRoute, prepTasksUpdateRoute, cycleItemsUpdateRoute, internalAuditProgrammeRoute,
+];

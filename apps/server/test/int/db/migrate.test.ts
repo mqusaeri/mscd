@@ -28,7 +28,8 @@ import {
   type BareDatabase,
 } from './helpers';
 
-const PLATFORM = ['0001_foundation', '0002_identity', '0003_licensing_packs_keys', '0004_operations'];
+// Milestone 2 (M2-02) adds platform 0005 and tenant 0008; the ref migration 0002 of M2-03 follows in wave 1b.
+const PLATFORM = ['0001_foundation', '0002_identity', '0003_licensing_packs_keys', '0004_operations', '0005_milestone2_saas'];
 const REF = ['0001_framework_content'];
 const TENANT = [
   '0001_core',
@@ -38,6 +39,7 @@ const TENANT = [
   '0005_audit_cycle_phases',
   '0006_workflow',
   '0007_registers_workflow',
+  '0008_milestone2',
 ];
 
 /** A packs.dir that does not exist: C.3 step 5 (WP-12) installs nothing, whether packs/dist was built or not. */
@@ -105,7 +107,7 @@ describe(`migrations on ${EXTERNAL_SERVER ? 'the server of MSCD_TEST_DATABASE_UR
     const lines: string[] = [];
     const first = await migrateAll({ connectionString: bare.urls.migrator, log: (l) => lines.push(l) });
     expect(first).toEqual({ platform: PLATFORM, ref: REF, tenants: [] });
-    expect(lines).toEqual([`platform applied 4: ${PLATFORM.join(', ')}`, `ref applied 1: ${REF[0]}`]);
+    expect(lines).toEqual([`platform applied ${PLATFORM.length}: ${PLATFORM.join(', ')}`, `ref applied ${REF.length}: ${REF.join(', ')}`]);
     // The readiness check of WP-08 compares platform.kysely_migration with the list compiled into the build.
     expect(MIGRATIONS_EXPECTED).toEqual(PLATFORM);
     expect(MIGRATIONS_BY_FOLDER).toEqual({ platform: PLATFORM, ref: REF, tenant: TENANT });
@@ -129,14 +131,15 @@ describe(`migrations on ${EXTERNAL_SERVER ? 'the server of MSCD_TEST_DATABASE_UR
     expect(singletons.rows[0]).toEqual({ installations: '1', marks: '1' });
   });
 
-  it('creates two tenant schemas with all seven tenant migrations', async () => {
+  it('creates two tenant schemas with all eight tenant migrations', async () => {
     alpha = await createTenant({ urls: bare.urls }, 'alpha');
     beta = await createTenant({ urls: bare.urls }, 'beta');
     for (const tenant of [alpha, beta]) {
       expect(tenant.migrations).toEqual(TENANT);
       const applied = await sql<{ name: string }>`select name from ${sql.id(tenant.schemaName, 'kysely_migration')} order by name`.execute(migrator);
       expect(applied.rows.map((r) => r.name)).toEqual(TENANT);
-      expect(await schemaTables(migrator, tenant.schemaName)).toHaveLength(66);
+      // 66 tables of Milestone 1 and the three of tenant 0008 (document_code_link, competence_record, import_run).
+      expect(await schemaTables(migrator, tenant.schemaName)).toHaveLength(66 + 3);
     }
   });
 

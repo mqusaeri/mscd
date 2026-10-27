@@ -113,9 +113,13 @@ describe('buildOpenApiDocument', () => {
   });
 
   it('carries no zod internals or invalid examples', () => {
+    // One assertion over the collected keys: an expect per key of the whole document is slow on a busy machine.
+    const forbidden = new Set(['$schema', '$defs', 'x-invalid-examples', '~standard']);
+    const found = new Set<string>();
     walk(doc, (k) => {
-      expect(['$schema', '$defs', 'x-invalid-examples', '~standard']).not.toContain(k);
+      if (forbidden.has(k)) found.add(k);
     });
+    expect([...found]).toEqual([]);
     const text = JSON.stringify(doc);
     expect(text).not.toContain('#/$defs/');
   });

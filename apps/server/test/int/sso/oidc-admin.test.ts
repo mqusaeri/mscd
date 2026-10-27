@@ -233,6 +233,10 @@ describeSso('identity provider administration and the provider list', () => {
     // A domain verified for another organisation does not count.
     await verifyDomain(orgB.id, domain);
     expect((await browserA.post('/api/v1/admin/identity-providers', oidcRequest('kc-jit', { jitProvisioning: true, allowedEmailDomains: [domain] }))).statusCode).toBe(422);
+    // One organisation per verified domain (Milestone 2 D.3, platform 0005): the operator moves it to organisation A.
+    await inScope(db.migrator, { platformScope: true }, (trx) =>
+      trx.deleteFrom('platform.verified_domain').where('organization_id', '=', orgB.id).where('domain', '=', domain).execute(),
+    );
     await verifyDomain(orgA.id, domain);
     const created = await browserA.post('/api/v1/admin/identity-providers', oidcRequest('kc-jit', { jitProvisioning: true, allowedEmailDomains: [domain] }));
     expect(created.statusCode, created.body).toBe(201);

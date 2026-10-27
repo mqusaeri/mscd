@@ -1,8 +1,13 @@
+import { LICENCE_FEATURES } from '@mscd/shared';
 import { z } from 'zod';
 
 // Deployment profile schema (build plan I.1). Strict at every level: an unknown key is an error, so a typo or a
 // key from an older release never goes unnoticed. Cross-field rules (demo mode, TLS off, channel URLs) are in
 // `profileRules` below; release-flavour restrictions are in `releaseFlavourIssues`.
+//
+// Milestone 2 (docs/platform/MILESTONE-2.md D.3, SaaS track) adds `tenancy.default_region`, `license.plans`,
+// `network.dns_resolvers`, `legal.privacy_url`, `legal.terms_url` and `mail.required`. Each has a default that keeps
+// on-premise behaviour unchanged, so a profile written before Milestone 2 still loads.
 
 const nonEmpty = z.string().trim().min(1, { error: 'must not be empty' });
 /** A file path; relative paths are resolved against the folder of the profile file. */
@@ -49,13 +54,43 @@ export const IDENTITY_PROVIDER_KINDS = ['local', 'oidc', 'saml'] as const;
 export const CHANNELS = ['offline', 'online', 'managed'] as const;
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
+/** Name of a plan preset of `license.plans` (the same pattern as `PlanPresetName` of the shared contract). */
+export const PLAN_PRESET_NAME = /^[a-z][a-z0-9_-]{0,39}$/;
+
+/**
+ * One plan preset of `license.plans` (Milestone 2 D.3, D-S4): the limits an entitlement row gets from
+ * `ops.entitlements.set {preset}` and `ops.organizations.create {preset}` (M2-S10). `frameworks` empty means every
+ * framework; the rate limits null mean the defaults of every api request (F.3).
+ */
+const planPreset = z.strictObject({
+  max_users: z.int().min(0),
+  max_management_systems: z.int().min(0),
+  valid_days: z.int().min(1).max(3650),
+  grace_days: z.int().min(0).max(365).default(30),
+  frameworks: z.array(z.string().regex(/^[A-Z][A-Z0-9]{1,19}$/, { error: 'must be a framework code such as ISO27001' })).default([]),
+  storage_adapters: z.array(z.enum(STORAGE_ADAPTERS)).min(1).default(['managed_vault']),
+  features: z.array(z.enum(LICENCE_FEATURES)).default([]),
+  rate_user_per_minute: positiveInt.nullable().default(null),
+  rate_org_per_minute: positiveInt.nullable().default(null),
+});
+
+/** A DNS resolver of `network.dns_resolvers`: an IPv4 or IPv6 address, optionally with a port (`1.1.1.1:53`, `[::1]:5353`). */
+const dnsResolver = z.union(
+  [z.ipv4(), z.ipv6(), z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}$/), z.string().regex(/^\[[0-9a-fA-F:]+\]:\d{1,5}$/)],
+  { error: 'must be an IPv4 or IPv6 address, optionally with a port' },
+);
+
 export const profileSchema = z.strictObject({
   tenancy: z.strictObject({
     mode: z.enum(['single', 'multi']),
     isolation: z.enum(['database', 'schema']),
+    /** `platform.organization.region` of new organisations (Milestone 2 K.3 D-S2). */
+    default_region: z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, { error: 'must be a region code such as id' }).default('id'),
   }),
   license: z.strictObject({
     validation: z.enum(['offline', 'online']),
+    /** Plan presets by name (Milestone 2 D.3); empty in every profile until M2-S10 writes the SaaS presets. */
+    plans: z.record(z.string().regex(PLAN_PRESET_NAME, { error: 'must be a preset name such as trial' }), planPreset).default({}),
   }),
   updates: z.strictObject({
     channel: z.enum(CHANNELS),
@@ -84,6 +119,11 @@ export const profileSchema = z.strictObject({
   }),
   mail: z.strictObject({
     transport: z.literal('smtp'),
+    /**
+     * Mail must work for organisation and operator onboarding (Milestone 2 D.2): with true, creating an organisation
+     * or an operator is refused while SMTP is not configured, and no invitation link is ever returned (SaaS).
+     */
+    required: z.boolean().default(false),
     from: nonEmpty,
     smtp: z.strictObject({
       host: nonEmpty,
@@ -104,7 +144,16 @@ export const profileSchema = z.strictObject({
   }),
   network: z.strictObject({
     egress_allowlist: z.array(nonEmpty),
+    /** Resolvers for the DNS TXT checks of domain verification (Milestone 2 M2-S11); empty uses the system resolvers. */
+    dns_resolvers: z.array(dnsResolver).default([]),
   }),
+  /** Links of the privacy notice and the terms for the sign-in page footer (Milestone 2 D.2); null hides a link. */
+  legal: z
+    .strictObject({
+      privacy_url: httpUrl.nullable().default(null),
+      terms_url: httpUrl.nullable().default(null),
+    })
+    .default({ privacy_url: null, terms_url: null }),
   jobs: z.strictObject({
     driver: z.enum(['pgboss', 'bullmq']),
     schedules_enabled: z.boolean(),

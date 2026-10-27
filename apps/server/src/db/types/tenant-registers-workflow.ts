@@ -73,6 +73,9 @@ export interface AuditActivityTable {
   status: Generated<'planned' | 'done' | 'cancelled'>;
   note: string | null;
   position: Generated<number>;
+  /** Milestone 2 (tenant 0008, D.2): the auditor and the clause or control examined. */
+  auditor_user_id: string | null;
+  target_code: string | null;
 }
 
 /** `task` */
@@ -147,7 +150,7 @@ export const TABLE_COLUMNS = tableColumns<TenantRegisterWorkflowTables>()({
   audit_activity: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'audit_event_id',
     'management_system_id', 'template_code', 'title', 'clause_ref', 'key_questions', 'evidence_to_request',
-    'auditee_user_id', 'scheduled_at', 'status', 'note', 'position',
+    'auditee_user_id', 'scheduled_at', 'status', 'note', 'position', 'auditor_user_id', 'target_code',
   ],
   task: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',

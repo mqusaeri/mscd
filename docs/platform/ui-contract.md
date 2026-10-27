@@ -68,7 +68,8 @@ Sample: `ndt` (4 systems, saas, 2 sites), `bsd` (isms and qms, onprem, 3 sites),
 | `cert` | string | `'Certified 14 Mar 2025, cycle ...'`, `'Not yet certified, Stage 1 planned'` | `portfolio` card | Derived from `certification_cycle` |
 | `stage` | `Pair` | `['Surveillance 1, year 2','Surveillance 1, tahun ke-2']` | `portfolio`, `msOptions` | Derived from cycle, `management_system.status` and current phase |
 | `audit` | object or `null` | see below | `dueTag`, `chain` (After audit), chain and audit hero, `portfolio`, `upcoming`, tasks week strip, reassign `afterWarn` | Next `audit_event` (TS 9.4) |
-| `clauses` | `number[7]` | `[100,100,88,72,94,81,67]` (clauses 4 to 10) | `portfolio` radar and clause list, `overviewScreen` maturity | Readiness per Harmonized Structure clause (read model) |
+| `clauses` | `(number or null)[7]` | `[100,100,88,72,94,81,67]` (clauses 4 to 10) | `portfolio` radar and clause list, `overviewScreen` maturity | Readiness per Harmonized Structure clause: `clause_readiness.readiness_pct`, written by the job `readiness.recompute` (Milestone 2 D.6). A value is null until the job has computed it; the web then shows "Not computed yet" and never 0 |
+| `readiness` | object or absent | `{computedAt: '2026-10-28T02:30:00Z', groups: [{documented: 80, implemented: 64, evidenced: 90, measured: null}, ...]}` | `overviewScreen` maturity (Milestone 2) | The four dimensions per clause group 4 to 10 (`documented_pct`, `implemented_pct`, `evidenced_pct`, `measured_pct`) and `computed_at`. Each dimension is null when not computed or when the group has nothing of that kind; `computedAt` is null for seeded or manual rows |
 | `findings` | `{open, major}` | `{open:3, major:1}` | `portfolio` stats, `overviewScreen` open count for clause 10 | Open findings; those classified major |
 | `banner` | `{tone, text: Pair}` or absent | `{tone:'bad', text:['Google Shared Drive token expired 27 Sep 2026. ...', ...]}` | `portfolio` card and attention (weight 4), `renderVals.msBanner` (hidden on portfolio, tasks, fw, storage) | Derived alert: connector degraded, edition transition, beta pack |
 | `loc` | `LocId` | `'sp'`, `'vault'`, `'gd'` | `buildReqs` default `loc`, `buildEvidence` version, hash and path, `docDetail` storage and pinned facts, `docRow` location cell, `openPicker` (`'vault'` opens upload, `'gd'` the Google picker, else SharePoint), `portfolio` `locLabel`, `fwScreen`, evidence pack toast | `default_storage_repository_id` |
@@ -115,7 +116,7 @@ Shape: `{[PersonId]: [displayName, jobTitle]}`, with the sentinel `none: ['Unass
 | Field | Type | Example | Read by | Server source |
 |---|---|---|---|---|
 | `id` | string | `'A.8.13'`, `'Cl. 8.7'` | Rows, details, keys, chain and gate ids, golden thread, `titleOf`, evidence link `e.ctrl` | Catalogue item code with `A.` prefix, or requirement code with `Cl. ` prefix |
-| `key` | string | `'8.13'` | `buildEvidence` (`ctrlKey`, evidence title lookup `EVT`, BCMS evidence filter); tasks `EXAMPLES` lookup | Raw code |
+| `key` | string | `'8.13'`, `'cl-5.1'` | `buildEvidence` (`ctrlKey`, evidence title lookup `EVT`, BCMS evidence filter); tasks `EXAMPLES` lookup; Controls screen grouping (Milestone 2) | Raw code. In a catalogue system (ISO/IEC 27001) a clause entry has the key `cl-<code>` (Milestone 2 D2-09, `clauseEntryKey` in `codes.ts`), for example `cl-5.1` with snapshot ref `isms:cl-5.1`, so it never shares a key with the Annex A control of the same number (`5.1`). The Controls screen lists `cl-` entries first, in a group "Clauses 4 to 10" with the label `Cl. 4.1` |
 | `title` | string | `'Information backup'` | `reqRow`, `reqDetail`, chain title, `evRow` and `evDetail`, `titleOf`, tasks | Pack label |
 | `theme` | string | `'A.8 Technological'`, `'Clause 8'` | `reqRow` sub line when `note` is empty | Group label |
 | `st` | `ReqStatus` | `'partial'` | Badges, tab and chip counts, chain inclusion and action text, evidence inclusion, action availability | `applicability_entry.implementation_status` (see 5.1) |
@@ -150,6 +151,8 @@ Sample counts: ISMS 93 controls (61 implemented, 18 partial, 6 planned, 2 ns, 2 
 | `owner` | `PersonId` | `'bagus'` | Rows, facts, chain holder, reminders, owner scoping | `owner_user_id` |
 | `shared` | boolean | `true` for `IMS-01` to `IMS-04` | `docRow` tag, badges, `usedBy` fact, golden thread `shared` marker | Linked to more than one system through `entity_ms_link` |
 | `ms` | `MsId` | `'isms'` | Not read | Primary system |
+| `origin` | `'internal'` or `'external'`, optional | `'external'` | Document register and detail (Milestone 2) | `document.origin` (default `internal`). An external document comes from outside the organisation, such as a supplier contract or a regulation, with `external_source`, `external_ref` and `received_at` |
+| `changeSummary` | string (at most 500 characters), null or absent | `'Section 4 rewritten for the new VPN'` | Document detail and version history (Milestone 2) | `document_version.change_summary` of the current version: what changed in this revision |
 
 `DocStatus`: `approved` (ok), `expired` (bad), `review` (warn, TS `in_review`), `draft` (info). Override fields `h` and `due` may be merged into a document but the register does not read them.
 
@@ -455,7 +458,7 @@ Owner scoping: when `role === 'owner'`, `controlsScreen`, `freshScreen` and `doc
 | Value | Rule | Placement |
 |---|---|---|
 | Open per clause | Chain item stage to clause: `context` and `brisk` 4; `risk`, `treatment`, `soa`, `action`, `objective` 6; `document` 7; `metric` 9; every other stage 8. Clause 10 gets `findings.open` when non-zero | S |
-| Maturity values | Per clause with readiness `p` and open count `o`: `[min(100, p+14), p, max(0, p-10-(o ? 8 : 0)), max(0, p-22)]` for Documented, Implemented, Evidenced, Measured | S (real per-dimension scores, see 5.14) |
+| Maturity values | Per clause with readiness `p` and open count `o`: `[min(100, p+14), p, max(0, p-10-(o ? 8 : 0)), max(0, p-22)]` for Documented, Implemented, Evidenced, Measured | S in the sample. From Milestone 2 the API sends the stored dimensions in `ms.readiness.groups` (see 1.2); a null value shows as "Not computed yet" |
 | Level | `q(x) = max(0, min(4, round(x/25)))`; level `q(mean of the four values)`; labels Initial, Basic, Defined, Managed, Optimised; colour ok at 3 or more, warn at 2, else bad | S value, C labels |
 | Current phase | First phase with `verified < total` and no locked activity, else the last phase | S |
 | Blockers | Gate items (`title = titleOf(id)` or `why`), then overdue non-gate chain items sorted by due; first 5 | S |
@@ -737,7 +740,9 @@ export interface ManagementSystem {                  // section 1.2; new optiona
   id: MsId; code: string; ed: string; short: string; name: Pair; mgr: PersonId; mgrRole: string; color: string;
   scope: string; certifier: string; lead: string; cert: string; stage: Pair;
   audit: { name: Pair; date: IsoDate; days: number } | null;
-  clauses: number[]; findings: { open: number; major: number };
+  clauses: (number|null)[];                         // null: not computed yet (Milestone 2 D.6)
+  readiness?: { computedAt: string|null; groups: { documented: number|null; implemented: number|null; evidenced: number|null; measured: number|null }[] };
+  findings: { open: number; major: number };
   banner?: { tone: 'info'|'warn'|'bad'; text: Pair; kind?: 'connector'|'transition'|'beta' };
   loc: string; locMode: string; pack: string; phase: Pair; unit: 'ctrl'|'req'; theme?: Record<number, string>;
   gateName?: string; gtSuggestions?: string[];
@@ -745,7 +750,8 @@ export interface ManagementSystem {                  // section 1.2; new optiona
 export interface Requirement { id: string; key: string; title: string; theme: string; st: ReqStatus; owner: PersonId;
   doc: string; freq: FreqId; note: string; gate: boolean; just: string; risks: string[]; by?: PersonId|null; due?: IsoDate|null }
 export interface Document { id: string; title: string; tier: string; ver: string; st: DocStatus; appr: IsoDate|''; rev: IsoDate;
-  owner: PersonId; shared: boolean; ms: MsId; approver?: PersonId; path?: string; hashAlg?: string; usedBy?: string[] }
+  owner: PersonId; shared: boolean; ms: MsId; approver?: PersonId; path?: string; hashAlg?: string; usedBy?: string[];
+  origin?: 'internal'|'external'; changeSummary?: string|null }
 export interface Evidence { code: string; ctrl: string; ctrlKey: string; title: string; freq: FreqId; p: number; prod: IsoDate;
   next: IsoDate|null; fresh: Fresh; integ: IntegId; loc: string; owner: PersonId; ver: string; hashAlg: string; path: string;
   hash?: string; lastCheck?: string; lastGoodCheck?: string }
@@ -916,7 +922,7 @@ My Tasks across all four systems: `rina` 3, `bagus` 31, `maya` 1, `hendra` 3.
 | 5.11 | `gateItems` ignores overrides, so a reassigned gate record keeps its old holder in the gate tab | The server derives gate items from current state |
 | 5.12 | The UI allows `ns` to `complete` directly; TS 6.6 requires `in_progress` first | Server performs both transitions in one command, or the UI shows Start first |
 | 5.13 | Critical evidence and unverifiable evidence are separate counts (nav badge and portfolio `evCrit`: critical only; portfolio `evBad` and freshness tab `cannot`: unverifiable). Evidence can be in both | One named server function per count (TS 9.6), returned as `criticalEvidence` and `unverifiableEvidence` in the summary |
-| 5.14 | Clause readiness and the four maturity dimensions have no defined source | Define the per-clause computation in the read model (PRD 7.2) |
+| 5.14 | Clause readiness and the four maturity dimensions have no defined source | Milestone 2 D.6: the job `readiness.recompute` stores the readiness and the four dimensions per clause group in `clause_readiness`; values are null until computed |
 | 5.15 | Past-event findings list every finding of the system; drift `metric` and `exercise` list every record | Findings per `audit_event`; drift rows from `drift_result` predicates only |
 | 5.16 | One global role in the UI; roles are per system in the TS | Session returns the role per system; the controller uses the role of the selected system |
 | 5.17 | Requirement chain due dates, activity owners and dates, and stage record counts are fabricated | Store a due date on the pending action of each record; store activity owners and dates; count records per stage |

@@ -1,0 +1,16 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+# fail2ban reads the .local files of jail.d after the .conf files, so these
+# values win over the defaults of the Ubuntu package.
+#
+# An address with 5 failed SSH logins within 10 minutes is banned for 1 hour.
+# Each new ban of the same address lasts longer, up to one week.
+[sshd]
+enabled = true
+backend = systemd
+mode = aggressive
+port = 22
+maxretry = 5
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+bantime.maxtime = 1w

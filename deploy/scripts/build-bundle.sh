@@ -20,6 +20,11 @@
 # at install time. The bundle is checked for development keys, development
 # secrets, demo profiles and demo data (check-release-artefacts.sh, R-13)
 # before its checksums are written.
+#
+# --images-only builds the two MSCD images, runs the release artefact check and
+# the vulnerability gate on them, and stops: no bundle is written. It is the
+# first half of deploy/scripts/build-release-images.sh (SaaS releases, M2-S01),
+# which then pushes the checked images.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -40,10 +45,18 @@ usage() {
 Usage: deploy/scripts/build-bundle.sh --trusted-keys-dir DIR --pack-signing-key FILE [options]
        deploy/scripts/build-bundle.sh --release --version 1.0.0 --trusted-keys-dir DIR \
            --pack-signing-key FILE --sign-key FILE
+       deploy/scripts/build-bundle.sh --images-only [--release] --version 1.1.0 \
+           --trusted-keys-dir DIR --pack-signing-key FILE [--attest]
 
 Builds the MSCD on-premise offline bundle: the web image (API mode), the
 release server image, the bundled PostgreSQL, SeaweedFS and Valkey images,
 the Compose files, the Helm chart, the packs and the install scripts.
+
+With --images-only it builds only the two MSCD images, runs the release
+artefact check (R-13) and the vulnerability scan on them, and stops. No bundle
+is written; the build logs and SECURITY-SCAN.txt go to
+<output>/mscd-images-<version>.logs/. deploy/scripts/build-release-images.sh
+uses this mode and then pushes the images.
 
 Required:
   --trusted-keys-dir DIR    Release public keys compiled into the server: one or more
@@ -81,6 +94,18 @@ Options:
   --output DIR              Output directory (default: deploy/dist)
   -h, --help                Show this help
 
+Images only:
+  --images-only             Build the MSCD images, run the release artefact check and the
+                            scan, then stop; no bundle, no signature (--sign-key is refused).
+                            With --release the sources may have uncommitted files (a
+                            warning); build-release-images.sh refuses to push such images
+  --attest                  Add an SBOM and the build provenance (mode=max) to both images.
+                            Needs the containerd image store of Docker
+  --source-url URL          Label org.opencontainers.image.source on both images, for
+                            example https://github.com/mqusaeri/mscd
+  --no-pull                 Keep the base images of this machine, also with --release (local
+                            test images that are never pushed; saves registry pulls)
+
 Environment:
   MSCD_BUILD_CA      Default of --build-ca
   HELM_IMAGE         Helm container used when helm is not installed (default: alpine/k8s:1.34.1)
@@ -93,6 +118,7 @@ EOF
 
 VERSION='' REVISION='' BUILD=true BUILD_CA=${MSCD_BUILD_CA:-} SIGN_KEY=''
 TRUSTED_KEYS_DIR='' PACK_SIGNING_KEY='' OS_UPDATES=auto SCAN=auto PULL=false RELEASE=false
+IMAGES_ONLY=false ATTEST=false SOURCE_URL='' NO_PULL=false
 SERVER_REPO=$MSCD_DEFAULT_SERVER_IMAGE WEB_REPO=$MSCD_DEFAULT_IMAGE
 OUTPUT_DIR=$REPO_DIR/deploy/dist
 WORK=''
@@ -117,8 +143,12 @@ parse_args() {
             --scan) need_value "$@"; SCAN=$2; shift 2 ;;
             --skip-scan) SCAN=off; shift ;;
             --pull) PULL=true; shift ;;
+            --no-pull) NO_PULL=true; shift ;;
             --no-build) BUILD=false; shift ;;
             --release) RELEASE=true; shift ;;
+            --images-only) IMAGES_ONLY=true; shift ;;
+            --attest) ATTEST=true; shift ;;
+            --source-url) need_value "$@"; SOURCE_URL=$2; shift 2 ;;
             --server-image) need_value "$@"; SERVER_REPO=$2; shift 2 ;;
             --web-image) need_value "$@"; WEB_REPO=$2; shift 2 ;;
             --output) need_value "$@"; OUTPUT_DIR=$(absolute_path "$2"); shift 2 ;;
@@ -132,9 +162,22 @@ parse_args() {
             die "--release cannot be combined with --no-os-updates, --scan report or --scan off"
         PULL=true OS_UPDATES=true SCAN=gate
     fi
+    if [[ $NO_PULL == true ]]; then
+        [[ $IMAGES_ONLY == true ]] || die "--no-pull works only with --images-only (a bundle to deliver starts from the newest base images)"
+        PULL=false
+    fi
     case "$SCAN" in auto | gate | report | off) ;; *) die "--scan takes auto, gate, report or off" ;; esac
-    if [[ $RELEASE == true && -z $SIGN_KEY ]]; then
-        die "--release needs --sign-key (customers check the bundle signature)"
+    if [[ $IMAGES_ONLY == true ]]; then
+        [[ -z $SIGN_KEY ]] || die "--sign-key signs a bundle; --images-only writes none"
+        if [[ -n $SOURCE_URL && ! $SOURCE_URL =~ ^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+)+$ ]]; then
+            die "--source-url takes an https URL such as https://github.com/mqusaeri/mscd"
+        fi
+    else
+        [[ $ATTEST == false ]] || die "--attest works only with --images-only (the bundle images carry no attestations)"
+        [[ -z $SOURCE_URL ]] || die "--source-url works only with --images-only"
+        if [[ $RELEASE == true && -z $SIGN_KEY ]]; then
+            die "--release needs --sign-key (customers check the bundle signature)"
+        fi
     fi
     [[ -n $TRUSTED_KEYS_DIR ]] || die "--trusted-keys-dir is required (the release public keys; see --help)"
     [[ -n $PACK_SIGNING_KEY ]] || die "--pack-signing-key is required (the release pack signing key; see --help)"
@@ -290,6 +333,10 @@ check_tools() {
     if command -v docker >/dev/null 2>&1 && ! docker buildx version >/dev/null 2>&1; then
         fail "docker buildx is not available (builds the images with secrets)" "Install the Docker Buildx plugin"
     fi
+    if [[ $ATTEST == true ]] && command -v docker >/dev/null 2>&1 && ! containerd_image_store; then
+        fail "--attest needs the containerd image store of Docker (SBOM and provenance stay with a loaded image only there)" \
+            'Add "features": {"containerd-snapshotter": true} to /etc/docker/daemon.json and restart Docker'
+    fi
     check_tool openssl "checks the keys and signs the checksums"
     check_tool sha256sum "writes checksums"
     check_tool tar "packs the bundle"
@@ -305,14 +352,26 @@ check_tools() {
 # Images
 # ---------------------------------------------------------------------------
 
+# containerd_image_store: true when Docker keeps images in the containerd image
+# store, which keeps the attestations of a loaded image (and pushes them).
+containerd_image_store() {
+    docker info --format '{{json .DriverStatus}}' 2>/dev/null | grep -q 'io.containerd.snapshotter.v1'
+}
+
 # build_image LOG ARGS...: docker buildx build with the shared arguments.
 build_image() {
     local log=$1
     shift
-    local args=(buildx build --load --progress=plain --provenance=false --sbom=false
-        --secret "id=build_ca,src=$BUILD_CA"
+    local args=(buildx build --load --progress=plain)
+    if [[ $ATTEST == true ]]; then
+        args+=(--provenance=mode=max --sbom=true)
+    else
+        args+=(--provenance=false --sbom=false)
+    fi
+    args+=(--secret "id=build_ca,src=$BUILD_CA"
         --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED"
         --build-arg "APK_UPGRADE=$OS_UPDATES")
+    if [[ -n $SOURCE_URL ]]; then args+=(--label "org.opencontainers.image.source=$SOURCE_URL"); fi
     if [[ $PULL == true ]]; then args+=(--pull); fi
     run_logged "$log" docker "${args[@]}" "$@" "$REPO_DIR"
 }
@@ -446,10 +505,20 @@ trivy_command() {
     TRIVY_IN=/scan
 }
 
+# scan_targets: one "image|file" line per saved image file that scan_images
+# reads: the two MSCD images, plus the third-party images of a bundle.
+scan_targets() {
+    printf '%s|%s\n' "$WEB_REF" "$WEB_FILE" "$SERVER_REF" "$SERVER_FILE"
+    if [[ $IMAGES_ONLY == false ]]; then
+        printf '%s|%s\n' "${EXTRA_IMAGES[0]}" "${EXTRA_FILES[0]}" "${EXTRA_IMAGES[1]}" "${EXTRA_FILES[1]}" \
+            "${EXTRA_IMAGES[2]}" "${EXTRA_FILES[2]}"
+    fi
+}
+
 # scan_images: Trivy on every saved image file. The MSCD images are a release
 # gate (unless --scan report); the third-party images are reported only.
 scan_images() {
-    local template file ref out rc version db_date info gate_failed=false gate=false report=$STAGE/SECURITY-SCAN.txt
+    local template file ref out rc version db_date info gate_failed=false gate=false report=${SCAN_REPORT:-$STAGE/SECURITY-SCAN.txt}
     if [[ $SCAN == gate ]]; then
         gate=true
     elif [[ $SCAN == auto ]]; then
@@ -471,8 +540,12 @@ scan_images() {
     {
         printf 'MSCD %s image security scan\n\n' "$VERSION"
         printf 'Scanned:   %s with Trivy %s\n' "$(date -u +%Y-%m-%d)" "${version:-unknown}"
-        printf 'Policy:    no HIGH or CRITICAL vulnerability that has a fix in the MSCD images;\n'
-        printf '           the PostgreSQL, SeaweedFS and Valkey images are listed for information\n'
+        if [[ $IMAGES_ONLY == true ]]; then
+            printf 'Policy:    no HIGH or CRITICAL vulnerability that has a fix in the MSCD images\n'
+        else
+            printf 'Policy:    no HIGH or CRITICAL vulnerability that has a fix in the MSCD images;\n'
+            printf '           the PostgreSQL, SeaweedFS and Valkey images are listed for information\n'
+        fi
     } >"$report"
     while IFS='|' read -r ref file; do
         rc=0
@@ -504,12 +577,13 @@ scan_images() {
                 die "The scan of $ref could not run. Check access to the vulnerability database (use --build-ca behind a TLS-inspecting proxy)."
                 ;;
         esac
-    done < <(printf '%s|%s\n' "$WEB_REF" "$WEB_FILE" "$SERVER_REF" "$SERVER_FILE" \
-        "${EXTRA_IMAGES[0]}" "${EXTRA_FILES[0]}" "${EXTRA_IMAGES[1]}" "${EXTRA_FILES[1]}" \
-        "${EXTRA_IMAGES[2]}" "${EXTRA_FILES[2]}")
+    done < <(scan_targets)
     db_date=$("${TRIVY[@]}" --version 2>/dev/null | sed -n 's/^ *UpdatedAt: \([0-9-]*\).*/\1/p' | head -n1 || true)
     printf '\nVulnerability database of %s\n' "${db_date:-unknown}" >>"$report"
     if [[ $gate_failed == true ]]; then
+        if [[ $IMAGES_ONLY == true ]]; then
+            die "The images did not pass the release gate: an MSCD image has HIGH or CRITICAL vulnerabilities that have a fix (see $report)."
+        fi
         die "The bundle was not packed: an MSCD image has HIGH or CRITICAL vulnerabilities that have a fix (see $report)."
     fi
     if [[ $gate == true ]]; then
@@ -595,6 +669,78 @@ write_checksums() {
     fi
 }
 
+# images_only_main: --images-only. The checks of a bundle build, the two MSCD
+# images, the release artefact check on the loaded images and the scan gate.
+# Nothing is packed; the logs and SECURITY-SCAN.txt stay in LOG_DIR.
+images_only_main() {
+    LOG_DIR=$OUTPUT_DIR/mscd-images-$VERSION.logs
+    install -d -m 0755 "$OUTPUT_DIR"
+    WORK=$(mktemp -d "$OUTPUT_DIR/.build-$VERSION.XXXXXX")
+    STAGE=$WORK/stage
+
+    title "Building the MSCD release images $VERSION (images only, no bundle)"
+
+    step "Checking tools and inputs"
+    check_tools
+    abort_if_failed
+    check_build_ca
+    check_release_keys
+    check_pack_versions
+    if [[ $REVISION == *-dirty ]]; then
+        # The images are labelled with the revision; build-release-images.sh
+        # refuses to push images built from uncommitted sources.
+        warn "The sources have uncommitted or untracked files; the images are labelled $REVISION"
+        detail "Commit the sources before pushing release images."
+    fi
+    if [[ $RELEASE == false ]]; then
+        info "Test build: add --release for release images (newest base images, Alpine updates required, scan gate)"
+    fi
+    if [[ $SCAN == off ]]; then
+        warn "--scan off: the images are not scanned. Never push or deliver these images."
+    fi
+    if [[ $ATTEST == true ]]; then
+        info "SBOM and build provenance (mode=max) are added to both images"
+    fi
+    if [[ $NO_PULL == true ]]; then
+        warn "--no-pull: the base images of this machine are used as they are. Test images only."
+    fi
+    abort_if_failed
+    rm -rf -- "$LOG_DIR"
+    install -d -m 0755 "$STAGE/images" "$LOG_DIR"
+
+    step "Building the MSCD images"
+    OS_RESULT_WEB=skipped OS_RESULT_SERVER=skipped
+    build_images
+    ARCH=$(docker image inspect --format '{{.Architecture}}' "$SERVER_REF")
+    [[ $(docker image inspect --format '{{.Architecture}}' "$WEB_REF") == "$ARCH" ]] ||
+        die "$WEB_REF and $SERVER_REF are built for different architectures"
+
+    step "Checking for development keys, secrets and demo data (R-13)"
+    if ! bash "$SCRIPT_DIR/check-release-artefacts.sh" "$SERVER_REF" "$WEB_REF" 2>&1 | tee "$LOG_DIR/release-check.log"; then
+        die "The images contain development keys, development secrets or demo data (see above)."
+    fi
+
+    step "Scanning the images"
+    SCAN_FINDINGS=false
+    if [[ $SCAN == off ]]; then
+        warn "Scan skipped (--scan off)"
+    else
+        WEB_FILE=images/web-$ARCH.tar
+        SERVER_FILE=images/server-$ARCH.tar
+        docker save --platform "linux/$ARCH" "$WEB_REF" -o "$STAGE/$WEB_FILE"
+        docker save --platform "linux/$ARCH" "$SERVER_REF" -o "$STAGE/$SERVER_FILE"
+        SCAN_REPORT=$LOG_DIR/SECURITY-SCAN.txt
+        scan_images
+        rm -f -- "$STAGE/$WEB_FILE" "$STAGE/$SERVER_FILE"
+        info "Scan report: $SCAN_REPORT"
+    fi
+
+    step "Images ready"
+    pass "$SERVER_REF $(docker image inspect --format '{{.Id}}' "$SERVER_REF")"
+    pass "$WEB_REF $(docker image inspect --format '{{.Id}}' "$WEB_REF")"
+    detail "No bundle was written (--images-only). Build logs: $LOG_DIR"
+}
+
 main() {
     parse_args "$@"
 
@@ -615,6 +761,10 @@ main() {
     CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     SERVER_REF=$SERVER_REPO:$VERSION
     WEB_REF=$WEB_REPO:$VERSION
+    if [[ $IMAGES_ONLY == true ]]; then
+        images_only_main
+        return
+    fi
     local name=mscd-onprem-$VERSION
     STAGE=$OUTPUT_DIR/$name
     LOG_DIR=$OUTPUT_DIR/$name.logs

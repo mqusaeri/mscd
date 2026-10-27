@@ -23,7 +23,8 @@ export interface OpenApiOptions {
 const STATUS_TEXT: Readonly<Record<number, string>> = {
   200: 'OK', 201: 'Created', 202: 'Accepted', 204: 'No content', 302: 'Redirect', 400: 'Validation failed (problem validation)',
   401: 'Not authenticated', 403: 'Forbidden (csrf, forbidden, read-only-mode, organisation-inactive)', 404: 'Not found', 409: 'Conflict',
-  412: 'Precondition failed (stale If-Match)', 413: 'Payload too large', 422: 'Business rule violated', 429: 'Rate limited', 500: 'Internal error',
+  412: 'Precondition failed (stale If-Match)', 413: 'Payload too large', 422: 'Business rule violated', 428: 'Precondition required (If-Match missing)',
+  429: 'Rate limited', 500: 'Internal error', 501: 'Not implemented yet (route stub of Milestone 2, problem not-implemented)',
   502: 'Provider unreachable', 503: 'Dependency unavailable',
 };
 

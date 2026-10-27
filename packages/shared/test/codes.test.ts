@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_STATUSES, ACT_STATUSES, CONNECTION_STATUSES, DOCUMENT_STATUSES, DOC_STATUSES, FINDING_STATUSES, HASH_ALGORITHMS, HASH_SOURCES,
   IMPLEMENTATION_STATUSES, INTEG_IDS, LINK_STATUSES, OWNERSHIP_TYPES, REQ_STATUSES, REPO_STATUSES, TASK_PROGRESS_STATUSES, TUPLE_STATUSES,
-  UNVERIFIABLE_INTEG_IDS, uiActStatus, uiDocStatus, uiFindingClass, uiFindingState, uiHashAlg, uiIntegId, uiRepoStatus, uiReqStatus,
+  CLAUSE_ENTRY_KEY_PREFIX, UNVERIFIABLE_INTEG_IDS, clauseEntryKey, isClauseEntryKey, uiActStatus, uiDocStatus, uiFindingClass, uiFindingState, uiHashAlg, uiIntegId, uiRepoStatus, uiReqStatus,
   uiTupleStatus,
 } from '../src/index.js';
 
@@ -77,5 +77,16 @@ describe('C.12 integrity codes', () => {
     expect(uiHashAlg('sha1', 'provider')).toBe('SHA-1');
     expect(uiHashAlg('none', 'none')).toBe('none');
     for (const a of HASH_ALGORITHMS) for (const s of HASH_SOURCES) expect(uiHashAlg(a, s).length).toBeGreaterThan(0);
+  });
+});
+
+describe('clause entry keys of catalogue systems (Milestone 2 D2-09)', () => {
+  it('prefix the code with cl-, so a clause row never shares the key of the Annex A control of the same number', () => {
+    expect(CLAUSE_ENTRY_KEY_PREFIX).toBe('cl-');
+    expect(clauseEntryKey('5.1')).toBe('cl-5.1');
+    expect(clauseEntryKey('5.1')).not.toBe('5.1');
+    expect(isClauseEntryKey('cl-10.2')).toBe(true);
+    expect(isClauseEntryKey('5.1')).toBe(false);
+    expect(isClauseEntryKey('A.5.1')).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApplicabilitySyncJob } from './applicability-sync.job';
 import { EditionWithdrawnAlertsJob } from './edition-withdrawn-alerts.job';
 import { PackBundleStore } from './pack-bundle-store';
 import { PackInstallJob } from './pack-install.job';
@@ -16,6 +17,8 @@ import { PacksService } from './packs.service';
 @Module({
   controllers: [PacksController],
   providers: [
+    // Milestone 2 J.3 job stub (M2-02); M2-03 fills it.
+    ApplicabilitySyncJob,
     PackInstallerDatabase,
     PackInstallService,
     PackBundleStore,

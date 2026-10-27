@@ -175,7 +175,7 @@ describe('job queue drivers (E.1)', () => {
     expect(again.after).toBe(again.before);
     expect(again.queuesCreated).toBe(0);
     const { rows } = await sql<{ n: string }>`SELECT count(*) AS n FROM pgboss.queue`.execute(db.migrator);
-    expect(Number(rows[0]!.n)).toBe(22);
+    expect(Number(rows[0]!.n)).toBe(22 + 6); // Milestone 2 D.3: six new jobs
     const owner = await sql<{ owner: string }>`SELECT nspowner::regrole::text AS owner FROM pg_namespace WHERE nspname = 'pgboss'`.execute(db.migrator);
     expect(owner.rows[0]!.owner).toBe('mscd_migrator');
     const rights = await sql<{ usage: boolean; job: boolean; create: boolean }>`
@@ -212,7 +212,7 @@ describe('job queue drivers (E.1)', () => {
       expect(dry.join('')).toContain('-- schema pgboss: pg-boss schema, job queues and grants to mscd_app');
       const out: string[] = [];
       expect(await runMigrate(config, { out: (t) => out.push(t) })).toBe(0);
-      expect(out.join('')).toMatch(/migrate: pgboss created \(schema version \d+\), 22 queue\(s\) created\n/);
+      expect(out.join('')).toMatch(/migrate: pgboss created \(schema version \d+\), 28 queue\(s\) created\n/);
       const again: string[] = [];
       expect(await runMigrate(config, { out: (t) => again.push(t) })).toBe(0);
       expect(again.join('')).toMatch(/migrate: pgboss up to date \(schema version \d+\)\n/);

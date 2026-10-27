@@ -5,7 +5,13 @@ import {
   opsDiagnosticsRoute,
   opsHealthRoute,
   opsJobRunRoute,
+  opsOrganizationsCreateRoute,
+  opsOrganizationsEventsRoute,
+  opsOrganizationsGetRoute,
+  opsOrganizationsListRoute,
+  opsOrganizationsStatusRoute,
   opsQueuesRoute,
+  opsUsersResetMfaRoute,
   type JobRunParams,
   type JobRunRequest,
   type JobRunResponse,
@@ -15,7 +21,7 @@ import {
 import type { FastifyReply } from 'fastify';
 import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
 import { FILE_CONTENT_SECURITY_POLICY, contentDisposition } from '../../common/file-response';
-import { UnauthenticatedError } from '../../common/problems';
+import { UnauthenticatedError, routeStub } from '../../common/problems';
 import { AUDIT_WRITER, type AuditWriter, type Principal } from '../../common/tokens';
 import { DiagnosticsService } from './diagnostics.service';
 import { OpsService } from './ops.service';
@@ -77,5 +83,37 @@ export class OpsController {
       'cache-control': 'no-store',
     });
     await reply.status(200).send(archive.data);
+  }
+
+  // Milestone 2 D.1 stubs (M2-02): M2-06 builds the organisation list and creation and the factor reset; M2-S09 the
+  // detail, the status changes and the status history.
+  @ApiRoute(opsOrganizationsListRoute)
+  organizations(): never {
+    return routeStub(opsOrganizationsListRoute);
+  }
+
+  @ApiRoute(opsOrganizationsCreateRoute)
+  createOrganization(): never {
+    return routeStub(opsOrganizationsCreateRoute);
+  }
+
+  @ApiRoute(opsUsersResetMfaRoute)
+  resetMfa(): never {
+    return routeStub(opsUsersResetMfaRoute);
+  }
+
+  @ApiRoute(opsOrganizationsGetRoute)
+  organization(): never {
+    return routeStub(opsOrganizationsGetRoute);
+  }
+
+  @ApiRoute(opsOrganizationsStatusRoute)
+  organizationStatus(): never {
+    return routeStub(opsOrganizationsStatusRoute);
+  }
+
+  @ApiRoute(opsOrganizationsEventsRoute)
+  organizationEvents(): never {
+    return routeStub(opsOrganizationsEventsRoute);
   }
 }

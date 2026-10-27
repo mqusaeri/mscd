@@ -1,0 +1,250 @@
+# MSCD security scans (Milestone 2, package M2-S01; docs/saas/release.md).
+#
+#   codeql          CodeQL for JavaScript and TypeScript; any alert fails the job.
+#                   Alerts go to Security, Code scanning (seen only by people with
+#                   write access), never into the public job log
+#   gitleaks        secrets in the whole git history
+#   osv             known vulnerabilities in the packages of package-lock.json
+#   trivy-config    Trivy misconfiguration scan of deploy/ (Dockerfiles, Helm chart)
+#   release-images  nightly and by hand: Trivy scan of the image digests in
+#                   digests.json of the latest GitHub Release, so the deployed
+#                   images are scanned again as new vulnerabilities are published
+#
+# The repository is public, so code scanning is available. If it becomes
+# private without GitHub Code Security, set the repository variable
+# MSCD_CODE_SCANNING=false: the results then stay in a SARIF artefact of the run.
+name: Security scan
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Exact versions at least two weeks old, pinned by digest or checksum (S-4, S-5).
+  TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  codeql:
+    name: CodeQL (JavaScript and TypeScript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config: |
+            paths-ignore:
+              - '**/node_modules'
+              - '**/dist'
+              - deploy/dist
+              - project
+
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:javascript-typescript
+          output: ${{ runner.temp }}/codeql
+          upload: ${{ vars.MSCD_CODE_SCANNING == 'false' && 'never' || 'always' }}
+
+      - name: No CodeQL alert
+        env:
+          CODE_SCANNING: ${{ vars.MSCD_CODE_SCANNING != 'false' }}
+        run: |
+          set -euo pipefail
+          # Only the number is printed: the log of a public repository is public.
+          count=$(jq '[.runs[] | .results[]? | select((.level // "warning") | IN("error", "warning"))] | length' \
+            "$RUNNER_TEMP"/codeql/*.sarif | awk '{ n += $1 } END { print n + 0 }')
+          if [ "$count" -gt 0 ]; then
+            if [ "$CODE_SCANNING" = true ]; then where='Security, Code scanning'; else where='the codeql-sarif artefact of this run'; fi
+            echo "::error::CodeQL reported $count alert(s); see $where"
+            exit 1
+          fi
+          echo "No CodeQL alert"
+
+      - name: Keep the SARIF results (code scanning off)
+        if: always() && vars.MSCD_CODE_SCANNING == 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-sarif
+          path: ${{ runner.temp }}/codeql
+          if-no-files-found: ignore
+          retention-days: 14
+
+  gitleaks:
+    name: gitleaks (secrets in the git history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (checksum checked)
+        run: |
+          set -euo pipefail
+          dir=$RUNNER_TEMP/gitleaks
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $dir/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          "$dir/gitleaks" version
+
+      - name: Scan the whole history
+        run: |
+          set -euo pipefail
+          # Development keys and demo secrets (R-11), test fixtures (S-2) and API
+          # examples are public values by design; release artefacts are checked
+          # for them separately (check-release-artefacts.sh). Every other finding fails.
+          cat > "$RUNNER_TEMP/gitleaks.toml" <<'EOF'
+          title = "MSCD secret scan"
+
+          [extend]
+          useDefault = true
+
+          [[allowlists]]
+          description = "Development keys and demo secrets of build plan R-11: public by design and never in a release"
+          paths = [
+            '''(?:^|/)packages/pack-tools/dev-keys/''',
+            '''(?:^|/)packages/pack-tools/dev-licences/''',
+            '''(?:^|/)apps/server/test/fixtures/secrets/''',
+            '''(?:^|/)deploy/compose/config/demo-secrets/''',
+            '''(?:^|/)deploy/compose/dev/''',
+          ]
+
+          [[allowlists]]
+          description = "Tests and test fixtures: made-up tokens and throwaway keys (rule S-2)"
+          paths = [
+            '''(?:^|/)apps/[^/]+/test/''',
+            '''(?:^|/)apps/web/e2e(?:-api)?/''',
+            '''(?:^|/)packages/[^/]+/test/''',
+            '''(?:^|/)tools/[^/]+/test/''',
+            '''(?:^|/)tools/smoke/''',
+          ]
+
+          [[allowlists]]
+          description = "Example values of the API contract (zod schemas with OpenAPI examples)"
+          targetRules = ["generic-api-key"]
+          paths = ['''(?:^|/)packages/shared/src/api/''']
+
+          [[allowlists]]
+          description = "Checksums of downloads and PEM header patterns in shell checks"
+          targetRules = ["generic-api-key", "private-key"]
+          regexTarget = "line"
+          regexes = [
+            '''(?i)sha256[A-Za-z0-9_]*\s*[=:]\s*['"]?[0-9a-f]{64}\b''',
+            '''grep [^\n]*-----BEGIN ENCRYPTED PRIVATE KEY-----''',
+          ]
+
+          [[allowlists]]
+          description = "Prose that looks like a key assignment, for example 'Valkey, S3-compatible store'"
+          targetRules = ["generic-api-key"]
+          stopwords = ["compatible"]
+          EOF
+          # --redact keeps every secret value out of the log; a finding names the
+          # commit, file and line. A real secret found here must be rotated: the
+          # history of a public repository cannot be recalled.
+          "$RUNNER_TEMP/gitleaks/gitleaks" git . --config "$RUNNER_TEMP/gitleaks.toml" --redact --no-banner \
+            --verbose --exit-code 1
+
+  osv:
+    name: OSV scan of package-lock.json
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+        with:
+          scan-args: |-
+            --lockfile=package-lock.json
+
+  trivy-config:
+    name: Trivy configuration scan of deploy/
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: No HIGH or CRITICAL misconfiguration
+        run: |
+          docker run --rm -v "$PWD/deploy:/src/deploy:ro" "$TRIVY_IMAGE" config \
+            --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs /src/deploy/dist --skip-dirs /src/deploy/helm/mscd/ci/.schema-cache \
+            /src/deploy
+
+  release-images:
+    name: Trivy scan of the released images
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Digests of the latest GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null); then
+            echo "::notice::No GitHub Release yet, so there is no released image to scan"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern digests.json --dir "$RUNNER_TEMP/release"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: No HIGH or CRITICAL vulnerability with a fix
+        if: steps.release.outputs.found == 'true'
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          d=$RUNNER_TEMP/release/digests.json
+          status=0
+          for name in server web; do
+            ref=$(jq -r ".${name}Ref" "$d")
+            case "$ref" in
+              ghcr.io/*@sha256:*) ;;
+              *) echo "::error::Unexpected image reference '$ref' in digests.json of $TAG"; exit 1 ;;
+            esac
+            echo "== $ref ($TAG)"
+            if ! docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD "$TRIVY_IMAGE" image \
+                --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$ref"; then
+              echo "::error::$ref of $TAG has HIGH or CRITICAL vulnerabilities that have a fix; release a patch version"
+              status=1
+            fi
+          done
+          exit "$status"

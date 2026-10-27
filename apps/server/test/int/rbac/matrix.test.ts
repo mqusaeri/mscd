@@ -3,7 +3,9 @@
 // examples, and the authorisation guard must deny it (403, counted by `mscd_authz_denied_total`) or admit it
 // (whatever the service then answers) exactly as the matrix says. Routes whose permission depends on a request
 // member (`permissionBy`) are called once per case. Every answer is also checked against the route's contract
-// (J.3: declared status codes, response and problem schemas, F.13 file headers).
+// (J.3: declared status codes, response and problem schemas, F.13 file headers). A Milestone 2 route stub that is
+// still pending answers 501 `not-implemented` once the guard admits the caller (`m2-pending`, Milestone 2 D.1); the
+// guard decision is checked all the same.
 import { API_ROUTES, permissionCase, type RouteDef } from '@mscd/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
@@ -11,7 +13,7 @@ import {
   ROLE_KEYS, addRoleUsers, callRoute, createFullApp, exampleInput, examplesOf, guardDenials, resetRateLimits, sessionFor,
   type Client, type FullApp, type RoleKey, type RouteInput,
 } from '../contract/harness';
-import { expectedAllowed } from './expectations';
+import { M2_INPUTS, M2_SERVICE_REFUSALS, expectedAllowed } from './expectations';
 
 /** Routes a signed-in user calls: the `session` and `any_session` routes, test-only routes left out. */
 const SWEPT = API_ROUTES.filter((r) => (r.auth === 'session' || r.auth === 'any_session') && !r.testOnly && r.id !== 'auth.logout');
@@ -71,7 +73,8 @@ function inputsOf(def: RouteDef): Case[] {
       };
     });
   }
-  const base = exampleInput(def, { ms: 'isms' });
+  const override = M2_INPUTS[def.id];
+  const base = override ? exampleInput(def, { ms: 'isms', override }) : exampleInput(def, { ms: 'isms' });
   if (def.msSource !== 'body' && def.msSource !== 'query') return [{ label: '', input: base }];
   const schema = def.msSource === 'body' ? def.body : def.query;
   const holder = ((def.msSource === 'body' ? base.body : base.query) ?? {}) as Record<string, unknown>;
@@ -100,6 +103,25 @@ describe('J.5 generated RBAC tests: every route and every role of F.6', () => {
 
   it('sweeps every signed-in route', () => {
     expect(SWEPT.length).toBeGreaterThan(140);
+  });
+
+  it('admits the requests a Milestone 2 service refuses itself, which then answer 403 (Milestone 2 F)', async () => {
+    const problems: string[] = [];
+    for (const refusal of M2_SERVICE_REFUSALS) {
+      await resetRateLimits(db);
+      const def = API_ROUTES.find((r) => r.id === refusal.route);
+      if (!def) {
+        problems.push(`${refusal.route}: no such route`);
+        continue;
+      }
+      const [first] = inputsOf(def);
+      const before = await guardDenials(full, def.id);
+      const call = await callRoute(clients[refusal.role], def, first!.input);
+      if ((await guardDenials(full, def.id)) > before) problems.push(`${def.id} ${refusal.role}: the guard denied it (${refusal.reason})`);
+      if (call.status !== 403) problems.push(`${def.id} ${refusal.role}: answered ${call.status}, expected 403 (${refusal.reason})`);
+      problems.push(...call.violations);
+    }
+    expect(problems).toEqual([]);
   });
 
   for (const def of SWEPT) {

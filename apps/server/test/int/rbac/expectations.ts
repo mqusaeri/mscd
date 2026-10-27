@@ -5,7 +5,38 @@
 import {
   EXTERNAL_AUDITOR, effectiveGrant, machinePermissions, permissionCase, type Permission, type PermissionCheckScope, type RouteDef,
 } from '@mscd/shared';
-import { BUSINESS_ROLE, ORG_ROLE, type RoleKey } from '../contract/harness';
+import { BUSINESS_ROLE, ORG_ROLE, type RoleKey, type RouteInput } from '../contract/harness';
+import { RBAC_EXPECTATIONS as M2_05 } from './expectations/M2-05';
+import { RBAC_EXPECTATIONS as M2_06 } from './expectations/M2-06';
+import { RBAC_EXPECTATIONS as M2_07 } from './expectations/M2-07';
+import { RBAC_EXPECTATIONS as M2_08 } from './expectations/M2-08';
+import { RBAC_EXPECTATIONS as M2_S09 } from './expectations/M2-S09';
+import { RBAC_EXPECTATIONS as M2_S10 } from './expectations/M2-S10';
+import { RBAC_EXPECTATIONS as M2_S11 } from './expectations/M2-S11';
+
+/**
+ * What a Milestone 2 building package adds to the generated RBAC tests (Milestone 2 F), in `expectations/M2-nn.ts`
+ * (or `M2-Snn.ts`), so no two packages share a file:
+ * - `inputs`: a request input per route id that replaces the one built from the schema examples, when the examples
+ *   cannot reach the handler (for example a record id the route needs);
+ * - `serviceRefusals`: requests the guard admits and the service refuses with 403, because the rule depends on the
+ *   record (for example an Internal Auditor on an audit event that is not an internal audit, Milestone 2 D.2).
+ */
+export interface RbacExpectations {
+  inputs: Readonly<Record<string, RouteInput>>;
+  serviceRefusals: readonly { route: string; role: RoleKey; reason: string }[];
+}
+
+/** The RBAC expectations of the Milestone 2 building packages, by package. */
+export const M2_EXPECTATIONS: Readonly<Record<string, RbacExpectations>> = {
+  'M2-05': M2_05, 'M2-06': M2_06, 'M2-07': M2_07, 'M2-08': M2_08, 'M2-S09': M2_S09, 'M2-S10': M2_S10, 'M2-S11': M2_S11,
+};
+
+/** Input overrides of the Milestone 2 packages, by route id. */
+export const M2_INPUTS: Readonly<Record<string, RouteInput>> = Object.assign({}, ...Object.values(M2_EXPECTATIONS).map((e) => e.inputs));
+
+/** Service refusals of the Milestone 2 packages. */
+export const M2_SERVICE_REFUSALS = Object.values(M2_EXPECTATIONS).flatMap((e) => e.serviceRefusals);
 
 export interface Check {
   permission: Permission;

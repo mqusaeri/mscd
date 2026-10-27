@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CertificationModule } from './certification.module';
 import { ManagementSystemsController } from './management-systems.controller';
 import { ManagementSystemsService } from './management-systems.service';
 
@@ -8,6 +9,8 @@ import { ManagementSystemsService } from './management-systems.service';
  * `LIC-FEATURE`).
  */
 @Module({
+  // Milestone 2 sub-module (D.3): certification cycles, the certificate record and certificate.expiry (M2-05).
+  imports: [CertificationModule],
   controllers: [ManagementSystemsController],
   providers: [ManagementSystemsService],
   exports: [ManagementSystemsService],

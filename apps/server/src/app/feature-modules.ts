@@ -12,6 +12,7 @@ import { FilesModule } from '../modules/files/files.module';
 import { FreshnessModule } from '../modules/freshness/freshness.module';
 import { IdentityModule } from '../modules/identity/identity.module';
 import { ImplementationModule } from '../modules/implementation/implementation.module';
+import { ImportsModule } from '../modules/imports/imports.module';
 import { IntegrityModule } from '../modules/integrity/integrity.module';
 import { JobsModule } from '../modules/jobs/jobs.module';
 import { KeysModule } from '../modules/keys/keys.module';
@@ -72,6 +73,8 @@ const DOMAIN_MODULES: readonly Type<unknown>[] = [
   EvidencePacksModule,
   AuditorAccessModule,
   OpsModule,
+  // Milestone 2 (D.1, D2-13): bulk import, built by M2-08.
+  ImportsModule,
 ];
 
 /** Modules that only serve HTTP reads or test routes; the worker does not load them. */

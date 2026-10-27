@@ -1,0 +1,9 @@
+{
+  "workPackage": "M2-08",
+  "routes": [
+    "imports.templates",
+    "imports.create",
+    "imports.get",
+    "imports.commit"
+  ]
+}

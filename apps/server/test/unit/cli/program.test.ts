@@ -19,7 +19,7 @@ describe('mscd-server command line (D-01)', () => {
   const program = buildProgram();
 
   it('has the four run modes and the admin commands', () => {
-    expect(names(program)).toEqual(['api', 'worker', 'storage-gateway', 'migrate', 'db', 'tenant', 'packs', 'keys', 'admin', 'seed']);
+    expect(names(program)).toEqual(['api', 'worker', 'storage-gateway', 'migrate', 'db', 'tenant', 'packs', 'keys', 'admin', 'seed', 'license', 'backup', 'diagnostics']);
   });
 
   it('has the sub-commands of D-01', () => {
@@ -30,6 +30,9 @@ describe('mscd-server command line (D-01)', () => {
     expect(sub('keys')).toEqual(['generate', 'rewrap', 'rotate-gateway-token']);
     expect(sub('admin')).toEqual(['create-user']);
     expect(sub('seed')).toEqual(['demo']);
+    // Milestone 2 D.3: placeholders registered by M2-02, built by M2-06 (license), M2-S07 (backup) and M2-S09 (diagnostics).
+    expect(sub('license')).toEqual(['show-id']);
+    expect(sub('backup')).toEqual(['verify']);
   });
 });
 

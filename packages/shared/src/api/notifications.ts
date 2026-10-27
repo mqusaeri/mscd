@@ -1,4 +1,5 @@
 // Area `notifications` (owner from wave 9: WP-24): in-app notifications of the session user (D.2, D.3, E.6).
+// Milestone 2 (D.1) adds marking every notification read, built by M2-06.
 import { z } from 'zod';
 import { NotificationKind } from '../enums.js';
 import { IdParams, Instant, MsId, NoBody, Pair, QueryBoolean, RecordRef, Uuid, defineRoute, named, pageOf, pageQueryShape } from './common.js';
@@ -48,4 +49,16 @@ export const notificationsReadRoute = defineRoute({
   errors: [404],
 });
 
-export const routes: RouteDef[] = [notificationsListRoute, notificationsReadRoute];
+export const notificationsReadAllRoute = defineRoute({
+  id: 'notifications.read-all',
+  owner: 'M2-06',
+  method: 'POST',
+  path: '/api/v1/notifications/read-all',
+  summary: 'Mark every notification of the session user read',
+  auth: 'session',
+  response: NoBody,
+  status: 204,
+  errors: [],
+});
+
+export const routes: RouteDef[] = [notificationsListRoute, notificationsReadRoute, notificationsReadAllRoute];

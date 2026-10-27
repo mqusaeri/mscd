@@ -6,7 +6,9 @@ import { CorrectiveActionsService } from './corrective-actions.service';
 import { CycleDeriveJob } from './cycle-derive.job';
 import { CycleDeriveService } from './cycle-derive.service';
 import { FindingsService } from './findings.service';
+import { InternalAuditModule } from './internal-audit.module';
 import { ManagementReviewsService } from './management-reviews.service';
+import { ReviewEditModule } from './review-edit.module';
 import { AUDIT_REGISTER_RULES } from './rules';
 import { SelfAssessmentsService } from './self-assessments.service';
 
@@ -16,7 +18,8 @@ import { SelfAssessmentsService } from './self-assessments.service';
  * BR-13 and BR-14 are registered here with `@BusinessRule` for the global `RuleEngine`.
  */
 @Module({
-  imports: [JobsModule],
+  // Milestone 2 sub-modules (D.3): internal audit programme (M2-05), management review changes (M2-07).
+  imports: [JobsModule, InternalAuditModule, ReviewEditModule],
   controllers: [AuditRegistersController],
   providers: [
     FindingsService,

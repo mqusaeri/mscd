@@ -23,6 +23,7 @@ export const PROBLEM_TITLES: Readonly<Record<ProblemSlug, string>> = {
   'rate-limited': 'Too many requests',
   'dependency-unavailable': 'A dependency is unavailable',
   'internal': 'Internal error',
+  'not-implemented': 'Not implemented yet',
 };
 
 /** Extension members a problem may carry besides `type`, `title`, `status` and `requestId` (D.1). */
@@ -203,4 +204,26 @@ export class InternalError extends ProblemError {
     super('internal', {}, options);
     this.message = message;
   }
+}
+
+/**
+ * 501 `not-implemented`: a route stub of Milestone 2 whose building package has not landed yet (Milestone 2 D.1,
+ * J.6). The guard has already passed, so the answer tells the caller that the route exists and the caller may use it.
+ */
+export class NotImplementedError extends ProblemError {
+  constructor(routeId: string, workPackage: string) {
+    super('not-implemented', {
+      detail: `${routeId} is not implemented in this build yet (${workPackage})`,
+      messageKey: 'not_implemented',
+      messages: {
+        en: 'This function is not available in this version yet.',
+        id: 'Fungsi ini belum tersedia di versi ini.',
+      },
+    });
+  }
+}
+
+/** The body of a Milestone 2 route stub: answers 501 `not-implemented` naming the route and its building package. */
+export function routeStub(def: { id: string; owner: string }): never {
+  throw new NotImplementedError(def.id, def.owner);
 }

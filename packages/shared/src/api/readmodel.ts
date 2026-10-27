@@ -11,7 +11,7 @@ import {
   EXAMPLE_ACTIVITY, EXAMPLE_DOCUMENT, EXAMPLE_EVIDENCE, EXAMPLE_REF, EXAMPLE_REQUIREMENT,
 } from '../examples.js';
 import {
-  FreqId, IsoDate, MsParams, MsRecordParams, PersonId, QueryBoolean, RecordRef, StageKey, Uuid, defineRoute, named, pageOf, pageQueryShape,
+  FreqId, Instant, IsoDate, MsParams, MsRecordParams, PersonId, QueryBoolean, RecordRef, StageKey, Uuid, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
 
@@ -49,9 +49,17 @@ export type PhaseSummary = z.infer<typeof PhaseSummary>;
 
 export const ClauseMaturity = named(
   'ClauseMaturity',
-  z.object({ clause: z.int().min(4).max(10), readiness: z.int().min(0).max(100), dimensions: z.array(z.int().min(0).max(4)).length(4) }),
-  'Readiness of one Harmonized Structure clause and its four maturity values (A.4 5.14)',
-  { valid: [{ clause: 6, readiness: 88, dimensions: [4, 3, 3, 4] }], invalid: [{ clause: 11, readiness: 88, dimensions: [4, 3, 3, 4] }, { clause: 6, readiness: 88, dimensions: [4] }] },
+  z.object({
+    clause: z.int().min(4).max(10),
+    readiness: z.int().min(0).max(100).nullable(),
+    dimensions: z.array(z.int().min(0).max(4).nullable()).length(4),
+    computedAt: Instant.nullable().optional(),
+  }),
+  'Readiness of one Harmonized Structure clause and its four maturity values (A.4 5.14): documented, implemented, evidenced, measured. Null until readiness.recompute computes it for a fresh system (Milestone 2 D.6)',
+  {
+    valid: [{ clause: 6, readiness: 88, dimensions: [4, 3, 3, 4] }, { clause: 9, readiness: null, dimensions: [null, null, null, null], computedAt: null }, { clause: 5, readiness: 60, dimensions: [3, 2, 4, null], computedAt: '2026-10-28T02:30:00Z' }],
+    invalid: [{ clause: 11, readiness: 88, dimensions: [4, 3, 3, 4] }, { clause: 6, readiness: 88, dimensions: [4] }, { clause: 6, readiness: 101, dimensions: [4, 3, 3, 4] }],
+  },
 );
 export type ClauseMaturity = z.infer<typeof ClauseMaturity>;
 

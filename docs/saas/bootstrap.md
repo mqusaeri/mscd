@@ -13,12 +13,12 @@ The script runs as root, step by step. Each step first compares the server with 
 | Data volume | With `--data-device`, mounts the block volume at `/var/lib/docker`, so Docker volumes and container logs live there. Docker starts only when the volume is mounted |
 | System packages | `apt-get upgrade`, then the base packages: OpenSSH server, rsync, curl, ufw, fail2ban, chrony and unattended-upgrades |
 | Docker Engine | Docker CE and the Compose plugin from Docker's own apt repository (signing key checked against its fingerprint `9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`). `/etc/docker/daemon.json` turns on `live-restore` (containers keep running while Docker restarts), the `local` log driver and address pools outside `172.31.0.0/16` |
-| Time, swap and journal | Time zone UTC with chrony, a 4 GB swap file with `vm.swappiness = 10`, and a system journal of at most 1 GB |
+| Time, swap and journal | Time zone UTC with chrony, a 4 GB swap file with `vm.swappiness = 10`, and a system journal of at most 1 GB. A smaller `/swapfile`, for example one from the provider image, is replaced with a 4 GB one |
 | Accounts | `deploy` for GitHub Actions (SSH key only, member of the `docker` group, no sudo), one admin account for the owner (SSH key only, sudo), and the `mscd` system account |
 | Folders | `/opt/mscd` and its folders for releases, state, logs, secrets, backups and metrics |
 | Security updates | Daily Ubuntu security updates without automatic reboot, and a reboot-needed marker for the monitoring |
 | Firewall | ufw denies everything that comes in, except SSH (rate limited), HTTP and HTTPS. fail2ban bans addresses that keep failing SSH logins |
-| SSH | Key-only logins for `deploy` and the admin account. Root and password logins are turned off |
+| SSH | Key-only logins for `deploy` and the admin account. Root and password logins are turned off, but only when both accounts have an SSH key. A key line that is commented out with `#` does not count |
 
 At the end the script prints the fingerprints of the server's SSH host keys and the lines for the secret `DEPLOY_SSH_KNOWN_HOSTS`.
 

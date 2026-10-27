@@ -1,0 +1,14 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+# The block volume that holds the Docker data: volumes, container logs and
+# container state. Without it, Docker does not start (docker.service.d).
+[Unit]
+Description=MSCD Docker data volume
+Before=docker.service
+
+[Mount]
+What=@WHAT@
+Where=/var/lib/docker
+Options=defaults,noatime,nofail
+
+[Install]
+WantedBy=local-fs.target

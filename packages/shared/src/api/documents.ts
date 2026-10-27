@@ -1,8 +1,11 @@
 // Area `documents` (owner from wave 9: WP-35): document register commands (D.2, D.3, C.13 `document.status`,
-// A.4 5.7 and 5.8). Document versions are file commands (`files.ts`).
+// A.4 5.7 and 5.8). Document versions are file commands (`files.ts`); Milestone 2 (D.1) adds the version history,
+// built by M2-07.
 import { z } from 'zod';
-import { Classification } from '../enums.js';
-import { Code, CommandResult, Handle, IsoDate, MsId, MsParams, MsRecordParams, PersonId, defineRoute, named } from './common.js';
+import { Classification, DocumentVersionStatus } from '../enums.js';
+import {
+  Code, CommandResult, Handle, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, Uuid, defineRoute, named,
+} from './common.js';
 import type { RouteDef } from './common.js';
 
 const Title = z.string().trim().min(1).max(255);
@@ -105,4 +108,44 @@ export const documentsUpdateRoute = defineRoute({
   ifMatch: true,
 });
 
-export const routes: RouteDef[] = [documentsTransitionRoute, documentsCreateRoute, documentsUpdateRoute];
+const EXAMPLE_VERSION = {
+  id: '3f4a5b6c-7d8e-4f9a-8b0c-1d2e3f4a5b6c', label: '3.2', status: 'approved', storageObjectId: '4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d',
+  submittedBy: 'bagus', submittedAt: '2025-09-20T03:00:00Z', approvedBy: 'hendra', approvedAt: '2025-09-24', rejectionNote: null,
+  changeSummary: 'Access review frequency changed to quarterly',
+} as const;
+
+export const DocumentVersionItem = named(
+  'DocumentVersionItem',
+  z.object({
+    id: Uuid,
+    label: z.string(),
+    status: DocumentVersionStatus,
+    storageObjectId: Uuid,
+    submittedBy: PersonId.nullable(),
+    submittedAt: Instant.nullable(),
+    approvedBy: PersonId.nullable(),
+    approvedAt: IsoDate.nullable(),
+    rejectionNote: z.string().nullable(),
+    changeSummary: z.string().max(500).nullable(),
+  }),
+  'One version of a document: label, status, stored file, submitter, approver, dates, rejection note and change summary (Milestone 2 D.1)',
+  { valid: [EXAMPLE_VERSION, { ...EXAMPLE_VERSION, status: 'rejected', approvedBy: null, approvedAt: null, rejectionNote: 'Section 4 missing', changeSummary: null }], invalid: [{ ...EXAMPLE_VERSION, status: 'published' }, { ...EXAMPLE_VERSION, changeSummary: 'x'.repeat(501) }] },
+);
+export type DocumentVersionItem = z.infer<typeof DocumentVersionItem>;
+
+export const documentsVersionsListRoute = defineRoute({
+  id: 'documents.versions.list',
+  owner: 'M2-07',
+  method: 'GET',
+  path: '/api/v1/ms/:ms/documents/:id/versions',
+  summary: 'Versions of a document, newest first (document scope policy: a restricted document only for those who may see it)',
+  auth: 'session',
+  permission: 'ms.read',
+  scope: 'ms',
+  msSource: 'path',
+  params: MsRecordParams,
+  response: z.array(DocumentVersionItem),
+  errors: [404],
+});
+
+export const routes: RouteDef[] = [documentsTransitionRoute, documentsCreateRoute, documentsUpdateRoute, documentsVersionsListRoute];

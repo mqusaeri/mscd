@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ReadModelModule } from '../read-model/read-model.module';
 import { AuditEventCommandsService } from './audit-events.service';
 import { DocumentCommandsService } from './documents.service';
+import { HoldingsModule } from './holdings.module';
 import { RecordCommandsService } from './records.service';
 import { REGISTER_RULES } from './register.rules';
 import { RegistersController } from './registers.controller';
@@ -14,7 +15,8 @@ import { SharedChangeGuard } from './shared-change';
  * WP-36 and WP-37.
  */
 @Module({
-  imports: [ReadModelModule],
+  // Milestone 2 sub-module (D.3): holdings, handover and the document version history (M2-07).
+  imports: [ReadModelModule, HoldingsModule],
   controllers: [RegistersController],
   providers: [RecordCommandsService, DocumentCommandsService, AuditEventCommandsService, SharedChangeGuard, ...REGISTER_RULES],
   exports: [RecordCommandsService, DocumentCommandsService, AuditEventCommandsService, SharedChangeGuard],

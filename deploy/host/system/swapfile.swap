@@ -1,0 +1,11 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+# A 4 GB swap file on the system disk. During a short memory peak the
+# server slows down and the containers keep running.
+[Unit]
+Description=MSCD swap file
+
+[Swap]
+What=/swapfile
+
+[Install]
+WantedBy=swap.target

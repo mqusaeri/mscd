@@ -1,0 +1,10 @@
+# Managed by deploy/scripts/bootstrap-host.sh (docs/saas/bootstrap.md).
+# Docker Engine and the Compose plugin from Docker's own apt repository.
+# The key in /etc/apt/keyrings/docker.asc has the fingerprint
+# 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88.
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: @CODENAME@
+Components: stable
+Architectures: @ARCH@
+Signed-By: /etc/apt/keyrings/docker.asc

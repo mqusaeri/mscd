@@ -1,8 +1,11 @@
 // Area `implementation` (owner from wave 8: WP-20; the operating criteria route: WP-36): applicability entries,
-// activities and phases (D.2, D.3 "Commands from the UI", C.13).
+// activities and phases (D.2, D.3 "Commands from the UI", C.13). Milestone 2 (D.1) adds the targets of the active
+// edition, freshness thresholds per frequency and the required documented information with its links, built by M2-07.
 import { z } from 'zod';
-import { ApplicabilityTarget, ImplementationStatus } from '../enums.js';
-import { Code, CommandResult, FreqId, MsParams, MsRecordParams, PersonId, defineRoute, named } from './common.js';
+import { ApplicabilityTarget, ClauseGroup, DocStatus, DocumentedInfoKind, FreshnessStatus, ImplementationStatus } from '../enums.js';
+import {
+  Code, CommandResult, FreqId, IsoDate, MsId, MsParams, MsRecordParams, PersonId, QueryBoolean, Uuid, defineRoute, named,
+} from './common.js';
 import type { RouteDef } from './common.js';
 import { PhaseParams } from './readmodel.js';
 
@@ -187,7 +190,152 @@ export const phaseVerifyRoute = defineRoute({
   errors: [404, 422],
 });
 
+// ---------------------------------------------------------------------------------------------------------------
+// Targets, freshness thresholds and documented information (Milestone 2 D.1, M2-07)
+// ---------------------------------------------------------------------------------------------------------------
+
+export const ApplicabilityTargetsQuery = named(
+  'ApplicabilityTargetsQuery',
+  z.strictObject({ kind: ApplicabilityTarget.optional(), q: z.string().trim().min(1).max(100).optional(), retired: QueryBoolean.optional() }),
+  'GET /ms/{ms}/applicability/targets query: target kind, search in code and title, and whether retired rows are listed (default no)',
+  { valid: [{}, { kind: 'catalogue_item', q: 'backup' }, { retired: 'true' }], invalid: [{ kind: 'control' }, { page: 'x', q: '' }] },
+);
+export type ApplicabilityTargetsQuery = z.infer<typeof ApplicabilityTargetsQuery>;
+
+const EXAMPLE_TARGET = {
+  kind: 'catalogue_item', code: 'A.8.13', title: 'Information backup', clauseGroup: '8', hasEntry: true, retired: false, assessable: true,
+  documentedInfo: false,
+} as const;
+
+export const ApplicabilityTargetItem = named(
+  'ApplicabilityTargetItem',
+  z.object({
+    kind: ApplicabilityTarget,
+    code: Code,
+    title: z.string(),
+    clauseGroup: ClauseGroup.nullable(),
+    hasEntry: z.boolean(),
+    retired: z.boolean(),
+    /** false for clause rows, which are always applicable (applicability_assessable, D2-09). */
+    assessable: z.boolean(),
+    documentedInfo: z.boolean(),
+  }),
+  'A catalogue item or requirement of the active edition: code, title, clause group, whether the system has an entry, retired, assessable, documented information needed (Milestone 2 D.1)',
+  { valid: [EXAMPLE_TARGET, { ...EXAMPLE_TARGET, kind: 'requirement', code: '5.1', title: 'Leadership and commitment', clauseGroup: '5', hasEntry: false, assessable: false, documentedInfo: true }], invalid: [{ ...EXAMPLE_TARGET, kind: 'control' }, { ...EXAMPLE_TARGET, clauseGroup: '11' }] },
+);
+export type ApplicabilityTargetItem = z.infer<typeof ApplicabilityTargetItem>;
+
+export const FreshnessThresholdItem = named(
+  'FreshnessThresholdItem',
+  z.object({
+    frequencyCode: FreqId,
+    graceDays: z.number().min(0),
+    agingFactor: z.number().min(1),
+    expiredFactor: z.number().min(1),
+    source: z.enum(['default', 'set']),
+  }),
+  'Freshness limits in force for one evidence frequency of a system, marked default or set for the system (Milestone 2 D.1)',
+  { valid: [{ frequencyCode: 'monthly', graceDays: 1, agingFactor: 1.25, expiredFactor: 2, source: 'default' }, { frequencyCode: 'annual', graceDays: 14, agingFactor: 1.1, expiredFactor: 1.5, source: 'set' }], invalid: [{ frequencyCode: 'monthly', graceDays: -1, agingFactor: 1.25, expiredFactor: 2, source: 'default' }, { frequencyCode: 'monthly', graceDays: 1, agingFactor: 0.5, expiredFactor: 2, source: 'set' }] },
+);
+export type FreshnessThresholdItem = z.infer<typeof FreshnessThresholdItem>;
+
+export const FreshnessThresholdParams = named('FreshnessThresholdParams', z.strictObject({ ms: MsId, frequencyCode: FreqId }), 'Path parameters {ms} and {frequencyCode}', {
+  valid: [{ ms: 'isms', frequencyCode: 'monthly' }],
+  invalid: [{ ms: 'isms', frequencyCode: 'Monthly' }, { ms: 'isms' }],
+});
+export type FreshnessThresholdParams = z.infer<typeof FreshnessThresholdParams>;
+
+export const FreshnessThresholdSet = named(
+  'FreshnessThresholdSet',
+  z.union([
+    z.strictObject({ graceDays: z.number().min(0).max(365), agingFactor: z.number().min(1).max(100), expiredFactor: z.number().min(1).max(100) })
+      .refine((t) => t.expiredFactor >= t.agingFactor, { message: 'expiredFactor must be at least agingFactor', path: ['expiredFactor'] }),
+    z.strictObject({ graceDays: z.null(), agingFactor: z.null(), expiredFactor: z.null() }),
+  ]),
+  'PUT /ms/{ms}/freshness-thresholds/{frequencyCode} body: grace days, aging factor (at least 1) and expired factor (at least the aging factor), or all null to return to the defaults (Milestone 2 D.1)',
+  { valid: [{ graceDays: 7, agingFactor: 1.2, expiredFactor: 1.8 }, { graceDays: null, agingFactor: null, expiredFactor: null }], invalid: [{ graceDays: 7, agingFactor: 2, expiredFactor: 1.5 }, { graceDays: 7 }, { graceDays: null, agingFactor: 1.2, expiredFactor: null }] },
+);
+export type FreshnessThresholdSet = z.infer<typeof FreshnessThresholdSet>;
+
+/** States of a row of the documented information list (Milestone 2 M2-07). */
+export const DOCUMENTED_INFO_STATES = ['missing', 'draft', 'in_review', 'approved', 'review_overdue', 'fresh', 'out_of_date'] as const;
+export const DocumentedInfoState = z.enum(DOCUMENTED_INFO_STATES).meta({ id: 'DocumentedInfoState', description: 'State of required documented information (Milestone 2 M2-07)' });
+export type DocumentedInfoState = z.infer<typeof DocumentedInfoState>;
+
+const EXAMPLE_DOCUMENTED_INFO = {
+  code: 'DI-5.2', requirementCode: '5.2', kind: 'maintain', title: 'Information security policy', templateCode: 'POL-01', state: 'approved',
+  document: { id: '2e3f4a5b-6c7d-4e8f-9a0b-1c2d3e4f5a6b', code: 'ISP-001', title: 'Information Security Policy', status: 'approved', nextReviewAt: '2027-03-01', owner: 'rina', linked: true },
+  evidence: [],
+} as const;
+
+export const DocumentedInfoItem = named(
+  'DocumentedInfoItem',
+  z.object({
+    code: Code,
+    requirementCode: Code,
+    kind: DocumentedInfoKind,
+    title: z.string(),
+    templateCode: Code.nullable(),
+    state: DocumentedInfoState,
+    document: z.object({
+      id: Uuid, code: Code, title: z.string(), status: DocStatus, nextReviewAt: IsoDate.nullable(), owner: PersonId,
+      /** True when the document was mapped to the pack code with documented-info.link. */
+      linked: z.boolean(),
+    }).nullable(),
+    evidence: z.array(z.object({ code: Code, title: z.string(), fresh: FreshnessStatus })),
+  }),
+  'Required documented information of the edition with the document (maintain) or the evidence (retain) that covers it and its state (Milestone 2 D.1)',
+  {
+    valid: [EXAMPLE_DOCUMENTED_INFO, { ...EXAMPLE_DOCUMENTED_INFO, code: 'DI-9.2', requirementCode: '9.2', kind: 'retain', title: 'Internal audit results', templateCode: null, state: 'fresh', document: null, evidence: [{ code: 'EV-0920', title: 'Internal audit report 2026', fresh: 'fresh' }] }],
+    invalid: [{ ...EXAMPLE_DOCUMENTED_INFO, state: 'done' }, { ...EXAMPLE_DOCUMENTED_INFO, kind: 'keep' }],
+  },
+);
+export type DocumentedInfoItem = z.infer<typeof DocumentedInfoItem>;
+
+export const DocumentedInfoParams = named('DocumentedInfoParams', z.strictObject({ ms: MsId, code: Code }), 'Path parameters {ms} and {code}: a pack document code (template code or activity output document code)', {
+  valid: [{ ms: 'isms', code: 'POL-01' }],
+  invalid: [{ ms: 'isms', code: '' }, { ms: 'isms' }],
+});
+export type DocumentedInfoParams = z.infer<typeof DocumentedInfoParams>;
+
+export const DocumentedInfoLink = named(
+  'DocumentedInfoLink',
+  z.strictObject({ documentId: Uuid.nullable() }),
+  'PUT /ms/{ms}/documented-information/{code}/link body: the registered document that stands for the pack code, or null to remove the link (Milestone 2 D.1)',
+  { valid: [{ documentId: '2e3f4a5b-6c7d-4e8f-9a0b-1c2d3e4f5a6b' }, { documentId: null }], invalid: [{}, { documentId: 'ISP-001' }] },
+);
+export type DocumentedInfoLink = z.infer<typeof DocumentedInfoLink>;
+
+const m2 = { owner: 'M2-07' as const, auth: 'session' as const, scope: 'ms' as const, msSource: 'path' as const };
+
+export const applicabilityTargetsRoute = defineRoute({
+  ...m2, id: 'applicability.targets', method: 'GET', path: '/api/v1/ms/:ms/applicability/targets',
+  summary: 'Catalogue items and requirements of the active edition, with whether the system has an entry for each',
+  permission: 'ms.read', params: MsParams, query: ApplicabilityTargetsQuery, response: z.array(ApplicabilityTargetItem), errors: [404],
+});
+export const freshnessThresholdsGetRoute = defineRoute({
+  ...m2, id: 'freshness.thresholds.get', method: 'GET', path: '/api/v1/ms/:ms/freshness-thresholds',
+  summary: 'Freshness limits in force per evidence frequency, marked default or set',
+  permission: 'ms.read', params: MsParams, response: z.array(FreshnessThresholdItem), errors: [404],
+});
+export const freshnessThresholdsPutRoute = defineRoute({
+  ...m2, id: 'freshness.thresholds.put', method: 'PUT', path: '/api/v1/ms/:ms/freshness-thresholds/:frequencyCode',
+  summary: 'Set or reset the freshness limits of one frequency for the system (audited freshness_threshold.changed; queues freshness.recompute)',
+  permission: 'applicability.manage', params: FreshnessThresholdParams, body: FreshnessThresholdSet, response: CommandResult, errors: [404, 422],
+});
+export const documentedInfoListRoute = defineRoute({
+  ...m2, id: 'documented-info.list', method: 'GET', path: '/api/v1/ms/:ms/documented-information',
+  summary: 'Required documented information of the edition with the linked document or evidence and its state',
+  permission: 'ms.read', params: MsParams, response: z.array(DocumentedInfoItem), errors: [404],
+});
+export const documentedInfoLinkRoute = defineRoute({
+  ...m2, id: 'documented-info.link', method: 'PUT', path: '/api/v1/ms/:ms/documented-information/:code/link',
+  summary: 'Map a pack document code to a registered document of the system, or remove the mapping (audited document_code.linked)',
+  permission: 'document.manage', params: DocumentedInfoParams, body: DocumentedInfoLink, response: CommandResult, errors: [404, 422],
+});
+
 export const routes: RouteDef[] = [
   applicabilityTransitionRoute, applicabilityUpdateRoute, applicabilityCreateRoute, applicabilityOperatingCriteriaRoute,
   activityTransitionRoute, phaseVerifyRoute,
+  applicabilityTargetsRoute, freshnessThresholdsGetRoute, freshnessThresholdsPutRoute, documentedInfoListRoute, documentedInfoLinkRoute,
 ];

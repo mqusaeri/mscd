@@ -63,7 +63,8 @@ describe('Kysely types and the migrated schema (C.7)', () => {
       for (const c of listed) if (!columns.includes(c)) columnDiffs.push(`${table}.${c} is not in the database`);
     }
     expect(columnDiffs).toEqual([]);
-    expect(declared.size).toBe(112);
+    // 112 tables of Milestone 1, then Milestone 2: tenant 0008 adds three, platform 0005 two (M2-02).
+    expect(declared.size).toBe(112 + 3 + 2);
   });
 
   it('keeps the kysely_migration type of the platform schema in line with the Kysely Migrator', async () => {

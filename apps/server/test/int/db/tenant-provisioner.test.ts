@@ -306,7 +306,7 @@ describe('tenant provisioning (C.8)', () => {
       useCliEnv({ MSCD__STORAGE__GATEWAY__URL: gateway.url });
       const result = await cli(['tenant', 'create', '--slug', 'cli_org', '--name', 'CLI Org', '--time-zone', 'Asia/Jayapura', '--site-count', '2', '--demo-deploy-label', 'saas']);
       expect(result).toMatchObject({ code: 0, err: '' });
-      expect(result.out).toMatch(/^tenant create: organisation cli_org \([0-9a-f-]{36}\) created: schema org_cli_org, 7 tenant migrations, data key [0-9a-f]{8}, Managed Vault repository [0-9a-f-]{36}\n$/);
+      expect(result.out).toMatch(/^tenant create: organisation cli_org \([0-9a-f-]{36}\) created: schema org_cli_org, 8 tenant migrations, data key [0-9a-f]{8}, Managed Vault repository [0-9a-f-]{36}\n$/);
       const org = await sql<{ time_zone: string; site_count: number; demo_deploy_label: string }>`
         select time_zone, site_count, demo_deploy_label from platform.organization where slug = 'cli_org'`.execute(db.migrator);
       expect(org.rows).toEqual([{ time_zone: 'Asia/Jayapura', site_count: 2, demo_deploy_label: 'saas' }]);

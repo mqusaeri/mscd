@@ -1,10 +1,12 @@
 // Area `admin-ms` (owner from wave 5: WP-12): management systems and their status transitions (D.2
 // `ManagementSystemCreate`, `MsTransitionRequest`; D.3 "Administration"; C.13 `management_system.status`; D-30).
+// Milestone 2 (D.1, D.4, J.8) adds the certification cycles of a system and the certificate record, built by M2-05:
+// a system moves to `certified` only through `ms.certification`.
 import { z } from 'zod';
-import { ApplicabilityTarget, MsStatus } from '../enums.js';
+import { ApplicabilityTarget, AuditEventType, AuditOutcome, CertificationCycleStatus, MsStatus } from '../enums.js';
 import { PackEdition, PackId } from '../pack/manifest.js';
 import {
-  Color, CommandResult, IdParams, Instant, MsId, MsParams, RepositorySlug, Uuid, defineRoute, named,
+  Color, CommandResult, IdParams, Instant, IsoDate, MsId, MsParams, MsRecordParams, RepositorySlug, Uuid, defineRoute, named,
 } from './common.js';
 import type { RouteDef } from './common.js';
 
@@ -88,6 +90,74 @@ export const MsTransitionRequest = named(
 );
 export type MsTransitionRequest = z.infer<typeof MsTransitionRequest>;
 
+// ---------------------------------------------------------------------------------------------------------------
+// Certification cycles (Milestone 2 D.1, D.4, J.8)
+// ---------------------------------------------------------------------------------------------------------------
+
+const EXAMPLE_CYCLE = {
+  id: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d', status: 'certified', cycleStart: '2025-03-14', cycleEnd: '2028-03-13', certificateNo: 'ISMS-2025-0147',
+  certifiedAt: '2025-03-14', certificateExpiresAt: '2028-03-13', certificationBody: 'PT Sertifikasi Nusantara',
+  certifiedScope: 'Data centre and managed services operations: Jakarta and Surabaya',
+  events: [{ id: '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e', eventType: 'stage2', shortLabel: 'Stage 2', scheduledAt: '2025-02-20', outcome: 'recommended' }],
+  items: { total: 12, done: 12 },
+} as const;
+
+export const CertificationCycleItem = named(
+  'CertificationCycleItem',
+  z.object({
+    id: Uuid,
+    status: CertificationCycleStatus,
+    cycleStart: IsoDate,
+    cycleEnd: IsoDate,
+    certificateNo: z.string().nullable(),
+    certifiedAt: IsoDate.nullable(),
+    certificateExpiresAt: IsoDate.nullable(),
+    certificationBody: z.string().nullable(),
+    certifiedScope: z.string().nullable(),
+    events: z.array(z.object({ id: Uuid, eventType: AuditEventType, shortLabel: z.string(), scheduledAt: IsoDate, outcome: AuditOutcome.nullable() })),
+    items: z.object({ total: z.int().min(0), done: z.int().min(0) }),
+  }),
+  'A certification cycle of a system with its dates, certificate and audit events (Milestone 2 D.1, D.4)',
+  {
+    valid: [EXAMPLE_CYCLE, { ...EXAMPLE_CYCLE, status: 'active', certificateNo: null, certifiedAt: null, certificateExpiresAt: null, certificationBody: null, certifiedScope: null, events: [], items: { total: 12, done: 3 } }],
+    invalid: [{ ...EXAMPLE_CYCLE, status: 'lapsed' }, { ...EXAMPLE_CYCLE, items: { total: -1, done: 0 } }],
+  },
+);
+export type CertificationCycleItem = z.infer<typeof CertificationCycleItem>;
+
+export const CertificationCycleCreate = named(
+  'CertificationCycleCreate',
+  z.strictObject({ cycleStart: IsoDate, cycleEnd: IsoDate.optional() }),
+  'POST /ms/{ms}/certification-cycles body: start a cycle and its cycle items; cycleEnd defaults to three years later (Milestone 2 D.4)',
+  { valid: [{ cycleStart: '2026-11-01' }, { cycleStart: '2026-11-01', cycleEnd: '2029-10-31' }], invalid: [{}, { cycleStart: '1 Nov 2026' }, { cycleStart: '2026-11-01', status: 'active' }] },
+);
+export type CertificationCycleCreate = z.infer<typeof CertificationCycleCreate>;
+
+export const CertificationRecord = named(
+  'CertificationRecord',
+  z.strictObject({
+    certificateNo: z.string().trim().min(1).max(60),
+    issuedAt: IsoDate,
+    expiresAt: IsoDate,
+    certificationBody: z.string().trim().min(1).max(200),
+    certifiedScope: z.string().trim().min(1).max(4000).optional(),
+  }).refine((r) => r.expiresAt > r.issuedAt, { message: 'expiresAt must be after issuedAt', path: ['expiresAt'] }),
+  'POST /ms/{ms}/certification body: the certificate after a stage2 or recertification audit with outcome recommended or recommended_with_conditions (Milestone 2 D.4)',
+  {
+    valid: [{ certificateNo: 'ISMS-2027-0031', issuedAt: '2027-03-20', expiresAt: '2030-03-19', certificationBody: 'PT Sertifikasi Nusantara' }, { certificateNo: 'QMS-88', issuedAt: '2027-01-10', expiresAt: '2030-01-09', certificationBody: 'Garuda Mutu', certifiedScope: 'Software development' }],
+    invalid: [{ certificateNo: 'X', issuedAt: '2027-03-20', expiresAt: '2026-03-19', certificationBody: 'Y' }, { certificateNo: '', issuedAt: '2027-03-20', expiresAt: '2030-03-19', certificationBody: 'Y' }, { issuedAt: '2027-03-20' }],
+  },
+);
+export type CertificationRecord = z.infer<typeof CertificationRecord>;
+
+export const CycleTransitionRequest = named(
+  'CycleTransitionRequest',
+  z.strictObject({ to: z.enum(['certified', 'suspended', 'withdrawn', 'closed']), reason: z.string().trim().min(3).max(1000) }),
+  'POST /ms/{ms}/certification-cycles/{id}/transitions body: the manual moves of J.8 (suspend, reinstate, withdraw, close an active cycle), each with a reason',
+  { valid: [{ to: 'suspended', reason: 'Suspended by the certification body after the surveillance audit' }, { to: 'closed', reason: 'Project stopped' }], invalid: [{ to: 'suspended' }, { to: 'expired', reason: 'Lapsed' }, { to: 'closed', reason: '' }] },
+);
+export type CycleTransitionRequest = z.infer<typeof CycleTransitionRequest>;
+
 export const adminMsListRoute = defineRoute({
   id: 'admin.ms.list',
   owner: 'WP-12',
@@ -150,4 +220,30 @@ export const msTransitionRoute = defineRoute({
   errors: [404, 409, 422],
 });
 
-export const routes: RouteDef[] = [adminMsListRoute, adminMsCreateRoute, adminMsUpdateRoute, msTransitionRoute];
+const cert = { owner: 'M2-05' as const, auth: 'session' as const, scope: 'ms' as const, msSource: 'path' as const };
+
+export const msCyclesListRoute = defineRoute({
+  ...cert, id: 'ms.cycles.list', method: 'GET', path: '/api/v1/ms/:ms/certification-cycles',
+  summary: 'Certification cycles of the system, newest first, with status, dates and certificate',
+  permission: 'ms.read', params: MsParams, response: z.array(CertificationCycleItem), errors: [404],
+});
+export const msCyclesCreateRoute = defineRoute({
+  ...cert, id: 'ms.cycles.create', method: 'POST', path: '/api/v1/ms/:ms/certification-cycles',
+  summary: 'Start a certification cycle and its cycle items, or activate the planned one (one open cycle per system; audited certification_cycle.created)',
+  permission: 'audit_event.manage', params: MsParams, body: CertificationCycleCreate, response: CommandResult, status: 201, errors: [404, 409, 422], idempotent: true,
+});
+export const msCertificationRoute = defineRoute({
+  ...cert, id: 'ms.certification', method: 'POST', path: '/api/v1/ms/:ms/certification',
+  summary: 'Record the certificate and move the cycle and the system to certified; a recertification closes the previous certified cycle (audited ms.certified)',
+  permission: 'ms.transition', params: MsParams, body: CertificationRecord, response: CommandResult, errors: [404, 409, 422],
+});
+export const msCyclesTransitionRoute = defineRoute({
+  ...cert, id: 'ms.cycles.transition', method: 'POST', path: '/api/v1/ms/:ms/certification-cycles/:id/transitions',
+  summary: 'Suspend, reinstate or withdraw a certificate, or close an active cycle, with a reason (J.8; audited certification_cycle.transitioned)',
+  permission: 'ms.transition', params: MsRecordParams, body: CycleTransitionRequest, response: CommandResult, errors: [404, 409, 422],
+});
+
+export const routes: RouteDef[] = [
+  adminMsListRoute, adminMsCreateRoute, adminMsUpdateRoute, msTransitionRoute,
+  msCyclesListRoute, msCyclesCreateRoute, msCertificationRoute, msCyclesTransitionRoute,
+];

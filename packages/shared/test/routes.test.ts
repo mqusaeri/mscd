@@ -1,5 +1,5 @@
-// The route table against build plan D.1, D.3 and D.5: every endpoint is present once, with a valid owner,
-// permission, machine and path parameter schema.
+// The route table against build plan D.1, D.3 and D.5 and the Milestone 2 endpoint table (J.1): every endpoint is
+// present once, with a valid owner, permission, machine and path parameter schema.
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -8,7 +8,7 @@ import {
   permissionCase, routeArea, routeById, routes, transitionsFor,
 } from '../src/index.js';
 import type { MachineEntity, Permission, PermissionCheckScope, RouteDef } from '../src/index.js';
-import { fastifyPath, planApiEndpoints, planGatewayEndpoints, planWorkPackages } from './helpers.js';
+import { bpApiEndpoints, fastifyPath, m2PlanRoutes, planApiEndpoints, planGatewayEndpoints, planWorkPackages } from './helpers.js';
 
 const key = (r: { method: string; path: string }) => `${r.method} ${r.path}`;
 
@@ -41,9 +41,23 @@ describe('route table against the plan', () => {
   const planApi = planApiEndpoints().map((e) => ({ method: e.method, path: fastifyPath(e.path, '/api/v1') }));
   const planGateway = planGatewayEndpoints();
 
-  it('reads the D.3 and D.5 tables', () => {
-    expect(planApi.length).toBeGreaterThan(150);
+  it('reads the D.3 and D.5 tables and Milestone 2 J.1', () => {
+    expect(bpApiEndpoints().length).toBeGreaterThan(150);
+    expect(m2PlanRoutes()).toHaveLength(38);
+    expect(planApi.length).toBe(bpApiEndpoints().length + 38);
     expect(planGateway.length).toBe(16);
+  });
+
+  it('has every route of Milestone 2 J.1 with its route id and building package', () => {
+    for (const planned of m2PlanRoutes()) {
+      const r = routeById(planned.id);
+      expect(`${r.method} ${r.path}`, planned.id).toBe(`${planned.method} ${fastifyPath(planned.path, '/api/v1')}`);
+      expect(r.owner, planned.id).toBe(planned.owner);
+    }
+    expect(new Set(m2PlanRoutes().map((r) => r.id)).size).toBe(38);
+    // Every route owned by a Milestone 2 package is a J.1 row.
+    const ids = new Set(m2PlanRoutes().map((r) => r.id));
+    expect(routes.filter((r) => r.owner.startsWith('M2-')).map((r) => r.id).filter((id) => !ids.has(id))).toEqual([]);
   });
 
   it('has every D.3 endpoint, with the parameter names of the plan', () => {
@@ -64,6 +78,8 @@ describe('route table against the plan', () => {
   it('names an existing work package as owner of every route', () => {
     const planned = new Set(planWorkPackages());
     expect(planned.size).toBe(WORK_PACKAGE_IDS.length);
+    expect(WORK_PACKAGE_IDS.length).toBe(39 + 18 + 13);
+    expect([...planned].sort()).toEqual([...WORK_PACKAGE_IDS].sort());
     for (const r of routes) {
       expect(WORK_PACKAGE_IDS, r.id).toContain(r.owner);
       expect(planned.has(r.owner), `${r.id} owner ${r.owner}`).toBe(true);
@@ -183,9 +199,10 @@ describe('path parameters', () => {
     }
   });
 
-  it('lists the 26 record entity types of D.1', () => {
-    expect(RECORD_ENTITY_TYPES).toHaveLength(26);
-    expect(new Set(RECORD_ENTITY_TYPES).size).toBe(26);
+  it('lists the 26 record entity types of D.1 and competence_record of Milestone 2 D.3', () => {
+    expect(RECORD_ENTITY_TYPES).toHaveLength(26 + 1);
+    expect(new Set(RECORD_ENTITY_TYPES).size).toBe(26 + 1);
+    expect(RECORD_ENTITY_TYPES).toContain('competence_record');
   });
 });
 
@@ -219,7 +236,8 @@ describe('authorisation metadata', () => {
   it('checks each anyOf alternative at a scope the matrix allows', () => {
     const anyOfRoutes = routes.filter((r) => r.anyOf);
     expect(anyOfRoutes.map((r) => r.id).sort()).toEqual([
-      'admin.users.reset-mfa', 'audit-trail.anchors', 'audit-trail.list', 'audit-trail.verify', 'storage.browse', 'storage.upload-intents.create',
+      'admin.packs.list', 'admin.users.reset-mfa', 'audit-activities.generate', 'audit-activities.update', 'audit-events.update', 'audit-trail.anchors',
+      'audit-trail.list', 'audit-trail.verify', 'storage.browse', 'storage.upload-intents.create',
     ]);
     for (const r of anyOfRoutes) {
       const checks = r.anyOf as NonNullable<RouteDef['anyOf']>;
@@ -296,7 +314,7 @@ describe('authorisation metadata', () => {
 
   it('names a permission per member value on permissionBy routes', () => {
     const byRoutes = routes.filter((r) => r.permissionBy);
-    expect(byRoutes.map((r) => r.id).sort()).toEqual(['exports.create', 'registers.create', 'registers.update']);
+    expect(byRoutes.map((r) => r.id).sort()).toEqual(['audit-events.create', 'exports.create', 'imports.create', 'registers.create', 'registers.update']);
     for (const r of byRoutes) {
       const by = r.permissionBy as NonNullable<RouteDef['permissionBy']>;
       expect(r.permission ?? r.anyOf ?? r.allOf ?? r.machine ?? r.scope, `${r.id} keeps its checks in the cases`).toBeUndefined();
@@ -312,6 +330,58 @@ describe('authorisation metadata', () => {
       const msCases = Object.values(by.cases).some((c) => c.scope === 'ms');
       expect(Boolean(r.msSource), `${r.id} msSource exactly when a case is ms-scoped`).toBe(msCases);
     }
+  });
+
+  it('checks internal_audit.manage on internal audits and audit_event.manage on the other event types (Milestone 2 D.2)', () => {
+    const by = routeById('audit-events.create').permissionBy as NonNullable<RouteDef['permissionBy']>;
+    expect(by).toMatchObject({ source: 'body', member: 'eventType' });
+    expect(permissionCase(by, 'internal_audit')).toEqual({ permission: 'internal_audit.manage', scope: 'ms' });
+    for (const type of ['stage1', 'stage2', 'surveillance', 'recertification', 'transition', 'special']) {
+      expect(permissionCase(by, type), type).toEqual({ permission: 'audit_event.manage', scope: 'ms' });
+    }
+    for (const id of ['audit-events.update', 'audit-activities.generate', 'audit-activities.update']) {
+      expect(routeById(id).anyOf, id).toEqual([{ permission: 'audit_event.manage', scope: 'ms' }, { permission: 'internal_audit.manage', scope: 'ms' }]);
+      expect(routeById(id).msSource, id).toBe('path');
+    }
+    const auditor = { tenancy: 'single', msRoles: ['internal_auditor'], anyMsRoles: ['internal_auditor'], orgRoles: [], platformRoles: [] } as const;
+    const owner = { ...auditor, msRoles: ['domain_owner'], anyMsRoles: ['domain_owner'] } as const;
+    expect(evaluatePermission(permissionCase(by, 'internal_audit').permission, auditor)).toBe('full');
+    expect(evaluatePermission(permissionCase(by, 'stage1').permission, auditor)).toBeNull();
+    expect(evaluatePermission(permissionCase(by, 'internal_audit').permission, owner)).toBeNull();
+  });
+
+  it('checks the permission of the import kind (Milestone 2 D.1)', () => {
+    const by = routeById('imports.create').permissionBy as NonNullable<RouteDef['permissionBy']>;
+    expect(by).toMatchObject({ source: 'path', member: 'kind' });
+    expect(permissionCase(by, 'applicability').permission).toBe('applicability.manage');
+    expect(permissionCase(by, 'documents').permission).toBe('document.manage');
+    expect(permissionCase(by, 'risks').permission).toBe('risk.manage');
+    expect(permissionCase(by, 'evidence').permission).toBe('evidence.manage');
+    for (const id of ['imports.get', 'imports.commit', 'imports.templates']) expect(routeById(id).permission, id).toBe('ms.read');
+  });
+
+  it('lets the platform operator list the packs in multi tenancy (Milestone 2 D.2)', () => {
+    expect(routeById('admin.packs.list').anyOf).toEqual([{ permission: 'pack.read', scope: 'org' }, { permission: 'pack.install', scope: 'platform' }]);
+    expect(routeById('admin.packs.import').permission).toBe('pack.install');
+    const operator = { tenancy: 'multi', msRoles: [], anyMsRoles: [], orgRoles: [], platformRoles: ['platform_operator'] } as const;
+    expect(evaluatePermission('pack.install', operator)).toBe('full');
+    expect(evaluatePermission('pack.read', operator)).toBeNull();
+  });
+
+  it('checks the SaaS track routes with the operator permissions (Milestone 2 D.1)', () => {
+    const permissionOf: Record<string, string> = {
+      'ops.organizations.list': 'ops.read', 'ops.organizations.get': 'ops.read', 'ops.organizations.events': 'ops.read', 'ops.domains.list': 'ops.read',
+      'ops.entitlements.get': 'ops.read', 'ops.plans.list': 'ops.read', 'ops.organizations.create': 'ops.tenants.manage',
+      'ops.organizations.status': 'ops.tenants.manage', 'ops.domains.add': 'ops.tenants.manage', 'ops.domains.verify': 'ops.tenants.manage',
+      'ops.domains.remove': 'ops.tenants.manage', 'ops.entitlements.set': 'ops.entitlements.manage', 'ops.users.reset-mfa': 'ops.users.manage',
+    };
+    for (const [id, permission] of Object.entries(permissionOf)) {
+      expect(routeById(id).permission, id).toBe(permission);
+      expect(routeById(id).scope, id).toBe('platform');
+    }
+    expect(routeById('ops.domains.remove').method).toBe('DELETE');
+    expect(routeById('ops.entitlements.set').ifMatch).toBe(true);
+    expect(routeById('auth.providers').rateLimits).toEqual([{ key: 'ip', max: 20, windowSeconds: 60 }]);
   });
 
   it('checks risk.manage on risks and register.manage on the other registers (D.3)', () => {

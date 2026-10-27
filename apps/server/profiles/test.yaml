@@ -3,8 +3,8 @@
 # local addresses: the developer stack (deploy/compose/dev) for PostgreSQL, SeaweedFS and Mailpit, and the fixed
 # API E2E ports of R-05 for the web (4174), mock providers (4310) and storage gateway (4311). Test suites and
 # the API E2E stack override what they start on random ports (MSCD__... variables or MSCD_DATABASE_URL).
-tenancy:   { mode: single, isolation: database }
-license:   { validation: offline }
+tenancy:   { mode: single, isolation: database, default_region: id }
+license:   { validation: offline, plans: {} }
 updates:   { channel: offline }
 packs:     { channel: offline, dir: ../../../packs/dist, channel_url: null }
 telemetry: { enabled: false, otlp_endpoint: null }
@@ -14,13 +14,14 @@ identity:
   local: { mfa_required: true }
   oidc: { allow_insecure_http: true }
   session: { idle_minutes: 60, absolute_hours: 8, remember_hours: 12, guest_idle_minutes: 30, guest_absolute_hours: 4 }
-mail:      { transport: smtp, from: "MSCD Test <mscd@test.invalid>", smtp: { host: localhost, port: 51025, secure: false, user: null, password_file: null } }
+mail:      { transport: smtp, required: false, from: "MSCD Test <mscd@test.invalid>", smtp: { host: localhost, port: 51025, secure: false, user: null, password_file: null } }
 storage:
   adapters: { enabled: [managed_vault, m365, google_drive] }
   max_upload_bytes: 104857600
   gateway: { url: "http://localhost:4311", token_file: ../test/fixtures/secrets/gateway.token,
              tls: { mode: "off", ca_file: null, cert_file: null, key_file: null } }
-network:   { egress_allowlist: [] }
+network:   { egress_allowlist: [], dns_resolvers: [] }
+legal:     { privacy_url: null, terms_url: null }            # sign-in page footer links (Milestone 2 D.2)
 jobs:      { driver: pgboss, schedules_enabled: false, bullmq: { url: null } }
 http:      { port: 3000, public_url: "http://localhost:4174", trust_proxy: { hops: 0 } }
 security:  { cookie_secure: false }

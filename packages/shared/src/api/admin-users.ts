@@ -1,12 +1,13 @@
 // Area `admin-users` (owner from wave 6: WP-39): members of the organisation, identity pre-registration, the local
 // sign-in policy, and role grants with the four-eyes approval flow (D.2, D.3 "Administration", F.6 Tenant Admin
-// limits, C.13 `user_ms_role.approval_status`).
+// limits, C.13 `user_ms_role.approval_status`). Milestone 2 (D.1, D.5) adds the organisation settings read and the
+// onboarding checklist, built by M2-06.
 import { z } from 'zod';
 import {
-  AccountStatus, ApprovalStatus, BusinessRole, LocalLoginPolicy, MembershipStatus, OrgRole, UserKind,
+  AccountStatus, ApprovalStatus, BusinessRole, LocalLoginPolicy, MembershipStatus, OrgRole, TenancyMode, UserKind,
 } from '../enums.js';
 import {
-  CommandResult, Handle, IdParams, Instant, MsId, NoBody, ProviderSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
+  CommandResult, Handle, IdParams, Instant, MsId, NoBody, OrgSlug, ProviderSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
 
@@ -131,6 +132,69 @@ export const RoleGrantParams = named('RoleGrantParams', z.strictObject({ id: Uui
 export type RoleGrantParams = z.infer<typeof RoleGrantParams>;
 
 // ---------------------------------------------------------------------------------------------------------------
+// Organisation settings and onboarding (Milestone 2 D.1, D.5)
+// ---------------------------------------------------------------------------------------------------------------
+
+const EXAMPLE_ORG_SETTINGS = {
+  slug: 'ndt', name: 'PT Nusantara Digital Teknologi', timeZone: 'Asia/Jakarta', siteCount: 2, localLogin: 'allowed',
+  installationId: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', tenancyMode: 'single', activeAdminCount: 2,
+} as const;
+
+export const OrganizationSettings = named(
+  'OrganizationSettings',
+  z.object({
+    slug: OrgSlug,
+    name: z.string(),
+    timeZone: z.string(),
+    siteCount: z.int().min(0),
+    localLogin: LocalLoginPolicy,
+    installationId: Uuid,
+    tenancyMode: TenancyMode,
+    activeAdminCount: z.int().min(0),
+  }),
+  'GET /admin/organization: the organisation settings the Tenant Admin can see; the slug is permanent (Milestone 2 D.1)',
+  { valid: [EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 }], invalid: [{ ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }] },
+);
+export type OrganizationSettings = z.infer<typeof OrganizationSettings>;
+
+/** Steps of the onboarding checklist (Milestone 2 D.5); the per-system steps carry `ms`. */
+export const ONBOARDING_STEP_KEYS = [
+  'licence', 'second_admin', 'sign_in', 'local_login', 'repository', 'routing', 'systems', 'team',
+  'ms_manager', 'verifiers', 'internal_auditor', 'implementing', 'applicability', 'audit_dates', 'pending_grants',
+] as const;
+export const OnboardingStepKey = z.enum(ONBOARDING_STEP_KEYS).meta({ id: 'OnboardingStepKey', description: 'Step of the onboarding checklist (Milestone 2 D.5)' });
+export type OnboardingStepKey = z.infer<typeof OnboardingStepKey>;
+
+export const ONBOARDING_STATES = ['done', 'pending', 'optional'] as const;
+export const OnboardingState = z.enum(ONBOARDING_STATES).meta({ id: 'OnboardingState', description: 'State of an onboarding step (Milestone 2 D.5)' });
+export type OnboardingState = z.infer<typeof OnboardingState>;
+
+export const OnboardingStep = named(
+  'OnboardingStep',
+  z.object({
+    key: OnboardingStepKey,
+    state: OnboardingState,
+    /** The screen id of the web app that completes the step. */
+    screen: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+    count: z.int().min(0).optional(),
+    limit: z.int().min(0).optional(),
+    ms: MsId.optional(),
+    doneBy: z.literal('ms_manager').optional(),
+    assignee: z.object({ name: z.string(), email: z.email() }).nullable().optional(),
+  }),
+  'One step of the onboarding checklist: state and counts only, so a Tenant Admin sees no compliance content (F.6, Milestone 2 D.5)',
+  {
+    valid: [
+      { key: 'licence', state: 'done', screen: 'license', count: 12, limit: 50 },
+      { key: 'second_admin', state: 'pending', screen: 'users', count: 1 },
+      { key: 'audit_dates', state: 'pending', screen: 'timeline', ms: 'isms', doneBy: 'ms_manager', assignee: { name: 'Rina Kusuma', email: 'rina.kusuma@nusantaradigital.co.id' } },
+    ],
+    invalid: [{ key: 'licence', state: 'blocked', screen: 'license' }, { key: 'coffee', state: 'done', screen: 'license' }, { key: 'team', state: 'done', screen: 'Users Screen' }],
+  },
+);
+export type OnboardingStep = z.infer<typeof OnboardingStep>;
+
+// ---------------------------------------------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -228,6 +292,32 @@ export const adminOrganizationUpdateRoute = defineRoute({
   errors: [],
 });
 
+export const adminOrganizationGetRoute = defineRoute({
+  id: 'admin.organization.get',
+  owner: 'M2-06',
+  method: 'GET',
+  path: '/api/v1/admin/organization',
+  summary: 'Organisation settings: slug, name, time zone, site count, local sign-in policy, installation id, tenancy mode, active admin count',
+  auth: 'session',
+  permission: 'org.settings.manage',
+  scope: 'org',
+  response: OrganizationSettings,
+  errors: [],
+});
+
+export const adminOnboardingRoute = defineRoute({
+  id: 'admin.onboarding',
+  owner: 'M2-06',
+  method: 'GET',
+  path: '/api/v1/admin/onboarding',
+  summary: 'Onboarding checklist computed from existing tables: states, counts and the assignee of the steps of the MS Manager (Milestone 2 D.5)',
+  auth: 'session',
+  permission: 'ms.admin',
+  scope: 'org',
+  response: z.array(OnboardingStep),
+  errors: [],
+});
+
 export const adminRolesGrantRoute = defineRoute({
   id: 'admin.roles.grant',
   owner: 'WP-39',
@@ -293,4 +383,5 @@ export const adminRolesRevokeRoute = defineRoute({
 export const routes: RouteDef[] = [
   adminUsersListRoute, adminUsersCreateRoute, adminUsersUpdateRoute, adminUsersResetMfaRoute, adminUsersRegisterIdentityRoute,
   adminOrganizationUpdateRoute, adminRolesGrantRoute, adminRolesApproveRoute, adminRolesRejectRoute, adminRolesRevokeRoute,
+  adminOrganizationGetRoute, adminOnboardingRoute,
 ];

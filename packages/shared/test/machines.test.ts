@@ -5,7 +5,7 @@ import {
   rejectionFor, routeById, transitionsFor, transitionsVia,
 } from '../src/index.js';
 import type { MachineEntity, Permission } from '../src/index.js';
-import { planSection } from './helpers.js';
+import { planMachines } from './helpers.js';
 
 /** A row expectation: from, to, permission (null for the system), own flag, rules that must be present. */
 type Row = [from: string | null, to: string, permission: Permission | null, own?: boolean, rules?: string[]];
@@ -21,10 +21,10 @@ function expectNoRow(entity: MachineEntity, from: string | null, to: string): vo
 }
 
 describe('machines', () => {
-  it('cover every entity of C.13', () => {
-    const table = planSection('### C.13 State machines', '## D. API contract');
-    const planned = [...table.matchAll(/^\| `([a-z_]+\.[a-z_]+)`(?:, `([a-z_]+\.[a-z_]+)`)? \((WP-\d\d)\)/gm)]
-      .flatMap((m) => [[m[1], m[3]], ...(m[2] ? [[m[2], m[3]]] : [])]) as [string, string][];
+  it('cover every entity of C.13 and Milestone 2 J.8', () => {
+    const planned = planMachines();
+    expect(planned.filter(([, owner]) => owner.startsWith('WP-')).length).toBe(12);
+    expect(planned.filter(([, owner]) => owner.startsWith('M2-'))).toEqual([['organization.status', 'M2-02'], ['certification_cycle.status', 'M2-02']]);
     expect(planned.map(([e]) => e).sort()).toEqual([...MACHINE_ENTITIES].sort());
     for (const [entity, owner] of planned) expect(MACHINES[entity as MachineEntity].owner, entity).toBe(owner);
   });
@@ -275,6 +275,56 @@ describe('C.13 rows', () => {
     expect(machinePermissions(e)).toEqual(['ms.transition']);
     expectRow(e, ['certified', 'transitioning', 'ms.transition', false, ['LIC-FEATURE']]);
     expectRow(e, ['transitioning', 'certified', 'ms.transition']);
-    expectRow(e, ['implementing', 'certified', null]);
+    // Milestone 2 D.2: the first certification runs through POST /ms/{ms}/certification only.
+    expectRow(e, ['implementing', 'certified', 'ms.transition']);
+    expect(transitionsVia(e, 'implementing', 'certified', 'ms.certification').map((t) => t.permission)).toEqual(['ms.transition']);
+    expect(transitionsVia(e, 'implementing', 'certified', null)).toEqual([]);
+    expect(machinePermissions(e, 'ms.certification')).toEqual(['ms.transition']);
+  });
+
+  it('certification cycle (Milestone 2 J.8, D.4)', () => {
+    const e = 'certification_cycle.status';
+    for (const to of ['planned', 'active']) {
+      expectRow(e, [null, to, 'audit_event.manage']);
+      expect(transitionsVia(e, null, to, 'ms.cycles.create').map((t) => t.permission), to).toEqual(['audit_event.manage']);
+    }
+    expectRow(e, [null, 'active', null]);
+    expectRow(e, ['planned', 'active', null]);
+    expectRow(e, ['planned', 'active', 'audit_event.manage']);
+    expectRow(e, ['active', 'certified', 'ms.transition']);
+    expect(transitionsVia(e, 'active', 'certified', 'ms.certification').map((t) => t.permission)).toEqual(['ms.transition']);
+    expectRow(e, ['certified', 'closed', null]);
+    expectRow(e, ['certified', 'expired', null]);
+    for (const [from, to] of [['certified', 'suspended'], ['suspended', 'certified'], ['suspended', 'withdrawn'], ['active', 'closed']] as const) {
+      expectRow(e, [from, to, 'ms.transition']);
+      const [row] = transitionsVia(e, from, to, 'ms.cycles.transition');
+      expect(row?.requires, `${from} to ${to}`).toEqual(['reason']);
+    }
+    // Only the dedicated routes move a cycle: the machine has no transition route of its own.
+    expect(machinePermissions(e)).toEqual([]);
+    expect(machinePermissions(e, 'ms.cycles.transition')).toEqual(['ms.transition']);
+    expectNoRow(e, 'planned', 'certified');
+    expectNoRow(e, 'expired', 'certified');
+    expectNoRow(e, 'withdrawn', 'certified');
+    expectNoRow(e, 'closed', 'active');
+    expect(routeById('ms.cycles.transition').permission).toBe('ms.transition');
+    expect(routeById('ms.certification').permission).toBe('ms.transition');
+    expect(routeById('ms.cycles.create').permission).toBe('audit_event.manage');
+  });
+
+  it('organisation status (Milestone 2 J.8)', () => {
+    const e = 'organization.status';
+    const moves = [['active', 'suspended'], ['active', 'offboarding'], ['suspended', 'active'], ['suspended', 'offboarding'], ['offboarding', 'active'], ['offboarding', 'archived']] as const;
+    for (const [from, to] of moves) {
+      expectRow(e, [from, to, 'ops.tenants.manage']);
+      const [row] = transitionsVia(e, from, to, 'ops.organizations.status');
+      expect(row?.requires, `${from} to ${to}`).toEqual(to === 'offboarding' || to === 'archived' ? ['reason', 'confirmSlug'] : ['reason']);
+    }
+    expect(MACHINES[e].transitions).toHaveLength(moves.length);
+    for (const to of ['active', 'suspended', 'offboarding']) expectNoRow(e, 'archived', to);
+    expectNoRow(e, 'active', 'archived');
+    expectNoRow(e, 'suspended', 'archived');
+    expect(machinePermissions(e, 'ops.organizations.status')).toEqual(['ops.tenants.manage']);
+    expect(routeById('ops.organizations.status').permission).toBe('ops.tenants.manage');
   });
 });

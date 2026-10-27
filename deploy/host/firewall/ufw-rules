@@ -1,0 +1,12 @@
+# Inbound rules of the host firewall, applied by deploy/scripts/bootstrap-host.sh
+# (docs/saas/bootstrap.md). Everything else that comes in is denied.
+# Columns: ufw action, port and protocol, rule comment.
+#
+# limit: ufw refuses the 6th new SSH connection from one address within
+# 30 seconds (at most 5 are allowed), which slows down password and key
+# guessing.
+limit 22/tcp  mscd-ssh
+# Caddy: HTTP (certificate checks and the redirect to HTTPS), HTTPS, HTTP/3.
+allow 80/tcp  mscd-http
+allow 443/tcp mscd-https
+allow 443/udp mscd-http3

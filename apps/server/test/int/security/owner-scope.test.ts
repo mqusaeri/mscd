@@ -12,9 +12,10 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
 import {
-  addFixtureUser, callRoute, createFullApp, demoSession, exampleInput, msIdOf, resetRateLimits, rowsIn, sessionFor, userIdOf,
+  addFixtureUser, callRoute, createFullApp, demoSession, exampleInput, msIdOf, pendingStub, resetRateLimits, rowsIn, sessionFor, userIdOf,
   type Client, type FullApp, type FixtureUser, type RouteInput,
 } from '../contract/harness';
+import { DIRECT, M2_READ_TABLES } from './record-tables';
 
 /** GET routes of a signed-in user that read one system. */
 const MS_READS: readonly RouteDef[] = API_ROUTES.filter(
@@ -133,14 +134,20 @@ function unpinnedKeys(body: unknown, self: string, handles: ReadonlySet<string>,
   return out;
 }
 
-/** A valid input of a GET route for a system, with real ids where the route needs one. */
+/**
+ * A valid input of a GET route for a system, with real ids where the route needs one: the record table of a
+ * Milestone 2 route comes from its package's record-tables file (Milestone 2 F).
+ */
 async function readInput(db: ReturnType<typeof useTestDatabase>, def: RouteDef, org: 'ndt' | 'tst', ms: string): Promise<RouteInput | null> {
   const msId = await msIdOf(db, org, ms);
   const names = pathParamNames(def.path);
   const ids: Record<string, string> = {};
   if (names.includes('id')) {
-    const table = def.id.startsWith('evidence-packs') ? 'evidence_pack' : 'audit_event';
-    const [row] = await rowsIn<{ id: string }>(db, org, sql`select id from ${sql.table(table)} where management_system_id = ${msId} and deleted_at is null limit 1`);
+    const table = M2_READ_TABLES[def.id] ?? (def.id.startsWith('evidence-packs') ? 'evidence_pack' : 'audit_event');
+    const [row] = DIRECT.has(table)
+      ? await rowsIn<{ id: string }>(db, org, sql`select id from ${sql.table(table)} where management_system_id = ${msId} and deleted_at is null limit 1`)
+      : await rowsIn<{ id: string }>(db, org, sql`select x.id from ${sql.table(table)} x where x.deleted_at is null and exists (select 1 from entity_ms_link l
+          where l.entity_type = ${table} and l.entity_id = x.id and l.management_system_id = ${msId} and l.deleted_at is null) limit 1`);
     if (!row) return null;
     ids.id = row.id;
   }
@@ -178,7 +185,7 @@ describe('J.5 owner scope and read projections on every GET route', () => {
       if (!input) continue;
       const reply = await callRoute(nobody, def, input);
       problems.push(...reply.violations);
-      if (reply.status === 403 || reply.status === 404) continue;
+      if (reply.status === 403 || reply.status === 404 || pendingStub(def, input, reply)) continue;
       if (reply.status !== 200) {
         problems.push(`${def.id}: ${reply.status} ${reply.text.slice(0, 160)}`);
         continue;
@@ -305,7 +312,7 @@ describe('J.5 owner scope and read projections on every GET route', () => {
       if (!input) continue;
       const reply = await callRoute(hendra, def, input);
       problems.push(...reply.violations);
-      if (reply.status === 403 || reply.status === 404) continue;
+      if (reply.status === 403 || reply.status === 404 || pendingStub(def, input, reply)) continue;
       if (reply.status !== 200) {
         problems.push(`${def.id}: ${reply.status} ${reply.text.slice(0, 160)}`);
         continue;

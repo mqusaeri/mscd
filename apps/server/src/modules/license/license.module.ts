@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { LICENCE_GATE } from '../../common/tokens';
+import { EntitlementsModule } from './entitlements.module';
 import { LicenseCheckJob } from './license-check.job';
 import { LicenseController } from './license.controller';
 import { LicenceGateService } from './licence-gate';
@@ -13,6 +14,8 @@ import { TRUST_ANCHORS, compiledTrustAnchors } from './trust-anchors';
  */
 @Global()
 @Module({
+  // Milestone 2 sub-module (D.3): per-organisation entitlements of the SaaS track (M2-S10).
+  imports: [EntitlementsModule],
   controllers: [LicenseController],
   providers: [
     { provide: TRUST_ANCHORS, useFactory: compiledTrustAnchors },

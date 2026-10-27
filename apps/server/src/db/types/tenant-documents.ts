@@ -31,6 +31,11 @@ export interface DocumentTable {
   pending_due_at: string | null;
   review_started_at: string | null;
   position: Generated<number>;
+  /** Milestone 2 (tenant 0008, D.2): external documents. */
+  origin: Generated<'internal' | 'external'>;
+  external_source: string | null;
+  external_ref: string | null;
+  received_at: string | null;
 }
 
 /** `document_version` */
@@ -51,6 +56,8 @@ export interface DocumentVersionTable {
   approved_by: string | null;
   approved_at: string | null;
   rejection_note: string | null;
+  /** Milestone 2 (tenant 0008, D.2). */
+  change_summary: string | null;
 }
 
 /** `applicability_entry` */
@@ -214,12 +221,13 @@ export const TABLE_COLUMNS = tableColumns<TenantDocumentTables>()({
   document: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'doc_code', 'title',
     'doc_type', 'status', 'classification', 'owner_user_id', 'approver_user_id', 'current_version_id', 'approved_at',
-    'next_review_at', 'is_org_wide', 'pending_holder_user_id', 'pending_due_at', 'review_started_at', 'position',
+    'next_review_at', 'is_org_wide', 'pending_holder_user_id', 'pending_due_at', 'review_started_at', 'position', 'origin',
+    'external_source', 'external_ref', 'received_at',
   ],
   document_version: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'document_id',
     'version_label', 'storage_object_id', 'status', 'submitted_by', 'submitted_at', 'approved_by', 'approved_at',
-    'rejection_note',
+    'rejection_note', 'change_summary',
   ],
   applicability_entry: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',

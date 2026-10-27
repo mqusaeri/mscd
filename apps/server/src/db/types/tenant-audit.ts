@@ -18,7 +18,7 @@ export interface AuditEventTable {
   deleted_at: Date | null;
   management_system_id: string;
   certification_cycle_id: string | null;
-  event_type: 'stage1' | 'stage2' | 'surveillance' | 'recertification' | 'transition' | 'special';
+  event_type: 'stage1' | 'stage2' | 'surveillance' | 'recertification' | 'transition' | 'special' | 'internal_audit';
   name_en: string;
   name_id: string;
   short_label: string;
@@ -29,6 +29,9 @@ export interface AuditEventTable {
   prep_window_days: Generated<number>;
   outcome: 'recommended' | 'recommended_with_conditions' | 'not_recommended' | null;
   outcome_summary: string | null;
+  /** Milestone 2 (tenant 0008, D.2): internal audit scope and report. */
+  scope_text: string | null;
+  report_document_id: string | null;
 }
 
 /** `audit_prep_task` */
@@ -80,6 +83,8 @@ export interface FindingTable {
   closed_by_user_id: string | null;
   close_note: string | null;
   position: Generated<number>;
+  /** Milestone 2 (tenant 0008, D.2): clause or control code of the edition. */
+  target_code: string | null;
 }
 
 /** `corrective_action` */
@@ -275,7 +280,8 @@ export const TABLE_COLUMNS = tableColumns<TenantAuditTables>()({
   audit_event: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'certification_cycle_id', 'event_type', 'name_en', 'name_id', 'short_label', 'scheduled_at',
-    'audit_days', 'lead_auditor_name', 'expected_focus', 'prep_window_days', 'outcome', 'outcome_summary',
+    'audit_days', 'lead_auditor_name', 'expected_focus', 'prep_window_days', 'outcome', 'outcome_summary', 'scope_text',
+    'report_document_id',
   ],
   audit_prep_task: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'audit_event_id',
@@ -286,7 +292,7 @@ export const TABLE_COLUMNS = tableColumns<TenantAuditTables>()({
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'framework_version_id', 'audit_event_id', 'code', 'title', 'classification', 'clause_ref',
     'source', 'status', 'status_note', 'owner_user_id', 'raised_at', 'due_at', 'rca_text', 'systemic_check_text',
-    'closed_at', 'closed_by_user_id', 'close_note', 'position',
+    'closed_at', 'closed_by_user_id', 'close_note', 'position', 'target_code',
   ],
   corrective_action: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
