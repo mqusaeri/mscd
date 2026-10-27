@@ -5,12 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
 import type { LicenceView as WireLicence } from '@mscd/shared';
-import { ApiClient } from '../../src/data/api/ApiClient';
+import { ApiClient, CONNECTION_LOST } from '../../src/data/api/ApiClient';
+import type { ApiError } from '../../src/data/api/ApiClient';
 import screen from '../../src/screens/license/index';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/license/routes';
 import { createApiAdapter, fromView } from '../../src/screens/license/api';
 import { createSampleAdapter, fromSample, isoOfDay, resetSampleLicence, usageOf } from '../../src/screens/license/sample';
-import { InstallDialog, LicenceView, adapterFor, deferredAdapter, installError, stateBadges } from '../../src/screens/license/Screen';
+import { InstallDialog, LicenceView, adapterFor, deferredAdapter, installError, loadLicence, stateBadges } from '../../src/screens/license/Screen';
 import { TEXT } from '../../src/screens/license/text';
 import { HostCtx } from '../../src/screens/ui';
 import type { HostContext, Lang } from '../../src/screens/types';
@@ -178,6 +179,19 @@ describe('Licence sample adapter', () => {
     expect(await adapter.load()).toMatchObject({ ok: true, licence: { licenseId: 'LIC-SAMPLE' } });
     expect(await adapter.install({ license_id: 'LIC-NEXT', signature: 'ed25519:x' })).toMatchObject({ ok: true, licence: { licenseId: 'LIC-NEXT' } });
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('the screen load turns a failed module load into an error with Try again, and the next load retries', async () => {
+    const load = vi.fn<() => Promise<ReturnType<typeof createSampleAdapter>>>()
+      .mockRejectedValueOnce(new Error('chunk not loaded'))
+      .mockResolvedValue(createSampleAdapter(() => D));
+    const adapter = deferredAdapter(load);
+    expect(await loadLicence(adapter)).toEqual({ loading: false, licence: null, error: { status: 0, message: CONNECTION_LOST } });
+    expect(await loadLicence(adapter)).toMatchObject({ loading: false, error: null, licence: { licenseId: 'LIC-SAMPLE' } });
+    expect(load).toHaveBeenCalledTimes(2);
+    const refused: ApiError = { status: 403, message: ['No access', 'Tanpa akses'] };
+    expect(await loadLicence({ load: async () => ({ ok: false, error: refused }), install: async () => ({ ok: false, error: refused }) }))
+      .toEqual({ loading: false, licence: null, error: refused });
   });
 });
 

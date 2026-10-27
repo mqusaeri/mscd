@@ -2,6 +2,7 @@
 // dates, the seats and management systems in use against their limits, what it includes, and "Install licence"
 // for whoever holds `license.manage` (a Tenant Admin with single tenancy; the platform operator with multi tenancy).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { ApiClient, ApiError } from '../../data/api/ApiClient';
 import type { ControllerData } from '../../data/types';
 import type { HostContext, ScreenProps } from '../types';
@@ -39,6 +40,20 @@ export function adapterFor(client: ApiClient | null, getD: () => ControllerData 
   return import.meta.env.VITE_DATA_SOURCE === 'api'
     ? createApiAdapter(client)
     : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(getD)));
+}
+
+/** What the screen shows: a load in progress, the licence (null when none is installed) or the error of the last load. */
+export type LoadState = { loading: boolean; licence: LicenceModel | null; error: ApiError | null };
+
+/**
+ * Loads the licence into the state of the screen. It never rejects: a failed module load of the deferred adapter
+ * becomes a connection error, so the screen shows "Try again" and the next call loads the module again.
+ */
+export function loadLicence(adapter: LicenceAdapter): Promise<LoadState> {
+  return adapter.load().then(
+    (res): LoadState => (res.ok ? { loading: false, licence: res.licence, error: null } : { loading: false, licence: null, error: res.error }),
+    (): LoadState => ({ loading: false, licence: null, error: { status: 0, message: CONNECTION_LOST } }),
+  );
 }
 
 /** The state badges of a licence: its state, and Expired once the end date has passed. */
@@ -211,11 +226,11 @@ export default function LicenceScreen({ ctx }: ScreenProps) {
   data.current = ctx.D;
   const { client } = ctx;
   const adapter = useMemo(() => adapterFor(client, () => data.current), [client]);
-  const [state, setState] = useState<{ loading: boolean; licence: LicenceModel | null; error: ApiError | null }>({ loading: true, licence: null, error: null });
+  const [state, setState] = useState<LoadState>({ loading: true, licence: null, error: null });
   const [open, setOpen] = useState(false);
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true, error: null }));
-    adapter.load().then((res) => setState(res.ok ? { loading: false, licence: res.licence, error: null } : { loading: false, licence: null, error: res.error }));
+    loadLicence(adapter).then(setState);
   }, [adapter]);
   useEffect(() => load(), [load]);
   // The page action "Install licence" opens the dialog through the screen params (index.tsx).

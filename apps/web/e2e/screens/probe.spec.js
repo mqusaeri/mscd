@@ -74,15 +74,28 @@ test.describe('Host screen probe @sample-only', () => {
 // The fixture is bundled with React's development build and runs on a blank page, outside the app.
 const STRICT_FORM = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../test/fixtures/screens/strict-form.tsx');
 
+/** Bundles the fixture into one script with Vite, a declared dev dependency of the web workspace. */
+async function bundleStrictForm() {
+  const { build } = await import('vite');
+  const nodeEnv = process.env.NODE_ENV;
+  try {
+    const out = await build({
+      configFile: false, root: path.dirname(STRICT_FORM), mode: 'development', logLevel: 'silent', publicDir: false,
+      define: { 'process.env.NODE_ENV': '"development"' }, esbuild: { jsx: 'automatic', jsxDev: false },
+      build: { write: false, minify: false, target: 'es2020', lib: { entry: STRICT_FORM, formats: ['iife'], name: 'StrictForm' } },
+    });
+    return (Array.isArray(out) ? out[0] : out).output[0].code;
+  } finally {
+    // Vite sets NODE_ENV for the process when it is unset; the worker keeps its own value.
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+  }
+}
+
 test.describe('Screen helpers under StrictMode @sample-only', () => {
   test('useMutation shows the field error of a refused save, then allows a second save', async ({ page }) => {
-    const { build } = await import('esbuild');
-    const out = await build({
-      entryPoints: [STRICT_FORM], bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020',
-      jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'silent',
-    });
     await page.setContent('<!doctype html><html lang="en"><body><div id="root"></div></body></html>');
-    await page.addScriptTag({ content: out.outputFiles[0].text });
+    await page.addScriptTag({ content: await bundleStrictForm() });
     const save = page.locator('button', { hasText: 'Save' });
     await save.click();
     await expect(page.locator('[role="alert"]')).toHaveText('Name is too short');

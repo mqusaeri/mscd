@@ -1,5 +1,6 @@
 import {
   test, expect, SCREENS, SCREENS_ID, HOST_METAS, openApp, openScreen, go, ui, list, listRows, groupRows, tabs, switchMs, closeDrawer,
+  layerAfterAction,
 } from './helpers.js';
 import * as D from '../src/data/mscd-data.js';
 
@@ -96,8 +97,8 @@ async function walkHost(page, meta, query) {
   await snap(meta.id);
   for (const action of meta.pageActions) {
     await page.locator(`main button[title="${action[lang]}"]`).first().click();
-    const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
-    if (!(await layer.count())) continue;
+    const layer = await layerAfterAction(page);
+    if (!layer) continue;
     await snap(`${meta.id}, ${action[0]}`);
     await page.keyboard.press('Escape');
     await expect(layer).toHaveCount(0);

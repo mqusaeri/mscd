@@ -1,4 +1,4 @@
-import { test, expect, SCREENS, HOST_METAS, openApp, go, openScreen } from './helpers.js';
+import { test, expect, SCREENS, HOST_METAS, openApp, go, openScreen, layerAfterAction } from './helpers.js';
 
 // WCAG 2.1 AA: 4.5:1 for normal text, 3:1 for large text (24px, or 18.66px bold).
 // Every visible text element is measured against the first opaque background behind it. Text is also at least 12px
@@ -72,8 +72,8 @@ for (const theme of ['light', 'dark']) {
       if (bad.length) failures[meta.id] = bad;
       for (const [label] of meta.pageActions) {
         await page.locator(`main button[title="${label}"]`).first().click();
-        const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
-        if (!(await layer.count())) continue;
+        const layer = await layerAfterAction(page);
+        if (!layer) continue;
         await page.waitForTimeout(400);
         const inDialog = await lowContrast(page);
         if (inDialog.length) failures[`${meta.id}, ${label}`] = inDialog;

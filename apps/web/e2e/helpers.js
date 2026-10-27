@@ -154,6 +154,8 @@ export async function openScreen(page, meta, query = '') {
     await page.goto(`/?screen=${encodeURIComponent(meta.id)}&persona=${encodeURIComponent(meta.sampleRole)}${query ? '&' + query : ''}`);
     await expect(page.locator('main h1')).toHaveText(label);
   }
+  // The title and page actions show at once; the body is a lazy chunk (C.6), in place once its data-screen box is.
+  await expect(page.locator(`main [data-screen="${meta.id}"]`)).toBeVisible();
 }
 // Screens with a filterable list and row details (the drill-down screens).
 export const DRILL_SCREENS = ['Controls & requirements', 'Document register', 'Chain stages', 'Evidence freshness', 'Review calendar', 'Storage repositories'];
@@ -329,6 +331,18 @@ export async function contrastProblems(page, min = 3, scope = SCOPE) {
 }
 export async function expectReadableText(page, min = 3) {
   expect(await contrastProblems(page, min), `text below ${min}:1 contrast`).toEqual([]);
+}
+
+// The modal or drawer a page action opened, or null when it opened none. A host screen opens its dialog after React
+// has handled the click (through the screen's params, C.6), so this waits a moment instead of counting at once.
+export async function layerAfterAction(page, timeout = 2000) {
+  const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
+  try {
+    await layer.first().waitFor({ state: 'visible', timeout });
+    return layer;
+  } catch {
+    return null;
+  }
 }
 
 // The open host modal or drawer (and the generated ones): every text at 4.5:1 and at least 12px (MILESTONE-2 C.7).
