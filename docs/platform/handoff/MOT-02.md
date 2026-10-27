@@ -50,22 +50,23 @@ The sample build that Playwright serves on 4173 has no sign-in pages. `e2e/auth-
 ## Follow-ups
 
 - M2-S11 (owns `apps/web/src/auth/**` in wave 3b): keep the refs and the effect of `BrandPanel` and the `canvas.au-threads` element. New brand text in the panel needs its selector in `TEXT_SELECTOR` of `motion/BrandMotion.ts`, so it gets a quiet zone; the contrast test of the browser spec fails otherwise. New or renamed chain labels must keep the clearance test of `motion.test.tsx` passing (a longer word may need a new `tx` or `ty` in `CHAIN_LABELS`).
+- Orchestrator: two checks of the common acceptance fail in the live tree because of other packages, and MOT-02 changes no file in either. Re-run `MSCD_TEST_CONTAINER_PREFIX=<prefix> npm run test:int -w @mscd/server -- test/int/seed test/int/parity` after the version expectations of M2-03 are applied (its `m2-03-version-tests.patch`, rule R-15), and the full `CI=1 npm run test:e2e -w @mscd/web` after M2-01 finishes its controller and view edits, before the milestone is marked green.
 
 ## Acceptance
 
-Fix round (findings: the unit test file outside the acceptance run, and chain labels touching the chain line at some layouts). Other packages were editing the web controller, views, sample data and the pack modules in the same tree during this run, so the two suite-wide commands were also run on a copy of the last checkpoint commit (which holds the MOT-02 source changes) with the two MOT-02 test files of this round.
+Round 3 (minor findings: this note was out of date after the `.tsx` include of `vitest.config.js` was committed, there was no recorded run of `e2e/api-only/sign-in.spec.js`, and two checks of the common acceptance failed because of other packages). This round changed this note only; no source or test file of MOT-02 changed. Other packages were still editing the tree (pack modules, web specs) during the run, so the results describe the live tree on 27 October 2026.
 
 | Command | Result |
 |---|---|
-| `npm test -w @mscd/web -- test/auth` | Pass (6 files, 89 tests; `motion.test.tsx` waits for the `.tsx` include, deviation 1) |
-| `vitest run` of `test/auth` with the planned `.tsx` include | Pass (7 files, 112 tests, of which 23 in `motion.test.tsx`) |
-| `CI=1 npm run test:e2e -w @mscd/web -- e2e/auth-motion.spec.js e2e/contrast.spec.js e2e/shell.spec.js` | Pass (22 tests, of which 10 in `e2e/auth-motion.spec.js`) |
-| The new contrast tests at 1000 x 800 and 1280 x 720 (Indonesian) with the old label positions put back in the page | Fail as expected: Risiko and Dokumen at 1.45 (1000 x 800), Risiko at 1.45 (1280 x 720) |
+| `npm test -w @mscd/web -- test/auth` | Pass (7 files, 112 tests, of which 23 in `motion.test.tsx`) |
+| `MSCD_TEST_CONTAINER_PREFIX=mot-02- CI=1 flock /tmp/mscd-stack.lock flock /tmp/mscd-e2e.lock flock -s /tmp/mscd-npm.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/sign-in.spec.js e2e/auth-motion.spec.js` | Pass (15 tests: the 5 of `e2e/api-only/sign-in.spec.js` and the 10 of `e2e/auth-motion.spec.js`). The stack removed its 3 containers at the end |
+| `CI=1 npm run test:e2e -w @mscd/web -- e2e/auth-motion.spec.js e2e/contrast.spec.js e2e/shell.spec.js` | Pass (24 tests, of which 10 in `e2e/auth-motion.spec.js`) |
+| The new contrast tests at 1000 x 800 and 1280 x 720 (Indonesian) with the old label positions put back in the page | Fail as expected (fix round): Risiko and Dokumen at 1.45 (1000 x 800), Risiko at 1.45 (1280 x 720) |
 | `npm run build -w @mscd/web` | Pass |
 | `npm run typecheck` | Pass |
 | `npm run lint` | Pass |
-| `npm test` | Pass |
+| `npm test` | Pass (all workspaces: 330, 273, 88, 2337 and 104 tests) |
 | `npm run check:text` | Pass |
 | `npm run gen:views:check -w @mscd/web` | Pass |
-| `CI=1 npm run test:e2e -w @mscd/web` | Pass on the checkpoint copy (273 tests, the ten of `e2e/auth-motion.spec.js` included). In the live tree, specs of the main app (audit, calendar, chain, controls, display) failed while M2-01 had `MscdApp.jsx`, the views and `styles.css` half changed; none of them opens a sign-in page |
-| `MSCD_TEST_CONTAINER_PREFIX=mot-02- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | 44 of 49 pass in the live tree. The 5 failures expect packs at version 1.0.0 where the tree now builds 1.0.1 and 1.2.1 (pack work in progress in `packages/pack-tools` and `apps/server/src/modules/packs`), and the sample organisation parity; MOT-02 changes no server, pack or sample data file. Passed (49 tests) in the first MOT-02 round |
+| `CI=1 npm run test:e2e -w @mscd/web` | Not run again in round 3, because the E2E lock had a long queue of full runs from other packages; the targeted runs above cover every MOT-02 spec in both projects. Verification of the fix round, live tree: 281 passed, 4 failed (`chain.spec.js:174`, `display.spec.js:178` at 1920px for ISMS and QMS, `screens/probe.spec.js:13` for the licence screen). These are main app and M2-01 screen specs on the sample build, which renders no sign-in page; all 10 tests of `e2e/auth-motion.spec.js` passed in that run. Fix round: pass on a copy of the checkpoint commit (273 tests) |
+| `MSCD_TEST_CONTAINER_PREFIX=mot-02- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | 44 of 49 pass in the live tree, as in the fix round. The 5 failures expect the Milestone 1 pack versions (`ISO22301-2019 1.0.0`, `ISO27001-2022 1.2.0` and so on) and the tree now builds the patch versions of M2-03 (`1.0.1`, `1.2.1`): `seed/demo-template.test.ts`, `seed/scripts.test.ts` (ensure-built) and `parity/snapshots.test.ts` for ndt, bsd and rmn. M2-03 left these expectation changes to the orchestrator (see the follow-up). MOT-02 changes no server, pack or sample data file. Passed (49 tests) in the first MOT-02 round. No mot-02 container is left |
