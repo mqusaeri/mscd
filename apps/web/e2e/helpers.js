@@ -25,10 +25,21 @@ export const test = base.extend({
       if (m.type() === 'error' && !text.startsWith('Failed to load resource')) problems.push('console.error: ' + text);
       if (m.type() === 'warning' && /react|warning/i.test(text)) problems.push('console.warn: ' + text);
     });
+    // Host screens load their data after they open (MILESTONE-2 C.6), so a test that loads another page while such a
+    // read is under way aborts it. The start of every page load is kept to tell those reads from real failures.
+    const loads = [];
+    page.on('request', (r) => {
+      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) loads.push(Date.now());
+    });
     page.on('requestfailed', async (r) => {
       if (/fonts\.(googleapis|gstatic)\.com/.test(r.url())) return;
-      // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
-      if (r.failure()?.errorText === 'net::ERR_ABORTED' && (await r.response().catch(() => null))) return;
+      if (r.failure()?.errorText === 'net::ERR_ABORTED') {
+        // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
+        if (await r.response().catch(() => null)) return;
+        // A read of the api that a later page load of the test cut off.
+        const started = r.timing().startTime;
+        if (['fetch', 'xhr'].includes(r.resourceType()) && r.method() === 'GET' && started > 0 && loads.some((t) => t >= started - 1)) return;
+      }
       problems.push('requestfailed: ' + r.url());
     });
     await use(page);

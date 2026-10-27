@@ -615,10 +615,10 @@ process.stdout.write(`queued ${id}\n`);
         fail "The worker log says the anchor key is $ANCHOR_MISMATCH" \
             "The deployed audit-anchor.key does not belong to this image's key set"
     else
-        pass "The worker log has no line \"$ANCHOR_MISMATCH\""
+        pass "The worker log has no line \"$ANCHOR_MISMATCH\": the deployed anchor key is compiled into the image"
     fi
     if compose logs --since "$since" worker 2>/dev/null | grep -q '"event":"audit.anchor"'; then
-        pass "The worker signed an anchor with the deployed key, which matches the key compiled into the image"
+        pass "The worker signed an anchor (audit.anchor line), so the check above covered a real use of the key"
     else
         fail "The worker wrote no audit.anchor line, so the anchor key was not used" \
             "See: docker compose -p $PROJECT logs worker"
