@@ -52,14 +52,16 @@ node apps/site/check.mjs --only en       # one language
 node apps/site/check.mjs --out /tmp/shots
 ```
 
-The script serves `apps/site` on a free local port and opens both pages at 1440x900 and 390x844, in light and in dark, with the Chromium of Playwright (`@playwright/test` from the root `node_modules`, browsers from `/opt/pw-browsers` when that folder exists). It saves full-page and first-screen screenshots in the output folder (by default `mscd-site-check` in the system temporary folder) and fails on:
+The script serves `apps/site` on a free local port and opens both pages at 1440x900, 390x844 and 320x640 (the WCAG reflow width and the narrowest phone in use), in light and in dark, with the Chromium of Playwright (`@playwright/test` from the root `node_modules`, browsers from `/opt/pw-browsers` when that folder exists). It saves full-page and first-screen screenshots in the output folder (by default `mscd-site-check` in the system temporary folder) and fails on:
 
 - a request to another origin;
 - horizontal overflow, or an element that sticks out of the viewport;
+- text cut off by a box that hides its overflow or by the page edge (text that ends in an ellipsis on purpose is allowed), and text that runs into other text;
 - text under 12px;
 - text with a contrast ratio under 4.5:1. The background is sampled at the position of each text from a screenshot with all text hidden. Text over the hero film is also measured over eight frames of the film. The navigation is measured over the page as well, and the phone menu is measured open;
 - a missing `<title>`, a missing meta description or a wrong `lang`;
 - console errors, failed requests, broken images, a film that does not load or a poster that does not load;
+- a broken film file. Playwright's Chromium cannot decode H.264, so it plays the WebM and never opens the MP4 that Safari and iOS use. The script therefore reads every film file the pages reference from disk: the MP4 must start with an `ftyp` box, keep its `moov` box before the media data and hold an H.264 (`avc1`) track. When `ffprobe` and `ffmpeg` are installed, it also checks the codec (H.264 in yuv420p for the MP4, VP9 for the WebM) and decodes every frame of both files;
 - Sign in or demo links that differ from `site.config.mjs`;
 - a film that keeps playing off screen or in a hidden tab;
 - with reduced motion: any running animation, any requested animation frame, a playing film, or text that is hidden at rest;

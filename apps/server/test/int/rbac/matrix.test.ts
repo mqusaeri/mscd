@@ -105,6 +105,32 @@ describe('J.5 generated RBAC tests: every route and every role of F.6', () => {
     expect(SWEPT.length).toBeGreaterThan(140);
   });
 
+  for (const def of SWEPT) {
+    it(`${def.id}: ${def.method} ${def.path}`, async () => {
+      const mismatches: string[] = [];
+      const violations: string[] = [];
+      for (const { label, member, input } of inputsOf(def)) {
+        await resetRateLimits(db);
+        for (const role of ROLE_KEYS) {
+          const before = await guardDenials(full, def.id);
+          const call = await callRoute(clients[role], def, input);
+          const denied = (await guardDenials(full, def.id)) > before;
+          const expected = expectedAllowed(def, role, member, namesSystem(def, input));
+          if (denied === expected) {
+            mismatches.push(`${role}${label}: expected ${expected ? 'admitted' : 'denied'}, the guard ${denied ? 'denied' : 'admitted'} (${call.status} ${call.text.slice(0, 160)})`);
+          }
+          if (denied && call.status !== 403) mismatches.push(`${role}${label}: a guard denial answered ${call.status}`);
+          violations.push(...call.violations.map((v) => `${role}${label}: ${v}`));
+        }
+      }
+      expect(mismatches).toEqual([]);
+      expect(violations).toEqual([]);
+    });
+  }
+
+  // The two tests below are declared after the sweep, and vitest runs the tests of a file in declaration order, so
+  // the records their setups add (audit events and activities in tst/isms) change no input of the sweep. Tests that
+  // add records go here.
   it('admits the requests a Milestone 2 service refuses itself, which then answer 403 (Milestone 2 F)', async () => {
     const problems: string[] = [];
     for (const refusal of M2_SERVICE_REFUSALS) {
@@ -133,30 +159,6 @@ describe('J.5 generated RBAC tests: every route and every role of F.6', () => {
     expect(problems).toEqual([]);
   });
 
-  for (const def of SWEPT) {
-    it(`${def.id}: ${def.method} ${def.path}`, async () => {
-      const mismatches: string[] = [];
-      const violations: string[] = [];
-      for (const { label, member, input } of inputsOf(def)) {
-        await resetRateLimits(db);
-        for (const role of ROLE_KEYS) {
-          const before = await guardDenials(full, def.id);
-          const call = await callRoute(clients[role], def, input);
-          const denied = (await guardDenials(full, def.id)) > before;
-          const expected = expectedAllowed(def, role, member, namesSystem(def, input));
-          if (denied === expected) {
-            mismatches.push(`${role}${label}: expected ${expected ? 'admitted' : 'denied'}, the guard ${denied ? 'denied' : 'admitted'} (${call.status} ${call.text.slice(0, 160)})`);
-          }
-          if (denied && call.status !== 403) mismatches.push(`${role}${label}: a guard denial answered ${call.status}`);
-          violations.push(...call.violations.map((v) => `${role}${label}: ${v}`));
-        }
-      }
-      expect(mismatches).toEqual([]);
-      expect(violations).toEqual([]);
-    });
-  }
-
-  // Runs after the sweep, so the records it adds change no input of the sweep.
   it('lets an Internal Auditor change an internal audit and plan its activities (Milestone 2 D.2)', async () => {
     await resetRateLimits(db);
     const route = (id: string) => API_ROUTES.find((r) => r.id === id)!;

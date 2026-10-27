@@ -140,10 +140,10 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
 .dot--ok{background:var(--ok)}.dot--warn{background:var(--warn)}.dot--bad{background:var(--bad)}
 
 .viewer{border-radius:22px;background:var(--sur);border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden}
-.viewer__bar{display:flex;align-items:center;gap:8px;height:48px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--sur2)}
+.viewer__bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:48px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--sur2)}
 .viewer__bar i{width:10px;height:10px;border-radius:50%;background:var(--line2)}
 .viewer__title{margin-left:10px;font-size:14px;font-weight:600;white-space:nowrap}
-.viewer__tag{margin-left:auto;white-space:nowrap;font:500 12px/1 var(--ffm);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);border:1px solid var(--line2);border-radius:999px;padding:6px 10px}
+.viewer__tag{margin-left:auto;flex:none;white-space:nowrap;font:500 12px/1 var(--ffm);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);border:1px solid var(--line2);border-radius:999px;padding:6px 10px}
 .viewer__query{display:flex;align-items:center;gap:10px;margin:18px 20px 6px;padding:0 14px;height:44px;border-radius:12px;border:1px solid var(--line2);font:500 14px/1 var(--ffm);color:var(--ink)}
 .viewer__query svg{width:16px;height:16px;color:var(--ink3)}
 .viewer__query b{font-weight:500;white-space:nowrap}
@@ -164,6 +164,17 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
 .pill--ok{color:var(--ok);background:var(--okbg)}
 .pill--warn{color:var(--warn);background:var(--warnbg)}
 .pill--bad{color:var(--bad);background:var(--badbg)}
+
+/* Named accountability */
+.own{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);grid-template-areas:"list text";gap:clamp(40px,6vw,88px);align-items:center}
+.own__text{grid-area:text}
+.own__list{grid-area:list;border-radius:24px;border:1px solid var(--line);background:var(--sur);box-shadow:var(--shadow);padding:6px 32px}
+.own__item{display:grid;grid-template-columns:44px minmax(0,1fr);gap:20px;padding:26px 0}
+.own__item+.own__item{border-top:1px solid var(--line)}
+.own__ic{width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--acc-soft);color:var(--acc)}
+.own__ic svg{width:22px;height:22px}
+.own h3{font-size:18px;font-weight:600;line-height:1.3;letter-spacing:-.01em}
+.own__item p{margin-top:6px;font-size:15px;line-height:1.55;color:var(--ink2)}
 
 /* Frameworks */
 .hs{margin-top:56px;border-radius:28px;border:1px solid var(--line);background:var(--sur);padding:clamp(24px,4vw,48px);display:grid;grid-template-columns:minmax(200px,250px) minmax(48px,1fr) minmax(200px,240px) minmax(40px,.5fr) minmax(170px,200px);align-items:stretch;box-shadow:var(--shadow)}
@@ -317,6 +328,7 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .nav__menu .nav__menu-row a.btn--line{border:1px solid rgba(242,238,231,.26)}
   .nav.is-paper .nav__menu .nav__menu-row a.btn--line{border-color:var(--line2)}
   .how{grid-template-columns:minmax(0,1fr)}
+  .own{grid-template-columns:minmax(0,1fr);grid-template-areas:"text" "list"}
   .hs{grid-template-columns:minmax(0,1fr);gap:0;padding:24px}
   .hs__std{grid-template-rows:none;grid-template-columns:repeat(2,minmax(0,1fr))}
   .hs__wire{height:48px}
@@ -352,8 +364,9 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .hero{height:auto;min-height:calc(100svh - 2 * var(--inset));max-height:none}
   .hero__inner{padding-top:104px}
   .eyebrow{letter-spacing:.04em}
-  .hero h1{margin-top:18px;font-size:clamp(40px,11.4vw,56px);line-height:1.02}
-  .hero h1:lang(id){font-size:clamp(34px,9.9vw,52px)}
+  .hero h1{margin-top:18px;font-size:clamp(32px,10.8vw,56px);line-height:1.02}
+  .hero h1 .line{white-space:normal}
+  .hero h1:lang(id){font-size:clamp(28px,9.6vw,52px)}
   .hero__sub{margin-top:18px}
   .hero__cta{margin-top:26px}
   .hero__cta .btn{flex:1 1 auto}
@@ -367,7 +380,14 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .chain li::before{box-shadow:none}
   .facts{grid-template-columns:minmax(0,1fr)}
   .fact,.fact:nth-child(2n){padding:28px 0;border-left:0}
+  .viewer__bar i{display:none}
+  .viewer__title{margin-left:0}
+  .viewer__tag{letter-spacing:.04em}
   .link{grid-template-columns:28px minmax(0,1fr)}
+  .own__list{padding:2px 20px}
+  .own__item{grid-template-columns:40px minmax(0,1fr);gap:16px;padding:22px 0}
+  .own__ic{width:40px;height:40px;border-radius:12px}
+  .own__ic svg{width:20px;height:20px}
   .link .pill{grid-column:2;justify-self:start}
   .link__meta{grid-column:2}
   .links::before{left:31px}
@@ -381,6 +401,14 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
 }
 @media (max-width:480px){
   .hs__std{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:359px){
+  /* Three labels such as "04 Document" no longer fit in a row: two per row. */
+  .chain li{flex-basis:50%}
+  /* The viewer tag moves under the title. */
+  .viewer__tag{margin-left:0}
+  /* One more row of links: the film band moves up by one row (64.6px) to stay clear of them. */
+  .hero .stage__film{bottom:calc(248.2px - 22.5vw)}
 }
 @media (max-height:720px) and (min-width:641px){
   .hero h1{font-size:clamp(44px,5.4vw,76px)}

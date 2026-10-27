@@ -27,7 +27,7 @@
     <a href="#security">Security</a>
   </nav>
   <div class="nav__end">
-    <a class="nav__lang" href="id/" hreflang="id" lang="id" aria-label="Bahasa Indonesia">ID</a>
+    <a class="nav__lang" href="id/" hreflang="id" lang="id" aria-label="ID, Bahasa Indonesia">ID</a>
     <a class="btn btn--line btn--sm" href="https://app.example.com/" data-app-link>Sign in</a>
     <a class="btn btn--acc btn--sm" href="mailto:sales@example.com?subject=MSCD%20demo%20request" data-demo-link>Request a demo</a>
     <button class="nav__burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="Open menu" data-label-open="Open menu" data-label-close="Close menu" data-burger><span></span></button>
@@ -103,9 +103,23 @@
           <li class="link" data-st="ok"><span class="link__node"></span><div class="link__main"><p class="link__kind">Control<b>A.5.15</b></p><p class="link__title">Access control</p></div><span class="pill pill--ok">Ready</span></li>
           <li class="link" data-st="bad"><span class="link__node"></span><div class="link__main"><p class="link__kind">Document<b>PRC-07</b></p><p class="link__title">Access control procedure</p></div><span class="pill pill--bad">Broken</span><p class="link__meta">Review date passed. Every control it implements is held back</p></li>
           <li class="link" data-st="warn"><span class="link__node"></span><div class="link__main"><p class="link__kind">Evidence<b>EV-0280</b></p><p class="link__title">Quarterly access review</p></div><span class="pill pill--warn">Pending</span><p class="link__meta">Next evidence due before the audit, held by the control owner</p></li>
-          <li class="link" data-st="ok"><span class="link__node"></span><div class="link__main"><p class="link__kind">Finding</p><p class="link__title">No open finding on this chain</p></div><span class="pill pill--ok">Ready</span></li>
         </ol>
       </figure>
+    </div>
+  </section>
+
+  <section class="section" id="accountability" aria-labelledby="accountability-title">
+    <div class="container own">
+      <div class="own__text reveal">
+        <p class="eyebrow">Named accountability</p>
+        <h2 id="accountability-title">What is still pending, who holds it, and when it is due.</h2>
+        <p class="lede">Each management system keeps one list of open work, grouped by the person who holds it.</p>
+      </div>
+      <ul class="own__list reveal">
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></span><div><h3>A named person on every pending item</h3><p>Each item is held by one person and has a due date. A role on its own never holds work.</p></div></li>
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg></span><div><h3>Reminders sent and logged by the platform</h3><p>Remind one holder or every holder at once, by email and in the app. Each reminder is logged.</p></div></li>
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/><path d="M9.5 15.5l2 2 3.5-4"/></svg></span><div><h3>An after-audit flag that follows the audit date</h3><p>Items due after the audit date are flagged. When the audit date moves, the flags are recalculated and the holders are told.</p></div></li>
+      </ul>
     </div>
   </section>
 

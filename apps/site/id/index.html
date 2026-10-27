@@ -27,7 +27,7 @@
     <a href="#security">Keamanan</a>
   </nav>
   <div class="nav__end">
-    <a class="nav__lang" href="../" hreflang="en" lang="en" aria-label="English">EN</a>
+    <a class="nav__lang" href="../" hreflang="en" lang="en" aria-label="EN, English">EN</a>
     <a class="btn btn--line btn--sm" href="https://app.example.com/" data-app-link>Masuk</a>
     <a class="btn btn--acc btn--sm" href="mailto:sales@example.com?subject=Permintaan%20demo%20MSCD" data-demo-link>Minta demo</a>
     <button class="nav__burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="Buka menu" data-label-open="Buka menu" data-label-close="Tutup menu" data-burger><span></span></button>
@@ -103,9 +103,23 @@
           <li class="link" data-st="ok"><span class="link__node"></span><div class="link__main"><p class="link__kind">Kontrol<b>A.5.15</b></p><p class="link__title">Kendali akses</p></div><span class="pill pill--ok">Siap</span></li>
           <li class="link" data-st="bad"><span class="link__node"></span><div class="link__main"><p class="link__kind">Dokumen<b>PRC-07</b></p><p class="link__title">Prosedur kendali akses</p></div><span class="pill pill--bad">Putus</span><p class="link__meta">Tanggal tinjauan terlewati. Setiap kontrol yang dijalankannya ikut tertahan</p></li>
           <li class="link" data-st="warn"><span class="link__node"></span><div class="link__main"><p class="link__kind">Bukti<b>EV-0280</b></p><p class="link__title">Tinjauan akses triwulanan</p></div><span class="pill pill--warn">Tertunda</span><p class="link__meta">Bukti berikutnya jatuh tempo sebelum audit, dipegang pemilik kontrol</p></li>
-          <li class="link" data-st="ok"><span class="link__node"></span><div class="link__main"><p class="link__kind">Temuan</p><p class="link__title">Tidak ada temuan terbuka pada rantai ini</p></div><span class="pill pill--ok">Siap</span></li>
         </ol>
       </figure>
+    </div>
+  </section>
+
+  <section class="section" id="accountability" aria-labelledby="accountability-title">
+    <div class="container own">
+      <div class="own__text reveal">
+        <p class="eyebrow">Akuntabilitas per orang</p>
+        <h2 id="accountability-title">Apa yang masih tertunda, siapa yang memegangnya, dan kapan jatuh temponya.</h2>
+        <p class="lede">Setiap sistem manajemen punya satu daftar pekerjaan terbuka, dikelompokkan menurut orang yang memegangnya.</p>
+      </div>
+      <ul class="own__list reveal">
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></span><div><h3>Orang tertentu pada setiap item tertunda</h3><p>Setiap item dipegang satu orang dan punya tanggal jatuh tempo. Peran saja tidak pernah memegang pekerjaan.</p></div></li>
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg></span><div><h3>Pengingat dikirim dan dicatat oleh platform</h3><p>Ingatkan satu pemegang atau semua pemegang sekaligus, lewat email dan di aplikasi. Setiap pengingat dicatat.</p></div></li>
+        <li class="own__item"><span class="own__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/><path d="M9.5 15.5l2 2 3.5-4"/></svg></span><div><h3>Penanda setelah audit yang mengikuti tanggal audit</h3><p>Item yang jatuh tempo setelah tanggal audit ditandai. Saat tanggal audit bergeser, penandanya dihitung ulang dan pemegangnya diberi tahu.</p></div></li>
+      </ul>
     </div>
   </section>
 

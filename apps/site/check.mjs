@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // Quality check of the landing site (MOT-01). Serves apps/site on a free local port, opens both
-// languages at 1440x900 and 390x844 in light and dark, saves screenshots, and fails on:
-//   a request to another origin, horizontal overflow, text under 12px, text contrast under 4.5:1
-//   (background sampled at the text position, over several frames of the hero film), a missing
-//   <title> or meta description, console errors, broken media, links that differ from
-//   site.config.mjs, and, with reduced motion, any running animation, loop or playing video.
+// languages at 1440x900, 390x844 and 320x640 in light and dark, saves screenshots, and fails on:
+//   a request to another origin, horizontal overflow, text cut off by a clipping box, text under
+//   12px, text contrast under 4.5:1 (background sampled at the text position, over several frames
+//   of the hero film), a missing <title> or meta description, console errors, broken media (the
+//   H.264 file is checked on disk, because Playwright's Chromium cannot decode it), links that
+//   differ from site.config.mjs, and, with reduced motion, any running animation, loop or video.
 //
 //   node apps/site/check.mjs [--out <folder for screenshots>] [--only en|id]
 // The functions passed to page.evaluate run in the browser, so they use its globals.
 /* global window, document, NodeFilter, getComputedStyle, requestAnimationFrame, scrollX, scrollY, innerHeight, Image */
+import { spawnSync } from 'node:child_process';
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -39,6 +41,8 @@ const PAGES = [
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844, isMobile: true, hasTouch: true },
+  // 320 CSS px is the WCAG reflow width and the narrowest phone in use.
+  { name: 'narrow', width: 320, height: 640, isMobile: true, hasTouch: true },
 ];
 const SCHEMES = ['light', 'dark'];
 
@@ -86,6 +90,90 @@ for (const page of PAGE_FILES) {
   if (!existsSync(join(SITE, page))) { fail(page, 'page is missing'); continue; }
   const html = readFileSync(join(SITE, page), 'utf8');
   if (applyConfig(html) !== html) fail(page, 'links differ from site.config.mjs: run node apps/site/apply-config.mjs');
+}
+
+// ---------- Media files on disk ----------
+// Playwright's Chromium has no H.264 decoder, so it plays the WebM and never opens the MP4 that
+// Safari and iOS use. Check every film file the pages reference: the MP4 box structure always,
+// and a full decode with ffprobe and ffmpeg when they are installed.
+function mp4Boxes(buf, start, end) {
+  const boxes = [];
+  for (let at = start; at + 8 <= end;) {
+    let size = buf.readUInt32BE(at);
+    const type = buf.toString('latin1', at + 4, at + 8);
+    let header = 8;
+    if (size === 1) { size = Number(buf.readBigUInt64BE(at + 8)); header = 16; } else if (size === 0) size = end - at;
+    if (size < header || at + size > end) { boxes.push({ type, start: at, end: at + size, header, broken: true }); break; }
+    boxes.push({ type, start: at, end: at + size, header });
+    at += size;
+  }
+  return boxes;
+}
+
+function checkMp4(file) {
+  const problems = [];
+  const buf = readFileSync(file);
+  const top = mp4Boxes(buf, 0, buf.length);
+  if (!top.length || top[0].type !== 'ftyp') problems.push('does not start with an ftyp box');
+  if (top.some((b) => b.broken)) problems.push('a top-level box runs past the end of the file');
+  const moov = top.find((b) => b.type === 'moov');
+  const mdat = top.find((b) => b.type === 'mdat');
+  if (!moov) problems.push('no moov box');
+  if (!mdat || mdat.end - mdat.start <= mdat.header) problems.push('no media data');
+  if (moov && mdat && moov.start > mdat.start) problems.push('moov box after the media data (the film cannot start before it has fully loaded)');
+  const entries = [];
+  const walk = (box) => {
+    const inner = box.type === 'stsd' ? box.start + box.header + 8 : box.start + box.header;
+    for (const child of mp4Boxes(buf, inner, box.end)) {
+      if (box.type === 'stsd') entries.push({ type: child.type, width: buf.readUInt16BE(child.start + 32), height: buf.readUInt16BE(child.start + 34) });
+      else if (['moov', 'trak', 'mdia', 'minf', 'stbl', 'stsd'].includes(child.type)) walk(child);
+    }
+  };
+  if (moov) walk(moov);
+  const avc = entries.find((e) => e.type === 'avc1' || e.type === 'avc3');
+  if (!avc) problems.push(`no H.264 sample entry (found ${entries.map((e) => e.type).join(', ') || 'none'})`);
+  else if (!avc.width || !avc.height) problems.push('H.264 sample entry has no frame size');
+  return problems;
+}
+
+function decodeFilm(file) {
+  const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width,height,pix_fmt', '-of', 'json', file], { encoding: 'utf8' });
+  if (probe.error) return { skipped: true };
+  if (probe.status !== 0) return { problems: [`ffprobe failed: ${probe.stderr.trim()}`] };
+  const stream = (JSON.parse(probe.stdout).streams || [])[0];
+  if (!stream) return { problems: ['ffprobe finds no video stream'] };
+  const decode = spawnSync('ffmpeg', ['-v', 'error', '-nostdin', '-i', file, '-map', '0:v:0', '-f', 'null', '-'], { encoding: 'utf8' });
+  if (decode.error) return { stream, problems: [] };
+  const problems = [];
+  if (decode.status !== 0 || decode.stderr.trim()) problems.push(`ffmpeg cannot decode every frame: ${decode.stderr.trim().split('\n')[0] || `exit ${decode.status}`}`);
+  return { stream, problems };
+}
+
+const films = new Map();
+for (const page of PAGE_FILES) {
+  const file = join(SITE, page);
+  if (!existsSync(file)) continue;
+  for (const m of readFileSync(file, 'utf8').matchAll(/<source\s[^>]*src="([^"]+)"[^>]*type="([^"]+)"/g)) {
+    films.set(normalize(join(dirname(file), m[1])), m[2]);
+  }
+}
+if (![...films.values()].includes('video/mp4')) fail('media', 'no MP4 source for browsers without WebM support');
+for (const [file, type] of films) {
+  const name = file.slice(SITE.length + 1);
+  if (!existsSync(file)) { fail('media', `${name} is missing`); continue; }
+  const problems = type === 'video/mp4' ? checkMp4(file) : [];
+  const decoded = decodeFilm(file);
+  const s = decoded.stream;
+  if (!decoded.skipped) problems.push(...decoded.problems);
+  if (s) {
+    const want = type === 'video/mp4' ? 'h264' : 'vp9';
+    if (s.codec_name !== want) problems.push(`codec ${s.codec_name}, expected ${want}`);
+    if (type === 'video/mp4' && s.pix_fmt !== 'yuv420p') problems.push(`pixel format ${s.pix_fmt}, Safari needs yuv420p`);
+  }
+  problems.forEach((p) => fail('media', `${name}: ${p}`));
+  if (problems.length) log(`FAIL media ${name}: ${problems.join('; ')}`);
+  else if (decoded.skipped) log(`ok   media ${name}: file structure (ffprobe not installed, frames not decoded)`);
+  else log(`ok   media ${name}: ${s.codec_name} ${s.width}x${s.height} ${s.pix_fmt}, every frame decodes`);
 }
 
 // ---------- In-page helpers (run in the browser) ----------
@@ -320,6 +408,67 @@ async function checkLayout(page, where) {
     for (const t of window.__texts()) {
       if (t.size < minFont) out.push(`text under ${minFont}px (${t.size}px): "${t.text}"`);
     }
+    // Text cut off by a box that hides its overflow (or by the page edge). A box that ends its
+    // text with an ellipsis (text-overflow) is a deliberate shortening and is not reported.
+    const describe = (e) => `<${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className ? ` class="${e.className}"` : ''}>`;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const text = n.nodeValue.replace(/\s+/g, ' ').trim();
+      const el = n.parentElement;
+      if (!text || !el || el.closest('script,style,noscript,template')) continue;
+      if (getComputedStyle(el).visibility !== 'visible') continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const rects = [...range.getClientRects()].filter((r) => r.width > 1 && r.height > 1);
+      if (!rects.length) continue;
+      for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (cs.clip && cs.clip !== 'auto') break; // visually hidden on purpose
+        const clipX = /(hidden|clip)/.test(cs.overflowX);
+        const clipY = /(hidden|clip)/.test(cs.overflowY);
+        if ((clipX || clipY) && cs.textOverflow === 'ellipsis') break; // shortened on purpose, with an ellipsis
+        if (clipX || clipY) {
+          const b = e.getBoundingClientRect();
+          if (b.width <= 2 || b.height <= 2) break;
+          const cut = rects.find((r) => (clipX && (r.left < b.left - 1 || r.right > b.right + 1)) || (clipY && (r.top < b.top - 1 || r.bottom > b.bottom + 1)));
+          if (cut) {
+            out.push(`text cut off by ${describe(e)}: "${text.slice(0, 60)}" spans ${Math.round(cut.left)} to ${Math.round(cut.right)}, box ${Math.round(b.left)} to ${Math.round(b.right)}`);
+            break;
+          }
+        }
+        if (cs.position === 'fixed') break; // fixed boxes escape the clipping of their ancestors
+      }
+    }
+    // Text running into other text (for example a label wider than its column). Only the middle
+    // of each line box counts, so tight line heights and touching glyphs are not reported.
+    const runs = [];
+    const all = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = all.nextNode(); n; n = all.nextNode()) {
+      const text = n.nodeValue.replace(/\s+/g, ' ').trim();
+      const el = n.parentElement;
+      if (!text || !el || el.closest('script,style,noscript,template')) continue;
+      let fixed = false;
+      for (let e = el; e && !fixed; e = e.parentElement) fixed = getComputedStyle(e).position === 'fixed';
+      if (fixed || getComputedStyle(el).visibility !== 'visible') continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) {
+        if (r.width <= 1 || r.height <= 1) continue;
+        runs.push({ text: text.slice(0, 40), node: n, l: r.left, r: r.right, t: r.top + r.height * 0.3, b: r.bottom - r.height * 0.3 });
+      }
+    }
+    runs.sort((a, b) => a.t - b.t);
+    const seenPairs = new Set();
+    for (let i = 0; i < runs.length; i += 1) {
+      for (let j = i + 1; j < runs.length && runs[j].t < runs[i].b; j += 1) {
+        const a = runs[i]; const c = runs[j];
+        if (a.node === c.node) continue;
+        if (Math.min(a.r, c.r) - Math.max(a.l, c.l) > 2 && Math.min(a.b, c.b) > Math.max(a.t, c.t)) {
+          const key = `${a.text}|${c.text}`;
+          if (!seenPairs.has(key)) { seenPairs.add(key); out.push(`text overlaps other text: "${a.text}" and "${c.text}"`); }
+        }
+      }
+    }
     return out;
   }, MIN_FONT_PX);
   issues.slice(0, 20).forEach((i) => fail(where, i));
@@ -379,7 +528,7 @@ async function measureFullPage(page, where) {
   const hero = await page.evaluate(() => {
     const h = document.querySelector('[data-hero]');
     const r = h.getBoundingClientRect();
-    return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: Math.min(r.height, innerHeight - r.top) };
+    return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height };
   });
   const hasFilm = await page.evaluate(() => {
     const v = document.querySelector('[data-hero] video');
@@ -393,7 +542,8 @@ async function measureFullPage(page, where) {
         await new Promise((r) => { v.addEventListener('seeked', r, { once: true }); v.currentTime = time; });
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       }, t);
-      const clip = await page.screenshot({ clip: { x: hero.x, y: hero.y, width: hero.w, height: hero.h }, animations: 'disabled' });
+      // fullPage, so a hero taller than the viewport (narrow phones) is measured to its bottom.
+      const clip = await page.screenshot({ fullPage: true, clip: { x: hero.x, y: hero.y, width: hero.w, height: hero.h }, animations: 'disabled' });
       shots.push({ data: clip.toString('base64'), x: hero.x, y: hero.y, label: `film at ${t}s` });
     }
   }
