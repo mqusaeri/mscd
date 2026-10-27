@@ -78,8 +78,11 @@
 	import mscd_tls
 	import mscd_log
 
-	# Caddy's own Server header is not sent.
-	header -Server
+	# Neither the Server header nor the Via header of the proxy is sent.
+	header {
+		-Server
+		-Via
+	}
 
 	@app host {$MSCD_DOMAIN}
 	handle @app {

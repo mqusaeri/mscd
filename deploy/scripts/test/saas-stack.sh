@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # Node scripts and Go templates are in single quotes on purpose
 # MSCD SaaS: a local test stack of the SaaS Compose files (Milestone 2 plan K, M2-S02).
 #
 #   deploy/scripts/test/saas-stack.sh up      build release images, configure and start the stack
@@ -49,8 +50,6 @@
 #                               applied (see build_images)
 #   MSCD_BUILD_CA               CA certificate of a TLS-inspecting proxy for the image builds
 set -euo pipefail
-# Node scripts and Go templates are passed in single quotes on purpose.
-# shellcheck disable=SC2016
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd -- "$SCRIPT_DIR/../../.." && pwd)
@@ -73,7 +72,7 @@ readonly MAILPIT_IMAGE=axllent/mailpit:v1.31.3
 readonly ANCHOR_MISMATCH='not among the anchor keys compiled into this build'
 
 usage() {
-    sed -n '2,/^set -euo pipefail$/p' "${BASH_SOURCE[0]}" | sed -e '$d' -e 's/^# \{0,1\}//'
+    sed -n '3,/^set -euo pipefail$/p' "${BASH_SOURCE[0]}" | sed -e '$d' -e 's/^# \{0,1\}//'
 }
 
 # ---------------------------------------------------------------------------
@@ -496,8 +495,9 @@ check_tls() {
 check_rate_limit() {
     local probe urls=() i out count429 others
     probe="https://$APP_HOST:$HTTPS_PORT/api/v1/auth/mscd-rate-limit-probe"
-    for ((i = 0; i < 80; i++)); do urls+=("$probe"); done
-    out=$(https --parallel --parallel-immediate --parallel-max 80 -o /dev/null \
+    # -o applies to one URL each, so every URL gets its own.
+    for ((i = 0; i < 80; i++)); do urls+=(-o /dev/null "$probe"); done
+    out=$(https --parallel --parallel-immediate --parallel-max 80 \
         -w '%{http_code} %header{retry-after} %header{content-type}\n' "${urls[@]}" 2>/dev/null || true)
     count429=$(grep -c '^429 1 application/problem+json' <<<"$out" || true)
     others=$(awk '$1 != 429 && $1 != 404 { print $1 }' <<<"$out" | sort | uniq -c | xargs)
