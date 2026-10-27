@@ -66,17 +66,20 @@ Behind a TLS-inspecting proxy, pass the proxy CA to image builds: `--secret id=b
 - No em dashes, no centre dots, no "X, not Y" sentences, no meta commentary, no small or low-contrast text in anything you produce.
 - The product owner is not an ISO auditor. Use correct audit terms and explain them in plain words.
 
-## Open product questions (defaults are built)
+## Product decisions
 
-1. Google Drive repositories in a personal My Drive: allowed (default) or Shared Drives only.
-2. Pending work per person: MS Manager and Programme Owner see detail, Top Management sees totals only (built).
-3. Internal Auditors verifying items and seeing everyone's pending list: no (default).
-4. Phase lock: phases shown in order, hard block only at critical gates (default).
-5. Licence user count: active members without guests (default).
-6. Programme Owner keeps verify and approve rights: yes (default).
-7. New SaaS organisations: SSO-only login is not the default.
-8. Moved or changed files count as "cannot be verified" in evidence lists without lowering the item status (default).
-9. Terminology changes proposed in `docs/product/USER-FLOWS.md` are waiting for approval.
+Confirmed by the product owner on 2026-10-27 (the defaults that were already built):
+
+1. Google Drive repositories in a personal My Drive are allowed, as well as Shared Drives.
+2. Pending work per person: MS Manager and Programme Owner see the detail; Top Management sees totals only.
+3. Internal Auditors do not verify items and do not see everyone's pending list.
+4. Phases are shown in order; the hard block applies only at critical gates.
+5. The licence user count is active members, without guests.
+6. The Programme Owner keeps verify and approve rights.
+7. New SaaS organisations do not default to SSO-only sign-in.
+8. A moved or changed evidence file shows "cannot be verified" in evidence lists and does not lower the item status.
+
+Still open: the terminology changes proposed in `docs/product/USER-FLOWS.md`.
 
 ## Open follow-ups
 
