@@ -342,12 +342,15 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
   unique(issues, 'drift_rules.json', 'code', d.driftRules.map((r) => r.code));
   unique(issues, 'rules.json', 'rule_id', d.rules.map((r) => r.rule_id));
 
-  // Mappings: sources are requirements or catalogue items of this pack, targets are other packs.
+  // Mappings: sources are requirements or catalogue items of this pack that are still in the standard, targets are
+  // other packs. A row that leaves the standard takes its mappings with it (the installer keeps the ones it wrote).
   const sourceCodes = new Set([...requirementCodes, ...d.catalogue.map((c) => c.item_code)]);
+  const retiredSources = new Set([...retiredCodes, ...d.catalogue.filter((c) => c.retired).map((c) => c.item_code)]);
   for (const [file, rows] of Object.entries(d.mappings)) {
     unique(issues, file, 'mapping', rows.map((m) => `${m.source_code} ${m.target_pack_id} ${m.target_code}`));
     for (const m of rows) {
       if (!sourceCodes.has(m.source_code)) issues.add(file, `source_code ${m.source_code} is not a requirement or catalogue item of the pack`);
+      else if (retiredSources.has(m.source_code)) issues.add(file, `source_code ${m.source_code} names a retired requirement or catalogue item`);
       if (m.target_pack_id === manifest.pack_id) issues.add(file, `mapping ${m.source_code} targets the pack itself`);
     }
   }

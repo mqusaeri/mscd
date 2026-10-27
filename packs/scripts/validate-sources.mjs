@@ -3,7 +3,8 @@
 // every file exists and is UTF-8 with LF line endings, CSV headers match the format, JSON is
 // pretty-printed, values fit the ref columns of C.5 and ref 0002, codes are unique, retired
 // rows are consistent, and references resolve (catalogue items, documented information,
-// templates and finding conditions to requirement codes, chain entity types to the record
+// templates and finding conditions to requirement codes, mapping sources to requirements or
+// catalogue items that are not retired, chain entity types to the record
 // tables of C.10, risk profiles, frequencies, lookups, contiguous phase and activity numbers,
 // and the content references of E.1: cycle requirement codes, chain clause_at_risk values,
 // activity output documents and documented information templates). Prints the dataset counts
@@ -654,13 +655,16 @@ function validatePack(report, sourcesDir, packId) {
 
   // Mappings to other packs (optional).
   let mappingCount = 0;
+  // Sources are rows that are still in the standard: a retired row takes its mappings with it.
   const sourceCodes = new Set([...reqCodes, ...catRows.map((r) => r.obj.item_code)]);
+  const retiredSources = new Set([...retiredCodes, ...catRows.filter((r) => r.obj.retired === 'true').map((r) => r.obj.item_code)]);
   for (const f of mappingFiles) {
     const rows = readCsv(report, path.join(dir, f), at(f), MAPPING_HEADER);
     for (const r of rows) {
       const x = new Row(report, at(f, r.line), r.obj);
       const src = x.text('source_code', { required: true, max: 20 });
       if (src && !sourceCodes.has(src)) x.fail('source_code', `"${src}" is not a requirement or catalogue item of the pack`);
+      else if (src && retiredSources.has(src)) x.fail('source_code', `"${src}" names a retired requirement or catalogue item`);
       x.text('target_pack_id', { required: true, max: 40, re: /^[A-Z0-9]+-[A-Za-z0-9]+$/ });
       x.text('target_code', { required: true, max: 20 });
       x.oneOf('mapping_type', ALLOWED.mappingType);

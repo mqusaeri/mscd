@@ -3,7 +3,7 @@
 // clause_at_risk values, activity output documents, documented information templates), which are errors, except
 // warnings in a Milestone 1 pack version before its content step that lists no documented information. Also the
 // engine version rule of the shared format.
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { engineVersionSatisfies } from '@mscd/shared';
@@ -46,6 +46,13 @@ function setVersion(dir: string, version: string): void {
   writeFileSync(file, `${JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pack_version: version }, null, 2)}\n`);
 }
 
+/** `mappings/ISO9001-2015.csv` with one equivalent mapping per [source, target] pair. */
+function writeMappings(dir: string, pairs: readonly [string, string][]): void {
+  mkdirSync(path.join(dir, 'mappings'), { recursive: true });
+  writeRows(path.join(dir, 'mappings'), 'ISO9001-2015.csv', ['source_code', 'target_pack_id', 'target_code', 'mapping_type', 'evidence_reusable', 'note'],
+    pairs.map(([source, target]) => ({ source_code: source, target_pack_id: 'ISO9001-2015', target_code: target, mapping_type: 'equivalent', evidence_reusable: 'true', note: '' })));
+}
+
 function packError(fn: () => unknown): PackError {
   try {
     fn();
@@ -83,7 +90,7 @@ describe('retired rows (E.1)', () => {
     expect(verifyPack(pack.bytes, [key().publicKey]).datasets.requirements).toHaveLength(24);
   });
 
-  it('refuses a row that is not true or false, a live row under a retired parent and a link to a retired requirement', () => {
+  it('refuses a row that is not true or false, a live row under a retired parent, a link to a retired requirement and a mapping from a retired row', () => {
     const cases: [string, (dir: string) => void, RegExp][] = [
       ['empty flag', (d) => editRows(d, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '4.1' ? { ...r, retired: '' } : r))), /^requirements\.csv:2: retired/],
       ['retired parent', (d) => editRows(d, 'requirements.csv', (rows) => rows.map((r) =>
@@ -92,6 +99,14 @@ describe('retired rows (E.1)', () => {
         editRows(d, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'true' } : r)));
         editRows(d, 'catalogue.csv', (rows) => rows.map((r) => (r.item_code === 'A.5.1' ? { ...r, requirement_code: '10.3' } : r)));
       }, /item A\.5\.1: requirement_code 10\.3 names a retired requirement/],
+      ['retired mapping source', (d) => {
+        editRows(d, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'true' } : r)));
+        writeMappings(d, [['10.2', '10.2'], ['10.3', '10.3']]);
+      }, /^mappings\/ISO9001-2015\.csv: source_code 10\.3 names a retired requirement or catalogue item$/],
+      ['retired catalogue mapping source', (d) => {
+        editRows(d, 'catalogue.csv', (rows) => rows.map((r) => (r.item_code === 'A.8.34' ? { ...r, retired: 'true' } : r)));
+        writeMappings(d, [['A.8.34', '9.2']]);
+      }, /^mappings\/ISO9001-2015\.csv: source_code A\.8\.34 names a retired requirement or catalogue item$/],
     ];
     for (const [label, change, pattern] of cases) {
       const dir = sourceCopy();
@@ -100,6 +115,14 @@ describe('retired rows (E.1)', () => {
       expect(error.code, label).toBe('dataset');
       expect(error.issues.some((i) => pattern.test(i)), `${label}: ${error.issues.join(' | ')}`).toBe(true);
     }
+  });
+
+  it('keeps mappings from rows that are still in the standard', () => {
+    const dir = sourceCopy();
+    editRows(dir, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'true' } : r)));
+    writeMappings(dir, [['10.2', '10.2'], ['A.8.34', '9.2']]);
+    const pack = buildPack(dir, key().privateKey);
+    expect(pack.datasets.mappings['mappings/ISO9001-2015.csv']?.map((m) => m.source_code)).toEqual(['10.2', 'A.8.34']);
   });
 });
 
