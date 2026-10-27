@@ -11,6 +11,6 @@
     "smoke": "node run-smoke.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.56.1"
+    "@playwright/test": "1.64.0"
   }
 }

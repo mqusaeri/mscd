@@ -72,7 +72,7 @@
     "@mscd/mock-providers": "*",
     "@mscd/web": "*",
     "@nestjs/testing": "11.2.7",
-    "@swc/core": "1.16.13",
+    "@swc/core": "1.16.18",
     "@testcontainers/postgresql": "11.14.0",
     "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
