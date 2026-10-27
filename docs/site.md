@@ -110,7 +110,7 @@ To use other footage instead:
 
 ## How it will be served (follow-up for M2-S02)
 
-On SaaS, Caddy serves the site on the bare domain and the app on `app.<domain>` (decision D-S3). Only `index.html`, `id/` and `assets/` are public; the tools in the folder (`*.mjs`, `media-src/`) are not. A sketch for the Caddy configuration that M2-S02 owns:
+On SaaS, Caddy serves the site on the bare domain and the app on `app.<domain>` (decision D-S3). Only `index.html`, `id/` and `assets/` are published. The tools in the folder (`*.mjs`, `media-src/`) stay private. A sketch for the Caddy configuration that M2-S02 owns:
 
 ```caddy
 {$MSCD_SITE_DOMAIN} {

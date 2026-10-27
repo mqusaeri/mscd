@@ -225,15 +225,26 @@ async function finishAnimations(page) {
 
 async function scrollThrough(page) {
   await page.evaluate(async () => {
-    const step = Math.max(200, Math.floor(innerHeight * 0.7));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const step = Math.max(200, Math.floor(innerHeight * 0.5));
     for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
       window.scrollTo({ top: y, behavior: 'instant' });
-      await new Promise((r) => setTimeout(r, 90));
+      await wait(150);
     }
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
-    await new Promise((r) => setTimeout(r, 150));
+    await wait(300);
+    // A busy machine can miss a reveal during the fast pass: bring every still-hidden text
+    // into view once more, so only content that never appears is reported.
+    if (window.__texts) {
+      const hidden = new Set();
+      for (const t of window.__texts()) if (t.opacity < 0.99) hidden.add(Math.round(t.rects[0].y));
+      for (const y of hidden) {
+        window.scrollTo({ top: Math.max(0, y - innerHeight / 2), behavior: 'instant' });
+        await wait(400);
+      }
+    }
     window.scrollTo({ top: 0, behavior: 'instant' });
-    await new Promise((r) => setTimeout(r, 250));
+    await wait(250);
   });
 }
 

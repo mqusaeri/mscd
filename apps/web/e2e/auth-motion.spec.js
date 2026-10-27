@@ -112,14 +112,14 @@ async function openSignIn(page, query = '') {
   await page.addInitScript(() => {
     window.__violations = [];
     document.addEventListener('securitypolicyviolation', (e) => window.__violations.push(`${e.violatedDirective} ${e.blockedURI}`));
-    window.__longTasks = [];
-    try {
-      new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) window.__longTasks.push({ start: e.startTime, duration: e.duration });
-      }).observe({ type: 'longtask', buffered: true });
-    } catch {
-      // no Long Tasks API: nothing recorded
-    }
+    // The work of every animation frame callback (the motion draws in them), in milliseconds.
+    window.__frameCosts = [];
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) => raf((t) => {
+      const start = performance.now();
+      cb(t);
+      window.__frameCosts.push(performance.now() - start);
+    });
   });
   await page.goto(`${site.base}/login${query}`);
   await expect(page.locator('#au-email')).toBeVisible();
@@ -236,15 +236,19 @@ test('the brand panel moves behind the sign-in form without touching the form', 
   await page.waitForTimeout(700);
   expect((await canvasPrint(page)).sum).not.toBe(first.sum);
 
-  // The form works as before while the panel moves, and the motion never blocks the page for long.
-  const longBefore = await page.evaluate(() => performance.now());
+  // The form works as before while the panel moves, and a frame of the motion takes a small part of the frame budget.
+  await page.evaluate(() => {
+    window.__frameCosts.length = 0;
+  });
   await page.locator('#au-email').fill('rina.kusuma@nusantaradigital.co.id');
   await page.locator('#au-password').fill('correct horse battery staple');
   await page.locator('input[name="remember"]').check();
   await expect(page.locator('#au-email')).toHaveValue('rina.kusuma@nusantaradigital.co.id');
   await page.waitForTimeout(1500);
-  const longTasks = await page.evaluate((since) => window.__longTasks.filter((t) => t.start >= since && t.duration > 100), longBefore);
-  expect(longTasks).toEqual([]);
+  const costs = await page.evaluate(() => window.__frameCosts.slice().sort((a, b) => a - b));
+  expect(costs.length).toBeGreaterThan(10);
+  expect(costs[Math.floor(costs.length / 2)]).toBeLessThan(4);
+  expect(costs[Math.floor(costs.length * 0.95)]).toBeLessThan(16);
 
   // L-1 and the Content-Security-Policy: same origin only, no violation, no inline script in the page.
   const origin = new URL(site.base).origin;
