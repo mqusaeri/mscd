@@ -171,6 +171,10 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
         insert into cycle_requirement_status (management_system_id, certification_cycle_id, cycle_requirement_def_id, requirement_code, title, due_at, position)
         select ${systems['upg:isms']}, ${cycle.id}, d.id, coalesce(d.requirement_code, '-'), d.title, date '2026-12-01', d.sort_order
           from ref.cycle_requirement_def d where d.framework_version_id = ${isoVersionId}`.execute(trx);
+      // The team removed one item from the cycle; the sync never brings it back.
+      await sql`
+        update cycle_requirement_status set deleted_at = now()
+         where certification_cycle_id = ${cycle.id} and position = (select min(position) from cycle_requirement_status where certification_cycle_id = ${cycle.id})`.execute(trx);
     });
   });
   afterAll(async () => {
@@ -274,6 +278,12 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     );
     expect(items).toHaveLength(7);
     expect(items.at(-1)).toEqual({ requirement_code: '9.2', title: 'Audit programme confirmed for the cycle', owner_user_id: mm, status: 'not_started', due_at: '2029-01-01' });
+    // Only the new cycle requirement was added: the removed item stays removed and no item is doubled.
+    const held = await tenantRows(org, (trx) =>
+      trx.selectFrom('cycle_requirement_status').select(['cycle_requirement_def_id', 'deleted_at']).where('management_system_id', '=', systems['upg:isms']!).execute(),
+    );
+    expect(held.filter((h) => h.deleted_at !== null)).toHaveLength(1);
+    expect(new Set(held.map((h) => h.cycle_requirement_def_id)).size).toBe(held.length);
 
     // One notice for the MS Manager, one audit entry for the system.
     const sent = await notices(org, mm);

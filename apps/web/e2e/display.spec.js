@@ -176,6 +176,8 @@ test.describe('Viewport widths', () => {
   for (const width of [1280, 1920]) {
     for (const ms of SYSTEMS) {
       test(`every ${ms} screen fits at ${width} px`, async ({ page }) => {
+        // The walk grows with every host screen of src/screens (MILESTONE-2 C.7), so it gets the slow test time.
+        test.slow();
         await page.setViewportSize({ width, height: 900 });
         await openIn(page, '', ms);
         await visitAll(page, SCREENS);

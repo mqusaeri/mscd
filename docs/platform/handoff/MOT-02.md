@@ -41,7 +41,7 @@ The sample build that Playwright serves on 4173 has no sign-in pages. `e2e/auth-
 
 ## Deviations
 
-1. `test/auth/motion.test.tsx` runs once `apps/web/vitest.config.js` includes `.tsx` files (C.7, owned by M2-01 in wave 1b). Until then `npm test -w @mscd/web -- test/auth` runs the six existing files and skips this one without a failure, so the zero-test check of the common acceptance counts no MOT-02 test yet. The fix is outside the Owns list of MOT-02: MOT-02 stays open for that check until the M2-01 change lands. The file was run with a configuration equal to the planned change: 23 tests pass, and the whole `test/auth` folder passes with it (7 files, 112 tests).
+1. Resolved. `test/auth/motion.test.tsx` needed the `.tsx` include of `apps/web/vitest.config.js` (C.7, owned by M2-01). That change is now committed, and `npm test -w @mscd/web -- test/auth` runs the file: 7 files and 112 tests, 23 of them in `motion.test.tsx`. The zero-test check of the common acceptance passes for MOT-02.
 2. No media file: the background is drawn, so `apps/web/public/motion/` was not created. Reduced motion shows the still frame of the same drawing, which needs no poster.
 3. Narrow layout (900px and below): the panel collapses to the logo bar as before (hero and footer facts hidden); the canvas stays in the bar and shows one still frame of the woven threads. The animation stops there as the brief asks, and the brand signature stays visible on phones.
 4. Footer facts colour `#a39b8c` became `#b3ab9d`, for contrast headroom over the motion. The two animated mesh blobs were removed (the craft rules of the skill ban glow blobs and purple, and the canvas is now the animated background).
@@ -49,7 +49,6 @@ The sample build that Playwright serves on 4173 has no sign-in pages. `e2e/auth-
 
 ## Follow-ups
 
-- M2-01: the `.tsx` include of `vitest.config.js` makes `test/auth/motion.test.tsx` part of `npm test -w @mscd/web -- test/auth`. After it lands, `npm test -w @mscd/web -- test/auth` must report 7 files and 23 tests from `motion.test.tsx`.
 - M2-S11 (owns `apps/web/src/auth/**` in wave 3b): keep the refs and the effect of `BrandPanel` and the `canvas.au-threads` element. New brand text in the panel needs its selector in `TEXT_SELECTOR` of `motion/BrandMotion.ts`, so it gets a quiet zone; the contrast test of the browser spec fails otherwise. New or renamed chain labels must keep the clearance test of `motion.test.tsx` passing (a longer word may need a new `tx` or `ty` in `CHAIN_LABELS`).
 
 ## Acceptance

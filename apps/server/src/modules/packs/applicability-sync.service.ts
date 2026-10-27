@@ -283,8 +283,10 @@ export class ApplicabilitySyncService implements OnApplicationBootstrap, OnAppli
     const { system, installs } = item;
     const latest = installs[installs.length - 1]!;
     const seeded = await seedApplicability(trx, system.id, { actorUserId: SYSTEM_USER_ID });
-    const cycleItems = await this.addCycleItems(trx, system, today);
     const changes = installs.map((i) => i.changes).filter((c): c is PackContentChanges => c !== null);
+    // The cycle requirements new in the waiting installations; every one of the edition when a change summary is missing.
+    const newCycleCodes = changes.length === installs.length ? new Set(changes.flatMap((c) => c.cycleRequirementsAdded)) : null;
+    const cycleItems = await this.addCycleItems(trx, system, today, newCycleCodes);
     const retitled = unite(changes.map((c) => c.retitled));
     const retired = unite(changes.map((c) => c.retired));
     const restored = unite(changes.map((c) => c.restored));
@@ -352,11 +354,12 @@ export class ApplicabilitySyncService implements OnApplicationBootstrap, OnAppli
   }
 
   /**
-   * Cycle items for the cycle requirements of the system's edition that an open cycle (`planned` or `active`) does not
-   * hold yet: owner the primary MS Manager, due on the next audit event of the system, else at the cycle end (D.4).
-   * Returns the codes added.
+   * Cycle items for the new cycle requirements (`codes`; null: every one of the edition) that an open cycle (`planned`
+   * or `active`) has never held: owner the primary MS Manager, due on the next audit event of the system, else at the
+   * cycle end (D.4). An item the team removed from a cycle is not added again. Returns the codes added.
    */
-  private async addCycleItems(trx: Trx, system: SystemRow, today: string): Promise<string[]> {
+  private async addCycleItems(trx: Trx, system: SystemRow, today: string, codes: ReadonlySet<string> | null): Promise<string[]> {
+    if (codes && codes.size === 0) return [];
     const cycles = await trx
       .selectFrom('certification_cycle')
       .select(['id', 'cycle_end'])
@@ -372,13 +375,14 @@ export class ApplicabilitySyncService implements OnApplicationBootstrap, OnAppli
       .where('framework_version_id', '=', system.framework_version_id)
       .orderBy('sort_order')
       .orderBy('code')
-      .execute();
+      .execute()
+      .then((rows) => (codes ? rows.filter((d) => codes.has(d.code)) : rows));
     if (defs.length === 0) return [];
+    // Removed items count as held, so the sync never brings back an item the team deleted.
     const held = await trx
       .selectFrom('cycle_requirement_status')
       .select(['certification_cycle_id', 'cycle_requirement_def_id'])
       .where('management_system_id', '=', system.id)
-      .where('deleted_at', 'is', null)
       .where('cycle_requirement_def_id', 'is not', null)
       .execute();
     const have = new Set(held.map((h) => `${h.certification_cycle_id} ${h.cycle_requirement_def_id}`));
