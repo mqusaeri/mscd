@@ -2,7 +2,7 @@
 // activity numbering that validate-sources.mjs asks of a removal, and mapping sources in the validator. Every case
 // runs the scripts on a temporary copy of the files they read, so the repository is never written.
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT, SOURCES_DIR, tempDir } from './helpers.js';
@@ -82,6 +82,11 @@ describe('extract-from-sample.mjs removed.csv (E.1)', () => {
       .split('\n').filter((line) => line.startsWith('9,')).length;
 
     const whole = scriptTree();
+    // The content step (M2-04) already drops the phase; without its removed.csv the phase is back.
+    expect(phase(whole)).toBe(0);
+    rmSync(path.join(whole, 'packs/content/ISO9001-2026/removed.csv'));
+    expect(run(whole, 'extract-from-sample.mjs', ['--check']).status).toBe(1);
+    expect(run(whole, 'extract-from-sample.mjs').status).toBe(0);
     expect(phase(whole)).toBe(14);
     const rows = Array.from({ length: 14 }, (_, i) => `activities.csv,9.${i + 1},Demo transition step (E.4)\n`).join('');
     writeContent(whole, 'ISO9001-2026', 'removed.csv', `${REMOVED_HEADER}${rows}`);
@@ -109,7 +114,7 @@ describe('validate-sources.mjs mapping sources', () => {
       const dir = tempDir('mscd-pack-sources-');
       const pack = path.join(dir, 'ISO27001-2022');
       cpSync(path.join(SOURCES_DIR, 'ISO27001-2022'), pack, { recursive: true });
-      for (const [file, code] of [['requirements.csv', '10.3'], ['catalogue.csv', 'A.8.34']] as const) {
+      for (const [file, code] of [['requirements.csv', '6.3'], ['catalogue.csv', 'A.8.34']] as const) {
         const [header = '', ...lines] = readFileSync(path.join(pack, file), 'utf8').trimEnd().split('\n');
         expect(header.endsWith(',retired')).toBe(true);
         const changed = lines.map((line) => (line.startsWith(`${code},`) ? line.replace(/,false$/, ',true') : line));
@@ -123,9 +128,9 @@ describe('validate-sources.mjs mapping sources', () => {
 
     const live = run(REPO_ROOT, 'validate-sources.mjs', ['--dir', sources('10.2,ISO9001-2015,10.2,equivalent,true,\nA.5.1,ISO9001-2015,5.2,related,false,\n')]);
     expect(live.status, live.stderr).toBe(0);
-    const retired = run(REPO_ROOT, 'validate-sources.mjs', ['--dir', sources('10.3,ISO9001-2015,10.3,equivalent,true,\nA.8.34,ISO9001-2015,9.2,related,false,\n')]);
+    const retired = run(REPO_ROOT, 'validate-sources.mjs', ['--dir', sources('6.3,ISO9001-2015,6.3,equivalent,true,\nA.8.34,ISO9001-2015,9.2,related,false,\n')]);
     expect(retired.status).toBe(1);
-    expect(retired.stderr).toContain('"10.3" names a retired requirement or catalogue item');
+    expect(retired.stderr).toContain('"6.3" names a retired requirement or catalogue item');
     expect(retired.stderr).toContain('"A.8.34" names a retired requirement or catalogue item');
   }, SLOW);
 });

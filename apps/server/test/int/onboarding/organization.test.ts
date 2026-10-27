@@ -8,7 +8,7 @@ import { JobHandlerRegistry } from '../../../src/common/jobs/job-handler';
 import { MscdConfig } from '../../../src/config/mscd-config';
 import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
 import { SchedulerTickJob, planDailyJobs, type TimeZoneChange } from '../../../src/modules/jobs/scheduler-tick.job';
-import { DAILY_JOBS, dueDailyJobs, type DailyJob } from '../../../src/modules/jobs/schedules';
+import { DAILY_JOBS, dueDailyJobs, localTimeOf, type DailyJob } from '../../../src/modules/jobs/schedules';
 import { createTenant } from '../../setup/global-db';
 import { useTestDatabase } from '../../setup/test-db';
 import { callRoute, type FullApp } from '../contract/harness';
@@ -171,6 +171,110 @@ describe('daily jobs after a time zone change (Milestone 2 D.2, risk table I)', 
     const back: TimeZoneChange[] = [...east, { at: new Date('2030-01-16T15:30:00Z'), from: 'Asia/Tokyo', to: 'Asia/Jakarta' }];
     expect(keys('2030-01-16T17:05:00Z', 'Asia/Jakarta', back)).toEqual([]);
     expect(keys('2030-01-17T17:05:00Z', 'Asia/Jakarta', back)).toEqual([`lc:${ORG}:2030-01-18`]);
+    // The first tick after the change back (23:05 on 16 January in Jakarta) catches up nothing: every job of 16 January
+    // ran in Tokyo, the first one in the catch-up of 17:05 UTC on 15 January.
+    expect(keys('2030-01-16T16:05:00Z', 'Asia/Jakarta', back)).toEqual([]);
+  });
+
+  it('catches up at the first tick after the change, whether that tick starts on time, late or early', () => {
+    // Asia/Jakarta (UTC+7) to Asia/Jayapura (UTC+9) at 22:05:20 UTC, after the tick of 05:05 in Jakarta. Jakarta never
+    // reached 07:00 on 27 October, so the next tick, at 08:05 in Jayapura, runs the digest of that date at once.
+    const east: TimeZoneChange[] = [{ at: new Date('2026-10-26T22:05:20Z'), from: 'Asia/Jakarta', to: 'Asia/Jayapura' }];
+    const digest = [[`ndg:${ORG}:2026-10-27`, 0]];
+    for (const now of ['2026-10-26T23:05:00Z', '2026-10-26T23:05:40Z', '2026-10-26T23:04:58Z', '2026-10-26T23:40:00Z']) {
+      expect(plan(now, 'Asia/Jayapura', east), now).toEqual(digest);
+      // The same with the instant of the tick before, as the clock high-water mark gives it.
+      const withPrevious = planDailyJobs(ORG, new Date(now), 'Asia/Jayapura', east, JOBS, new Date('2026-10-26T22:05:05Z'));
+      expect(withPrevious.map((d) => [d.singletonKey, d.startAfterSeconds]), now).toEqual(digest);
+    }
+    expect(keys('2026-10-27T00:05:00Z', 'Asia/Jayapura', east)).toEqual([]);
+  });
+
+  it('plans the slot of a tick that starts just after a change with the old zone, and catches up once at the next slot', () => {
+    // The change comes at 22:05:02 UTC and the tick of 22:05 starts at 22:05:10: it plans 05:05 in Jakarta, the hour
+    // it is scheduled for. The next tick catches up the digest of 27 October once, with or without the previous tick.
+    const east: TimeZoneChange[] = [{ at: new Date('2026-10-26T22:05:02Z'), from: 'Asia/Jakarta', to: 'Asia/Jayapura' }];
+    const ticks = ['2026-10-26T22:05:10Z', '2026-10-26T23:05:00Z', '2026-10-27T00:05:00Z', '2026-10-27T15:05:00Z'];
+    for (const withPrevious of [false, true]) {
+      const planned = ticks.map((now, i) =>
+        planDailyJobs(ORG, new Date(now), 'Asia/Jayapura', east, JOBS, withPrevious && i > 0 ? new Date(ticks[i - 1]!) : undefined).map((d) => d.singletonKey),
+      );
+      expect(planned, `with the previous tick: ${withPrevious}`).toEqual([[], [`ndg:${ORG}:2026-10-27`], [], [`lc:${ORG}:2026-10-28`]]);
+    }
+    // A change just after 00:05 in Jakarta: the late tick still runs the date's first job in Jakarta, and the next tick,
+    // at 03:05 in Jayapura, does not run it again.
+    const midnight: TimeZoneChange[] = [{ at: new Date('2026-10-26T17:05:02Z'), from: 'Asia/Jakarta', to: 'Asia/Jayapura' }];
+    expect(plan('2026-10-26T17:05:10Z', 'Asia/Jayapura', midnight)).toEqual([[`lc:${ORG}:2026-10-27`, 0]]);
+    expect(plan('2026-10-26T18:05:00Z', 'Asia/Jayapura', midnight)).toEqual([[`cd:${ORG}:all`, 600]]);
+  });
+
+  it('plans nothing at a second tick of a slot, and catches up at the first tick after a slot without one', () => {
+    const east: TimeZoneChange[] = [{ at: new Date('2026-10-26T22:30:00Z'), from: 'Asia/Jakarta', to: 'Asia/Jayapura' }];
+    const at = (now: string, previousTick: string) =>
+      planDailyJobs(ORG, new Date(now), 'Asia/Jayapura', east, JOBS, new Date(previousTick)).map((d) => [d.singletonKey, d.startAfterSeconds]);
+    expect(at('2026-10-26T23:05:00Z', '2026-10-26T22:05:00Z')).toEqual([[`ndg:${ORG}:2026-10-27`, 0]]);
+    // A second tick in the slot of 23:05 UTC.
+    expect(at('2026-10-26T23:20:00Z', '2026-10-26T23:05:00Z')).toEqual([]);
+    // No tick in the slot of 23:05 UTC: the tick of 00:05 (09:05 in Jayapura) catches up the date.
+    expect(at('2026-10-27T00:05:00Z', '2026-10-26T22:05:00Z')).toEqual([[`ndg:${ORG}:2026-10-27`, 0]]);
+    // A clock set back hides the previous tick: the tick of the previous slot counts as the one before.
+    expect(at('2026-10-26T23:05:00Z', '2026-11-30T00:05:00Z')).toEqual([[`ndg:${ORG}:2026-10-27`, 0]]);
+    expect(at('2026-10-27T00:05:00Z', '2026-11-30T00:05:00Z')).toEqual([]);
+  });
+
+  it('enqueues each job once per local date when ticks start early, on time or late around a change', () => {
+    const HOUR = 3_600_000;
+    const dated: DailyJob[] = [
+      { name: 'license.check', at: '00:05', prefix: 'lc', retryLimit: 3 },
+      { name: 'freshness.sweep', at: '01:00', prefix: 'fs', retryLimit: 3 },
+      { name: 'certificate.expiry', at: '06:00', prefix: 'ce', retryLimit: 3 },
+      { name: 'notifications.digest', at: '07:00', prefix: 'ndg', retryLimit: 3 },
+      { name: 'documents.review-alerts', at: '13:30', prefix: 'dra', retryLimit: 3 },
+      { name: 'tasks.overdue', at: '23:00', prefix: 'to', retryLimit: 3 },
+    ];
+    const moves: [string, string][] = [
+      ['Asia/Jakarta', 'Asia/Jayapura'],
+      ['Asia/Jayapura', 'Asia/Jakarta'],
+      ['Asia/Jakarta', 'America/New_York'],
+      ['America/New_York', 'Asia/Tokyo'],
+      ['Asia/Kolkata', 'Asia/Kathmandu'],
+      ['Pacific/Kiritimati', 'Pacific/Pago_Pago'],
+      ['Pacific/Pago_Pago', 'Pacific/Kiritimati'],
+    ];
+    // The change, in seconds after minute 5 of its UTC hour: just after the tick, a little later, mid-hour, and just
+    // before the next tick.
+    const offsets = [2, 20, 1800, 3598];
+    // The start of each tick against minute 5, in seconds, in turn: on time, or late, early, on time and very late.
+    const starts = [[0], [10, 40, -2, 0, 1500]];
+    const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+    const base = Date.parse('2030-01-14T00:05:00Z');
+    for (const [from, to] of moves) {
+      for (const offset of offsets) {
+        for (const start of starts) {
+          for (const withPrevious of [false, true]) {
+            const label = `${from} to ${to}, change ${offset} s after minute 5, starts ${start.join(' ')}, previous tick ${withPrevious}`;
+            const change: TimeZoneChange = { at: new Date(base + 54 * HOUR + offset * 1000), from, to };
+            const seen: string[] = [];
+            let previous: Date | undefined;
+            for (let i = 0; i < 140; i++) {
+              const now = new Date(base + i * HOUR + start[i % start.length]! * 1000);
+              const visible = change.at.getTime() <= now.getTime() ? [change] : [];
+              const zone = visible.length > 0 ? to : from;
+              for (const due of planDailyJobs(ORG, now, zone, visible, dated, withPrevious ? previous : undefined)) seen.push(due.singletonKey);
+              previous = now;
+            }
+            expect(seen.filter((key, i) => seen.indexOf(key) !== i), label).toEqual([]);
+            // Complete local dates: the day before the change in the old zone, and the first two days of the new zone
+            // from its first tick after the change.
+            const firstSlot = Math.ceil((change.at.getTime() - 5 * 60_000) / HOUR) * HOUR + 5 * 60_000;
+            const newDate = localTimeOf(new Date(firstSlot), to).date;
+            const dates = [addDays(localTimeOf(change.at, from).date, -1), newDate, addDays(newDate, 1)];
+            const missing = dates.flatMap((date) => dated.map((job) => `${job.prefix}:${ORG}:${date}`)).filter((key) => !seen.includes(key));
+            expect(missing, label).toEqual([]);
+          }
+        }
+      }
+    }
   });
 
   it('ignores changes older than the history window and plans as before without changes', () => {
@@ -183,6 +287,7 @@ describe('daily jobs after a time zone change (Milestone 2 D.2, risk table I)', 
     let jobs: JobsApp;
     let moved: CreatedTenant;
     let still: CreatedTenant;
+    let late: CreatedTenant;
 
     /** Records a time zone change as `PATCH /admin/organization` does: the organisation row and its org.updated entry. */
     const changeZone = async (tenant: CreatedTenant, at: string, from: string, to: string) => {
@@ -214,6 +319,7 @@ describe('daily jobs after a time zone change (Milestone 2 D.2, risk table I)', 
     beforeAll(async () => {
       moved = await createTenant(db, 'tz_moved', { timeZone: 'America/New_York' });
       still = await createTenant(db, 'tz_still', { timeZone: 'America/New_York' });
+      late = await createTenant(db, 'tz_late', { timeZone: 'Asia/Jakarta' });
       jobs = await createJobsApp(db, { queues: ['scheduler.tick'] });
     });
     afterAll(async () => {
@@ -235,6 +341,25 @@ describe('daily jobs after a time zone change (Milestone 2 D.2, risk table I)', 
       // The next hour adds nothing; 00:05 on 16 January in Tokyo runs the next date.
       expect(await enqueued('2030-01-15T05:05:00Z', moved)).toEqual([]);
       expect(await enqueued('2030-01-15T15:05:00Z', moved)).toContain(`lc:${moved.id}:2030-01-16`);
+    });
+
+    it('decides the catch-up against the previous tick, read from the clock high-water mark', async () => {
+      // 04:05 on 21 January in Jakarta: nothing is due at that hour.
+      expect(await enqueued('2030-01-20T21:05:00Z', late)).toEqual([]);
+      // The change comes 2 seconds after minute 5 and that hour's tick starts 8 seconds late: it plans 05:05 in
+      // Jakarta, the hour it is scheduled for, without a catch-up.
+      await changeZone(late, '2030-01-20T22:05:02Z', 'Asia/Jakarta', 'Asia/Jayapura');
+      expect(await enqueued('2030-01-20T22:05:10Z', late)).toEqual([]);
+      // The next tick (08:05 in Jayapura) runs at once the jobs of 21 January from 06:00 to 07:59, which Jakarta never
+      // reached; a second tick in that hour and the tick after add nothing.
+      const handled = new Set(jobs.moduleRef.get(JobHandlerRegistry).discover().map((h) => h.metadata.name));
+      const expected = DAILY_JOBS.filter((d) => handled.has(d.name) && d.at >= '06:00' && d.at < '08:00' && d.weekday === undefined).map(
+        (d) => (d.allSystems ? `${d.prefix}:${late.id}:all` : `${d.prefix}:${late.id}:2030-01-21`),
+      );
+      expect(expected).toContain(`ndg:${late.id}:2030-01-21`);
+      expect((await enqueued('2030-01-20T23:05:00Z', late)).sort()).toEqual(expected.sort());
+      expect(await enqueued('2030-01-20T23:05:30Z', late)).toEqual([]);
+      expect(await enqueued('2030-01-21T00:05:00Z', late)).toEqual([]);
     });
   });
 });

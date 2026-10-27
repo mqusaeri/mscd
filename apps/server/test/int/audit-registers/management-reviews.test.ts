@@ -1,10 +1,13 @@
 // Management reviews and cycle derivation (build plan D.3 "Registers and workflows: audit side", C.13
-// `management_review.status`, BR-13, BR-14, E.2 `cycle.derive`, WP-37). The demo packs define no review inputs and
-// no derivations (G.7), so this file first proves that `cycle.derive` keeps every seeded cycle status of the demo
-// template, then adds fixture rows to the framework content (mandatory review inputs of the ISO 27001 and ISO 9001
-// editions, derivations of the ISO 27001 cycle requirements): a joint review of the `ndt` ISMS and QMS cannot close
-// while the QMS input is empty (BR-13) or without decisions (BR-14), closing queues `cycle.derive` for both systems,
-// and on `tst` the derivation sets `MGMT_REVIEW` done only after a review closed with complete inputs.
+// `management_review.status`, BR-13, BR-14, E.2 `cycle.derive`, WP-37). Since the content step of the packs
+// (Milestone 2 E.2, M2-04) the editions define mandatory review inputs (ten in ISO/IEC 27001, twelve in ISO 9001) and
+// derivations on their cycle requirements. This file proves that `cycle.derive` leaves the demo organisations alone
+// (Milestone 2 D.4: they keep the sample statuses) and derives the test organisation `tst` from the pack derivations;
+// that a joint review of the `ndt` ISMS and QMS gets one input row per mandatory input of each system, cannot close
+// while a QMS input is empty (BR-13) or without decisions (BR-14), and queues `cycle.derive` for both systems when it
+// closes; and that on `tst` the derivation sets `MGMT_REVIEW` done only after a review closed with every mandatory
+// input. Fixture rows cover only what the packs do not hold: an optional input, a mandatory input added after a
+// closure, and a derivation kind the server does not know.
 import { ManagementReviewItem } from '@mscd/shared';
 import { sql } from 'kysely';
 import { z } from 'zod';
@@ -12,8 +15,25 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
 import {
   addReviewInputs, auditOf, createAuditApp, cycleItemsOf, inOrg, ORG_IDS, REVIEWS, rowsOf, sessionFor, setDerivation, systemOf, TODAY, verifyChain,
-  type AuditApp, type Client, type DemoOrg,
+  type AuditApp, type Client,
 } from './helpers';
+
+/** The review input codes of a pack edition: `MR-01` to `MR-<count>`. */
+const inputCodes = (count: number) => Array.from({ length: count }, (_, i) => `MR-${String(i + 1).padStart(2, '0')}`);
+/** The ten review inputs of the ISO/IEC 27001 pack (clause 9.3.2), all mandatory. */
+const ISMS_INPUTS = inputCodes(10);
+/** The twelve review inputs of the ISO 9001:2015 pack (clause 9.3.2), all mandatory. */
+const QMS_INPUTS = inputCodes(12);
+
+/** The cycle requirements of the ISO/IEC 27001 pack with the derivation kind of each, in position order. */
+const ISMS_DERIVATIONS = [
+  ['RISK_ASSESSMENT', 'risk_assessment_current'],
+  ['INTERNAL_AUDIT', 'internal_audit_done'],
+  ['MGMT_REVIEW', 'management_review_closed'],
+  ['CORRECTIVE_ACTION', 'corrective_actions_closed'],
+  ['PERFORMANCE_EVALUATION', 'metrics_current'],
+  ['DOCUMENT_REVIEW', 'documents_reviewed_on_time'],
+];
 
 describe('management reviews and cycle derivation', () => {
   const db = useTestDatabase('demo');
@@ -26,16 +46,37 @@ describe('management reviews and cycle derivation', () => {
     await ctx?.close();
   });
 
-  it('keeps the cycle statuses of the demo template (the demo packs carry no derivations)', async () => {
-    const orgs: DemoOrg[] = ['ndt', 'bsd', 'rmn', 'tst'];
-    const statuses = () => Promise.all(orgs.map((org) => rowsOf<{ id: string; status: string; updated_at: Date }>(db, org, sql`select id, status, updated_at from cycle_requirement_status order by id`)));
-    const before = await statuses();
-    expect(before.flat().length).toBeGreaterThan(0);
-    for (const org of orgs) {
-      const result = await ctx.derive(org);
-      expect(result).toEqual({ systems: 0, items: [], skipped: [] });
+  it('keeps the cycle statuses of the demo organisations and derives tst from the pack derivations', async () => {
+    const statuses = (org: 'ndt' | 'bsd' | 'rmn') =>
+      rowsOf<{ id: string; status: string; updated_at: Date }>(db, org, sql`select id, status, updated_at from cycle_requirement_status order by id`);
+    for (const org of ['ndt', 'bsd', 'rmn'] as const) {
+      const before = await statuses(org);
+      expect(before.length).toBeGreaterThan(0);
+      expect(await ctx.derive(org)).toEqual({ systems: 0, items: [], skipped: [] });
+      expect(await statuses(org)).toEqual(before);
     }
-    expect(await statuses()).toEqual(before);
+
+    // tst has no demo label, so every cycle requirement of its ISMS with a pack derivation is decided by its data.
+    const before = await cycleItemsOf(db, 'tst', 'isms');
+    const codeOf = new Map(before.map((i) => [i.id, i.def_code]));
+    const result = await ctx.derive('tst');
+    expect(result.systems).toBe(1);
+    expect(result.skipped).toEqual([]);
+    expect(result.items.map((i) => [codeOf.get(i.itemId), i.kind])).toEqual(ISMS_DERIVATIONS);
+    // The seeded data of tst meets the internal audit requirement only (findings of its internal audit raised in the
+    // cycle); no management review has closed, and its risks, corrective actions, metrics and documents fall short.
+    expect(Object.fromEntries(result.items.map((i) => [codeOf.get(i.itemId), i.met]))).toEqual({
+      RISK_ASSESSMENT: false, INTERNAL_AUDIT: true, MGMT_REVIEW: false, CORRECTIVE_ACTION: false, PERFORMANCE_EVALUATION: false, DOCUMENT_REVIEW: false,
+    });
+    const after = await cycleItemsOf(db, 'tst', 'isms');
+    for (const item of result.items) {
+      const was = before.find((b) => b.id === item.itemId)!;
+      expect(item.changed, was.def_code!).toBe(item.met && was.status !== 'done');
+      expect(after.find((a) => a.id === item.itemId)!.status, was.def_code!).toBe(item.met ? 'done' : was.status);
+    }
+    expect(after.find((a) => a.def_code === 'INTERNAL_AUDIT')!.status).toBe('done');
+    // Idempotent: a second run changes nothing.
+    expect((await ctx.derive('tst')).items.filter((i) => i.changed)).toEqual([]);
   });
 
   describe('joint review of the ndt ISMS and QMS', () => {
@@ -50,14 +91,9 @@ describe('management reviews and cycle derivation', () => {
       sari = await sessionFor(ctx, db, 'sari', 'ndt');
       bagus = await sessionFor(ctx, db, 'bagus', 'ndt');
       hendra = await sessionFor(ctx, db, 'hendra', 'ndt');
+      // Every pack input is mandatory; an optional input is a fixture row.
       const isms = await systemOf(db, 'ndt', 'isms');
-      const qms = await systemOf(db, 'ndt', 'qms');
-      await addReviewInputs(db, isms.editionId, [
-        { code: 'MRI-01', title: 'Status of actions from previous reviews', mandatory: true },
-        { code: 'MRI-02', title: 'Results of risk assessment', mandatory: true },
-        { code: 'MRI-09', title: 'Opportunities for improvement', mandatory: false },
-      ]);
-      await addReviewInputs(db, qms.editionId, [{ code: 'MRQ-01', title: 'Customer satisfaction', mandatory: true }]);
+      await addReviewInputs(db, isms.editionId, [{ code: 'MRX-01', title: 'Benchmark with peer organisations', mandatory: false }]);
     });
 
     it('plans a joint review with one input row per mandatory input and linked system', async () => {
@@ -67,7 +103,7 @@ describe('management reviews and cycle derivation', () => {
       expect((await rina.post(REVIEWS('isms'), { ...body, linkedMs: ['isms', 'nope'] })).status).toBe(404);
       const created = await rina.post(REVIEWS('isms'), body);
       expect(created.status).toBe(201);
-      expect(created.body).toMatchObject({ changed: ['isms', 'qms'], count: 3, ref: { entityType: 'management_review', code: 'MR-2026-J' } });
+      expect(created.body).toMatchObject({ changed: ['isms', 'qms'], count: ISMS_INPUTS.length + QMS_INPUTS.length, ref: { entityType: 'management_review', code: 'MR-2026-J' } });
       reviewId = created.body.ref!.id;
       expect((await rina.post(REVIEWS('isms'), body)).status).toBe(409);
 
@@ -76,21 +112,23 @@ describe('management reviews and cycle derivation', () => {
       const review = list.body.find((r) => r.code === 'MR-2026-J')!;
       expect(review).toMatchObject({ status: 'planned', owner: 'hendra', linkedMs: ['isms', 'qms'], decisionsRecorded: false });
       expect(review.inputs.map((i) => [i.ms, i.defCode, i.mandatory, i.complete])).toEqual([
-        ['isms', 'MRI-01', true, false],
-        ['isms', 'MRI-02', true, false],
-        ['qms', 'MRQ-01', true, false],
+        ...ISMS_INPUTS.map((code) => ['isms', code, true, false]),
+        ...QMS_INPUTS.map((code) => ['qms', code, true, false]),
       ]);
+      // Each system's inputs are those of its own pack.
+      expect(review.inputs.find((i) => i.ms === 'isms' && i.defCode === 'MR-09')).toMatchObject({ title: 'Results of risk assessment and status of the risk treatment plan' });
+      expect(review.inputs.find((i) => i.ms === 'qms' && i.defCode === 'MR-03')).toMatchObject({ title: 'Customer satisfaction and feedback from interested parties' });
       expect((await auditOf(db, 'ndt', reviewId))[0]).toMatchObject({ action: 'management_review.created', actor: 'rina' });
     });
 
-    it('cannot close while the QMS mandatory input is empty (BR-13) or without decisions (BR-14)', async () => {
+    it('cannot close while a QMS mandatory input is empty (BR-13) or without decisions (BR-14)', async () => {
       const url = `${REVIEWS('isms')}/${reviewId}`;
       expect((await rina.post(`${url}/transitions`, { to: 'closed', decisionsText: 'Budget approved' })).status).toBe(409);
-      expect((await rina.request('PUT', `${url}/inputs/MRI-01`, { content: 'All actions of 2025 closed' })).status).toBe(200);
-      expect((await rina.request('PUT', `${url}/inputs/MRI-02`, { content: 'Two risks above appetite' })).status).toBe(200);
-      expect((await rina.request('PUT', `${url}/inputs/MRI-09`, { content: 'Automate the access reviews' })).status).toBe(200);
-      expect((await rina.request('PUT', `${url}/inputs/MRQ-01`, { content: 'x' })).status).toBe(404);
-      expect((await bagus.request('PUT', `${url}/inputs/MRI-01`, { content: 'x' })).status).toBe(403);
+      for (const code of ISMS_INPUTS) expect((await rina.request('PUT', `${url}/inputs/${code}`, { content: `ISMS input ${code} reviewed` })).status, code).toBe(200);
+      expect((await rina.request('PUT', `${url}/inputs/MRX-01`, { content: 'Automate the access reviews' })).status).toBe(200);
+      // MR-11 is an input of the QMS edition only, so the ISMS path does not reach it.
+      expect((await rina.request('PUT', `${url}/inputs/MR-11`, { content: 'x' })).status).toBe(404);
+      expect((await bagus.request('PUT', `${url}/inputs/MR-01`, { content: 'x' })).status).toBe(403);
       // The QMS MS Manager does not manage ISMS reviews, so cannot move the joint review through the QMS path.
       expect((await sari.post(`${REVIEWS('qms')}/${reviewId}/transitions`, { to: 'held', heldAt: '2026-09-28' })).status).toBe(403);
       const held = await rina.post(`${url}/transitions`, { to: 'held', heldAt: '2026-09-28' });
@@ -98,8 +136,12 @@ describe('management reviews and cycle derivation', () => {
 
       const missing = await rina.post(`${url}/transitions`, { to: 'closed', decisionsText: 'Budget approved for PAM' });
       expect(missing.body).toMatchObject({ status: 422, rule: 'BR-13', affected: ['qms'] });
-      // The QMS input is recorded through the QMS path by its MS Manager.
-      expect((await sari.request('PUT', `${REVIEWS('qms')}/${reviewId}/inputs/MRQ-01`, { content: 'Satisfaction 4.4 of 5' })).status).toBe(200);
+      // The QMS inputs are recorded through the QMS path by its MS Manager; one empty input still blocks the closure.
+      for (const code of QMS_INPUTS.slice(0, -1)) {
+        expect((await sari.request('PUT', `${REVIEWS('qms')}/${reviewId}/inputs/${code}`, { content: `QMS input ${code} reviewed` })).status, code).toBe(200);
+      }
+      expect((await rina.post(`${url}/transitions`, { to: 'closed', decisionsText: 'Budget approved for PAM' })).body).toMatchObject({ status: 422, rule: 'BR-13', affected: ['qms'] });
+      expect((await sari.request('PUT', `${REVIEWS('qms')}/${reviewId}/inputs/MR-12`, { content: 'Two improvement projects for 2027' })).status).toBe(200);
       expect((await rina.post(`${url}/transitions`, { to: 'closed' })).body).toMatchObject({ status: 422, rule: 'BR-14' });
       expect(ctx.queue.waitingJobs('cycle.derive')).toEqual([]);
 
@@ -118,19 +160,23 @@ describe('management reviews and cycle derivation', () => {
         ]),
       );
       const review = (await hendra.get<ManagementReviewItem[]>(REVIEWS('isms'))).body.find((r) => r.code === 'MR-2026-J')!;
+      expect(review.inputs).toHaveLength(ISMS_INPUTS.length + 1 + QMS_INPUTS.length);
       expect(review.inputs.every((i) => i.complete)).toBe(true);
-      expect(review.inputs.find((i) => i.defCode === 'MRI-09')).toMatchObject({ mandatory: false, content: 'Automate the access reviews' });
+      expect(review.inputs.find((i) => i.defCode === 'MRX-01')).toMatchObject({ ms: 'isms', mandatory: false, content: 'Automate the access reviews' });
       // A closed review's inputs no longer change.
-      expect((await rina.request('PUT', `${url}/inputs/MRI-01`, { content: 'Changed' })).status).toBe(409);
+      expect((await rina.request('PUT', `${url}/inputs/MR-01`, { content: 'Changed' })).status).toBe(409);
       expect((await auditOf(db, 'ndt', reviewId)).map((a) => a.action)).toEqual([
-        'management_review.created', 'management_review.input_updated', 'management_review.input_updated', 'management_review.input_updated',
-        'management_review.transition', 'management_review.input_updated', 'management_review.transition',
+        'management_review.created',
+        ...Array<string>(ISMS_INPUTS.length + 1).fill('management_review.input_updated'),
+        'management_review.transition',
+        ...Array<string>(QMS_INPUTS.length).fill('management_review.input_updated'),
+        'management_review.transition',
       ]);
       expect(await verifyChain(db, 'ndt')).toMatchObject({ firstBroken: null });
     });
   });
 
-  describe('cycle.derive on the tst ISMS with fixture derivations', () => {
+  describe('cycle.derive on the tst ISMS with the pack derivations', () => {
     let rina: Client;
     let editionId: string;
     let msId: string;
@@ -138,8 +184,6 @@ describe('management reviews and cycle derivation', () => {
     beforeAll(async () => {
       rina = await sessionFor(ctx, db, 'rina', 'tst');
       ({ id: msId, editionId } = await systemOf(db, 'tst', 'isms'));
-      // The ISMS edition's inputs were added above; the derivation of the management review requirement is added here.
-      await setDerivation(db, editionId, 'MGMT_REVIEW', { kind: 'management_review_closed' });
       // The seeded item starts as not done, so the derivation has something to decide.
       await inOrg(db, 'tst', (trx) =>
         sql`update cycle_requirement_status s set status = 'in_progress' from ref.cycle_requirement_def d
@@ -148,49 +192,54 @@ describe('management reviews and cycle derivation', () => {
     });
 
     const mgmt = async () => (await cycleItemsOf(db, 'tst', 'isms')).find((i) => i.def_code === 'MGMT_REVIEW')!;
+    const mgmtRun = async () => (await ctx.derive('tst', msId)).items.find((i) => i.kind === 'management_review_closed');
 
-    it('sets MGMT_REVIEW done only after a review closed with complete inputs', async () => {
+    it('sets MGMT_REVIEW done only after a review closed with every mandatory input', async () => {
       const item = await mgmt();
       expect(item.status).toBe('in_progress');
       expect(item.cycle_start <= TODAY && TODAY <= item.cycle_end).toBe(true);
 
       // No review: nothing changes.
-      expect((await ctx.derive('tst', msId)).items).toEqual([expect.objectContaining({ kind: 'management_review_closed', met: false, changed: false })]);
+      expect(await mgmtRun()).toMatchObject({ itemId: item.id, met: false, changed: false });
       const created = await rina.post(REVIEWS('isms'), { code: 'MR-2026-T', title: 'Management review 2026', plannedAt: TODAY, ownerHandle: 'rina', linkedMs: ['isms'] });
       expect(created.status).toBe(201);
+      expect(created.body).toMatchObject({ count: ISMS_INPUTS.length });
       const url = `${REVIEWS('isms')}/${created.body.ref!.id}`;
       expect((await rina.post(`${url}/transitions`, { to: 'held' })).status).toBe(200);
-      expect((await rina.request('PUT', `${url}/inputs/MRI-01`, { content: 'Actions closed' })).status).toBe(200);
+      for (const code of ISMS_INPUTS.slice(0, -1)) expect((await rina.request('PUT', `${url}/inputs/${code}`, { content: `Input ${code} reviewed` })).status, code).toBe(200);
       expect((await rina.post(`${url}/transitions`, { to: 'closed', decisionsText: 'Keep the plan' })).body).toMatchObject({ status: 422, rule: 'BR-13' });
-      expect((await rina.request('PUT', `${url}/inputs/MRI-02`, { content: 'Risk results reviewed' })).status).toBe(200);
+      expect((await rina.request('PUT', `${url}/inputs/MR-10`, { content: 'Improvement opportunities reviewed' })).status).toBe(200);
       // Held with complete inputs but not closed: still not done.
-      expect((await ctx.derive('tst', msId)).items[0]).toMatchObject({ met: false, changed: false });
+      expect(await mgmtRun()).toMatchObject({ met: false, changed: false });
       expect((await mgmt()).status).toBe('in_progress');
 
       expect((await rina.post(`${url}/transitions`, { to: 'closed', decisionsText: 'Keep the plan' })).status).toBe(200);
-      // A mandatory input added to the edition after the closure leaves the review incomplete: not done.
-      await addReviewInputs(db, editionId, [{ code: 'MRI-03', title: 'Audit results', mandatory: true }]);
-      expect((await ctx.derive('tst', msId)).items[0]).toMatchObject({ met: false, changed: false });
+      // A mandatory input added to the edition after the closure (a fixture row) leaves the review incomplete: not done.
+      await addReviewInputs(db, editionId, [{ code: 'MRX-02', title: 'Results of supplier audits', mandatory: true }]);
+      expect(await mgmtRun()).toMatchObject({ met: false, changed: false });
       expect((await mgmt()).status).toBe('in_progress');
       // The fixture input becomes optional again (the pack installer role updates framework content, it never deletes it).
-      await sql`update ref.review_input_def set mandatory = false where framework_version_id = ${editionId} and code = 'MRI-03'`.execute(db.packInstaller);
+      await sql`update ref.review_input_def set mandatory = false where framework_version_id = ${editionId} and code = 'MRX-02'`.execute(db.packInstaller);
 
       // Closed with every mandatory input complete: done, by the system.
-      const result = await ctx.derive('tst', msId);
-      expect(result.items[0]).toMatchObject({ met: true, changed: true });
+      expect(await mgmtRun()).toMatchObject({ met: true, changed: true });
       const done = await mgmt();
       expect(done.status).toBe('done');
       expect(await auditOf(db, 'tst', done.id)).toEqual([
         expect.objectContaining({ action: 'cycle_item.updated', actor: 'system', before: { status: 'in_progress' }, after: { status: 'done', derivation: 'management_review_closed' } }),
       ]);
       // Idempotent: a second run changes nothing.
-      expect((await ctx.derive('tst', msId)).items[0]).toMatchObject({ met: true, changed: false });
+      expect(await mgmtRun()).toMatchObject({ met: true, changed: false });
       expect(await auditOf(db, 'tst', done.id)).toHaveLength(1);
     });
 
     it('derives the other kinds from the data and skips unknown kinds', async () => {
-      await setDerivation(db, editionId, 'INTERNAL_AUDIT', { kind: 'internal_audit_done' });
-      await setDerivation(db, editionId, 'RISK_ASSESSMENT', { kind: 'risk_assessment_current', months: 12 });
+      // A derivation kind the server does not know is a fixture on one requirement; the pack's own is put back below.
+      const [pack] = (
+        await sql<{ derivation: Record<string, unknown> }>`select derivation from ref.cycle_requirement_def
+          where framework_version_id = ${editionId} and code = 'CORRECTIVE_ACTION'`.execute(db.packInstaller)
+      ).rows;
+      expect(pack!.derivation).toEqual({ kind: 'corrective_actions_closed' });
       await setDerivation(db, editionId, 'CORRECTIVE_ACTION', { kind: 'corrective_action_magic' });
       const before = await cycleItemsOf(db, 'tst', 'isms');
       const [expected] = await rowsOf<{ internal: boolean; risks_current: boolean }>(
@@ -206,15 +255,15 @@ describe('management reviews and cycle derivation', () => {
       const result = await ctx.derive('tst', msId);
       const byCode = new Map(before.map((i) => [i.id, i.def_code]));
       const kinds = Object.fromEntries(result.items.map((i) => [byCode.get(i.itemId), i.met]));
+      expect(Object.keys(kinds)).toEqual(['RISK_ASSESSMENT', 'INTERNAL_AUDIT', 'MGMT_REVIEW', 'PERFORMANCE_EVALUATION', 'DOCUMENT_REVIEW']);
       expect(kinds).toMatchObject({ MGMT_REVIEW: true, INTERNAL_AUDIT: expected!.internal, RISK_ASSESSMENT: expected!.risks_current === true });
       expect(result.skipped).toEqual([expect.objectContaining({ kind: 'corrective_action_magic' })]);
       const after = await cycleItemsOf(db, 'tst', 'isms');
       for (const item of after) {
         const was = before.find((b) => b.id === item.id)!;
-        if (item.def_code === 'INTERNAL_AUDIT' && expected!.internal) expect(item.status).toBe('done');
-        else if (item.def_code === 'RISK_ASSESSMENT' && expected!.risks_current) expect(item.status).toBe('done');
-        else expect(item.status).toBe(was.status);
+        expect(item.status, item.def_code!).toBe(kinds[item.def_code!] === true ? 'done' : was.status);
       }
+      await setDerivation(db, editionId, 'CORRECTIVE_ACTION', pack!.derivation);
       expect(await verifyChain(db, 'tst')).toMatchObject({ firstBroken: null });
     });
   });

@@ -73,6 +73,18 @@ function subclause(code: string, parent: string, title: string): Row {
   };
 }
 
+/**
+ * A copy of ISO 27001 as a Milestone 1 version would carry it: below the content step (1.2.9), without documented
+ * information and without document templates, so its activity output codes do not resolve.
+ */
+function milestone1Copy(): string {
+  const dir = sourceCopy();
+  setVersion(dir, '1.2.9');
+  writeRows(dir, 'documented_info.csv', ['code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'], []);
+  writeRows(dir, 'document_templates.csv', ['code', 'title', 'doc_type', 'requirement_code'], []);
+  return dir;
+}
+
 /** Renumbers `sort_order` 1..n in the given order (requirements must have unique sort orders). */
 function renumber(rows: Row[]): Row[] {
   return rows.map((r, i) => ({ ...r, sort_order: String(i + 1) }));
@@ -81,13 +93,15 @@ function renumber(rows: Row[]): Row[] {
 describe('retired rows (E.1)', () => {
   it('keeps a retired requirement and catalogue item in the pack', () => {
     const dir = sourceCopy();
-    editRows(dir, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'true' } : r)));
+    // 10.3 is retired in the content step (M2-04); 6.3 and A.8.34 are retired here.
+    editRows(dir, 'requirements.csv', (rows) => rows.map((r) => (r.requirement_code === '6.3' ? { ...r, retired: 'true' } : r)));
     editRows(dir, 'catalogue.csv', (rows) => rows.map((r) => (r.item_code === 'A.8.34' ? { ...r, retired: 'true' } : r)));
     const pack = buildPack(dir, key().privateKey);
     expect(pack.datasets.requirements.find((r) => r.requirement_code === '10.3')?.retired).toBe(true);
+    expect(pack.datasets.requirements.find((r) => r.requirement_code === '6.3')?.retired).toBe(true);
     expect(pack.datasets.requirements.find((r) => r.requirement_code === '10.2')?.retired).toBe(false);
     expect(pack.datasets.catalogue.find((c) => c.item_code === 'A.8.34')?.retired).toBe(true);
-    expect(verifyPack(pack.bytes, [key().publicKey]).datasets.requirements).toHaveLength(24);
+    expect(verifyPack(pack.bytes, [key().publicKey]).datasets.requirements).toHaveLength(35);
   });
 
   it('refuses a row that is not true or false, a live row under a retired parent, a link to a retired requirement and a mapping from a retired row', () => {
@@ -129,10 +143,8 @@ describe('retired rows (E.1)', () => {
 describe('new datasets and columns (E.1)', () => {
   it('reads documented information, template clauses, review kinds, internal audit templates and derivation kinds', () => {
     const dir = sourceCopy('ISO22301-2019');
-    writeRows(dir, 'document_templates.csv', ['code', 'title', 'doc_type', 'requirement_code'], [
-      { code: 'SCO-01', title: 'Scope statement', doc_type: 'record', requirement_code: '4.3' },
-      { code: 'TPL-POL', title: 'Business continuity policy', doc_type: 'policy', requirement_code: '' },
-    ]);
+    // The templates of the content step stay (activities and documented information name them); one is added.
+    editRows(dir, 'document_templates.csv', (rows) => [...rows, { code: 'TPL-POL', title: 'Business continuity policy', doc_type: 'policy', requirement_code: '' }]);
     writeRows(dir, 'review_inputs.csv', ['code', 'title', 'mandatory', 'sort_order', 'review_kind'], [
       { code: 'MRI-01', title: 'Status of actions from previous reviews', mandatory: 'true', sort_order: '1', review_kind: 'management' },
       { code: 'GBR-01', title: 'Results of the management review', mandatory: 'false', sort_order: '2', review_kind: 'governing_body' },
@@ -142,10 +154,9 @@ describe('new datasets and columns (E.1)', () => {
     ]);
     editRows(dir, 'cycle_requirements.csv', (rows) => rows.map((r, i) => (i === 0 ? { ...r, derivation: '{"kind":"bia_approved"}' } : i === 1 ? { ...r, derivation: '{"kind":"risk_assessment_current","months":12}' } : r)));
     const pack = buildPack(dir, key().privateKey);
-    expect(pack.datasets.documentTemplates).toEqual([
-      { code: 'SCO-01', title: 'Scope statement', doc_type: 'record', requirement_code: '4.3' },
-      { code: 'TPL-POL', title: 'Business continuity policy', doc_type: 'policy', requirement_code: null },
-    ]);
+    expect(pack.datasets.documentTemplates[0]).toEqual({ code: 'SCO-B01', title: 'Scope of the business continuity management system', doc_type: 'policy', requirement_code: '4.3.2' });
+    expect(pack.datasets.documentTemplates.at(-1)).toEqual({ code: 'TPL-POL', title: 'Business continuity policy', doc_type: 'policy', requirement_code: null });
+    expect(pack.datasets.documentedInfo).toHaveLength(15);
     expect(pack.datasets.reviewInputs.map((r) => r.review_kind)).toEqual(['management', 'governing_body']);
     expect(pack.datasets.auditActivities[0]?.event_type).toBe('internal_audit');
     expect(pack.datasets.cycleRequirements[0]?.derivation).toEqual({ kind: 'bia_approved' });
@@ -181,21 +192,25 @@ describe('new datasets and columns (E.1)', () => {
 
 describe('content references (E.1)', () => {
   it('are warnings in a Milestone 1 pack version without documented information, so the Milestone 1 content builds', () => {
-    const pack = testPack().pack;
+    // The development packs are at the content step (M2-04) and resolve every reference.
+    expect(contentReferencesStrict(testPack().pack.manifest, testPack().pack.datasets)).toBe(true);
+    expect(testPack().pack.warnings).toEqual([]);
+    const dir = milestone1Copy();
+    editRows(dir, 'chain.csv', (rows) => rows.map((r) => (r.stage_key === 'risk' ? { ...r, clause_at_risk: '6.1.9' } : r)));
+    const pack = buildPack(dir, key().privateKey);
     expect(contentReferencesStrict(pack.manifest, pack.datasets)).toBe(false);
     expect(pack.warnings).toEqual(expect.arrayContaining([
-      'cycle_requirements.csv: RISK_ASSESSMENT: requirement_code 6.1.2 is not in requirements.csv',
-      'cycle_requirements.csv: DOCUMENT_REVIEW: requirement_code 7.5.2 is not in requirements.csv',
-      'chain.csv: stage risk: clause_at_risk 6.1.2 is not in requirements.csv',
-      'chain.csv: stage soa: clause_at_risk 6.1.3 is not in requirements.csv',
+      'chain.csv: stage risk: clause_at_risk 6.1.9 is not in requirements.csv',
       expect.stringMatching(/^activities\.csv: output_document_code POL-01 \(activity 3\.1, 3\.3, 3\.5\) is not in document_templates\.csv$/),
     ]));
-    expect(verifyPack(pack.bytes, [testPack().key.publicKey]).warnings).toEqual(pack.warnings);
+    expect(verifyPack(pack.bytes, [key().publicKey]).warnings).toEqual(pack.warnings);
   });
 
   it('are errors once the pack lists documented information, and resolve with the subclauses and templates added', () => {
-    const dir = sourceCopy();
+    const dir = milestone1Copy();
+    editRows(dir, 'requirements.csv', (rows) => renumber(rows.filter((r) => !['6.1.1', '6.1.2', '6.1.3'].includes(r.requirement_code!))));
     const warnings = buildPack(dir, key().privateKey).warnings;
+    expect(warnings).toContain('cycle_requirements.csv: RISK_ASSESSMENT: requirement_code 6.1.2 is not in requirements.csv');
     writeRows(dir, 'documented_info.csv', ['code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'], [
       { code: 'DI-4.3', requirement_code: '4.3', kind: 'maintain', title: 'Scope of the management system', template_code: 'SCO-01', sort_order: '1' },
     ]);
@@ -205,15 +220,11 @@ describe('content references (E.1)', () => {
     expect(strict.issues).toEqual(expect.arrayContaining([...warnings, 'documented_info.csv: DI-4.3: template_code SCO-01 is not in document_templates.csv']));
 
     editRows(dir, 'requirements.csv', (rows) => {
-      const all = [...rows, subclause('6.1.2', '6.1', 'Risk assessment'), subclause('6.1.3', '6.1', 'Risk treatment'), subclause('7.5.2', '7.5', 'Creating and updating')];
+      const all = [...rows, subclause('6.1.1', '6.1', 'General'), subclause('6.1.2', '6.1', 'Risk assessment'), subclause('6.1.3', '6.1', 'Risk treatment')];
       const order = (code: string) => code.split('.').map((n) => n.padStart(3, '0')).join('.');
       return renumber(all.sort((a, b) => order(a.requirement_code!).localeCompare(order(b.requirement_code!))));
     });
-    const outputs = [...new Set(readRows(dir, 'activities.csv').rows.map((r) => r.output_document_code).filter((c): c is string => !!c))];
-    writeRows(dir, 'document_templates.csv', ['code', 'title', 'doc_type', 'requirement_code'], [
-      { code: 'SCO-01', title: 'Scope statement', doc_type: 'record', requirement_code: '4.3' },
-      ...outputs.map((code) => ({ code, title: `Template ${code}`, doc_type: 'procedure', requirement_code: '' })),
-    ]);
+    cpSync(path.join(SOURCES_DIR, 'ISO27001-2022', 'document_templates.csv'), path.join(dir, 'document_templates.csv'));
     const pack = buildPack(dir, key().privateKey);
     expect(contentReferencesStrict(pack.manifest, pack.datasets)).toBe(true);
     expect(pack.warnings).toEqual([]);
@@ -221,10 +232,10 @@ describe('content references (E.1)', () => {
   });
 
   it('are errors from the content step of each Milestone 1 pack, also with documented_info.csv left empty, and in every other pack', () => {
-    const dir = sourceCopy();
+    const dir = milestone1Copy();
     const warnings = buildPack(dir, key().privateKey).warnings;
     expect(warnings.length).toBeGreaterThan(0);
-    setVersion(dir, '1.2.9');
+    setVersion(dir, '1.2.8');
     expect(buildPack(dir, key().privateKey).warnings).toEqual(warnings);
     for (const version of ['1.3.0', '1.3.0-rc.1', '2.0.0']) {
       setVersion(dir, version);
@@ -252,7 +263,8 @@ describe('content references (E.1)', () => {
     for (const bad of ['', 'Clause 6', '6.1.3d)', '8.1/9.1', '6.1.3 D)', 'A.5.1']) expect(clauseAtRiskCodes(bad), bad).toBeNull();
     const dir = sourceCopy();
     editRows(dir, 'chain.csv', (rows) => rows.map((r) => (r.stage_key === 'metric' ? { ...r, clause_at_risk: 'see 9' } : r)));
-    expect(buildPack(dir, key().privateKey).warnings).toContain('chain.csv: stage metric: clause_at_risk "see 9" is not a clause reference such as 6.1.3, 6.1.3 d) or 8.1 / 9.1');
+    // The content step is strict, so the reference is an error.
+    expect(packError(() => buildPack(dir, key().privateKey)).issues).toContain('chain.csv: stage metric: clause_at_risk "see 9" is not a clause reference such as 6.1.3, 6.1.3 d) or 8.1 / 9.1');
   });
 });
 

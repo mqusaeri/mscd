@@ -793,7 +793,9 @@ export async function writeOrganisation(trx: Trx, input: OrgSeedInput): Promise<
         prep.map(([title, owner, due, status], position) => ({
           audit_event_id: nextEvent.id,
           management_system_id: msId,
-          template_code: content.prepTemplates.find((t) => t.title === title)?.code ?? null,
+          // The sample keeps demo wording in its task titles (Milestone 2 E.4), so a task without a template of the same
+          // title takes the template at its position (the pack numbers them PREP-01, PREP-02, ... in sample order).
+          template_code: content.prepTemplates.find((t) => t.title === title)?.code ?? content.prepTemplates.find((t) => t.code === `PREP-${String(position + 1).padStart(2, '0')}`)?.code ?? null,
           title,
           owner_user_id: userId(owner),
           due_at: due,

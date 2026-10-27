@@ -132,7 +132,7 @@ describe('tools/scripts/ensure-built.mjs (G.1)', () => {
     expect(first.stdout).toContain('ensure-built: building packs/dist (missing packs/dist/');
     const packs = readdirSync(path.join(scratch, 'packs/dist')).filter((name) => name.endsWith('.pack')).sort();
     expect(packs).toEqual([
-      'ISO22301-2019-1.0.1.pack', 'ISO27001-2022-1.2.1.pack', 'ISO37001-2016-1.0.1.pack', 'ISO37001-2025-0.6.1.pack', 'ISO9001-2015-1.4.3.pack', 'ISO9001-2026-0.9.1.pack',
+      'ISO22301-2019-1.1.0.pack', 'ISO27001-2022-1.3.0.pack', 'ISO37001-2016-1.1.0.pack', 'ISO37001-2025-0.7.0.pack', 'ISO9001-2015-1.5.0.pack', 'ISO9001-2026-0.10.0.pack',
     ]);
     for (const pack of packs) expect(readFileSync(path.join(scratch, 'packs/dist', pack))).toEqual(readFileSync(path.join(REPO_ROOT, 'packs/dist', pack)));
     const built = statSync(path.join(scratch, 'packs/dist', packs[0]!)).mtimeMs;

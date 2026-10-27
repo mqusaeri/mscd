@@ -44,7 +44,7 @@ describe('management systems (TS 6.2, C.13, D-30)', () => {
     const created = await create({ slug: 'isms', code: 'ISMS', name: 'Information security management system', packId: 'ISO27001-2022', edition: '2022', certificationBody: 'Garuda Cert', ...BASE });
     expect(created.statusCode).toBe(201);
     expect(created.json()).toMatchObject({
-      slug: 'isms', code: 'ISMS', frameworkCode: 'ISO27001', frameworkName: 'ISO/IEC 27001', edition: '2022', packId: 'ISO27001-2022', packVersion: '1.2.1',
+      slug: 'isms', code: 'ISMS', frameworkCode: 'ISO27001', frameworkName: 'ISO/IEC 27001', edition: '2022', packId: 'ISO27001-2022', packVersion: '1.3.0',
       transitionTargetEdition: null, applicabilityTarget: 'catalogue_item', status: 'setup', certificationBody: 'Garuda Cert', defaultRepository: 'vault', position: 0,
     });
     const id = created.json().id as string;
@@ -52,14 +52,14 @@ describe('management systems (TS 6.2, C.13, D-30)', () => {
       trx.selectFrom('implementation_activity_progress').select(['phase_no', 'activity_no', 'title', 'is_gate_phase', 'template_pack_version', 'status', 'output_document_code']).where('management_system_id', '=', id).orderBy('phase_no').orderBy('activity_no').execute(),
     );
     expect(copies).toHaveLength(69);
-    expect(copies[0]).toEqual({ phase_no: 1, activity_no: 1, title: 'Secure top management mandate', is_gate_phase: false, template_pack_version: '1.2.1', status: 'not_started', output_document_code: null });
+    expect(copies[0]).toEqual({ phase_no: 1, activity_no: 1, title: 'Secure top management mandate', is_gate_phase: false, template_pack_version: '1.3.0', status: 'not_started', output_document_code: null });
     expect(new Set(copies.filter((c) => c.is_gate_phase).map((c) => c.phase_no))).toEqual(new Set([4]));
     const versions = await tenantRows((trx) => trx.selectFrom('management_system_version').select(['role', 'activated_at', 'ended_at']).where('management_system_id', '=', id).execute());
     expect(versions).toEqual([{ role: 'active', activated_at: '2026-09-29', ended_at: null }]);
     const readiness = await tenantRows((trx) => trx.selectFrom('clause_readiness').select('clause_group').where('management_system_id', '=', id).orderBy('clause_group').execute());
     expect(readiness.map((r) => r.clause_group)).toEqual([4, 5, 6, 7, 8, 9, 10]);
     const audit = await tenantRows((trx) => trx.selectFrom('audit_trail').select(['action', 'management_system_id', 'edition', 'after_data']).where('action', '=', 'ms.created').execute());
-    expect(audit).toEqual([expect.objectContaining({ management_system_id: id, edition: 'ISO27001-2022 1.2.1', after_data: expect.objectContaining({ activities_copied: 69 }) })]);
+    expect(audit).toEqual([expect.objectContaining({ management_system_id: id, edition: 'ISO27001-2022 1.3.0', after_data: expect.objectContaining({ activities_copied: 69 }) })]);
 
     const list = await app.app.inject({ method: 'GET', url: '/api/v1/admin/management-systems', headers: as('ta@ndt') });
     expect(list.statusCode).toBe(200);

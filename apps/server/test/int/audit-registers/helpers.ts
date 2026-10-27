@@ -1,8 +1,8 @@
 // Helpers of the audit-side register tests (WP-37): an api application on a copy of the demo template with the real
 // session resolver, authorisation, licence service, rule engine, the audit register commands and the
 // `cycle.derive` job, a way to move the organisation's date (`demo.fixed_today` of the test profile), fixture rows
-// in the framework content (`ref`, written as the pack installer: review inputs and cycle derivations that the demo
-// packs do not carry), and fixture queries run as the migrator inside an organisation's schema. Sessions and
+// in the framework content (`ref`, written as the pack installer: review inputs and cycle derivations beyond those
+// of the packs), and fixture queries run as the migrator inside an organisation's schema. Sessions and
 // requests reuse the client of the WP-20 command tests.
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { TestingModule } from '@nestjs/testing';
@@ -87,7 +87,7 @@ export async function systemOf(db: TestDatabase, org: DemoOrg, ms: string): Prom
   return { id: row!.id, editionId: row!.framework_version_id };
 }
 
-/** Fixture review input definitions of an edition (the demo packs define none). */
+/** Fixture review input definitions of an edition, next to those of its pack. */
 export async function addReviewInputs(db: TestDatabase, editionId: string, defs: { code: string; title: string; mandatory: boolean }[]): Promise<void> {
   for (const [index, def] of defs.entries()) {
     await sql`insert into ref.review_input_def (framework_version_id, code, title, mandatory, sort_order)
@@ -96,7 +96,7 @@ export async function addReviewInputs(db: TestDatabase, editionId: string, defs:
   }
 }
 
-/** Sets the derivation of a cycle requirement definition of an edition (the demo packs carry none, G.7). */
+/** Sets the derivation of a cycle requirement definition of an edition (a fixture in place of the pack's). */
 export async function setDerivation(db: TestDatabase, editionId: string, code: string, derivation: Record<string, unknown> | null): Promise<void> {
   await sql`update ref.cycle_requirement_def set derivation = ${derivation === null ? null : JSON.stringify(derivation)}::jsonb
              where framework_version_id = ${editionId} and code = ${code}`.execute(db.packInstaller);

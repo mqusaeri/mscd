@@ -56,7 +56,7 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
   it('installs the six packs (D-14) with the sample install dates and the catalogue entries of newer versions', async () => {
     const installs = await db.migrator.selectFrom('platform.pack_install').select(['pack_id', 'pack_version', 'installed_at']).where('status', '=', 'installed').orderBy('pack_id').execute();
     expect(installs.map((i) => `${i.pack_id} ${i.pack_version}`)).toEqual([
-      'ISO22301-2019 1.0.1', 'ISO27001-2022 1.2.1', 'ISO37001-2016 1.0.1', 'ISO37001-2025 0.6.1', 'ISO9001-2015 1.4.3', 'ISO9001-2026 0.9.1',
+      'ISO22301-2019 1.1.0', 'ISO27001-2022 1.3.0', 'ISO37001-2016 1.1.0', 'ISO37001-2025 0.7.0', 'ISO9001-2015 1.5.0', 'ISO9001-2026 0.10.0',
     ]);
     const date = (packId: string) => installs.find((i) => i.pack_id === packId)!.installed_at!.toISOString();
     expect(date('ISO27001-2022')).toBe('2026-02-02T02:00:00.000Z'); // 02 Feb 2026, 09:00 in Jakarta
@@ -162,7 +162,8 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
   });
 
   it('seeds the reference counts of UI 4.7 in every organisation (ISMS 93 entries, 79 evidence, 22 documents)', async () => {
-    const expected: Record<string, [number, number, number]> = { isms: [93, 79, 22], qms: [28, 27, 10], bcms: [27, 11, 8], abms: [32, 2, 5] };
+    // Milestone 2 E.2 (M2-04): clause 10 per standard, so BCMS and ABMS hold 10.1 and 10.2 only (10.3 is retired).
+    const expected: Record<string, [number, number, number]> = { isms: [93, 79, 22], qms: [28, 27, 10], bcms: [26, 11, 8], abms: [31, 2, 5] };
     for (const org of ORG_SLUGS) {
       for (const ms of systemsOf(org)) {
         const actual = await inOrg(db.migrator, org, async (trx) => [

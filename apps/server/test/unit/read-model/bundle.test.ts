@@ -158,8 +158,9 @@ describe('portfolio counts (UI 2.8, UI 4.7)', () => {
     expect(Object.fromEntries(Object.entries(counts).map(([ms, c]) => [ms, [c.requirements, c.evidence, c.documents, c.chainItems, c.notPending, c.gateItems, c.criticalEvidence]]))).toEqual({
       isms: [93, 79, 22, 63, 24, 4, 3],
       qms: [28, 27, 10, 18, 5, 0, 0],
-      bcms: [27, 11, 8, 25, 2, 3, 0],
-      abms: [32, 2, 5, 35, 3, 1, 0],
+      // Milestone 2 E.2 (M2-04): clause 10 per standard, so BCMS and ABMS hold 10.1 and 10.2 only (10.3 is retired).
+      bcms: [26, 11, 8, 24, 2, 3, 0],
+      abms: [31, 2, 5, 34, 3, 1, 0],
     });
     expect(Object.fromEntries(Object.entries(counts).map(([ms, c]) => [ms, [c.gateItems, c.expiredDocuments, c.criticalEvidence, c.unverifiableEvidence, c.afterAudit]]))).toEqual({
       isms: [4, 5, 3, 3, 16],
