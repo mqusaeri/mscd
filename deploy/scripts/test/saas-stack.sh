@@ -49,6 +49,8 @@
 #                               applied (see build_images)
 #   MSCD_BUILD_CA               CA certificate of a TLS-inspecting proxy for the image builds
 set -euo pipefail
+# Node scripts and Go templates are passed in single quotes on purpose.
+# shellcheck disable=SC2016
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd -- "$SCRIPT_DIR/../../.." && pwd)
@@ -62,7 +64,7 @@ KEEP_IMAGES=${MSCD_SAAS_TEST_KEEP_IMAGES:-false}
 
 # lib/common.sh reads the project name once, when it is sourced.
 export COMPOSE_PROJECT_NAME=$PROJECT
-# shellcheck source=../lib/common.sh
+# shellcheck source=SCRIPTDIR/../lib/common.sh
 . "$REPO_DIR/deploy/scripts/lib/common.sh"
 
 readonly APP_HOST=localhost
@@ -96,7 +98,7 @@ https() {
 
 # header NAME < HEADERS: value of the first header NAME (any case), without CR.
 header() {
-    awk -v n="$(printf '%s' "$1" | tr 'A-Z' 'a-z')" 'BEGIN { FS = ": " }
+    awk -v n="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" 'BEGIN { FS = ": " }
         { name = tolower($1); sub(/\r$/, "") }
         name == n { sub(/^[^:]*: /, ""); print; exit }'
 }
@@ -264,6 +266,7 @@ make_secrets() {
         install -m 0600 "$STATE/keys/production/$name" "$dir/$name"
     done
     # The rest as install.sh makes them; the files copied above are kept.
+    # shellcheck disable=SC2034  # read by lib/common.sh
     DOCKER_OK=true
     ensure_secrets "$dir" "$(env_value MSCD_SERVER_IMAGE)@$(env_value MSCD_SERVER_DIGEST)" ||
         die "The secrets could not be created in $dir"
@@ -287,6 +290,7 @@ up() {
         info "Removing what an earlier run of $PROJECT left behind"
         down_quiet
     fi
+    # shellcheck disable=SC2034  # read by check_port of lib/common.sh
     DOCKER_OK=true
     check_port "$HTTP_PORT" "Caddy HTTP" MSCD_SAAS_TEST_HTTP_PORT
     check_port "$HTTPS_PORT" "Caddy HTTPS" MSCD_SAAS_TEST_HTTPS_PORT
