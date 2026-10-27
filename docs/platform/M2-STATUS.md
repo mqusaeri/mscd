@@ -23,7 +23,8 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-03 Pack format and upgrade path | 1b | Done | zod 4.6.6 and undici 7.30.1 are in; the server image passes the gate. Notes for M2-04 to M2-07 are in their briefs |
 | M2-S02 SaaS Compose stack and TLS | 1b | Done | Caddy also serves `apps/site` on `MSCD_SITE_DOMAIN`. Without the Alpine mirrors, run its stack test with `MSCD_SAAS_TEST_SCAN=auto` |
 | M2-05 Certification, internal audit and readiness server | 2a | Done, waiting for the wave commit | Its handoff lists the cross-package fixes the orchestrator applies at the end of wave 2a |
-| M2-04, M2-06, M2-07 | 2a | Running (started after wave 1, main at b76b4f3) | Read the "Orchestrator note from M2-03" lines in each brief |
+| M2-07 Document control and register server additions | 2a | Built and verified; an orchestrator follow-up run closes its open items (holdings columns, readiness queueing, overview maturity, `retired` in the snapshot, review audit action) | APPL-ASSESS also applies on create (plan D.2 updated) |
+| M2-04, M2-06 | 2a | Running (started after wave 1, main at b76b4f3) | Read the "Orchestrator note from M2-03" lines in each brief |
 | MOT-03 In-app illustration library | L2 | Next (M2-01 is done) | |
 | M2-S10, M2-S05, M2-S07, M2-S08 | 2b | M2-S05 and M2-S08 are ready now; M2-S07 and M2-S10 wait for M2-06 | M2-S10: write `platform.entitlement` only in platform scope (see its brief) |
 | M2-S09, M2-08, M2-09, M2-10 | 3a | After wave 2 | |

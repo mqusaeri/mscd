@@ -7,11 +7,13 @@
 //   `finding_overdue` when the task opens.
 // - Completed due diligence past `valid_until` becomes `expired`.
 // - Competence records (Milestone 2, M2-07) get the renewal action (`pending_action`, `action_due_at` = `valid_until`)
-//   30 days before `valid_until`, so they show in the owner's tasks; the owner gets `task_overdue` once when
-//   `valid_until` has passed. An action the owner completed is not set again for the same `valid_until`.
+//   30 days before `valid_until`, so they show in the owner's tasks; the owner gets `task_overdue` once per lapse
+//   when `valid_until` has passed (a renewed record that lapses again is announced again). An action the owner
+//   completed is not set again for the same `valid_until`.
 // - BR-10 and BR-15 tasks whose condition cleared are closed (`done`, actor system).
 // Rules run only where the system's edition activates them (`ref.rule_activation`).
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { RecordRef } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { addDays, fmtDay } from '../../common/dates';
@@ -50,6 +52,28 @@ function emptyResult(): TasksOverdueResult {
     competenceReminders: 0,
     notifications: 0,
   };
+}
+
+/**
+ * Reference of a competence lapse notification: the record, plus the `valid_until` that passed. Readers parse it as
+ * a `RecordRef`, which drops the extra member; the job keys its once-per-lapse check on it.
+ */
+function lapseRef(id: string, code: string, validUntil: string): RecordRef & { validUntil: string } {
+  return { module: 'audit', entityType: 'competence_record', id, code, validUntil };
+}
+
+/** Whether the owner already got `task_overdue` for this lapse of the record (the same `valid_until`). */
+async function lapseNotified(trx: Trx, recordId: string, recipient: string, validUntil: string): Promise<boolean> {
+  const row = await trx
+    .selectFrom('notification')
+    .select('id')
+    .where('kind', '=', 'task_overdue')
+    .where('recipient_user_id', '=', recipient)
+    .where(sql<string>`entity_ref->>'id'`, '=', recordId)
+    .where(sql<string>`entity_ref->>'validUntil'`, '=', validUntil)
+    .limit(1)
+    .executeTakeFirst();
+  return row !== undefined;
 }
 
 @Injectable()
@@ -263,7 +287,8 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
   /**
    * Competence records (Milestone 2 M2-07): the renewal action from 30 days before `valid_until` (once per
    * `valid_until`: `action_due_at` keeps the date it was set for, also after the owner completed it), and
-   * `task_overdue` to the owner once when `valid_until` has passed.
+   * `task_overdue` to the owner once per lapse when `valid_until` has passed. The notification's reference carries
+   * the `valid_until` it announces, so a record renewed and lapsed again gets a new one.
    */
   private async competence(trx: Trx, today: string, result: TasksOverdueResult): Promise<void> {
     const { rows } = await sql<{
@@ -296,7 +321,7 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
         result.competenceReminders += 1;
       }
       if (record.valid_until >= today || !record.owner_user_id) continue;
-      if (await notificationSent(trx, 'task_overdue', record.id, record.owner_user_id)) continue;
+      if (await lapseNotified(trx, record.id, record.owner_user_id, record.valid_until)) continue;
       const who = record.person ? `${record.person}, ${record.role_title}` : record.role_title;
       const created = await this.notifications.create(trx, {
         recipientUserId: record.owner_user_id,
@@ -307,7 +332,7 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
           en: `The competence of ${who} was valid until ${fmtDay(record.valid_until, 'en')}. Renew the proof and update the record.`,
           id: `Kompetensi ${who} berlaku sampai ${fmtDay(record.valid_until, 'id')}. Perbarui bukti dan rekamannya.`,
         },
-        ref: { module: 'audit', entityType: 'competence_record', id: record.id, code },
+        ref: lapseRef(record.id, code, record.valid_until),
         createdBy: SYSTEM_USER_ID,
       });
       if (created) result.notifications += 1;

@@ -47,8 +47,7 @@ export function register(program: Command): void {
         process.stdout.write(
           `tenant create: organisation ${created.slug} (${created.id}) created: schema ${created.schemaName}, ` +
             `${created.migrations.length} tenant migrations, data key ${created.kekId}, ` +
-            `Managed Vault repository ${created.vaultRepositoryId}\n` +
-            `The slug ${created.slug} cannot be changed: it names the organisation's schema. Local sign-in is allowed.\n`,
+            `Managed Vault repository ${created.vaultRepositoryId}\n`,
         );
       });
     });

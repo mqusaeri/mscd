@@ -510,13 +510,19 @@ export class RegistersService {
         const shownBefore = field.type === 'person' ? await this.handleOf(trx, row[field.column] as string | null) : undefined;
         change(field.column, values[field.column], field.type, shown[field.column], shownBefore);
       }
-      // A renewed competence record (valid beyond the reminder window again) no longer waits for renewal.
+      // A renewed competence record (valid beyond the reminder window again) no longer waits for renewal. A new
+      // `valid until` still inside the window keeps the renewal action open and moves its due date with it, so the
+      // owner's task shows the date that now applies.
       if (kind === 'competence' && row.pending_action && 'valid_until' in set) {
         const validUntil = values.valid_until as string | null;
         if (validUntil === null || validUntil > addDays(todayOf(this.clock, org), COMPETENCE_REMINDER_DAYS)) {
           set.pending_action = null;
           before.pending_action = row.pending_action;
           after.pending_action = null;
+        } else if (row.action_due_at !== validUntil) {
+          set.action_due_at = validUntil;
+          before.action_due_at = row.action_due_at ?? null;
+          after.action_due_at = validUntil;
         }
       }
 

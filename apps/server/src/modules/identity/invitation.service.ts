@@ -138,6 +138,43 @@ export class InvitationService {
   }
 
   /**
+   * When the pending invitations of a user were made (Milestone 2 D.2 `Me.pendingMemberships[].invitedAt`): per
+   * organisation of `orgIds`, the time of the latest `user.invited` entry for the user (entity `user`, or entity
+   * `invitation` naming one of the user's invitation links). The membership row is no clock for this: a trigger moves
+   * its `updated_at` on every change of the invited row (its admin roles, for example), and its `created_at` stays
+   * from a former membership that was invited again. The entries belong to organisations the session is not bound
+   * to, so they are read in platform scope, read only. Organisations without such an entry (seeded data) are left out.
+   */
+  async invitationTimes(userId: string, orgIds: readonly string[]): Promise<Map<string, Date>> {
+    const times = new Map<string, Date>();
+    if (orgIds.length === 0) return times;
+    const rows = await this.infra.scope.withPlatform(
+      async (trx) => {
+        await sql`set transaction read only`.execute(trx);
+        return trx
+          .selectFrom('platform.audit_log as a')
+          .select(['a.organization_id', (eb) => eb.fn.max('a.occurred_at').as('at')])
+          .where('a.action', '=', 'user.invited')
+          .where('a.organization_id', 'in', [...orgIds])
+          .where((eb) =>
+            eb.or([
+              eb.and([eb('a.entity_type', '=', 'user'), eb('a.entity_id', '=', userId)]),
+              eb.and([
+                eb('a.entity_type', '=', 'invitation'),
+                eb('a.entity_id', 'in', eb.selectFrom('platform.invitation as i').select('i.id').where('i.user_id', '=', userId)),
+              ]),
+            ]),
+          )
+          .groupBy('a.organization_id')
+          .execute();
+      },
+      { scope: 'auth', userId },
+    );
+    for (const r of rows) if (r.organization_id && r.at) times.set(r.organization_id, new Date(r.at));
+    return times;
+  }
+
+  /**
    * Tells an existing active account about an invited membership (Milestone 2 D.2, J.4), after `trx` commits: the
    * account email `membership_invited`, and the notification `membership_invited` in the organisation the account
    * signs in to (its default active membership, else its first active one; none when it has no other active

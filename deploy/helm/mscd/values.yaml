@@ -335,7 +335,8 @@ adminJob:
   # an active member.
   hook: post-install
   # -- Retries of a failed pod. Each retry runs every step again from the
-  # first; tenant create then passes because the organisation exists.
+  # first: tenant create passes because the organisation exists, and admin
+  # create-user sends a new invitation each time it runs.
   backoffLimit: 6
   activeDeadlineSeconds: 900
   # -- Seconds the finished Job (and its log) is kept.

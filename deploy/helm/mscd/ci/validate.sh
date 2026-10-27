@@ -16,7 +16,8 @@
 # helm and kubeconform run in alpine/k8s:1.34.1 with the host network, so
 # HTTPS_PROXY works. MSCD_BUILD_CA (a CA bundle file) is mounted as the
 # container's CA bundle when set, for networks with a TLS-inspecting proxy.
-# MSCD_HELM_CHECK_IMAGE overrides the image.
+# MSCD_HELM_CHECK_IMAGE overrides the image; MSCD_HELM_CHECK_PREFIX is put in
+# front of the names of the check containers (on a shared Docker host).
 set -euo pipefail
 
 CHART_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -47,7 +48,7 @@ fi
 
 # tool <command...>: runs helm or kubeconform in the check image.
 tool() {
-  docker run --rm --name "mscd-helm-check-$$-$RANDOM" \
+  docker run --rm --name "${MSCD_HELM_CHECK_PREFIX:-}mscd-helm-check-$$-$RANDOM" \
     --network host \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \

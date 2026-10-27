@@ -125,6 +125,59 @@ describe('holdings and handover (M2-07)', () => {
     expect((await rina.post(`${HOLDINGS('isms', 'nobody-here')}/reassign`, { successor: 'dewi' })).status).toBe(404);
   });
 
+  it('lists the drift results a person holds as tasks and the reviews they own as register rows, and hands them over', async () => {
+    const bagusId = await idOf(db, 'tst', 'bagus');
+    const ids = await inOrg(db, 'tst', async (trx) => {
+      const insertDrift = (code: string, resolved: boolean) => sql<{ id: string }>`
+        insert into drift_result (management_system_id, drift_rule_def_id, rule_code, entity_code, title, holder_user_id, due_at, resolved_at)
+        select ${isms.id}, d.id, d.code, ${code}, 'Fixture drift item', ${bagusId}, '2026-10-15', ${resolved ? sql`now()` : sql`null`}
+          from ref.drift_rule_def d where d.framework_version_id = ${isms.version} order by d.code limit 1
+        returning id`.execute(trx);
+      const insertReview = async (code: string, status: 'planned' | 'closed') => {
+        const { rows } = await sql<{ id: string }>`
+          insert into management_review (code, title, owner_user_id, planned_at, status, decisions_recorded, closed_at)
+          values (${code}, 'Fixture review', ${bagusId}, '2026-11-20', ${status}, ${status === 'closed'}, ${status === 'closed' ? '2026-09-01' : null})
+          returning id`.execute(trx);
+        await sql`insert into entity_ms_link (entity_type, entity_id, management_system_id, is_primary)
+                  values ('management_review', ${rows[0]!.id}, ${isms.id}, true)`.execute(trx);
+        return rows[0]!.id;
+      };
+      return {
+        drift: (await insertDrift('DR-HX1', false)).rows[0]!.id,
+        resolvedDrift: (await insertDrift('DR-HX2', true)).rows[0]!.id,
+        review: await insertReview('MR-HX1', 'planned'),
+        closedReview: await insertReview('MR-HX2', 'closed'),
+      };
+    });
+    const before = await holdings('bagus');
+    expect(before.items.find((i) => i.ref.id === ids.drift)).toMatchObject({
+      kind: 'task', code: 'DR-HX1', title: 'Fixture drift item', dueAt: '2026-10-15', ref: { module: 'surveillance', entityType: 'drift_result' },
+    });
+    expect(before.items.find((i) => i.ref.id === ids.review)).toMatchObject({
+      kind: 'register_row', code: 'MR-HX1', title: 'Fixture review', dueAt: '2026-11-20', ref: { module: 'audit', entityType: 'management_review' },
+    });
+    expect(before.items.some((i) => i.ref.id === ids.resolvedDrift || i.ref.id === ids.closedReview)).toBe(false);
+    const counts = (await admin.get<UserHoldings>(`/api/v1/admin/users/${bagusId}/holdings`)).body.systems.find((s) => s.ms === 'isms')!;
+    expect(counts.total).toBe(before.items.length);
+
+    const response = await rina.post(`${HOLDINGS('isms', 'bagus')}/reassign`, { successor: 'dewi', kinds: ['task', 'register_row'] });
+    expect(response.status).toBe(200);
+    const after = await holdings('bagus');
+    expect(after.items.some((i) => i.ref.id === ids.drift || i.ref.id === ids.review)).toBe(false);
+    const dewi = await holdings('dewi');
+    expect(dewi.items.filter((i) => i.ref.id === ids.drift || i.ref.id === ids.review)).toHaveLength(2);
+    const [stored] = await rowsOf<{ holder: string; owner: string; resolved_holder: string; closed_owner: string }>(db, 'tst', sql`
+      select (select u.handle from drift_result r join platform.app_user u on u.id = r.holder_user_id where r.id = ${ids.drift}) as holder,
+             (select u.handle from management_review r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.review}) as owner,
+             (select u.handle from drift_result r join platform.app_user u on u.id = r.holder_user_id where r.id = ${ids.resolvedDrift}) as resolved_holder,
+             (select u.handle from management_review r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.closedReview}) as closed_owner`);
+    expect(stored).toEqual({ holder: 'dewi', owner: 'dewi', resolved_holder: 'bagus', closed_owner: 'bagus' });
+    const audit = (await auditByAction(db, 'tst', 'holdings.reassigned')).filter((a) => a.entity_id === ids.drift || a.entity_id === ids.review);
+    expect(audit.map((a) => [a.entity_type, a.after?.columns])).toEqual(
+      expect.arrayContaining([['drift_result', ['holder_user_id']], ['management_review', ['owner_user_id']]]),
+    );
+  });
+
   it('hands everything over when no kind is named, after which the person holds nothing in the system', async () => {
     const response = await rina.post(`${HOLDINGS('isms', 'bagus')}/reassign`, { successor: 'dewi' });
     expect(response.status).toBe(200);

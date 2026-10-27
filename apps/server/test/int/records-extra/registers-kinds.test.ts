@@ -220,6 +220,40 @@ describe('register kinds objectives and competence (M2-07)', () => {
       expect(await rowOf('competence_record', lapsed.body.ref!.id)).toMatchObject({ pending_action: null, valid_until: '2029-09-01' });
       const third = await job.run(ORG_IDS.tst);
       expect(third.competenceReminders).toBe(0);
+
+      // The renewed record lapses again (the test profile's clock is fixed, so it gets a valid until that has passed):
+      // the owner hears about the new lapse once, with its own date.
+      const renewedRow = await rowOf('competence_record', lapsed.body.ref!.id);
+      const relapsed = await rina.patch(`${URL('competence')}/${lapsed.body.ref!.id}`, { validUntil: '2026-09-15' }, { 'if-match': etagOf(renewedRow.updated_at) });
+      expect(relapsed.status).toBe(200);
+      const fourth = await job.run(ORG_IDS.tst);
+      expect(fourth.competenceReminders).toBe(1);
+      expect(await rowOf('competence_record', lapsed.body.ref!.id)).toMatchObject({ pending_action: COMPETENCE_RENEWAL_ACTION, action_due_at: '2026-09-15' });
+      const lapses = (await notificationsOf(db, 'tst', 'bagus', 'task_overdue')).filter((n) => n.entity_id === lapsed.body.ref!.id);
+      expect(lapses).toHaveLength(2);
+      expect(lapses.map((n) => n.body_en)).toEqual(expect.arrayContaining([expect.stringContaining('01 Sep 2026'), expect.stringContaining('15 Sep 2026')]));
+      await job.run(ORG_IDS.tst);
+      expect((await notificationsOf(db, 'tst', 'bagus', 'task_overdue')).filter((n) => n.entity_id === lapsed.body.ref!.id)).toHaveLength(2);
+    });
+
+    it('moves the due date of an open renewal action with a new valid until that is still inside the reminder window', async () => {
+      const job = ctx.moduleRef.get(TasksOverdueJob);
+      const created = await rina.post(URL('competence'), { ...record, title: 'Network operator', ownerHandle: 'bagus', personHandle: 'bagus', validUntil: '2026-10-09' });
+      expect(created.status).toBe(201);
+      const id = created.body.ref!.id;
+      expect((await job.run(ORG_IDS.tst)).competenceReminders).toBe(1);
+      const open = await rowOf('competence_record', id);
+      expect(open).toMatchObject({ pending_action: COMPETENCE_RENEWAL_ACTION, action_due_at: '2026-10-09' });
+      const moved = await bagus.patch(`${URL('competence')}/${id}`, { validUntil: '2026-10-20' }, { 'if-match': etagOf(open.updated_at) });
+      expect(moved.status).toBe(200);
+      expect(await rowOf('competence_record', id)).toMatchObject({ pending_action: COMPETENCE_RENEWAL_ACTION, action_due_at: '2026-10-20', valid_until: '2026-10-20' });
+      expect((await auditOf(db, 'tst', id)).at(-1)).toMatchObject({
+        action: 'register.updated', before: { valid_until: '2026-10-09', action_due_at: '2026-10-09' }, after: { valid_until: '2026-10-20', action_due_at: '2026-10-20' },
+      });
+      const tasks = await bagus.get<TaskList>('/api/v1/tasks');
+      expect(tasks.body.items.find((t) => t.id === id)).toMatchObject({ due: '2026-10-20' });
+      // The job leaves the open action as it is.
+      expect((await job.run(ORG_IDS.tst)).competenceReminders).toBe(0);
     });
   });
 });

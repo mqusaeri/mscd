@@ -4,8 +4,9 @@
 // Kinds (`HOLDING_KINDS`): applicability entries (owner or justification holder), activities not verified,
 // documents as owner or pending review holder (`document_owner`) and as approver (`document_approver`), evidence,
 // risks, risk treatments not closed or accepted, findings not closed, corrective actions not closed or cancelled,
-// preparation tasks and cycle items not done, register rows (the other register and chain record tables) and open
-// stored tasks.
+// preparation tasks and cycle items not done, register rows (the other register and chain record tables, and the
+// management reviews the person owns that are not closed) and tasks (open stored tasks, and the unresolved drift
+// results the person holds through `records.assign` kind `drift`).
 //
 // The MS Manager and the Programme Owner (`record.assign`) see the items of one system with codes and titles; the
 // Tenant Admin (`user.manage`) sees counts per system and kind with the primary manager of each system, never a
@@ -203,16 +204,33 @@ function heldQueries(kind: HoldingKind, msId: string, userId: string, lock: bool
              from ${sql.table(table)} t
             where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid${forUpdate}`);
       }
+      // Management reviews the person owns and that are not closed, in every system they are linked to (a joint
+      // review is shared, BR-22); a planned review is due on its planned date.
+      parts.push(sql<HeldRow>`
+        select 'management_review' as tbl, t.id, t.updated_at, t.code, t.title, case when t.status = 'planned' then t.planned_at end as due_at,
+               array['owner_user_id'] as columns, ${otherLinked('management_review', 't', msId)} as other_ms, null as target_type
+          from management_review t
+         where t.deleted_at is null and t.owner_user_id = ${userId}::uuid and t.status <> 'closed' and ${linkedTo('management_review', 't', msId)}
+         order by t.planned_at nulls last, t.code${forUpdate}`);
       // One statement per table: PostgreSQL refuses FOR UPDATE inside UNION.
       return parts;
     }
     case 'task':
-      return [sql<HeldRow>`
+      return [
+        sql<HeldRow>`
         select 'task' as tbl, t.id, t.updated_at, coalesce(t.entity_code, left(t.title_en, 30)) as code, t.title_en as title, t.due_at,
                array['owner_user_id'] as columns, ${none} as other_ms, null as target_type
           from task t
          where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.owner_user_id = ${userId}::uuid and t.status = 'open'
-         order by t.due_at nulls last, t.created_at${forUpdate}`];
+         order by t.due_at nulls last, t.created_at${forUpdate}`,
+        // Unresolved drift results the person holds (`records.assign` kind `drift`, `holder_user_id`).
+        sql<HeldRow>`
+        select 'drift_result' as tbl, t.id, t.updated_at, t.entity_code as code, t.title, t.due_at,
+               array['holder_user_id'] as columns, ${none} as other_ms, null as target_type
+          from drift_result t
+         where t.management_system_id = ${msId}::uuid and t.deleted_at is null and t.resolved_at is null and t.holder_user_id = ${userId}::uuid
+         order by t.rule_code, t.position${forUpdate}`,
+      ];
   }
 }
 

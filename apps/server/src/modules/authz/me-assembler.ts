@@ -4,9 +4,9 @@
 // personas (demo mode only), the stored preferences, and the invitations waiting for the user (Milestone 2 D.2).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { sql } from 'kysely';
 import { DEMO_PERSONAS, UI_ROLE_LABELS, uiRoleFor, type Me, type Organisation, type PendingMembership, type UiRole } from '@mscd/shared';
 import { PERMISSION_EVALUATOR, type MeAssembler, type PermissionEvaluator, type Principal, type TenantInfo } from '../../common/tokens';
+import { InvitationService } from '../identity/invitation.service';
 import { PreferencesService } from '../identity/preferences.service';
 import { tenantContextOf } from '../tenancy/tenant-scope';
 import { AuthzInfra } from './authz-infra';
@@ -16,6 +16,7 @@ import { RoleResolver, type PrincipalRoles } from './role-resolver';
 export class MeAssemblerService implements MeAssembler {
   private readonly logger = new Logger('MeAssembler');
   private preferences?: PreferencesService | null;
+  private invitations?: InvitationService | null;
 
   constructor(
     private readonly infra: AuthzInfra,
@@ -72,8 +73,9 @@ export class MeAssemblerService implements MeAssembler {
 
   /**
    * Milestone 2 D.2 `pendingMemberships`: the user's invited memberships of organisations that are not archived, oldest
-   * invitation first, with the name of the person who invited (null for an operator command). Read through the
-   * policy's user clause, like `orgs`; organisations and accounts carry no row-level security.
+   * invitation first, with the name of the person who invited (null for an operator command) and the time of the
+   * latest invitation (its `user.invited` entry, else the membership's `created_at`). Read through the policy's user
+   * clause, like `orgs`; organisations and accounts carry no row-level security.
    */
   private async pendingMemberships(userId: string): Promise<PendingMembership[]> {
     const rows = await this.infra.withUserOnly(userId, (trx) =>
@@ -97,39 +99,25 @@ export class MeAssemblerService implements MeAssembler {
   }
 
   /**
-   * When each pending invitation was made: the time of the latest `user.invited` entry of the organisation for the
-   * user (entity `user`, or entity `invitation` naming one of the user's invitation links). The membership row is no
-   * clock for this: a trigger moves `updated_at` on every change of the invited row (its admin roles, for example),
-   * and `created_at` stays from a former membership that was invited again. A membership without such an entry
-   * (seeded data) keeps its `created_at`. The entries belong to organisations the session is not bound to, so they
-   * are read in platform scope, read only.
+   * When each pending invitation was made, from the identity module's InvitationService (it reads the platform audit
+   * log in platform scope, F.10). Resolved at the first use, like the preferences; without it (an application without
+   * the identity module) the memberships keep their `created_at`.
    */
   private async invitationTimes(userId: string, orgIds: string[]): Promise<Map<string, Date>> {
-    const rows = await this.infra.scope.withPlatform(
-      async (trx) => {
-        await sql`set transaction read only`.execute(trx);
-        return trx
-          .selectFrom('platform.audit_log as a')
-          .select(['a.organization_id', (eb) => eb.fn.max('a.occurred_at').as('at')])
-          .where('a.action', '=', 'user.invited')
-          .where('a.organization_id', 'in', orgIds)
-          .where((eb) =>
-            eb.or([
-              eb.and([eb('a.entity_type', '=', 'user'), eb('a.entity_id', '=', userId)]),
-              eb.and([
-                eb('a.entity_type', '=', 'invitation'),
-                eb('a.entity_id', 'in', eb.selectFrom('platform.invitation as i').select('i.id').where('i.user_id', '=', userId)),
-              ]),
-            ]),
-          )
-          .groupBy('a.organization_id')
-          .execute();
-      },
-      { scope: 'auth', userId },
-    );
-    const times = new Map<string, Date>();
-    for (const r of rows) if (r.organization_id && r.at) times.set(r.organization_id, new Date(r.at));
-    return times;
+    if (this.invitations === undefined) {
+      try {
+        this.invitations = this.moduleRef.get(InvitationService, { strict: false });
+      } catch {
+        this.invitations = null;
+      }
+    }
+    if (!this.invitations) return new Map();
+    try {
+      return await this.invitations.invitationTimes(userId, orgIds);
+    } catch (error) {
+      this.logger.warn(`Could not read the invitation times of user ${userId}: ${(error as Error).message}`);
+      return new Map();
+    }
   }
 
   /** G.5 `orgs[]`: the user's active memberships in organisation order, each with the systems where the user holds a role. */
