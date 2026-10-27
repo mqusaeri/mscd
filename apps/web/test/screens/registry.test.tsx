@@ -13,6 +13,9 @@ import type { ScreenDef, TextPair } from '../../src/screens/types';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCREENS_DIR = path.resolve(HERE, '../../src/screens');
 const FORBIDDEN = /[\u2014\u00b7]/;
+// A static `import` or `export ... from` of the folder's sample adapter (`./sample`, `./sample.ts`, `./sample/...`);
+// `import type` is erased and allowed. C.6: the sample adapter is loaded in the build's sample branch only.
+const STATIC_SAMPLE_IMPORT = /(^|\n)\s*(import(?!\s+type\b)(\s[^;'"]*?\sfrom)?|export(?!\s+type\b)\s[^;'"]*?\sfrom)\s*['"]\.\/sample(\.[jt]sx?)?(\/[^'"]*)?['"]/;
 
 interface Meta {
   id: string;
@@ -110,8 +113,29 @@ describe('screen registry', () => {
           expect(pair.join(' '), where).not.toMatch(FORBIDDEN);
         }
       });
+
+      it('loads its sample adapter through a dynamic import only, so an api build holds no sample code (C.6, R-13)', () => {
+        const dir = path.join(SCREENS_DIR, folder);
+        const sources = readdirSync(dir, { recursive: true, encoding: 'utf8' })
+          .filter((f) => /\.(ts|tsx|js|jsx)$/.test(f) && !/^sample(\.|\/)/.test(f.split(path.sep).join('/')));
+        for (const file of sources) {
+          const text = readFileSync(path.join(dir, file), 'utf8');
+          expect(text, `${folder}/${file}`).not.toMatch(STATIC_SAMPLE_IMPORT);
+        }
+      });
     });
   }
+});
+
+describe('the static sample import rule', () => {
+  it('finds a static import or re-export of ./sample and leaves type imports and dynamic imports alone', () => {
+    for (const bad of ["import { createSampleAdapter } from './sample';", "import * as sample from './sample.ts';", "export { fromSample } from './sample';", "import './sample';", "import x, { y } from\n  './sample/data';"]) {
+      expect(bad).toMatch(STATIC_SAMPLE_IMPORT);
+    }
+    for (const good of ["import type { Row } from './sample';", "export type { Row } from './sample';", "const m = await import('./sample');", "import { TEXT } from './text';", "import { a } from './sampler';"]) {
+      expect(good).not.toMatch(STATIC_SAMPLE_IMPORT);
+    }
+  });
 });
 
 describe('validateScreens', () => {

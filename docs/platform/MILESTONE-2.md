@@ -1385,6 +1385,8 @@ flock /tmp/mscd-stack.lock npm run test:smoke
 
 The `check` step also runs `curl --cacert /tmp/mscd-saas-test/caddy-root.crt https://localhost:18443/healthz` and checks that `http://localhost:18080/` answers 308. The last line proves the on-premise stack still works with the NGINX changes.
 
+Orchestrator decision (M2-S02): a host that cannot reach the Alpine mirrors (`dl-cdn.alpinelinux.org`) runs the fourth line with `MSCD_SAAS_TEST_SCAN=auto`, because the web base image keeps known findings that only `apk upgrade` removes. The line runs unchanged, with the scan gate, in the `saas-smoke` job of M2-S13 on GitHub Actions.
+
 #### M2-S03 Server bootstrap
 
 | | |

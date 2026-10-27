@@ -29,7 +29,8 @@
 # check asserts:
 #   - tenancy mode multi (and the release flavour) through the cli service;
 #   - only Caddy publishes ports;
-#   - HSTS on HTTPS, /healthz through Caddy's certificate, 308 from HTTP to HTTPS;
+#   - HSTS on HTTPS (also on Caddy's own error answers), /healthz through Caddy's
+#     certificate, 308 from HTTP to HTTPS;
 #   - the NGINX rate limit answers 429 with a problem body;
 #   - after the audit anchor job ran, the worker log has no line "not among the anchor
 #     keys compiled into this build" and holds a signed anchor, which proves that the
@@ -585,6 +586,14 @@ check_site() {
         pass "The tools of apps/site are not served (check.mjs answers 404)"
     else
         fail "https://$SITE_HOST:$HTTPS_PORT/check.mjs answered $code (expected 404)"
+    fi
+    # A missing file is an error answer of Caddy itself (handle_errors), which sets HSTS again.
+    headers=$(https "${resolve[@]}" -o /dev/null -D - "https://$SITE_HOST:$HTTPS_PORT/mscd-missing-$(random_hex 4)" || true)
+    code=$(head -n 1 <<<"$headers" | awk '{ print $2 }')
+    if [[ $code == 404 && $(header Strict-Transport-Security <<<"$headers") == max-age=31536000 ]]; then
+        pass "Caddy's own error answers carry HSTS (404 of a missing site file)"
+    else
+        fail "The 404 of a missing site file answered ${code:-nothing} without the HSTS of the site"
     fi
 }
 

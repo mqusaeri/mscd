@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   test, expect, ui, HOST_METAS, openScreen, openApp, go, navFor, expectNoHorizontalOverflow, expectReadableText,
 } from '../helpers.js';
@@ -37,6 +39,21 @@ test.describe('Host screen probe @sample-only', () => {
     await expect(ui.navItems(page)).toHaveCount(await navFor(page, 'manager'));
   });
 
+  // C.2: ?persona= sets the persona and its rules; a host screen that persona does not list is not opened, its body
+  // and data stay hidden, and the persona lands on its own first screen.
+  const LANDING = { manager: 'Portfolio Overview', owner: 'My Tasks', auditor: 'Portfolio Overview', top: 'Portfolio Overview' };
+  for (const meta of HOST_METAS) {
+    const persona = Object.keys(LANDING).find((p) => !meta.roles.includes(p));
+    if (!persona) continue;
+    test(`?screen=${meta.id}&persona=${persona} keeps that persona on its landing`, async ({ page }) => {
+      await page.goto(`/?screen=${encodeURIComponent(meta.id)}&persona=${persona}`);
+      await expect(ui.title(page)).toHaveText(LANDING[persona]);
+      await expect(page.locator(`main [data-screen="${meta.id}"]`)).toHaveCount(0);
+      await expect(ui.nav(page, meta.label[0])).toHaveCount(0);
+      await expect(ui.navItems(page)).toHaveCount(await navFor(page, persona));
+    });
+  }
+
   test('a host screen in the sidebar is kept while switching system and left for a persona without it', async ({ page }) => {
     const meta = HOST_METAS.find((m) => m.open === 'nav' && m.roles.includes('manager') && !m.roles.includes('owner'));
     test.skip(!meta, 'no host screen in the manager sidebar that the owner cannot open');
@@ -49,5 +66,31 @@ test.describe('Host screen probe @sample-only', () => {
     await page.locator('header div[style*="width: 300px"] button', { hasText: 'Domain Owner' }).click();
     await expect(ui.title(page)).toHaveText('My Tasks');
     await expect(ui.nav(page, meta.label[0])).toHaveCount(0);
+  });
+});
+
+// The form helper of the screens (screens/api.ts useMutation, C.6) in a development build: React StrictMode mounts
+// every component, unmounts it and mounts it again, and the form must still leave Save usable after each answer.
+// The fixture is bundled with React's development build and runs on a blank page, outside the app.
+const STRICT_FORM = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../test/fixtures/screens/strict-form.tsx');
+
+test.describe('Screen helpers under StrictMode @sample-only', () => {
+  test('useMutation shows the field error of a refused save, then allows a second save', async ({ page }) => {
+    const { build } = await import('esbuild');
+    const out = await build({
+      entryPoints: [STRICT_FORM], bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020',
+      jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'silent',
+    });
+    await page.setContent('<!doctype html><html lang="en"><body><div id="root"></div></body></html>');
+    await page.addScriptTag({ content: out.outputFiles[0].text });
+    const save = page.locator('button', { hasText: 'Save' });
+    await save.click();
+    await expect(page.locator('[role="alert"]')).toHaveText('Name is too short');
+    await expect(page.getByTestId('state')).toHaveText('idle');
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.getByTestId('done')).toHaveText('Saved Risk register');
+    await expect(page.locator('[role="alert"]')).toHaveCount(0);
+    await expect(save).toBeEnabled();
   });
 });

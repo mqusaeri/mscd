@@ -25,8 +25,8 @@ export const test = base.extend({
       if (m.type() === 'error' && !text.startsWith('Failed to load resource')) problems.push('console.error: ' + text);
       if (m.type() === 'warning' && /react|warning/i.test(text)) problems.push('console.warn: ' + text);
     });
-    // Host screens load their data after they open (MILESTONE-2 C.6), so a test that loads another page while such a
-    // read is under way aborts it. The start of every page load is kept to tell those reads from real failures.
+    // Host screens load their code and data after they open (MILESTONE-2 C.6), so a test that loads another page while
+    // such a request is under way aborts it. The start of every page load is kept to tell those from real failures.
     const loads = [];
     const starts = new WeakMap();
     page.on('request', (r) => {
@@ -38,9 +38,9 @@ export const test = base.extend({
       if (r.failure()?.errorText === 'net::ERR_ABORTED') {
         // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
         if (await r.response().catch(() => null)) return;
-        // A read of the api that a later page load of the test cut off.
+        // A read that a later page load of the test cut off: an api read, a lazy screen chunk, a font or an image.
         const started = starts.get(r);
-        if (['fetch', 'xhr'].includes(r.resourceType()) && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
+        if (!r.isNavigationRequest() && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
       }
       problems.push('requestfailed: ' + r.url());
     });

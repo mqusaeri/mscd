@@ -121,7 +121,7 @@ New screens live in their own folder under `apps/web/src/screens/<id>/` and neve
 | `meta.json` | The same `id`, `label`, `group`, `order`, `scope`, `perm`, `roles` and `nav`, plus `pageActions` (labels for the manager persona), `sampleRole` (the persona the E2E helpers open it as) and `open` (`nav` from the sidebar, `query` through `?screen=`). The E2E helpers read it; `test/screens/registry.test.tsx` checks that it matches `index.tsx` |
 | `Screen.tsx` | The page body. It gets `{ ctx }` with the host context of C.4: `lang`, `li(pair)`, `fill(pair, values)`, `theme`, `D`, `msObj`, `org`, `me`, `mode`, `client`, `can(ms, perm)`, `orgCan(perm)`, `platformCan(perm)`, `toast`, `go(screen, { ms, params })`, `params`, `track`, `reload`, `command`, `openPicker` and `layer()` |
 | `routes.ts` | `[method, path]` constants for every route the screen calls and `ROUTE_IDS`, compared with `routeById` of `@mscd/shared` in the screen's unit test |
-| `api.ts`, `sample.ts` | Two adapters with one interface: `api.ts` calls `call(ctx.client, ROUTES.x, { params, query, body, ifMatch, idempotencyKey })` of `screens/api.ts`; `sample.ts` works on the sample snapshot (`ctx.ds.mutate` and `ctx.ds.insert` change it, so built-in screens show the result). `ctx.mode` picks one |
+| `api.ts`, `sample.ts` | Two adapters with one interface: `api.ts` calls `call(ctx.client, ROUTES.x, { params, query, body, ifMatch, idempotencyKey })` of `screens/api.ts`; `sample.ts` works on the sample snapshot (`ctx.ds.mutate` and `ctx.ds.insert` change it, so built-in screens show the result). The build picks one, below |
 | `text.ts` | Every text as an `[English, Indonesian]` pair |
 | `actions.ts` (optional) | Hooks into the built-in screens, below |
 
@@ -129,7 +129,16 @@ Rules for screen code:
 
 - Build the page from the UI kit in `screens/ui` (`Card`, `Facts`, `Table`, `Badge`, `Button`, `Alert`, `EmptyState`, `Tabs`, `Field` with its inputs, `Modal`, `Drawer`, `ConfirmDialog`). Styles come from the `.mx-` classes of `screens/ui/screens.css` over the colour tokens of `src/styles.css`. No text under 12px, and every text and control meets WCAG AA in both themes. A disabled `Button` takes a `disabledReason`, shown as text.
 - Call the api only through `ctx.client` and `screens/api.ts`. Import only types from `@mscd/shared`.
-- Field errors of a refused command go next to the field: `fieldErrors(error)` maps `errors[].path` to messages.
+- Pick the adapter with the build value written out in full, and load `sample.ts` with a dynamic import inside the sample branch. Vite replaces `import.meta.env.VITE_DATA_SOURCE` and drops the other branch, so an api build holds no sample code or data (R-13). `adapterFor` in `screens/license/Screen.tsx` shows the pattern:
+
+  ```ts
+  return import.meta.env.VITE_DATA_SOURCE === 'api'
+    ? createApiAdapter(client)
+    : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(getD)));
+  ```
+
+  Never import `sample.ts` statically (`import type` is fine): `test/screens/registry.test.tsx` fails on such an import, and the API E2E stack (`e2e-api/stack.mjs`) stops when the api build holds the sample organisations or the sample licence id. Unit tests call `createApiAdapter` and `createSampleAdapter` directly.
+- Field errors of a refused command go next to the field: `fieldErrors(error)` maps `errors[].path` to messages. A form keeps its state with `useMutation(run)` of `screens/api.ts`: Save is disabled while it runs, and the error and field errors stay until the next submit. `e2e/screens/probe.spec.js` checks it under React StrictMode, which the development build uses.
 - `EmptyState` takes an `illustration` node for a scene of the illustration library.
 
 `actions.ts` exports any of:
@@ -143,7 +152,7 @@ Tests of a screen:
 
 - Unit tests in `apps/web/test/screens/<id>.test.tsx` render with `renderToStaticMarkup` in the Node environment; `test/screens/license.test.tsx` shows the pattern, with the route contract test.
 - E2E specs in `apps/web/e2e/screens/<id>.spec.js` carry `@sample-only` and open the screen with `openScreen(page, metaById('<id>'))` of `e2e/helpers.js`. Call `expectOverlayReadable(page)` after opening each form. `e2e/screens/probe.spec.js` checks every host screen's title, breadcrumb, page actions and help. API behaviour goes to `e2e/api-only/<id>.spec.js` with `@api-only`.
-- The sample build opens a screen directly with `?screen=<id>&persona=<manager|owner|auditor|top>`, for example `http://localhost:5173/?screen=license&persona=top`. API builds ignore both parameters.
+- The sample build opens a screen directly with `?screen=<id>&persona=<manager|owner|auditor|top>`, for example `http://localhost:5173/?screen=license&persona=top`. A screen the persona cannot open (its `roles` do not list it) is not opened: the persona lands on its own first screen, as after a persona switch. Without `persona`, the app switches to the first persona in `roles`. API builds ignore both parameters.
 - `npm test -w @mscd/web -- test/screens` checks every screen folder: ids, both languages, Indonesian that differs from English, no em dash or centre dot in any text, an icon and a matching `meta.json`.
 
 ## Developer infrastructure stack

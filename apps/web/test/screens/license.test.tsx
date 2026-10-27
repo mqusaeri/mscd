@@ -10,7 +10,7 @@ import screen from '../../src/screens/license/index';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/license/routes';
 import { createApiAdapter, fromView } from '../../src/screens/license/api';
 import { createSampleAdapter, fromSample, isoOfDay, resetSampleLicence, usageOf } from '../../src/screens/license/sample';
-import { InstallDialog, LicenceView, adapterFor, installError, stateBadges } from '../../src/screens/license/Screen';
+import { InstallDialog, LicenceView, adapterFor, deferredAdapter, installError, stateBadges } from '../../src/screens/license/Screen';
 import { TEXT } from '../../src/screens/license/text';
 import { HostCtx } from '../../src/screens/ui';
 import type { HostContext, Lang } from '../../src/screens/types';
@@ -163,9 +163,21 @@ describe('Licence sample adapter', () => {
     expect(again).toMatchObject({ ok: true, licence: { licenseId: 'LIC-NEW', organization: 'PT Baru', users: { used: 86, limit: 200 }, frameworks: ['ISO9001'] } });
   });
 
-  it('the build chooses the adapter: the sample one has no client', async () => {
-    const res = await adapterFor(ctxOf('en')).load();
+  it('the build chooses the adapter: outside an api build the sample one, loaded on first use', async () => {
+    expect(import.meta.env.VITE_DATA_SOURCE).not.toBe('api');
+    const res = await adapterFor(null, () => D).load();
     expect(res).toMatchObject({ ok: true, licence: { licenseId: 'LIC-SAMPLE' } });
+  });
+
+  it('a deferred adapter loads its module once, and again after a failed load', async () => {
+    const load = vi.fn<() => Promise<ReturnType<typeof createSampleAdapter>>>()
+      .mockRejectedValueOnce(new Error('chunk not loaded'))
+      .mockResolvedValue(createSampleAdapter(() => D));
+    const adapter = deferredAdapter(load);
+    await expect(adapter.load()).rejects.toThrow('chunk not loaded');
+    expect(await adapter.load()).toMatchObject({ ok: true, licence: { licenseId: 'LIC-SAMPLE' } });
+    expect(await adapter.install({ license_id: 'LIC-NEXT', signature: 'ed25519:x' })).toMatchObject({ ok: true, licence: { licenseId: 'LIC-NEXT' } });
+    expect(load).toHaveBeenCalledTimes(2);
   });
 });
 

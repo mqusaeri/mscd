@@ -13,7 +13,7 @@
 #                          example example.com; empty: no site
 #   MSCD_TLS_MODE          acme: Let's Encrypt (HTTP-01 challenge on port 80);
 #                          internal: Caddy's own local CA, for tests only
-#   ACME_EMAIL, ACME_CA    account email and ACME directory (acme mode)
+#   ACME_EMAIL, ACME_CA    account email (may be empty) and ACME directory (acme mode)
 #   MSCD_WEB_UPSTREAM      web container, <fixed IPv4 address>:8080 (see the comment at
 #                          reverse_proxy)
 #   MSCD_MAX_REQUEST_BYTES largest request body: storage.max_upload_bytes plus 1 MiB
@@ -39,7 +39,9 @@
 	tls {
 		issuer acme {
 			dir {$ACME_CA}
-			email {$ACME_EMAIL}
+			# Quoted, so an empty ACME_EMAIL gives an account without an email address
+			# (Let's Encrypt allows that) instead of a parse error at start.
+			email "{$ACME_EMAIL}"
 			# HTTP-01 only, on port 80.
 			disable_tlsalpn_challenge
 		}
@@ -145,6 +147,12 @@
 			Cache-Control "no-store"
 			-Server
 		}
+		# The HSTS headers of the two handle blocks above are not part of an error answer,
+		# so they are set here again, each host with its own value.
+		@app_error host {$MSCD_DOMAIN}
+		@site_error not host {$MSCD_DOMAIN}
+		header @app_error Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		header @site_error Strict-Transport-Security "max-age=31536000"
 		@api_large expression `{http.request.uri.path}.startsWith("/api/") && {err.status_code} == 413`
 		@api_down expression `{http.request.uri.path}.startsWith("/api/") && {err.status_code} in [502, 503, 504]`
 		@large expression `{err.status_code} == 413`

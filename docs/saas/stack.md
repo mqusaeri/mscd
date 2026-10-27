@@ -69,7 +69,7 @@ The deploy writes `.env` from `.env.saas.example`. These are the settings and wh
 | `MSCD_PUBLIC_URL` | `https://app.example.com` | The address in emails and sign-in redirects: `https://` and `MSCD_DOMAIN` |
 | `MSCD_SITE_DOMAIN`, `MSCD_SITE_DIR` | empty, `./site` | The marketing site on the bare domain, see [The marketing site](#the-marketing-site) |
 | `MSCD_TLS_MODE` | `acme` | `acme`: certificates from Let's Encrypt. `internal`: Caddy's own local certificate authority, for test stacks only |
-| `ACME_EMAIL` | `ops@example.com` | The email address of the Let's Encrypt account. Let's Encrypt writes to it about problems with the account |
+| `ACME_EMAIL` | `ops@example.com` | The email address of the Let's Encrypt account. It may be empty: the account then has no email address, which Let's Encrypt allows |
 | `ACME_CA` | Let's Encrypt staging | The ACME directory. See [Certificates](#certificates) |
 | `MSCD_MAIL_FROM`, `MSCD_SMTP_HOST`, `MSCD_SMTP_PORT`, `MSCD_SMTP_SECURE`, `MSCD_SMTP_USER`, `MSCD_SMTP_PASSWORD_FILE` | port 587, `secure` false | The mail provider. Port 587 starts in plain text and switches to TLS with STARTTLS before the login. The password is in the secret file `smtp.password` |
 | `MSCD_SECRETS_DIR` | `/opt/mscd/secrets` | The folder with the secret files (keys, database passwords, certificates of the storage gateway) |
@@ -100,9 +100,9 @@ The certificates, the Let's Encrypt account key and Caddy's local certificate au
 
 ## HSTS
 
-Every answer on the app host carries `Strict-Transport-Security: max-age=31536000; includeSubDomains`. A browser that saw it once uses only HTTPS for `app.<domain>` and every name under it for one year, even when someone types `http://`. The `preload` flag is not set, so the domain is not built into browsers, and a change stays possible.
+Every answer on the app host carries `Strict-Transport-Security: max-age=31536000; includeSubDomains`, also the error answers that Caddy writes itself (413 for a body that is too large, 503 when the web container does not answer). A browser that saw it once uses only HTTPS for `app.<domain>` and every name under it for one year, even when someone types `http://`. The `preload` flag is not set, so the domain is not built into browsers, and a change stays possible.
 
-The marketing site on the bare domain gets `max-age=31536000` without `includeSubDomains`, because other names under the bare domain (for example a mail server or an intranet) may not serve HTTPS. Add `includeSubDomains` there only when every name under the domain serves HTTPS.
+The marketing site on the bare domain gets `max-age=31536000` without `includeSubDomains`, because other names under the bare domain (for example a mail server or an intranet) may not serve HTTPS. Its error answers carry the same value. Add `includeSubDomains` there only when every name under the domain serves HTTPS.
 
 The web server inside does not send HSTS itself (`MSCD_HSTS=false`); Caddy sends it.
 
@@ -196,6 +196,7 @@ curl --cacert /tmp/mscd-saas-test/caddy-root.crt https://localhost:18443/healthz
 - 80 requests at once to `/api/v1/auth/` get 429 answers with the problem body;
 - a forged `X-Forwarded-For` is replaced: NGINX logs the address Caddy saw, and no query string value reaches the Caddy or NGINX log;
 - `/api/v1/system/profile` reports `saas`, and the marketing site answers with its own headers while `check.mjs` answers 404;
+- Caddy's own error answers carry HSTS (the 404 of a missing site file);
 - after a new organisation is created and the audit anchor job (`audit.verify-chain`) runs, the worker has signed an anchor and its log has no line "not among the anchor keys compiled into this build". This proves that the anchor key on the server matches the key built into the release image.
 
 `down` removes the containers, networks, volumes, every image under `localhost/<project>/` (the two test images, also when a failed build left them behind) and `/tmp/mscd-saas-test`. It then checks that nothing is left and names whatever it could not remove.
@@ -219,6 +220,7 @@ When the networks `172.31.250.0/24` or `172.31.251.0/24` are already used by ano
 | Caddy log: "too many certificates already issued" | The Let's Encrypt limits were reached, often after the `caddy_data` volume was lost | Wait for the time in the message, keep `caddy_data`, use the staging CA for tests |
 | Browser warning about the certificate after the first deploy | `ACME_CA` is still the staging CA | Change it to `https://acme-v02.api.letsencrypt.org/directory` and deploy again |
 | Caddy stops at start with "File to import not found: mscd_tls_..." | `MSCD_TLS_MODE` is not `acme` or `internal` | Fix the setting |
+| Caddy stops at start with "parsing caddyfile tokens for ..." and a line number | A setting that the Caddyfile reads has a value Caddy cannot use, for example `MSCD_MAX_REQUEST_BYTES=100abc`. An empty `ACME_EMAIL` is allowed | `$C logs caddy` names the line of the Caddyfile; fix the setting and run `$C up -d caddy` |
 | 503 "MSCD is not reachable at the moment" | The web container did not answer within 30 seconds (restart, crash) | `$C ps` and `$C logs web api` |
 | Users of one office get 429 | The office shares one address and goes over the limits | Look for `429` in the web log for that address; raise `MSCD_RATE_API` and `MSCD_RATE_API_BURST` (or the `AUTH` pair) and deploy |
 | All IPv6 users share one address in the logs | `MSCD_EDGE_IPV6` is false on a server with IPv6 | Set it to true, or remove the `AAAA` record |
