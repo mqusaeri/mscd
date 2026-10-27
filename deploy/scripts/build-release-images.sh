@@ -35,8 +35,6 @@ REPO_DIR=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 readonly VERSION_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$'
 # host[:port]/path, lower case, no tag or digest.
 readonly NAME_PATTERN='^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$'
-# The source paths of the images, as build-bundle.sh counts them for -dirty.
-readonly SOURCE_PATHS=(apps packages packs tools package.json package-lock.json deploy docs)
 
 usage() {
     cat <<'EOF'
@@ -67,7 +65,7 @@ Options:
                             (default: <registry>/mscd-server)
   --web-image NAME          Full web image name without a tag (default: <registry>/mscd-web)
   --revision REV            Source revision for the image labels (default: the commit of
-                            HEAD, with -dirty when the sources have uncommitted files)
+                            HEAD, with -dirty when the work tree has uncommitted files)
   --build-ca FILE           CA certificate of a TLS-inspecting proxy (default: $MSCD_BUILD_CA)
   --digest-file FILE        Write the digests as JSON (required with --push)
   --source-url URL          Label org.opencontainers.image.source, for example
@@ -193,9 +191,12 @@ validate_args() {
     fi
 }
 
-# sources_dirty: true when the image sources have uncommitted or untracked files.
+# sources_dirty: true when the work tree has uncommitted or untracked files
+# (ignored files aside). The whole tree counts: the image build context is the
+# repository root, and files such as tsconfig.base.json and .dockerignore shape
+# the images as much as the source folders do.
 sources_dirty() {
-    [[ -n $(git -C "$REPO_DIR" status --porcelain -- "${SOURCE_PATHS[@]}" 2>/dev/null) ]]
+    [[ -n $(git -C "$REPO_DIR" status --porcelain 2>/dev/null) ]]
 }
 
 resolve_revision() {
@@ -208,10 +209,10 @@ resolve_revision() {
     fi
     if [[ $dirty == true ]]; then
         if [[ $MODE == push ]]; then
-            git -C "$REPO_DIR" status --short -- "${SOURCE_PATHS[@]}" | head -n 20 | sed 's/^/        /'
-            die "The sources have uncommitted or untracked files (above). Commit them before pushing release images."
+            git -C "$REPO_DIR" status --short | head -n 20 | sed 's/^/        /'
+            die "The work tree has uncommitted or untracked files (above). Commit them before pushing release images."
         fi
-        warn "The sources have uncommitted or untracked files: test images only, never push them"
+        warn "The work tree has uncommitted or untracked files: test images only, never push them"
     fi
     if [[ -z $REVISION ]]; then
         REVISION=${head:-unknown}

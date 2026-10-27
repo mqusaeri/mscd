@@ -76,7 +76,7 @@ Add `-f bundle=true` to also build the signed on-premise bundle. It is attached 
 | Release exists | `release.yml` | A published version never changes under the same name | Publish a new version |
 | Demo images refused | `build-release-images.sh` | Image names ending in `-demo` never reach a release (S-7). Checked before anything else | Use the release image names |
 | Version pattern | `build-release-images.sh` | Only `x.y.z` and `x.y.z-rc.n` | Use a valid version |
-| Committed sources | `build-release-images.sh --push` | Pushed images are built from one commit, named in their labels and in `digests.json` | Commit the changes; a release builds from a clean checkout |
+| Committed sources | `build-release-images.sh --push` | Pushed images are built from one commit, named in their labels and in `digests.json`. The whole work tree counts (files ignored by git aside), because the image build reads the repository root, including `tsconfig.base.json` and `.dockerignore` | Commit the changes; a release builds from a clean checkout |
 | Release keys | `build-bundle.sh` | Trusted keys and the pack signing key come from outside the repository, match each other, and are no development key (R-11) | Use the release key set |
 | Server build | `server.Dockerfile` | The trusted keys are compiled in, every pack is signed with the release key and verified, and no file holds a development key id | See the build log |
 | Alpine updates | `build-bundle.sh --release` | Security updates of the base system are applied when the images are built | The Alpine mirrors could not be reached; run again |
@@ -126,15 +126,17 @@ Always deploy by digest (`ghcr.io/mqusaeri/mscd-server@sha256:...`), never by th
 |---|---|---|
 | CodeQL | Security problems in the JavaScript and TypeScript code. The alerts go to Security, Code scanning, which only people with write access can see; the log shows only their number | Fix or, when it is a false alarm, dismiss the alert there with a reason |
 | gitleaks | Secrets in the whole git history. Development keys and demo secrets (R-11), test fixtures and the example values of the API contract are allowed by name; every other finding fails | Rotate the secret at once (the history of a public repository cannot be recalled), then remove it from the code |
-| OSV | Known vulnerabilities in the packages of `package-lock.json` | Update the package (Dependabot usually proposes it) |
+| OSV | Known vulnerabilities in the packages of `package-lock.json`, with the OSV scanner image `ghcr.io/google/osv-scanner-action` v2.7.0 | Update the package (Dependabot usually proposes it) |
 | Trivy configuration | HIGH or CRITICAL misconfiguration in `deploy/` (Dockerfiles, Helm chart) | Fix the file named in the log |
 | Released images (nightly) | The two digests of the latest GitHub Release against today's vulnerability data, so the running images are scanned again as new problems are published | Release a patch version with the fix and deploy it |
 
-The scanners are pinned: actions by commit, the Trivy image by digest, gitleaks by version and checksum.
+The scanners are pinned: actions by commit, the Trivy and OSV scanner images by digest, gitleaks by version and checksum. The OSV job runs the scanner image itself, because the `google/osv-scanner-action` action names its image by a tag only, which pinning the action by commit does not fix. To move to a newer OSV scanner, take the image digest of the new tag (`docker buildx imagetools inspect ghcr.io/google/osv-scanner-action:<tag>`) and keep the `args` line.
 
 ## Dependency updates
 
 Dependabot opens one pull request per group every Monday: npm minor and patch updates (production and development separately), npm major updates, GitHub Actions and the base images of `deploy/docker`. It proposes only releases that are at least 14 days old. For actions it updates the commit SHA and the tag comment together. A pull request that changes `package-lock.json` passes the normal CI before it is merged.
+
+Limit for the base images: Dependabot reads the image named on a `FROM` line. The Dockerfiles of `deploy/docker` name their base images through build arguments (`ARG NODE_IMAGE=node:22-alpine`, `ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.30-alpine3.24`, then `FROM ${NODE_IMAGE}`), so the Docker entry may propose nothing. These tags float: a release build pulls the newest image of the tag (`--pull`) and applies the Alpine updates, and the vulnerability gate refuses a base image with a fixable HIGH or CRITICAL problem. A minor version step (for example NGINX 1.30 to 1.32, or Alpine 3.24 to 3.25) still needs a change of the `ARG` default by hand. Check the first Monday run: when it proposes nothing, either write the base images on the `FROM` lines or keep this manual step.
 
 ## Workflow rules
 
@@ -143,7 +145,9 @@ Rule S-4 of the plan applies to every SaaS workflow, and `tools/scripts/check-wo
 1. The workflow sets `permissions` at the top level (and never `write-all`); jobs add what they need.
 2. Every action from outside this repository (GitHub's own included) is pinned to a full 40-character commit SHA with the tag in a comment: `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. A `docker://` image needs a digest.
 3. No secret in script text: `${{ secrets.X }}` and `${{ github.token }}` go into `env:`, and the script uses the variable. A value written into script text can end up in logs and in the process list.
-4. A job of the environment `production` or `staging`, or of an environment chosen by an expression, has a concurrency group with `cancel-in-progress: false`, so two deploys never run at once and a running deploy is never cancelled half way.
+4. A job of the environment `production` or `staging`, or of an environment chosen by an expression, has a concurrency group with `cancel-in-progress: false`, so two deploys never run at once and a running deploy is never cancelled half way. GitHub applies the workflow-level and the job-level `concurrency` both, so each one that is set needs a group and a literal `cancel-in-progress: false`. At least one group must be a name that runs share: a group with `github.run_id`, `github.run_number` or `github.run_attempt` holds one run only.
+
+YAML anchors and aliases are allowed: the checker follows each alias, so aliased steps get every check. Merge keys (`<<: *base`) are refused, because the keys they bring in would not be checked.
 
 ```bash
 node tools/scripts/check-workflows.mjs .github/workflows/release.yml   # given files
@@ -176,7 +180,7 @@ rm -rf "$K"
 - `--load` keeps the images on the machine and pushes nothing. It runs the same release artefact check and vulnerability gate as a release. It applies the Alpine updates when the mirrors answer and warns when they do not, so a build machine without access to the mirrors can still build; the gate then decides whether the base images are current enough.
 - `--no-pull` keeps the base images already on the machine, which saves pulls from Docker Hub in repeated test runs. `--push` refuses it.
 - The build logs and `SECURITY-SCAN.txt` are in `deploy/dist/mscd-images-<version>.logs/`.
-- Images built from uncommitted sources are labelled `<commit>-dirty`, and `--push` refuses them.
+- Images built from a work tree with uncommitted or untracked files are labelled `<commit>-dirty`, and `--push` refuses them.
 - `--push` needs the containerd image store of Docker, because only that store keeps the SBOM and provenance with a loaded image. Add `"features": {"containerd-snapshotter": true}` to `/etc/docker/daemon.json` and restart Docker.
 
 ## Troubleshooting

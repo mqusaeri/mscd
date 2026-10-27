@@ -339,8 +339,13 @@ jobs:
           (umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/bundle-signing.key")
           chmod 0600 "$RUNNER_TEMP/pack-signing.key" "$RUNNER_TEMP/bundle-signing.key"
 
+      # The bundle build holds five images and their saved copies at once. The
+      # runner's Android SDK, .NET and Haskell toolchains are not used here.
       - name: Free disk space for the images
-        run: docker system df && df -h /
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Build the signed bundle
         env:

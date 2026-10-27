@@ -46,6 +46,9 @@ updates:
       github-actions:
         patterns: ['*']
 
+  # Dependabot reads the image on each FROM line. The Dockerfiles name their
+  # base images through ARG defaults (FROM ${NODE_IMAGE}), so this entry may
+  # propose nothing; docs/saas/release.md, "Dependency updates", has the limit.
   - package-ecosystem: docker
     directory: /deploy/docker
     schedule:

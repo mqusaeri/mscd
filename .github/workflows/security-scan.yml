@@ -178,10 +178,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+      # The scanner image by digest. google/osv-scanner-action/osv-scanner-action
+      # v2.7.0 runs this image by its tag only, so the step runs the image itself
+      # (same entrypoint, exit_code_redirect.sh, and the same argument).
+      - name: OSV scanner v2.7.0
+        uses: docker://ghcr.io/google/osv-scanner-action:v2.7.0@sha256:d54770fe0b09493894e76a02aaed9f51a0513fa57c5186452a755d257b0068a6
+        env:
+          GOTOOLCHAIN: auto
         with:
-          scan-args: |-
-            --lockfile=package-lock.json
+          args: --lockfile=package-lock.json
 
   trivy-config:
     name: Trivy configuration scan of deploy/
