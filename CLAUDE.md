@@ -8,9 +8,17 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 
 ## Status
 
-- All 39 work packages of `docs/platform/BUILD-PLAN.md` are built and verified. The working branch is `mscd-platform`.
-- The full stack runs with Docker Compose. A demo with sample data starts with `deploy/scripts/deploy-demo.sh`.
-- Open product questions and follow-ups are listed at the end of this file.
+- **Milestone 1 is done.** All 39 work packages of `docs/platform/BUILD-PLAN.md` are built and verified. `main` holds the work (the old `mscd-platform` branch is the same history).
+- **Milestone 2 is planned, not started.** `docs/platform/MILESTONE-2.md` is the plan of record: the core track (M2-01 to M2-18: admin screens, data-entry forms, ISO clauses 4 to 10, readiness, certification cycle, bulk import) and the SaaS production track (section K, M2-Sxx: release images, Compose on one VPS with Caddy, GitHub Actions deploy, backups, monitoring, operator console, go-live checklist).
+- The demo runs with `deploy/scripts/deploy-demo.sh`. A new customer cannot yet be run from the web app alone; Milestone 2 fixes that.
+- `docs/product/USER-FLOWS.md` is a draft of the four user flows. Its ISO lead-auditor review is still to do.
+
+## Next steps
+
+1. Build Milestone 2 in the wave order of the plan (section G.1 and the SaaS waves in section K). Start with wave 1a, M2-02.
+2. Build each package with the workflow in `.claude/workflows/mscd-m2-wp.js` (args `{wp: "M2-02"}`): it implements, runs the acceptance, has an independent agent verify, and fixes up to two rounds. Then commit once per package or per wave and push to `main`.
+3. Run at most four packages at once (rule R-02 of the plan). The workflow uses `flock` locks in `/tmp`; on macOS install `flock` first or run packages one at a time.
+4. Production deploys go through GitHub Actions with the owner's approval (section K). Never hold production secrets in the repo or the chat.
 
 ## Repository layout
 
