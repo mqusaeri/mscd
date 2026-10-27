@@ -44,6 +44,7 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 - `docs/DEVELOPMENT.md`: local development.
 - `docs/INSTALL-ONPREM.md`: install guide for operators.
 - `docs/product/USER-FLOWS.md`: user flows and terminology for the product owner.
+- `docs/ROADMAP.md`: what comes after Milestone 2.
 
 ## Commands
 
