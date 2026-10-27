@@ -176,7 +176,7 @@ describe('role labels (M2-01, D2-06)', () => {
     expect(Object.keys(BUSINESS_ROLE_LABELS)).toHaveLength(8);
     expect(new Set(labels.map((l) => l[0])).size).toBe(labels.length);
     expect(new Set(labels.map((l) => l[1])).size).toBe(labels.length);
-    for (const l of labels) expect(l.join(' ')).not.toMatch(/[—·]/);
+    for (const l of labels) expect(l.join(' ')).not.toMatch(/[\u2014\u00b7]/);
   });
 
   it('the held role wins in the order of F.7, then administration and platform roles', () => {

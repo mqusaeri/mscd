@@ -1,7 +1,15 @@
 # MSCD deployment profile: SaaS, many organisations in one installation (build plan I.1).
-# Release profile. Same keys as onprem.yaml; it differs in tenancy, licence validation (D-32), channels and
-# the trusted proxy (Helm: the web NGINX is one hop in front of the api, F.12). The KEK paths are the mounted
-# Kubernetes Secrets of each Deployment (D-09).
+# Release profile. Same keys as onprem.yaml; it differs in tenancy, licence validation (D-32), channels, mail
+# (required, port 587) and the trusted proxy (Helm: the web NGINX is one hop in front of the api, F.12). The KEK
+# paths are the mounted Secrets of each service (D-09): Kubernetes Secrets with Helm, /run/secrets files with Compose.
+#
+# The SaaS Compose stack (deploy/compose/docker-compose.saas.yml, Milestone 2 M2-S02) keeps these values but sets
+# some keys through environment variables (MSCD__<SECTION>__<KEY>, see x-app-env of docker-compose.yml):
+#   http.trust_proxy   the fixed address of the web container (MSCD__HTTP__TRUST_PROXY), the only hop in front of
+#                      the api; Caddy, in front of web, is trusted by NGINX, never by the api
+#   http.public_url    https://<MSCD_DOMAIN> (MSCD__HTTP__PUBLIC_URL from MSCD_PUBLIC_URL)
+#   mail.from, mail.smtp.*   the SMTP provider (MSCD__MAIL__*, from MSCD_SMTP_* and MSCD_MAIL_FROM)
+#   database.*, gateway.vault.*, the secret file paths   as on-premise
 tenancy:   { mode: multi, isolation: schema, default_region: id }
 license:   { validation: online, plans: {} }                         # signed entitlement per organisation (D-32)
 updates:   { channel: managed }
@@ -13,7 +21,9 @@ identity:
   local: { mfa_required: true }
   oidc: { allow_insecure_http: false }
   session: { idle_minutes: 60, absolute_hours: 8, remember_hours: 12, guest_idle_minutes: 30, guest_absolute_hours: 4 }
-mail:      { transport: smtp, required: true, from: "MSCD <mscd@example.internal>", smtp: { host: smtp, port: 25, secure: false, user: null, password_file: null } }
+# SMTP submission on port 587 with STARTTLS (secure: false starts in plain text and switches to TLS when the
+# provider offers it, as transactional providers on 587 do; secure: true is for implicit TLS on port 465).
+mail:      { transport: smtp, required: true, from: "MSCD <mscd@example.internal>", smtp: { host: smtp, port: 587, secure: false, user: null, password_file: null } }
 storage:
   adapters: { enabled: [managed_vault, m365, google_drive] }
   max_upload_bytes: 104857600
@@ -22,11 +32,12 @@ storage:
 network:   { egress_allowlist: [], dns_resolvers: [] }
 legal:     { privacy_url: null, terms_url: null }            # sign-in page footer links (Milestone 2 D.2)
 jobs:      { driver: pgboss, schedules_enabled: true, bullmq: { url: null } }
-http:      { port: 3000, public_url: "https://mscd.example.internal", trust_proxy: { cidrs: ["10.0.0.0/8"] } }
+http:      { port: 3000, public_url: "https://mscd.example.internal", trust_proxy: { cidrs: ["10.0.0.0/8"] } }   # Compose: env (header)
 security:  { cookie_secure: true }
 database:  { url_file: /run/secrets/db-app.url, migrator_url_file: /run/secrets/db-migrator.url,
              pack_installer_url_file: /run/secrets/db-pack.url, admin_url_file: null, pool_max: 10 }
-audit:     { anchor_key_file: /run/secrets/audit-anchor.key }       # read by the worker only
+audit:     { anchor_key_file: /run/secrets/audit-anchor.key }       # read by the worker only; its public key must be
+                                                                    # one of the anchor keys compiled into the release
 observability: { log_level: info, metrics_port: 9464 }
 demo:      { enabled: false, acknowledge_insecure: false, fixed_today: null, personas: false, keycloak: null }
 gateway:                                                  # read only by run mode storage-gateway

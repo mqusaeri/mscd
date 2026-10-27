@@ -12,7 +12,7 @@ import type { ScreenDef, TextPair } from '../../src/screens/types';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCREENS_DIR = path.resolve(HERE, '../../src/screens');
-const FORBIDDEN = /[—·]/;
+const FORBIDDEN = /[\u2014\u00b7]/;
 
 interface Meta {
   id: string;

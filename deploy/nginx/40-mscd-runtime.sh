@@ -34,6 +34,19 @@
 #                                       separated by commas or spaces. Their X-Forwarded-For
 #                                       header names the client. Default: none, the socket
 #                                       address is the client
+#   MSCD_RATE_LIMITS        true|false  Request limits per client address on /api/ (default
+#                                       false; the SaaS stack turns them on). A request over a
+#                                       limit gets 429 with a problem body and Retry-After
+#   MSCD_RATE_AUTH          number      Requests per second per address to /api/v1/auth/
+#                                       (sign-in, MFA, password reset; default 10)
+#   MSCD_RATE_AUTH_BURST    number      Requests above that rate accepted at once (default 20)
+#   MSCD_RATE_API           number      Requests per second per address to /api/, sign-in
+#                                       included (default 50)
+#   MSCD_RATE_API_BURST     number      Requests above that rate accepted at once (default 100)
+#   MSCD_RATE_CONN          number      Requests to /api/ in progress at the same time per
+#                                       address (default 50)
+#                                       The defaults are generous on purpose: a whole office
+#                                       behind one carrier NAT address shares them
 #
 # TLS turns on when /etc/nginx/tls/tls.crt and /etc/nginx/tls/tls.key exist.
 set -eu
@@ -123,6 +136,20 @@ external_fonts=${MSCD_EXTERNAL_FONTS:-false}
 api_upstream=${MSCD_API_UPSTREAM:-api:3000}
 trusted_proxies=${MSCD_TRUSTED_PROXY_CIDRS:-}
 api_resolver=${MSCD_API_RESOLVER:-}
+rate_limits=${MSCD_RATE_LIMITS:-false}
+rate_auth=${MSCD_RATE_AUTH:-10}
+rate_auth_burst=${MSCD_RATE_AUTH_BURST:-20}
+rate_api=${MSCD_RATE_API:-50}
+rate_api_burst=${MSCD_RATE_API_BURST:-100}
+rate_conn=${MSCD_RATE_CONN:-50}
+
+# is_count VALUE MIN: a whole number from MIN to 1000000, without leading zeros.
+is_count() {
+    case "$1" in
+        '' | *[!0-9]* | 0?*) return 1 ;;
+    esac
+    [ "${#1}" -le 7 ] && [ "$1" -ge "$2" ] && [ "$1" -le 1000000 ]
+}
 
 if ! is_port "$public_port"; then
     log "ERROR: MSCD_HTTPS_PUBLIC_PORT must be a port number, got '$public_port'"
@@ -140,6 +167,26 @@ case "$hsts_max_age" in
         exit 1
         ;;
 esac
+case "$rate_limits" in
+    true | TRUE | True | yes | on | 1 | false | FALSE | False | no | off | 0) ;;
+    *)
+        log "ERROR: MSCD_RATE_LIMITS must be true or false, got '$rate_limits'"
+        exit 1
+        ;;
+esac
+if is_true "$rate_limits"; then
+    for setting in "MSCD_RATE_AUTH:$rate_auth:1" "MSCD_RATE_API:$rate_api:1" "MSCD_RATE_CONN:$rate_conn:1" \
+        "MSCD_RATE_AUTH_BURST:$rate_auth_burst:0" "MSCD_RATE_API_BURST:$rate_api_burst:0"; do
+        name=${setting%%:*}
+        rest=${setting#*:}
+        value=${rest%:*}
+        min=${rest##*:}
+        if ! is_count "$value" "$min"; then
+            log "ERROR: $name must be a whole number from $min to 1000000, got '$value'"
+            exit 1
+        fi
+    done
+fi
 
 # MSCD_API_UPSTREAM: host:port, [IPv6 address]:port, or none. The host is a DNS
 # name or an IPv4 address; the port is required so a typo never silently
@@ -323,7 +370,8 @@ qualify_host() {
 rm -rf "$RUNTIME_DIR"
 mkdir -p "$RUNTIME_DIR/conf.d" "$RUNTIME_DIR/http.d" "$RUNTIME_DIR/https.d" \
     "$RUNTIME_DIR/hsts.d" "$RUNTIME_DIR/site.d" "$RUNTIME_DIR/index.d" "$RUNTIME_DIR/redirect.d" \
-    "$RUNTIME_DIR/realip.d" "$RUNTIME_DIR/upstream.d"
+    "$RUNTIME_DIR/realip.d" "$RUNTIME_DIR/upstream.d" \
+    "$RUNTIME_DIR/ratelimit.d" "$RUNTIME_DIR/api-limits.d" "$RUNTIME_DIR/auth-limits.d"
 
 if [ "$api_upstream" = none ]; then
     echo 'return 404;' >"$RUNTIME_DIR/api-upstream.conf"
@@ -372,6 +420,31 @@ if [ -n "$proxies" ]; then
         echo 'real_ip_recursive on;'
     } >"$RUNTIME_DIR/realip.d/realip.conf"
     log "client address taken from X-Forwarded-For of the trusted proxies: $proxies"
+fi
+
+# Request limits per client address ($binary_remote_addr: the socket address, or
+# the client named by a trusted proxy). The zones live in the http block
+# (nginx.conf); /api/ and /api/v1/auth/ apply them (api.conf), and a request
+# over a limit is answered by @mscd_api_rate_limited (429, problem body).
+if is_true "$rate_limits"; then
+    cat >"$RUNTIME_DIR/ratelimit.d/zones.conf" <<EOF
+limit_req_zone \$binary_remote_addr zone=mscd_limit_auth:10m rate=${rate_auth}r/s;
+limit_req_zone \$binary_remote_addr zone=mscd_limit_api:10m rate=${rate_api}r/s;
+limit_conn_zone \$binary_remote_addr zone=mscd_limit_conn:10m;
+limit_req_status 429;
+limit_conn_status 429;
+EOF
+    cat >"$RUNTIME_DIR/api-limits.d/limits.conf" <<EOF
+limit_req zone=mscd_limit_api burst=$rate_api_burst nodelay;
+limit_conn mscd_limit_conn $rate_conn;
+EOF
+    # Sign-in requests count toward both limits.
+    cat >"$RUNTIME_DIR/auth-limits.d/limits.conf" <<EOF
+limit_req zone=mscd_limit_api burst=$rate_api_burst nodelay;
+limit_req zone=mscd_limit_auth burst=$rate_auth_burst nodelay;
+limit_conn mscd_limit_conn $rate_conn;
+EOF
+    log "rate limits on: /api/v1/auth/ $rate_auth per second (burst $rate_auth_burst), /api/ $rate_api per second (burst $rate_api_burst), $rate_conn requests in progress per address"
 fi
 
 if [ -f /proc/net/if_inet6 ]; then

@@ -73,7 +73,7 @@ describe('Licence view', () => {
         expect(html).toContain(lang === 'id' ? '31 Mar 2027' : '31 Mar 2027');
         expect(html).toContain(t(TEXT.seatsNote));
         expect(html).toContain(lang === 'id' ? 'kunci 0a1b2c3d4e5f6789, terverifikasi' : 'key 0a1b2c3d4e5f6789, verified');
-        expect(html).not.toMatch(/[—·]/);
+        expect(html).not.toMatch(/[\u2014\u00b7]/);
       });
     }
   }
@@ -98,7 +98,7 @@ describe('Licence view', () => {
   it('every text has both languages, Indonesian that differs, and no em dash or centre dot', () => {
     for (const [key, pair] of Object.entries(TEXT)) {
       expect(pair[1], key).not.toBe(pair[0]);
-      expect(pair.join(' '), key).not.toMatch(/[—·]/);
+      expect(pair.join(' '), key).not.toMatch(/[\u2014\u00b7]/);
     }
   });
 });

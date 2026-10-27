@@ -1,0 +1,229 @@
+# MSCD SaaS overlay: many organisations on one server (Milestone 2 plan K, M2-S02).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.saas.yml --env-file .env up -d --wait
+#
+# .env comes from .env.saas.example. On a production or staging server the deploy
+# workflow writes it (deploy/scripts/saas-deploy.sh, M2-S05); nobody edits it there.
+# docs/saas/stack.md explains the stack and every setting.
+#
+# On top of the on-premise file it:
+#   - runs migrate, storage-gateway, api, worker and cli from the signed release server
+#     image by digest (MSCD_SERVER_IMAGE@MSCD_SERVER_DIGEST) with the saas.yaml profile
+#     (tenancy multi), and web from MSCD_IMAGE@MSCD_WEB_DIGEST. pull_policy missing: the
+#     deploy pulls and verifies the images first; Compose pulls only what is absent;
+#   - adds Caddy (caddy service) in front of web: the only service that publishes ports
+#     (80/tcp, 443/tcp and 443/udp). Docker-published ports bypass the host firewall, so
+#     no other service may publish one. Caddy gets and renews the certificates, redirects
+#     HTTP to HTTPS and sends HSTS (config/caddy/Caddyfile);
+#   - takes the ports and the certificate folder away from web, which serves plain HTTP
+#     on 8080 to Caddy and trusts X-Forwarded-For only from Caddy's fixed address on the
+#     edge network, and turns on the NGINX rate limits of /api/;
+#   - sizes PostgreSQL for its 4 GB limit, sets the memory limits of every service from
+#     .env, and writes container logs with the local driver (20 MB times 10 files each).
+#
+# COMPOSE_PROFILES=bundled-db,bundled-s3 (in .env) starts the bundled PostgreSQL and
+# SeaweedFS. Jobs stay on pg-boss in PostgreSQL; Valkey (profile bullmq) stays off.
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "10"
+
+# The release server image by digest. A tag can be moved; a digest cannot.
+x-server-image: &server-image
+  image: ${MSCD_SERVER_IMAGE:?set MSCD_SERVER_IMAGE (ghcr.io/mqusaeri/mscd-server)}@${MSCD_SERVER_DIGEST:?set MSCD_SERVER_DIGEST (sha256:..., digests.json of the release)}
+  pull_policy: missing
+
+# Profile overrides of the SaaS stack, on top of x-app-env of docker-compose.yml. The
+# profile file defaults to saas.yaml here, so a missing setting never falls back to the
+# on-premise profile (tenancy single). The public URL is required.
+x-saas-env: &saas-env
+  MSCD_PROFILE_FILE: ${MSCD_PROFILE_FILE:-/app/apps/server/profiles/saas.yaml}
+  MSCD__HTTP__PUBLIC_URL: ${MSCD_PUBLIC_URL:?set MSCD_PUBLIC_URL (https://app.<domain>)}
+
+services:
+  postgres:
+    # Sized to the 4 GB limit of the container: a quarter for shared buffers, three
+    # quarters assumed available as file cache, and slow statements logged (500 ms).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - wal_compression=on
+      - -c
+      - log_min_duration_statement=500ms
+    # Shared memory for parallel queries; the Docker default of 64 MB is too small.
+    shm_size: 1g
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_POSTGRES_MEMORY:-4G}
+
+  objectstore:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_OBJECTSTORE_MEMORY:-2G}
+
+  # Off in SaaS (COMPOSE_PROFILES has no bullmq); listed for the log driver only.
+  valkey:
+    logging: *logging
+
+  migrate:
+    <<: *server-image
+    environment:
+      <<: *saas-env
+    logging: *logging
+
+  storage-gateway:
+    <<: *server-image
+    environment:
+      <<: *saas-env
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_GATEWAY_MEMORY:-1G}
+
+  api:
+    <<: *server-image
+    environment:
+      <<: *saas-env
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_API_MEMORY:-2G}
+
+  worker:
+    <<: *server-image
+    environment:
+      <<: *saas-env
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_WORKER_MEMORY:-2G}
+
+  cli:
+    <<: *server-image
+    environment:
+      <<: *saas-env
+    logging: *logging
+
+  web:
+    image: ${MSCD_IMAGE:?set MSCD_IMAGE (ghcr.io/mqusaeri/mscd-web)}@${MSCD_WEB_DIGEST:?set MSCD_WEB_DIGEST (sha256:..., digests.json of the release)}
+    pull_policy: missing
+    # Caddy publishes the ports and holds the certificates.
+    ports: !override []
+    volumes: !reset []
+    environment:
+      MSCD_HTTP_REDIRECT: "false"
+      MSCD_HSTS: "false"
+      MSCD_DOMAIN: ${MSCD_DOMAIN:?set MSCD_DOMAIN (app.<domain>)}
+      MSCD_EXTERNAL_FONTS: "false"
+      # X-Forwarded-For names the client only when Caddy sent it.
+      MSCD_TRUSTED_PROXY_CIDRS: ${MSCD_CADDY_ADDRESS:-172.31.251.2}/32
+      # Request limits per client address on /api/ (deploy/nginx/40-mscd-runtime.sh).
+      MSCD_RATE_LIMITS: ${MSCD_RATE_LIMITS:-true}
+      MSCD_RATE_AUTH: ${MSCD_RATE_AUTH:-10}
+      MSCD_RATE_AUTH_BURST: ${MSCD_RATE_AUTH_BURST:-20}
+      MSCD_RATE_API: ${MSCD_RATE_API:-50}
+      MSCD_RATE_API_BURST: ${MSCD_RATE_API_BURST:-100}
+      MSCD_RATE_CONN: ${MSCD_RATE_CONN:-50}
+    networks:
+      edge:
+        ipv4_address: ${MSCD_WEB_EDGE_ADDRESS:-172.31.251.3}
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MSCD_WEB_MEMORY:-512M}
+
+  caddy:
+    # Caddy 2.11.7 (tagged 3 October 2026), pinned by the digest of its Alpine image.
+    image: caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
+    pull_policy: missing
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    environment:
+      MSCD_DOMAIN: ${MSCD_DOMAIN:?set MSCD_DOMAIN (app.<domain>)}
+      MSCD_SITE_DOMAIN: ${MSCD_SITE_DOMAIN:-}
+      MSCD_TLS_MODE: ${MSCD_TLS_MODE:-acme}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_CA: ${ACME_CA:-https://acme-staging-v02.api.letsencrypt.org/directory}
+      MSCD_WEB_UPSTREAM: tcp4/${MSCD_WEB_EDGE_ADDRESS:-172.31.251.3}:8080
+      # storage.max_upload_bytes of saas.yaml (100 MiB) plus 1 MiB.
+      MSCD_MAX_REQUEST_BYTES: ${MSCD_MAX_REQUEST_BYTES:-105906176}
+    ports:
+      # No host address, so every IPv4 and IPv6 address of the server (an address
+      # such as 0.0.0.0 would publish on IPv4 only). 443/udp carries HTTP/3.
+      - "${MSCD_HTTP_PORT:-80}:80/tcp"
+      - "${MSCD_HTTPS_PORT:-443}:443/tcp"
+      - "${MSCD_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      # Caddyfile and conf.d/*.caddy (the optional ops host of M2-S08).
+      - ./config/caddy:/etc/caddy:ro,z
+      # The marketing site for MSCD_SITE_DOMAIN: index.html, id/ and assets/ of apps/site.
+      - ${MSCD_SITE_DIR:-./site}:/srv/site:ro,z
+      # Certificates, ACME account and the local CA (back these up with the server).
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: ${MSCD_CADDY_ADDRESS:-172.31.251.2}
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      # The admin endpoint listens on 127.0.0.1:2019 inside the container only.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 2s
+    stop_grace_period: 15s
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${MSCD_CADDY_CPUS:-1.0}"
+          memory: ${MSCD_CADDY_MEMORY:-512M}
+          pids: 256
+
+networks:
+  # Caddy and web, on fixed addresses inside 172.31.0.0/16, the range the Docker
+  # address pools of the server leave free (bootstrap-host.sh, M2-S03). With
+  # MSCD_EDGE_IPV6=true the network also has IPv6, so Docker forwards IPv6 clients
+  # with their own address; without it, every IPv6 client reaches Caddy from one
+  # gateway address and shares one rate limit.
+  edge:
+    enable_ipv6: ${MSCD_EDGE_IPV6:-false}
+    ipam:
+      config:
+        - subnet: ${MSCD_EDGE_SUBNET:-172.31.251.0/24}
+        - subnet: ${MSCD_EDGE_SUBNET6:-fd6d:7363:6400:1::/64}
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,171 @@
+# MSCD SaaS: Caddy, the TLS front of the SaaS Compose stack (Milestone 2 plan K, M2-S02).
+# Mounted read-only at /etc/caddy/Caddyfile by docker-compose.saas.yml. docs/saas/stack.md
+# explains every part.
+#
+# Caddy is the only container that publishes ports (80/tcp, 443/tcp, 443/udp for HTTP/3).
+# It gets and renews the certificates, redirects HTTP to HTTPS with 308, sends HSTS, and
+# passes every request for the app to the web container (NGINX), which serves the app and
+# proxies /api/ to the api. NGINX trusts X-Forwarded-For only from Caddy's fixed address.
+#
+# Settings (environment of the caddy service, from .env):
+#   MSCD_DOMAIN            host name of the app, for example app.example.com (D-S3)
+#   MSCD_SITE_DOMAIN       bare domain that serves the marketing site of apps/site, for
+#                          example example.com; empty: no site
+#   MSCD_TLS_MODE          acme: Let's Encrypt (HTTP-01 challenge on port 80);
+#                          internal: Caddy's own local CA, for tests only
+#   ACME_EMAIL, ACME_CA    account email and ACME directory (acme mode)
+#   MSCD_WEB_UPSTREAM      web container, <fixed IPv4 address>:8080 (see the comment at
+#                          reverse_proxy)
+#   MSCD_MAX_REQUEST_BYTES largest request body: storage.max_upload_bytes plus 1 MiB
+#
+# The variables are read when Caddy starts. After a change: docker compose up -d caddy.
+{
+	# Caddy's own CA (tls internal) is never added to the trust store of the container.
+	skip_install_trust
+
+	servers {
+		# A client must send its request headers within 10 seconds (slow header attacks).
+		# Bodies have no time limit, so slow uploads still work.
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+# Certificates. Each site imports mscd_tls, which picks one of the two snippets below by
+# MSCD_TLS_MODE; any other value stops Caddy at start with "File to import not found".
+(mscd_tls_acme) {
+	tls {
+		issuer acme {
+			dir {$ACME_CA}
+			email {$ACME_EMAIL}
+			# HTTP-01 only, on port 80.
+			disable_tlsalpn_challenge
+		}
+	}
+}
+
+(mscd_tls_internal) {
+	tls internal
+}
+
+(mscd_tls) {
+	import mscd_tls_{$MSCD_TLS_MODE:acme}
+}
+
+# JSON access log on stdout. The query string is removed from the request address, the
+# Referer and the Location of redirects, because it can hold a sign-in code, an
+# invitation or a password reset token. Caddy already writes Cookie, Set-Cookie and
+# Authorization as REDACTED.
+(mscd_log) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			request>uri regexp \?.*$ ""
+			request>headers>Referer regexp \?.*$ ""
+			resp_headers>Location regexp \?.*$ ""
+			request>headers>X-Csrf-Token delete
+		}
+	}
+}
+
+# The app on MSCD_DOMAIN and, when MSCD_SITE_DOMAIN is set, the marketing site on the
+# bare domain. Both names are addresses of this one block, so an empty MSCD_SITE_DOMAIN
+# simply leaves the site out. Caddy redirects plain HTTP to HTTPS (308) for both.
+{$MSCD_DOMAIN} {$MSCD_SITE_DOMAIN} {
+	import mscd_tls
+	import mscd_log
+
+	# Caddy's own Server header is not sent.
+	header -Server
+
+	@app host {$MSCD_DOMAIN}
+	handle @app {
+		# HSTS for one year on the app host and its subdomains, without preload. Set when
+		# the response is written, so it replaces any value from upstream.
+		header {
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			defer
+		}
+
+		# Request bodies above the upload limit are refused with 413 here.
+		request_body {
+			max_size {$MSCD_MAX_REQUEST_BYTES:105906176}
+		}
+
+		# The web container by its fixed IPv4 address on the edge network
+		# (MSCD_WEB_EDGE_ADDRESS), so NGINX always sees Caddy's fixed IPv4 address, the one
+		# it trusts, also when the edge network has IPv6. While web restarts, requests wait
+		# up to 30 seconds for it.
+		reverse_proxy {$MSCD_WEB_UPSTREAM:web:8080} {
+			# Caddy trusts no proxy in front of it, so the client's own X-Forwarded-For is
+			# never passed on: the header names the address that connected to Caddy.
+			header_up X-Forwarded-For {client_ip}
+
+			lb_try_duration 30s
+			lb_try_interval 250ms
+
+			health_uri /healthz
+			health_interval 5s
+			health_timeout 3s
+			health_status 200
+		}
+	}
+
+	# The marketing site (static files of apps/site, mounted at /srv/site). The tools of
+	# that folder are never copied there; these paths answer 404 all the same.
+	handle {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			Content-Security-Policy "default-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		}
+		@tools path *.mjs /media-src /media-src/*
+		respond @tools 404
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=604800"
+		root * /srv/site
+		encode zstd gzip
+		file_server
+	}
+
+	# Errors Caddy produces itself: problem details under /api/ (as the api and NGINX
+	# answer), short plain text elsewhere.
+	handle_errors {
+		header {
+			X-Content-Type-Options "nosniff"
+			Cache-Control "no-store"
+			-Server
+		}
+		@api_large expression `{http.request.uri.path}.startsWith("/api/") && {err.status_code} == 413`
+		@api_down expression `{http.request.uri.path}.startsWith("/api/") && {err.status_code} in [502, 503, 504]`
+		@large expression `{err.status_code} == 413`
+		@down expression `{err.status_code} in [502, 503, 504]`
+		handle @api_large {
+			header Content-Type application/problem+json
+			respond `{"type":"https://mscd.cyberlentera.com/problems/payload-too-large","title":"Request body too large","status":413}` 413
+		}
+		handle @api_down {
+			header Content-Type application/problem+json
+			respond `{"type":"https://mscd.cyberlentera.com/problems/dependency-unavailable","title":"MSCD is not reachable at the moment","status":503}` 503
+		}
+		handle @large {
+			respond "Request body too large." 413
+		}
+		handle @down {
+			respond "MSCD is not reachable at the moment. Try again in a minute." 503
+		}
+		handle {
+			respond "{err.status_code} {err.status_text}" {err.status_code}
+		}
+	}
+}
+
+# Optional extra hosts, such as ops.<domain> for the dashboards (M2-S08). Files here can
+# use the snippets above: import mscd_tls and import mscd_log.
+import /etc/caddy/conf.d/*.caddy

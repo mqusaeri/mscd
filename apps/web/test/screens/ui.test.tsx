@@ -16,7 +16,7 @@ import type { HostContext, Lang } from '../../src/screens/types';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(path.resolve(HERE, '../../src/screens/ui/screens.css'), 'utf8');
 const STYLES = readFileSync(path.resolve(HERE, '../../src/styles.css'), 'utf8');
-const FORBIDDEN = /[—·]/;
+const FORBIDDEN = /[\u2014\u00b7]/;
 
 /** Renders inside a host context of the language, with no layer (dialogs render in place). */
 function render(node: ReactElement, lang: Lang = 'en', theme: 'light' | 'dark' = 'light'): string {
