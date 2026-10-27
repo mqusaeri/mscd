@@ -32,6 +32,12 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | |
 
+## Wave results
+
+| Wave | Full suites (orchestrator) | Notes |
+|---|---|---|
+| 1 (1a, 1b, L1) | Server integration: 108 files, 1342 passed, 56 skipped. Web E2E sample: 286 passed, 1 failed once. Web E2E API: 265 passed | The failure was `e2e/offline.spec.js` (a lazy `sample-*.js` chunk cut off by a page load while `page.route` intercepts every request); `--repeat-each=4` then passed 8 of 8. The next package that owns `apps/web/e2e/helpers.js` should let the `requestfailed` filter accept that case |
+
 ## Product decisions to keep in mind
 
 - The 9 decisions in `CLAUDE.md` (section "Product decisions").
