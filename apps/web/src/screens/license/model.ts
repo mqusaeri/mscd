@@ -1,5 +1,5 @@
-// The view model of the Licence screen and the interface both adapters implement (api.ts in API mode, sample.ts in
-// the sample build), chosen in index.tsx (MILESTONE-2 C.6).
+// The view model of the Licence screen and the interface both adapters implement (api.ts in API builds, sample.ts in
+// the sample build), chosen by the build in Screen.tsx (adapterFor, MILESTONE-2 C.6).
 import type { ApiError } from '../../data/api/ApiClient';
 
 export type LicenceState = 'valid' | 'grace' | 'read_only';
