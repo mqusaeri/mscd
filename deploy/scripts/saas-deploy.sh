@@ -357,15 +357,25 @@ compose_logged() {
     saas_compose "$@" >>"$COMPOSE_LOG" 2>&1
 }
 
-# service_logs SERVICE...: the last log lines of each service, redacted.
+# service_logs SERVICE...: the last log lines of each service. The full lines go to the
+# server's log folder only; the output (the workflow log) gets a short, redacted excerpt.
 service_logs() {
-    local svc id
+    local svc id file=$LOG_DIR/$ACTION-$STAMP-services.log
     for svc in "$@"; do
         id=$(project_containers "$svc" | head -n 1)
         [[ -n $id ]] || continue
-        printf '        Service %s is %s; last log lines:\n' "$svc" "$(container_state "$id")"
-        docker logs --tail 25 "$id" 2>&1 | saas_redact | sed 's/^/          /' || true
+        { printf '\n== %s (%s)\n' "$svc" "$(container_state "$id")"; docker logs --tail 200 "$id" 2>&1; } >>"$file" || true
+        printf '        Service %s is %s; last log lines (addresses, emails and organisations hidden; all lines in %s):\n' \
+            "$svc" "$(container_state "$id")" "$file"
+        docker logs --tail 10 "$id" 2>&1 | cut -c1-300 | saas_redact | sed 's/^/          /' || true
     done
+}
+
+# service_healthy SERVICE: the container of SERVICE passes its health check.
+service_healthy() {
+    local id
+    id=$(project_containers "$1" | head -n 1)
+    [[ -n $id && $(container_state "$id") == healthy ]]
 }
 
 profile_active() {
@@ -432,8 +442,11 @@ restart_services() {
     for entry in "${SAAS_DATA_SERVICES[@]}"; do
         svc=${entry%%:*}
         profile_active "${entry#*:}" || continue
-        compose_logged up -d --no-deps --wait --wait-timeout "$TIMEOUT" "$svc" ||
-            { fail "$svc did not become healthy"; service_logs "$svc"; return 1; }
+        if ! compose_logged up -d --no-deps --wait --wait-timeout "$TIMEOUT" "$svc" || ! service_healthy "$svc"; then
+            fail "$svc did not become healthy"
+            service_logs "$svc"
+            return 1
+        fi
     done
     for svc in "${SAAS_APP_SERVICES[@]}"; do
         args=(up -d --no-deps --wait --wait-timeout "$TIMEOUT")
@@ -442,7 +455,9 @@ restart_services() {
             caddy_id=$(project_containers caddy | head -n 1)
             args+=(--remove-orphans)
         fi
-        if compose_logged "${args[@]}" "$svc"; then
+        # Every one of these services has a health check; a container without one (or one
+        # that restarts) does not count as started.
+        if compose_logged "${args[@]}" "$svc" && service_healthy "$svc"; then
             pass "$svc is healthy"
         else
             fail "$svc did not become healthy"

@@ -101,13 +101,16 @@ saas_in_list() {
     return 1
 }
 
-# saas_redact: copies standard input to standard output with organisation schema names
-# and email addresses hidden. Every log excerpt the deploy prints goes through it, because
-# workflow logs of a public repository are public (M2-S04 follow-up 1). The full logs
-# stay on the server in LOG_DIR.
+# saas_redact: copies standard input to standard output with organisation schema names,
+# email addresses and IP addresses hidden. Every log excerpt the deploy prints goes through
+# it, because workflow logs of a public repository are public (M2-S04 follow-up 1). The
+# full logs stay on the server in LOG_DIR.
 saas_redact() {
     sed -E -e 's/org_[a-z0-9_]+/org_[hidden]/g' \
-        -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g'
+        -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g' \
+        -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[address]/g' \
+        -e 's/([0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}/[address]/g' \
+        -e 's/[0-9a-fA-F]{0,4}(:[0-9a-fA-F]{1,4})*::([0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4})*)?/[address]/g'
 }
 
 # saas_print_log FILE [LINES]: the last LINES lines of FILE, redacted and indented.

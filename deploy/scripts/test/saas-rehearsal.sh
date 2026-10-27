@@ -687,8 +687,10 @@ check_upgrade() {
     fi
     local dump
     dump=$(find "$INSTALL/backup/pre-deploy" -name "*-$V1-to-$V2.dump" | head -n 1)
+    local toc=''
+    if [[ -n $dump ]]; then toc=$(compose exec -T postgres pg_restore --list <"$dump" 2>/dev/null || true); fi
     if [[ -n $dump && $(head -c 5 -- "$dump") == PGDMP && $(stat -c '%a' "$dump") == 600 ]] &&
-        compose exec -T postgres pg_restore --list <"$dump" 2>/dev/null | grep -q 'SCHEMA - pgboss'; then
+        grep -qE 'SCHEMA - platform( |$)' <<<"$toc" && grep -qE 'SCHEMA - pgboss( |$)' <<<"$toc"; then
         ok "Pre-deploy dump in pg_dump custom format, readable by pg_restore: $(basename -- "$dump")"
     else
         bad "No pre-deploy dump of the upgrade in $INSTALL/backup/pre-deploy"
@@ -792,8 +794,9 @@ check_rc5() {
     local id
     step "Broken $V5: services replaced, then the health check fails"
     deploy_run deploy-rc5 deploy "v$V5"
-    if ((RC != 0)) && log_has deploy-rc5 "Migrations of $V5 applied" && log_has deploy-rc5 "rolled back automatically" &&
-        log_has deploy-rc5 "(health)"; then
+    if ((RC != 0)) && log_has deploy-rc5 "Migrations of $V5 applied" && log_has deploy-rc5 "web did not become healthy" &&
+        log_has deploy-rc5 "rolled back automatically" && log_has deploy-rc5 "(health)" &&
+        ! grep -qE '"(remote_ip|client_ip)":"[0-9]' "$(log_file deploy-rc5)"; then
         ok "$V5: migrate passes, the health check fails, the deploy rolls back by itself"
     else
         bad "$V5 did not roll back after the health check (exit code $RC)"
