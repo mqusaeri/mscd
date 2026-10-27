@@ -14,10 +14,10 @@
 // Tenant Admin (`user.manage`) sees counts per system and kind with the primary manager of each system, never a
 // title (F.6). A handover moves every chosen kind in one transaction: each record's holder columns that name the
 // person move to the successor, BR-16 (a successor who wrote the version in review cannot approve it), BR-17 (a
-// risk keeps an owner), BR-41 (a due date after the next audit) and AUD-INDEP (a successor who becomes the auditor
-// of an activity examines their own work) are checked per record and answered as warnings that name the record,
-// each record gets its `holdings.reassigned` audit entry, and records shared with other systems need the BR-22
-// confirmation first.
+// risk keeps an owner), BR-41 (a due date after the next audit; not for audit activities, whose date is their own
+// scheduled date) and AUD-INDEP (a successor who becomes the auditor of an activity examines their own work) are
+// checked per record and answered as warnings that name the record, each record gets its `holdings.reassigned` audit
+// entry, and records shared with other systems need the BR-22 confirmation first.
 import { Inject, Injectable } from '@nestjs/common';
 import {
   HOLDING_KINDS,
@@ -349,8 +349,11 @@ export class HoldingsService {
       for (const record of records) {
         const ref = refOfHeld(record);
         const code = codeOf(record);
-        // BR-41: a due date after the next audit stays, with a warning that names the record.
-        warnings = mergeWarnings(warnings, asWarnings(code, await this.rules.evaluate<Br41Input>(trx, 'BR-41', { due: record.due_at, auditDate: next?.date ?? null }, scope(ref))));
+        // BR-41: a due date after the next audit stays, with a warning that names the record. An audit activity is
+        // left out: its due date is its own scheduled date, which may belong to a later audit event.
+        if (record.tbl !== 'audit_activity') {
+          warnings = mergeWarnings(warnings, asWarnings(code, await this.rules.evaluate<Br41Input>(trx, 'BR-41', { due: record.due_at, auditDate: next?.date ?? null }, scope(ref))));
+        }
         // BR-16: a successor who wrote the version in review of a document they now approve cannot approve it.
         if (record.tbl === 'document' && record.columns.includes('approver_user_id')) {
           const authors = await this.authorsOf(trx, record.id);

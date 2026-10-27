@@ -6,7 +6,7 @@ import { CommandResult, Holdings, UserHoldings } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { useTestDatabase } from '../../setup/test-db';
-import { auditByAction, createExtraApp, idOf, inOrg, rowsOf, sessionFor, systemOf, type Client, type CommandsApp } from './helpers';
+import { TODAY, auditByAction, createExtraApp, idOf, inOrg, rowsOf, sessionFor, systemOf, type Client, type CommandsApp } from './helpers';
 
 const HOLDINGS = (ms: string, handle: string) => `/api/v1/ms/${ms}/holdings/${handle}`;
 
@@ -200,10 +200,21 @@ describe('holdings and handover (M2-07)', () => {
       await sql`update applicability_entry set owner_user_id = ${dewiId} where id = ${targets[0]!.id}`.execute(trx);
       const { rows: events } = await sql<{ id: string }>`
         select id from audit_event where management_system_id = ${isms.id} and deleted_at is null order by scheduled_at, id limit 1`.execute(trx);
-      const activity = async (code: string, column: 'auditor_user_id' | 'auditee_user_id', status: 'planned' | 'done', target: string | null) =>
+      // An audit event after the next one (the next is the first on or after today), for an activity dated after the next audit.
+      const { rows: later } = await sql<{ id: string; date: string }>`
+        select id, scheduled_at::text as date from audit_event
+         where management_system_id = ${isms.id} and deleted_at is null
+           and scheduled_at > (select min(scheduled_at) from audit_event
+                                where management_system_id = ${isms.id} and deleted_at is null and scheduled_at >= ${TODAY}::date)
+         order by scheduled_at, id limit 1`.execute(trx);
+      expect(later).toHaveLength(1);
+      const activity = async (
+        code: string, column: 'auditor_user_id' | 'auditee_user_id', status: 'planned' | 'done', target: string | null,
+        event = events[0]!.id, date = '2026-10-20',
+      ) =>
         (await sql<{ id: string }>`
           insert into audit_activity (audit_event_id, management_system_id, template_code, title, ${sql.ref(column)}, scheduled_at, status, target_code)
-          values (${events[0]!.id}, ${isms.id}, ${code}, ${`Fixture audit activity ${code}`}, ${bagusId}, '2026-10-20', ${status}, ${target})
+          values (${event}, ${isms.id}, ${code}, ${`Fixture audit activity ${code}`}, ${bagusId}, ${date}, ${status}, ${target})
           returning id`.execute(trx)).rows[0]!.id;
       const associate = (await sql<{ id: string }>`
         insert into business_associate (management_system_id, code, title, owner_user_id, relationship_owner_user_id)
@@ -215,6 +226,7 @@ describe('holdings and handover (M2-07)', () => {
         audited: await activity('IA-HX1', 'auditor_user_id', 'planned', targets[0]!.code),
         auditee: await activity('IA-HX2', 'auditee_user_id', 'planned', null),
         done: await activity('IA-HX3', 'auditor_user_id', 'done', null),
+        later: await activity('IA-HX4', 'auditee_user_id', 'planned', null, later[0]!.id, later[0]!.date),
         associate,
       };
     });
@@ -226,6 +238,7 @@ describe('holdings and handover (M2-07)', () => {
       kind: 'prep_task', code: 'IA-HX1', dueAt: '2026-10-20', ref: { module: 'audit', entityType: 'audit_activity' },
     });
     expect(before.items.find((i) => i.ref.id === ids.auditee)).toMatchObject({ kind: 'prep_task', code: 'IA-HX2' });
+    expect(before.items.find((i) => i.ref.id === ids.later)).toMatchObject({ kind: 'prep_task', code: 'IA-HX4' });
     expect(before.items.find((i) => i.ref.id === ids.associate)).toMatchObject({
       kind: 'register_row', code: 'BA-HX1', ref: { entityType: 'business_associate' },
     });
@@ -238,10 +251,13 @@ describe('holdings and handover (M2-07)', () => {
     expect(response.status).toBe(200);
     // The successor owns the entry the activity examines, so she would audit her own work (AUD-INDEP, a warning).
     expect(response.body.warnings).toContainEqual({ rule: 'AUD-INDEP', messages: { en: expect.stringMatching(/^IA-HX1: /), id: expect.stringMatching(/^IA-HX1: /) } });
+    // An activity's due date is its own scheduled date: one of a later audit event gives no BR-41 warning.
+    expect((response.body.warnings ?? []).filter((w) => w.rule === 'BR-41' && /^IA-HX\d: /.test(w.messages.en))).toEqual([]);
     const after = await holdings('bagus');
-    expect(after.items.some((i) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(i.ref.id))).toBe(false);
+    const movedIds = [ids.gap, ids.audited, ids.auditee, ids.later, ids.associate];
+    expect(after.items.some((i) => movedIds.includes(i.ref.id))).toBe(false);
     const dewi = await holdings('dewi');
-    expect(dewi.items.filter((i) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(i.ref.id))).toHaveLength(4);
+    expect(dewi.items.filter((i) => movedIds.includes(i.ref.id))).toHaveLength(5);
     const [stored] = await rowsOf<Record<string, string>>(db, 'tst', sql`
       select (select u.handle from self_assessment r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.gap}) as gap,
              (select u.handle from self_assessment r join platform.app_user u on u.id = r.owner_user_id where r.id = ${ids.conforming}) as conforming,
@@ -253,12 +269,12 @@ describe('holdings and handover (M2-07)', () => {
     expect(stored).toEqual({
       gap: 'dewi', conforming: 'bagus', auditor: 'dewi', auditee: 'dewi', done: 'bagus', relationship: 'dewi', associate_owner: 'rina',
     });
-    const audit = (await auditByAction(db, 'tst', 'holdings.reassigned')).filter((a) => [ids.gap, ids.audited, ids.auditee, ids.associate].includes(a.entity_id!));
+    const audit = (await auditByAction(db, 'tst', 'holdings.reassigned')).filter((a) => movedIds.includes(a.entity_id!));
     expect(audit.map((a) => [a.entity_type, a.after?.columns])).toEqual(expect.arrayContaining([
       ['self_assessment', ['owner_user_id']], ['audit_activity', ['auditor_user_id']], ['audit_activity', ['auditee_user_id']],
       ['business_associate', ['relationship_owner_user_id']],
     ]));
-    expect(audit).toHaveLength(4);
+    expect(audit).toHaveLength(5);
   });
 
   it('hands everything over when no kind is named, after which the person holds nothing in the system', async () => {
