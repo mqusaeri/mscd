@@ -1246,6 +1246,7 @@ Each decision has a default that is built when no answer arrives in time.
 | Bootstrap dry run (tests only) | `ubuntu` 24.04, pinned to an exact dated tag (`ubuntu:noble-<yyyymmdd>`) at least two weeks old plus its digest, stored in `deploy/host/test/ubuntu-image` (S-5) | M2-S03 |
 | Backup tools | Built from `postgres:16.15-alpine` with `restic` and `rclone` from Alpine packages (`deploy/docker/backup.Dockerfile`) | M2-S07 |
 | Image and config scanning | `aquasec/trivy:0.74.0` (already in CI) | M2-S01 |
+| Dependency scanning in CI (OSV) | `ghcr.io/google/osv-scanner-action:v2.7.0`, pinned by digest in `security-scan.yml` (CI only, never in a stack) | M2-S01 |
 
 ### K.5 Waves and common acceptance
 

@@ -67,20 +67,31 @@ jobs:
           output: ${{ runner.temp }}/codeql
           upload: ${{ vars.MSCD_CODE_SCANNING == 'false' && 'never' || 'always' }}
 
-      - name: No CodeQL alert
+      - name: No open CodeQL alert
         env:
           CODE_SCANNING: ${{ vars.MSCD_CODE_SCANNING != 'false' }}
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           # Only the number is printed: the log of a public repository is public.
-          count=$(jq '[.runs[] | .results[]? | select((.level // "warning") | IN("error", "warning"))] | length' \
-            "$RUNNER_TEMP"/codeql/*.sarif | awk '{ n += $1 } END { print n + 0 }')
+          if [ "$CODE_SCANNING" = true ]; then
+            # Open alerts of this ref after the upload above. An alert dismissed in Security, Code scanning
+            # (with a reason) is no longer open, so a dismissed false alarm clears the gate.
+            count=$(gh api --paginate "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$REF&state=open&tool_name=CodeQL&per_page=100" \
+              --jq '[.[] | select(.rule.severity == "error" or .rule.severity == "warning")] | length' | awk '{ n += $1 } END { print n + 0 }')
+            where='Security, Code scanning'
+          else
+            # Code scanning off: count the SARIF results, leaving out results suppressed in the source.
+            count=$(jq '[.runs[] | .results[]? | select((.suppressions // []) | length == 0) | select((.level // "warning") | IN("error", "warning"))] | length' \
+              "$RUNNER_TEMP"/codeql/*.sarif | awk '{ n += $1 } END { print n + 0 }')
+            where='the codeql-sarif artefact of this run'
+          fi
           if [ "$count" -gt 0 ]; then
-            if [ "$CODE_SCANNING" = true ]; then where='Security, Code scanning'; else where='the codeql-sarif artefact of this run'; fi
-            echo "::error::CodeQL reported $count alert(s); see $where"
+            echo "::error::CodeQL reported $count open alert(s); see $where"
             exit 1
           fi
-          echo "No CodeQL alert"
+          echo "No open CodeQL alert"
 
       - name: Keep the SARIF results (code scanning off)
         if: always() && vars.MSCD_CODE_SCANNING == 'false'

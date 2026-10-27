@@ -88,7 +88,7 @@ Add `-f bundle=true` to also build the signed on-premise bundle. It is attached 
 | Signed attestations | cosign `attest` | The SBOM and the provenance are signed by the same identity | |
 | GitHub attestation | `actions/attest-build-provenance` | A second provenance record kept by GitHub (`gh attestation verify`), while the repository is public | |
 
-The signatures and attestations are recorded in the public Sigstore transparency log. The record holds the repository name, the workflow, the tag and the image digest, nothing else.
+The signatures and attestations are recorded in the public Sigstore transparency log. The record holds the identity of the workflow run (repository and owner, workflow, tag, commit, trigger, runner type and a link to the run) and the image digest.
 
 ## Verify an image yourself
 
@@ -124,7 +124,7 @@ Always deploy by digest (`ghcr.io/mqusaeri/mscd-server@sha256:...`), never by th
 
 | Job | What it checks | When it fails |
 |---|---|---|
-| CodeQL | Security problems in the JavaScript and TypeScript code. The alerts go to Security, Code scanning, which only people with write access can see; the log shows only their number | Fix or, when it is a false alarm, dismiss the alert there with a reason |
+| CodeQL | Security problems in the JavaScript and TypeScript code. The alerts go to Security, Code scanning, which only people with write access can see; the log shows only their number | Fix the code. For a false alarm, dismiss the alert there with a reason: the gate counts open alerts only. With code scanning off (`MSCD_CODE_SCANNING=false`), mark the line with a CodeQL suppression comment instead |
 | gitleaks | Secrets in the whole git history. Development keys and demo secrets (R-11), test fixtures and the example values of the API contract are allowed by name; every other finding fails | Rotate the secret at once (the history of a public repository cannot be recalled), then remove it from the code |
 | OSV | Known vulnerabilities in the packages of `package-lock.json`, with the OSV scanner image `ghcr.io/google/osv-scanner-action` v2.7.0 | Update the package (Dependabot usually proposes it) |
 | Trivy configuration | HIGH or CRITICAL misconfiguration in `deploy/` (Dockerfiles, Helm chart) | Fix the file named in the log |

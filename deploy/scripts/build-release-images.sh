@@ -93,7 +93,7 @@ need_value() {
 }
 
 set_mode() {
-    [[ -z $MODE || $MODE == "$1" ]] || die "Use --load or --push, not both"
+    [[ -z $MODE || $MODE == "$1" ]] || die "Use only one of --load and --push"
     MODE=$1
 }
 
