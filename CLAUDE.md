@@ -15,7 +15,7 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 
 ## Next steps
 
-1. Build Milestone 2 in the wave order of the plan (section G.1 and the SaaS waves in section K). Start with wave 1a, M2-02.
+1. Continue Milestone 2 from `docs/platform/M2-STATUS.md`, which lists every package as done, running or next.
 2. Build each package with the workflow in `.claude/workflows/mscd-m2-wp.js` (args `{wp: "M2-02"}`): it implements, runs the acceptance, has an independent agent verify, and fixes up to two rounds. Then commit once per package or per wave and push to `main`.
 3. Run at most four packages at once (rule R-02 of the plan). The workflow uses `flock` locks in `/tmp`; on macOS install `flock` first or run packages one at a time.
 4. Production deploys go through GitHub Actions with the owner's approval (section K). Never hold production secrets in the repo or the chat.
