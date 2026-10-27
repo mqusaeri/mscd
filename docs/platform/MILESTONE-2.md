@@ -563,7 +563,7 @@ npm run test:int -w @mscd/server
 | | |
 |---|---|
 | Wave, depends on | 2a; M2-03 |
-| Owns | `packs/content/**`, `packs/sources/**`, `packs/README.md`, `apps/web/src/data/mscd-data.js`, `apps/server/src/seed/demo/sample-snapshot.json`, `tools/mock-providers/fixtures/demo.json`, `apps/server/test/int/packs/**`, `apps/server/test/int/parity/**`, `apps/web/e2e/{audit,calendar,chain,display,documents,framework,freshness,golden-thread,i18n,mytasks}.spec.js`, `apps/web/test/sample-source.test.js` |
+| Owns | `packs/content/**`, `packs/sources/**`, `packs/README.md`, `apps/web/src/data/mscd-data.js`, `apps/server/src/seed/demo/sample-snapshot.json`, `tools/mock-providers/fixtures/demo.json`, `apps/server/test/int/packs/**`, `apps/server/test/int/parity/**`, `apps/server/test/int/pack-upgrade/**`, `apps/web/e2e/{audit,calendar,chain,display,documents,framework,freshness,golden-thread,i18n,mytasks}.spec.js`, `apps/web/test/sample-source.test.js` |
 
 Brief:
 - E.2 for all six packs, written as content tables in `packs/content/<pack_id>/`: requirement rows with `parent_code`, documented information, document templates (covering the 13 activity output codes, plus `SCO-01` Scope statement for requirement 4.3 and the matching scope template of each other pack), review inputs, Annex A links, Annex A evidence examples and an evidence example for every leaf clause row, assessable flags, derivation JSON, ISO 37001 chain fixes.
@@ -573,6 +573,9 @@ Brief:
 - Document code clashes of the gap study (`PRC-05`, `POL-01` against `QM-01`, `POL-B01`, `POL-A01`): template codes are unique per pack, and activity output codes match the sample's codes where the demo links them. A customer's own codes are handled by `documented-info.link` (D.1, M2-07).
 - `packs/README.md`: the lead auditor sign-off table of E.2, with every pack listed and no sign-off yet.
 - Second version bump, the minor step of E.3. ISO37001 statuses stay as they are until H.6 is answered.
+- Orchestrator note from M2-03: `apps/server/test/int/pack-upgrade/**` joins this package's Owns. Its fixture versions (1.2.2 to 1.2.5) become downgrades after the content step, so move them above 1.3.0 and take the counts from `seedTargets`.
+- Orchestrator note from M2-03: `test/int/parity/snapshots.test.ts` raises every sample PACKS version by one patch step. Remove that transform when the sample moves to the content step, or parity expects 1.3.1 against 1.3.0.
+- Orchestrator note from M2-03: content references become errors at the content step (`CONTENT_REFERENCES_STRICT_FROM`). Prove it in the handoff: a copy of a pack folder with one `output_document_code` changed to an unknown code makes `node packs/scripts/validate-sources.mjs --dir <copy>` exit 1.
 
 Acceptance:
 
@@ -611,6 +614,8 @@ Brief:
 - Findings: store `finding.target_code` on create and update and filter `findings.list` by `targetCode` (D.2).
 - D.6 readiness recompute with its schedule; `readiness.recompute` and `cycle.derive` queued next to every `freshness.recompute` call in the three command helpers, and after finding and corrective action commands; overview derivation reads the four stored dimensions and the certificate expiry that the loader of M2-07 passes in, and keeps the Milestone 1 offset formula of `maturityValues` for a row without stored dimensions (D.6); the seed writes demo readiness rows as `manual` with null dimensions and demo cycles with expiry dates that keep the sample certificate labels. The parity files stay unchanged.
 - Services and controllers are registered in the sub-modules `management-systems/certification.module.ts`, `implementation/readiness/readiness.module.ts` and `audit-registers/internal-audit.module.ts` (D.3).
+- Orchestrator note from M2-03: retired requirement and catalogue rows stay in `ref` with `retired = true`. Leave them out of readiness and clause lists; an existing entry on a retired row shows "No longer in the standard".
+- Orchestrator note from M2-03: `applicability.sync` queues `readiness.recompute` with the singleton key `rr:<org>:<ms>`. Keep that key, or change it in `packs/applicability-sync.service.ts` too.
 
 Acceptance:
 
@@ -641,6 +646,7 @@ Brief:
 - CLI: `admin create-operator --email <email> [--name <name>]` and `admin revoke-operator --email <email>` (platform role `platform_operator`, one-time set-password link from token kind `set_password`, TOTP enrolment forced at first sign-in, audit entry `ops.operator_created` or `ops.operator_revoked`); `license show-id` prints the installation id; `admin create-user` emails the invitation (D.2). With `mail.required` true, `admin create-operator` refuses when SMTP is not configured, never prints the set-password link, and prints "Invitation sent to <email>".
 - New services go in the sub-modules `admin-users/onboarding.module.ts` and `identity/recovery-codes.module.ts` (D.3); the ops services go in `ops.module.ts`, which M2-06 owns in wave 2a.
 - Helm: an optional Job (`adminJob.enabled`) that runs `tenant create`, `admin create-user` or `admin create-operator` with values, documented in `docs/INSTALL-ONPREM.md` with the new CLI commands (open follow-up of `CLAUDE.md`).
+- Orchestrator note from M2-03: call `seedApplicability` (`implementation/applicability-seed.ts`, without `only`) when a system is created, and audit `applicability.seeded`.
 
 Acceptance:
 
@@ -676,6 +682,7 @@ Brief:
 - Management review PATCH. `APPL-ASSESS` rule.
 - New services go in the sub-modules `implementation/targets.module.ts`, `registers/holdings.module.ts` and `audit-registers/review-edit.module.ts` (D.3).
 - The read model loader exposes clause entries of catalogue systems with the key `cl-<code>` (D2-09, `requirementKey` in `derive/requirements.ts`), document origin and change summary in the snapshot. The loader also loads the new `clause_readiness` columns (`documented_pct`, `implemented_pct`, `evidenced_pct`, `measured_pct`, `computed_at`) and `certification_cycle.certificate_expires_at` for the overview of M2-05, and passes a null `readiness_pct` or dimension through as null (`num()` is not applied to them). A read model test checks that no two entries of one system share a key, for the seeded demo and for a fresh ISO 27001 system with clause entries.
+- Orchestrator note from M2-03: retired requirement and catalogue rows stay in `ref` with `retired = true`. Pickers leave them out; an existing entry on a retired row shows "No longer in the standard". Mappings can now come from a catalogue item (`ref.requirement_mapping.source_catalogue_item_id`); the rules in `risk-registers/rules.ts` and `files/file-commands.service.ts` still read only requirement sources.
 
 Acceptance:
 

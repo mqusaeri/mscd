@@ -297,14 +297,16 @@ semver_below() {
 
 # check_pack_versions: every framework pack names the lowest server version
 # that may install it (engine_min_version); a bundle whose server is older
-# could not install its own packs.
+# could not install its own packs. The server counts a pre-release as its
+# release (engineVersionSatisfies in packages/shared), so 1.1.0-rc.1 may
+# install a pack that needs 1.1.0; the check compares the release part only.
 check_pack_versions() {
     local manifest min id too_new=()
     for manifest in "$REPO_DIR"/packs/sources/*/manifest.json; do
         [[ -f $manifest ]] || continue
         min=$(sed -n 's/.*"engine_min_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n1)
         id=$(basename -- "$(dirname -- "$manifest")")
-        if [[ -n $min ]] && semver_below "$VERSION" "$min"; then
+        if [[ -n $min ]] && semver_below "${VERSION%%-*}" "$min"; then
             too_new+=("$id (needs $min)")
         fi
     done

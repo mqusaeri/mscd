@@ -56,7 +56,7 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
   it('installs the six packs (D-14) with the sample install dates and the catalogue entries of newer versions', async () => {
     const installs = await db.migrator.selectFrom('platform.pack_install').select(['pack_id', 'pack_version', 'installed_at']).where('status', '=', 'installed').orderBy('pack_id').execute();
     expect(installs.map((i) => `${i.pack_id} ${i.pack_version}`)).toEqual([
-      'ISO22301-2019 1.0.0', 'ISO27001-2022 1.2.0', 'ISO37001-2016 1.0.0', 'ISO37001-2025 0.6.0', 'ISO9001-2015 1.4.2', 'ISO9001-2026 0.9.0',
+      'ISO22301-2019 1.0.1', 'ISO27001-2022 1.2.1', 'ISO37001-2016 1.0.1', 'ISO37001-2025 0.6.1', 'ISO9001-2015 1.4.3', 'ISO9001-2026 0.9.1',
     ]);
     const date = (packId: string) => installs.find((i) => i.pack_id === packId)!.installed_at!.toISOString();
     expect(date('ISO27001-2022')).toBe('2026-02-02T02:00:00.000Z'); // 02 Feb 2026, 09:00 in Jakarta

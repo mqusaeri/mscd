@@ -89,6 +89,14 @@ function knownOrgDifferences(org: DemoOrg, api: Record<string, unknown>, expecte
   const orgs = api.orgs as { id: string }[];
   checks.push(() => expect(orgs.at(-1)).toMatchObject({ id: 'tst', name: 'Test Organisation', ms: ['isms'], sites: 1 }));
   api.orgs = orgs.filter((o) => o.id !== 'tst');
+  // Milestone 2 E.3 (M2-03): the installed packs are one patch step ahead of the sample's pack cards (the pack format
+  // of engine 1.1.0, no content change); M2-04 updates the sample with the content step.
+  expected.PACKS = Object.fromEntries(
+    Object.entries(expected.PACKS as Record<string, { v: string }>).map(([ms, card]) => [
+      ms,
+      { ...card, v: card.v.replace(/(\d+)\.(\d+)\.(\d+)/g, (_m, major: string, minor: string, patch: string) => `${major}.${minor}.${Number(patch) + 1}`) },
+    ]),
+  );
   if (org === 'ndt') return checks;
   const systems = (api.MS as { id: string; code: string }[]).length;
   const licence = api.LICENCE as Record<string, unknown>;
