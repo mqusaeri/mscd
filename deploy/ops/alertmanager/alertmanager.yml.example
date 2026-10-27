@@ -1,0 +1,56 @@
+# Rendered by ops-init (deploy/ops/ops-init.sh) from deploy/ops/alertmanager/alertmanager.yml.tmpl.
+# Do not edit: change the settings it is made from (docs/saas/monitoring.md).
+
+global:
+  smtp_smarthost: "smtp.example.com:587"
+  smtp_from: "MSCD <no-reply@example.com>"
+  smtp_hello: "app.example.com"
+  # STARTTLS on port 587 must succeed before the login (port 465 uses TLS from the start).
+  smtp_require_tls: true
+  smtp_auth_username: "mscd-mailer"
+  smtp_auth_password_file: /etc/alertmanager/rendered/secrets/smtp_password
+  resolve_timeout: 5m
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: owner
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # The always-firing Watchdog pings the external heartbeat service about every minute.
+    # When the pings stop, that service alerts the owner (the server or the alert path is down).
+    - matchers: ['alertname="Watchdog"']
+      receiver: heartbeat
+      group_wait: 0s
+      group_interval: 30s
+      repeat_interval: 1m
+    - matchers: ['severity="critical"']
+      receiver: owner
+      repeat_interval: 1h
+
+receivers:
+  - name: owner
+    email_configs:
+      - to: "ops@example.com"
+        send_resolved: true
+        headers:
+          Subject: '[MSCD app.example.com] {{ template "mscd.title" . }}'
+        html: '{{ template "mscd.email.html" . }}'
+        text: '{{ template "mscd.email.text" . }}'
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/rendered/secrets/telegram_bot_token
+        chat_id: -1001234567890
+        parse_mode: ""
+        message: '[MSCD app.example.com] {{ template "mscd.telegram.message" . }}'
+        send_resolved: true
+
+  # Without HEARTBEAT_WATCHDOG_URL this receiver sends nothing.
+  - name: heartbeat
+    webhook_configs:
+      - url_file: /etc/alertmanager/rendered/secrets/heartbeat_watchdog_url
+        send_resolved: false
+        max_alerts: 1

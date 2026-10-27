@@ -1,0 +1,25 @@
+# MSCD SaaS alert rules: audit trail and licences (M2-S08). The api and the worker both
+# publish these values, so the rules take the highest or lowest value per chain or
+# organisation.
+groups:
+  - name: mscd-audit-licences
+    rules:
+      # audit.verify-chain found an audit chain broken, or not matching its newest signed
+      # anchor: rows may have been changed or removed.
+      - alert: AuditChainBroken
+        expr: max by (chain) (mscd_audit_chain_broken) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "The audit chain {{ $labels.chain }} is broken"
+          action: "Treat it as a possible security incident: start the incident log. See docs/saas/monitoring.md#auditchainbroken"
+
+      # The licence or plan of an organisation ends in less than 30 days (negative: ended).
+      - alert: LicenceExpiringSoon
+        expr: min by (org) (mscd_licence_days_left) < 30
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The licence of {{ $labels.org }} ends in {{ $value | printf \"%.0f\" }} days"
+          action: "Contact the customer about the renewal. See docs/saas/monitoring.md#licenceexpiringsoon"

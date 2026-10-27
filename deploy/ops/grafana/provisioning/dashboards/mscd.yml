@@ -1,0 +1,12 @@
+# MSCD SaaS: dashboards of Grafana (M2-S08, optional profile grafana), read from the files of
+# deploy/ops/grafana/dashboards. Changes made in the browser are not kept; edit the files.
+apiVersion: 1
+providers:
+  - name: mscd
+    folder: MSCD
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana-dashboards

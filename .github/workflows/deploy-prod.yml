@@ -1,0 +1,343 @@
+# Deploys a signed MSCD release to the staging or production server, or rolls back
+# (Milestone 2 plan K, M2-S05; docs/saas/deploy.md). Started by hand or by an agent
+# when the owner asks (rule S-1):
+#   gh workflow run deploy-prod.yml -f version=v1.1.0 -f target=staging
+#   gh workflow run deploy-prod.yml -f version=v1.0.2 -f target=production -f action=rollback
+# The job waits for the approval of the environment; the owner is its required reviewer.
+#
+# Steps: check out the tag; read digests.json of the GitHub Release and cosign verify both
+# digests (identity: release.yml at that tag); open one SSH connection with the pinned host
+# key (ufw refuses a 6th new connection within 30 seconds, so every command shares it);
+# copy the release folder to /opt/mscd/releases/<tag> with rsync; log the server in to
+# ghcr.io with this job's token; run deploy/scripts/saas-deploy.sh with every secret and
+# setting on standard input; log out; check https://<domain>/healthz and the version from
+# here. saas-deploy.sh backs up, migrates, restarts, checks and rolls back by itself.
+#
+# Environment staging or production (Settings > Environments):
+#   secrets    DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_SSH_KNOWN_HOSTS,
+#              PLATFORM_KEY, STORAGE_KEY, AUDIT_ANCHOR_KEY, SMTP_USER, SMTP_PASSWORD,
+#              BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY, BACKUP_S3_SECRET_KEY,
+#              BACKUP_SECRETS_ACCESS_KEY, BACKUP_SECRETS_SECRET_KEY, BACKUP_RESTIC_PASSWORD,
+#              HEARTBEAT_WATCHDOG_URL, HEARTBEAT_BACKUP_URL, TELEGRAM_BOT_TOKEN,
+#              OPS_BASIC_AUTH_HASH (optional)
+#   variables  MSCD_DOMAIN, ACME_EMAIL, SMTP_HOST, SMTP_PORT, MAIL_FROM, DEPLOY_SSH_PORT,
+#              ALERT_EMAIL_TO, TELEGRAM_CHAT_ID, and optional ACME_CA, MSCD_SITE_DOMAIN,
+#              OPS_DOMAIN, OPS_BASIC_AUTH_USER
+# The repository is public, so the job prints versions, timings and counts only; the
+# server keeps the full logs in /opt/mscd/logs.
+name: Deploy SaaS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to deploy (vX.Y.Z or vX.Y.Z-rc.N); for a rollback, the release to return to
+        type: string
+        required: true
+      action:
+        description: deploy, or rollback to the release that ran before
+        type: choice
+        required: true
+        default: deploy
+        options:
+          - deploy
+          - rollback
+      target:
+        description: Server
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      skip_backup:
+        description: Skip the pre-deploy database dump (only when the backup itself is the problem)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: ghcr.io/mqusaeri
+  SIGNER: https://github.com/mqusaeri/mscd/.github/workflows/release.yml
+  OIDC_ISSUER: https://token.actions.githubusercontent.com
+  COSIGN_RELEASE: v3.1.3
+  INSTALL_DIR: /opt/mscd
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} ${{ inputs.version }} on ${{ inputs.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    environment: ${{ inputs.target }}
+    # Same group as bootstrap-prod.yml: one run per server at a time, never cancelled.
+    concurrency:
+      group: deploy-${{ inputs.target }}
+      cancel-in-progress: false
+    steps:
+      - name: Check the inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ $VERSION =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]] ||
+            fail "version must be a release tag such as v1.1.0 or v1.1.0-rc.1, got '$VERSION'."
+          case $ACTION in deploy | rollback) ;; *) fail "action must be deploy or rollback." ;; esac
+          case $TARGET in staging | production) ;; *) fail "target must be staging or production." ;; esac
+          {
+            echo "WORK=$RUNNER_TEMP/mscd-deploy"
+            echo "SSH_DIR=$RUNNER_TEMP/mscd-ssh"
+            echo "STARTED=$(date +%s)"
+          } >>"$GITHUB_ENV"
+          echo "Inputs are valid: $ACTION $VERSION on $TARGET."
+
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.version }}
+          persist-credentials: false
+
+      - name: Check the commit of the tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          head=$(git rev-parse HEAD)
+          tagged=$(git rev-parse "refs/tags/$VERSION^{commit}")
+          if [[ $head != "$tagged" ]]; then
+            echo "::error::The checked-out commit $head is not the commit of $VERSION ($tagged)."
+            exit 1
+          fi
+          echo "Release $VERSION is commit $head."
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_RELEASE }}
+
+      - name: Read the digests of the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          install -d -m 0700 "$WORK"
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern digests.json --dir "$WORK" ||
+            fail "The GitHub Release $VERSION has no digests.json. Releases are made by release.yml."
+          d=$WORK/digests.json
+          [[ $(jq -r .version "$d") == "${VERSION#v}" ]] || fail "digests.json is not for version ${VERSION#v}."
+          [[ $(jq -r .serverImage "$d") == "$REGISTRY/mscd-server" ]] || fail "digests.json names another server image."
+          [[ $(jq -r .webImage "$d") == "$REGISTRY/mscd-web" ]] || fail "digests.json names another web image."
+          for name in server web; do
+            digest=$(jq -r ".$name" "$d")
+            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digests.json holds no $name digest."
+            [[ $(jq -r ".${name}Ref" "$d") == "$REGISTRY/mscd-$name@$digest" ]] || fail "${name}Ref of digests.json does not match."
+          done
+          echo "server $(jq -r .server "$d")"
+          echo "web    $(jq -r .web "$d")"
+
+      - name: Verify the image signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin >/dev/null
+          identity="$SIGNER@refs/tags/$VERSION"
+          for name in server web; do
+            ref=$(jq -r ".${name}Ref" "$WORK/digests.json")
+            cosign verify "$ref" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+            echo "Signed by release.yml at $VERSION: $ref"
+          done
+
+      - name: Open the SSH connection
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ -n $DEPLOY_HOST ]] || fail "The secret DEPLOY_HOST is not set in the environment $TARGET."
+          [[ $DEPLOY_HOST =~ ^[A-Za-z0-9.:-]+$ ]] || fail "DEPLOY_HOST must be a host name or an IP address."
+          user=${DEPLOY_USER:-deploy}
+          [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "DEPLOY_USER must be an account name such as deploy."
+          port=${DEPLOY_SSH_PORT:-22}
+          [[ $port =~ ^[0-9]{1,5}$ ]] || fail "The variable DEPLOY_SSH_PORT must be a port number."
+          [[ -n $DEPLOY_SSH_KEY ]] || fail "The secret DEPLOY_SSH_KEY is not set in the environment $TARGET."
+          [[ -n $DEPLOY_SSH_KNOWN_HOSTS ]] || fail "The secret DEPLOY_SSH_KNOWN_HOSTS is not set (the lines that bootstrap-prod.yml printed)."
+          install -d -m 0700 "$SSH_DIR"
+          printf '%s\n' "$DEPLOY_SSH_KEY" >"$SSH_DIR/deploy_key"
+          chmod 0600 "$SSH_DIR/deploy_key"
+          ssh-keygen -y -f "$SSH_DIR/deploy_key" >/dev/null 2>&1 || fail "DEPLOY_SSH_KEY is not a private SSH key without a passphrase."
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" >"$SSH_DIR/known_hosts"
+          # bootstrap-prod.yml prints lines for port 22. For another port, lines made for
+          # [host]:port are used when present; otherwise the port-22 lines through HostKeyAlias.
+          alias_line=''
+          if [[ $port != 22 ]] && ssh-keygen -F "[$DEPLOY_HOST]:$port" -f "$SSH_DIR/known_hosts" >/dev/null 2>&1; then
+            :
+          elif ssh-keygen -F "$DEPLOY_HOST" -f "$SSH_DIR/known_hosts" >/dev/null 2>&1; then
+            [[ $port == 22 ]] || alias_line="HostKeyAlias $DEPLOY_HOST"
+          else
+            fail "DEPLOY_SSH_KNOWN_HOSTS holds no host key for the server. Use the lines that bootstrap-prod.yml printed."
+          fi
+          cat >"$SSH_DIR/config" <<EOF
+          Host mscd-target
+            HostName $DEPLOY_HOST
+            Port $port
+            User $user
+            IdentityFile $SSH_DIR/deploy_key
+            IdentitiesOnly yes
+            BatchMode yes
+            RequestTTY no
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $SSH_DIR/known_hosts
+            GlobalKnownHostsFile /dev/null
+            CheckHostIP no
+            $alias_line
+            ControlMaster auto
+            ControlPath $SSH_DIR/control-%C
+            ControlPersist 75m
+            ServerAliveInterval 30
+            ServerAliveCountMax 6
+            ConnectTimeout 20
+          EOF
+          # One connection for the whole run; every later command and rsync uses it.
+          ssh -F "$SSH_DIR/config" mscd-target true
+          echo "Connected with the pinned host key."
+
+      - name: Copy the release to the server
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          . deploy/scripts/lib/common.sh
+          . deploy/scripts/lib/saas.sh
+          stage=$WORK/release
+          saas_stage_release "$PWD" "$stage" >/dev/null
+          install -m 0644 "$WORK/digests.json" "$stage/digests.json"
+          ssh -F "$SSH_DIR/config" mscd-target \
+            "install -d -m 0755 $INSTALL_DIR/releases $INSTALL_DIR/bin && test -w $INSTALL_DIR/releases"
+          # The demo files are excluded again, as build-bundle.sh and install_config do.
+          rsync -a --delete --checksum --exclude config/demo-secrets --exclude docker-compose.demo.yml --exclude dev \
+            -e "ssh -F $SSH_DIR/config" "$stage/" "mscd-target:$INSTALL_DIR/releases/$VERSION/"
+          # The server checks the signatures again with the same cosign.
+          rsync -a --checksum -e "ssh -F $SSH_DIR/config" "$(command -v cosign)" "mscd-target:$INSTALL_DIR/bin/cosign"
+          echo "Copied $(find "$stage" -type f | wc -l) files to $INSTALL_DIR/releases/$VERSION."
+
+      - name: Deploy on the server
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          VERSION: ${{ inputs.version }}
+          ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
+          SKIP_BACKUP: ${{ inputs.skip_backup && 'true' || 'false' }}
+          PLATFORM_KEY: ${{ secrets.PLATFORM_KEY }}
+          STORAGE_KEY: ${{ secrets.STORAGE_KEY }}
+          AUDIT_ANCHOR_KEY: ${{ secrets.AUDIT_ANCHOR_KEY }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MSCD_SMTP_USER: ${{ secrets.SMTP_USER }}
+          MSCD_SMTP_HOST: ${{ vars.SMTP_HOST }}
+          MSCD_SMTP_PORT: ${{ vars.SMTP_PORT }}
+          MSCD_MAIL_FROM: ${{ vars.MAIL_FROM }}
+          MSCD_DOMAIN: ${{ vars.MSCD_DOMAIN }}
+          MSCD_SITE_DOMAIN: ${{ vars.MSCD_SITE_DOMAIN }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          ACME_CA: ${{ vars.ACME_CA }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+          BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+          BACKUP_SECRETS_ACCESS_KEY: ${{ secrets.BACKUP_SECRETS_ACCESS_KEY }}
+          BACKUP_SECRETS_SECRET_KEY: ${{ secrets.BACKUP_SECRETS_SECRET_KEY }}
+          BACKUP_RESTIC_PASSWORD: ${{ secrets.BACKUP_RESTIC_PASSWORD }}
+          HEARTBEAT_BACKUP_URL: ${{ secrets.HEARTBEAT_BACKUP_URL }}
+          HEARTBEAT_WATCHDOG_URL: ${{ secrets.HEARTBEAT_WATCHDOG_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          ALERT_EMAIL_TO: ${{ vars.ALERT_EMAIL_TO }}
+          OPS_DOMAIN: ${{ vars.OPS_DOMAIN }}
+          OPS_BASIC_AUTH_USER: ${{ vars.OPS_BASIC_AUTH_USER }}
+          OPS_BASIC_AUTH_HASH: ${{ secrets.OPS_BASIC_AUTH_HASH }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          for name in PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD MSCD_DOMAIN MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM; do
+            [[ -n ${!name} ]] || fail "$name is not set in the environment $TARGET (docs/saas/owner-inputs.md)."
+          done
+          . deploy/scripts/lib/common.sh
+          . deploy/scripts/lib/saas.sh
+          # Optional values that are not set are left out, so the server keeps its default.
+          [[ -n $ACME_CA ]] || unset ACME_CA
+          ssh_cmd=(ssh -F "$SSH_DIR/config" mscd-target)
+          # The job token reaches the server on standard input and expires with this job.
+          printf '%s' "$GH_TOKEN" | "${ssh_cmd[@]}" "docker login ghcr.io --username $(printf '%q' "$ACTOR") --password-stdin" >/dev/null
+          trap '"${ssh_cmd[@]}" "docker logout ghcr.io" >/dev/null 2>&1 || true' EXIT
+          release=$INSTALL_DIR/releases/$VERSION
+          args=("$ACTION" --target "$TARGET" --install-dir "$INSTALL_DIR" --release-dir "$release"
+            --version "${VERSION#v}" --cosign "$INSTALL_DIR/bin/cosign")
+          [[ $SKIP_BACKUP != true ]] || args+=(--skip-backup)
+          # Every secret and setting goes on standard input (NAME=<base64>), never as an argument.
+          saas_encode_input PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
+            MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
+            ACME_EMAIL ACME_CA "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}" |
+            "${ssh_cmd[@]}" "NO_COLOR=1 bash $release/deploy/scripts/saas-deploy.sh $(printf '%q ' "${args[@]}")"
+
+      - name: Check from outside
+        env:
+          VERSION: ${{ inputs.version }}
+          MSCD_DOMAIN: ${{ vars.MSCD_DOMAIN }}
+          ACME_CA: ${{ vars.ACME_CA }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          tls=()
+          # The staging CA of Let's Encrypt (the default of a first deploy) is not trusted by
+          # browsers or curl; the server's own check went through Caddy already.
+          if [[ -z $ACME_CA || $ACME_CA == *staging* ]]; then
+            tls=(--insecure)
+            echo "::notice::The certificate comes from the Let's Encrypt staging CA, so it is not checked here. Set the variable ACME_CA to https://acme-v02.api.letsencrypt.org/directory and deploy again (docs/saas/deploy.md)."
+          fi
+          url=https://$MSCD_DOMAIN
+          for attempt in $(seq 1 30); do
+            code=$(curl -s "${tls[@]}" -o /dev/null -w '%{http_code}' --max-time 10 "$url/healthz" || true)
+            [[ $code == 200 ]] && break
+            sleep 10
+          done
+          [[ $code == 200 ]] || fail "$url/healthz answered ${code:-nothing} from outside after $attempt attempts."
+          got=$(curl -s "${tls[@]}" --max-time 10 "$url/api/v1/system/profile" | jq -r .version)
+          [[ $got == "${VERSION#v}" ]] || fail "$url reports version $got, expected ${VERSION#v}."
+          echo "$url/healthz answers 200 and reports version $got."
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION: ${{ inputs.version }}
+          ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## $ACTION $VERSION on $TARGET: $RESULT"
+            echo
+            echo "Duration: $(( $(date +%s) - STARTED )) seconds. The server keeps the full log in /opt/mscd/logs."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Close the connection and remove the key
+        if: always()
+        run: |
+          if [[ -f $SSH_DIR/config ]]; then
+            ssh -F "$SSH_DIR/config" mscd-target "docker logout ghcr.io" >/dev/null 2>&1 || true
+            ssh -F "$SSH_DIR/config" -O exit mscd-target 2>/dev/null || true
+          fi
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          rm -rf "$SSH_DIR" "$WORK"

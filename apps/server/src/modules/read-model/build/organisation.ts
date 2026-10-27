@@ -47,17 +47,34 @@ export function recordTitles(systems: readonly Pick<SystemCore, 'records'>[]): R
   return titles;
 }
 
-/** G.5 `CLAUSE_AT_RISK`: the clause at risk of each stage key; the first system in position order wins. */
-export function clausesAtRisk(systems: readonly Pick<SystemCore, 'stages'>[]): Record<string, string> {
+/**
+ * The key of a system's entry in an organisation-wide map: the system slug and the key of the row or stage (D2-09 ref
+ * style), `isms:7.2` for Annex A 7.2, `isms:cl-7.2` for the ISMS clause row, `qms:7.2` for QMS clause 7.2 Competence,
+ * `abms:control` for the control stage of the ABMS.
+ */
+export function systemKey(slug: string, key: string): string {
+  return `${slug}:${key}`;
+}
+
+/**
+ * G.5 `CLAUSE_AT_RISK`: the clause at risk of each chain stage of each system, by `systemKey`. Two systems with the same
+ * stage key keep their own clause: the control stage is 6.1.3 d) in the ISMS (`isms:control`) and 8.1 in the ABMS
+ * (`abms:control`).
+ */
+export function clausesAtRisk(systems: readonly Pick<SystemCore, 'slug' | 'stages'>[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const system of systems) for (const stage of system.stages) if (stage.clauseAtRisk && !(stage.key in out)) out[stage.key] = stage.clauseAtRisk;
+  for (const system of systems) for (const stage of system.stages) if (stage.clauseAtRisk) out[systemKey(system.slug, stage.key)] = stage.clauseAtRisk;
   return out;
 }
 
-/** G.5 `EXAMPLES`: evidence examples by requirement key; the first system in position order wins. */
-export function evidenceExamples(systems: readonly Pick<SystemCore, 'examples'>[]): Record<string, string> {
+/**
+ * G.5 `EXAMPLES`: evidence examples by system and requirement key (`systemKey`). Each system keeps its own examples,
+ * so a row never shows the example of another system's row with the same number (QMS 7.2 Competence and Annex A 7.2
+ * Physical entry).
+ */
+export function evidenceExamples(systems: readonly Pick<SystemCore, 'slug' | 'examples'>[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const system of systems) for (const [key, example] of Object.entries(system.examples)) out[key] ??= example;
+  for (const system of systems) for (const [key, example] of Object.entries(system.examples)) out[systemKey(system.slug, key)] = example;
   return out;
 }
 
@@ -121,9 +138,9 @@ export function buildOrgSnapshot(data: OrgData, input: OrgSnapshotInput): UiOrgS
   };
 }
 
-/** Requirement keys of `EXAMPLES` per system (`ScopePolicy.filterOrgSnapshot` sources). */
+/** The `EXAMPLES` keys of each system (`ScopePolicy.filterOrgSnapshot` sources). */
 export function exampleKeysByMs(systems: readonly Pick<SystemCore, 'slug' | 'examples'>[]): Record<string, string[]> {
-  return Object.fromEntries(systems.map((s) => [s.slug, Object.keys(s.examples)]));
+  return Object.fromEntries(systems.map((s) => [s.slug, Object.keys(s.examples).map((key) => systemKey(s.slug, key))]));
 }
 
 /** Codes of the chain records of a stage that a person holds (helper for owner-scoped chains). */

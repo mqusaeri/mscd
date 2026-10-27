@@ -1,0 +1,550 @@
+# Unit tests of every MSCD alert rule (M2-S08), run with:
+#
+#   docker run --rm --network none -v "$PWD/deploy/ops/prometheus:/etc/prometheus:ro" \
+#     --entrypoint promtool <prometheus image of docker-compose.ops.yml> \
+#     test rules /etc/prometheus/tests/alerts.test.yml
+#
+# Each test feeds made-up series and checks when the alert fires, with which labels and
+# which text. The clock of a test starts at 0 (1 January 1970).
+rule_files:
+  - ../rules/services.yml
+  - ../rules/audit-licences.yml
+  - ../rules/jobs.yml
+  - ../rules/security.yml
+  - ../rules/host.yml
+  - ../rules/certificates.yml
+  - ../rules/backups.yml
+  - ../rules/watchdog.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ---------------------------------------------------------------------------------------
+  # Services
+  # ---------------------------------------------------------------------------------------
+  - name: TargetDown fires after 2 minutes for the target that stopped answering
+    interval: 1m
+    input_series:
+      - series: 'up{job="api", instance="api:9464"}'
+        values: "1 1 0 0 0 0 0"
+      - series: 'up{job="worker", instance="worker:9464"}'
+        values: "1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TargetDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: api
+              instance: "api:9464"
+            exp_annotations:
+              summary: "api is not answering (api:9464)"
+              action: "Check the container: docker compose ps api and its logs. See docs/saas/monitoring.md#targetdown"
+
+  - name: PublicUrlDown fires after 2 minutes of failed probes
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="public-url", instance="https://app.example.com/healthz"}'
+        values: "1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PublicUrlDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: PublicUrlDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: public-url
+              instance: "https://app.example.com/healthz"
+            exp_annotations:
+              summary: "https://app.example.com/healthz does not answer"
+              action: "Open the address in a browser, then check Caddy and web. See docs/saas/monitoring.md#publicurldown"
+
+  - name: DatabaseDown fires after 2 minutes without a database connection
+    interval: 1m
+    input_series:
+      - series: 'pg_up{job="postgres", instance="postgres-exporter:9187"}'
+        values: "1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DatabaseDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: DatabaseDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: postgres
+              instance: "postgres-exporter:9187"
+            exp_annotations:
+              summary: "PostgreSQL is not reachable"
+              action: "Check the postgres container and its disk. See docs/saas/monitoring.md#databasedown"
+
+  - name: HttpErrorRateHigh fires above 2 percent server errors for 10 minutes, per process
+    interval: 1m
+    input_series:
+      # api: 3 server errors in every 125 requests.
+      - series: 'mscd_http_request_duration_seconds_count{job="api", instance="api:9464", route="/api/v1/me", method="GET", status="200"}'
+        values: "0+97x30"
+      - series: 'mscd_http_request_duration_seconds_count{job="api", instance="api:9464", route="/api/v1/me", method="GET", status="503"}'
+        values: "0+3x30"
+      # storage-gateway: 1 of every 101 requests fails (under 1 percent).
+      - series: 'mscd_http_request_duration_seconds_count{job="storage-gateway", instance="storage-gateway:9464", route="/v1/objects", method="GET", status="200"}'
+        values: "0+100x30"
+      - series: 'mscd_http_request_duration_seconds_count{job="storage-gateway", instance="storage-gateway:9464", route="/v1/objects", method="GET", status="500"}'
+        values: "0+1x30"
+      # 4xx answers count as requests, not as server errors: 3 of 125 is 2.4 percent.
+      - series: 'mscd_http_request_duration_seconds_count{job="api", instance="api:9464", route="/api/v1/me", method="GET", status="404"}'
+        values: "0+25x30"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HttpErrorRateHigh
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: HttpErrorRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: api
+            exp_annotations:
+              summary: "2.4% of api requests fail with a server error"
+              action: "Read the error lines of the api log. See docs/saas/monitoring.md#httperrorratehigh"
+
+  - name: HttpErrorRateHigh stays quiet without traffic
+    interval: 1m
+    input_series:
+      - series: 'mscd_http_request_duration_seconds_count{job="api", instance="api:9464", route="/api/v1/me", method="GET", status="500"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HttpErrorRateHigh
+        exp_alerts: []
+
+  - name: AlertDeliveryFailing fires when email or Telegram delivery fails
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="email"}'
+        values: "0 0 0 1 1 1"
+      # The heartbeat webhook has its own outside check.
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager", instance="alertmanager:9093", integration="webhook"}'
+        values: "0 1 2 3 4 5"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: AlertDeliveryFailing
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: AlertDeliveryFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: email
+            exp_annotations:
+              summary: "Alerts could not be sent by email"
+              action: "Check the mail or Telegram settings and the alertmanager log. See docs/saas/monitoring.md#alertdeliveryfailing"
+
+  # ---------------------------------------------------------------------------------------
+  # Audit trail and licences
+  # ---------------------------------------------------------------------------------------
+  - name: AuditChainBroken fires at once, once per chain
+    interval: 1m
+    input_series:
+      - series: 'mscd_audit_chain_broken{job="worker", instance="worker:9464", chain="platform"}'
+        values: "0 0 1 1"
+      - series: 'mscd_audit_chain_broken{job="api", instance="api:9464", chain="platform"}'
+        values: "0 0 0 0"
+      - series: 'mscd_audit_chain_broken{job="worker", instance="worker:9464", chain="org_acme"}'
+        values: "0 0 0 0"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: AuditChainBroken
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: AuditChainBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              chain: platform
+            exp_annotations:
+              summary: "The audit chain platform is broken"
+              action: "Treat it as a possible security incident: start the incident log. See docs/saas/monitoring.md#auditchainbroken"
+
+  - name: LicenceExpiringSoon fires under 30 days, once per organisation
+    interval: 1m
+    input_series:
+      - series: 'mscd_licence_days_left{job="api", instance="api:9464", org="acme"}'
+        values: "29x30"
+      - series: 'mscd_licence_days_left{job="worker", instance="worker:9464", org="acme"}'
+        values: "29x30"
+      - series: 'mscd_licence_days_left{job="api", instance="api:9464", org="beta"}'
+        values: "200x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: LicenceExpiringSoon
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: LicenceExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              org: acme
+            exp_annotations:
+              summary: "The licence of acme ends in 29 days"
+              action: "Contact the customer about the renewal. See docs/saas/monitoring.md#licenceexpiringsoon"
+
+  # ---------------------------------------------------------------------------------------
+  # Jobs
+  # ---------------------------------------------------------------------------------------
+  - name: JobFailuresRising fires at 3 failed runs of one job within 30 minutes
+    interval: 1m
+    input_series:
+      # job_name comes from the relabelling of prometheus.yml.
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", job_name="notify.send"}'
+        values: "0 0 1 2 3 3 3"
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", job_name="freshness.sweep"}'
+        values: "0 0 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JobFailuresRising
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: JobFailuresRising
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job_name: notify.send
+            exp_annotations:
+              summary: "The job notify.send failed 3 times in 30 minutes"
+              action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
+
+  - name: JobQueueStuck fires when the oldest job waits over 15 minutes for 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="notify.send"}'
+        values: "1200x10"
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="notify.send"}'
+        values: "1200x10"
+      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="export.build"}'
+        values: "30x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JobQueueStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              queue: notify.send
+            exp_annotations:
+              summary: "Jobs of notify.send wait for 20m 0s"
+              action: "Check that the worker runs and is healthy. See docs/saas/monitoring.md#jobqueuestuck"
+
+  - name: JobOutboxStuck fires after 15 minutes of stuck outbox rows
+    interval: 1m
+    input_series:
+      - series: 'mscd_job_outbox_stuck_rows{job="worker", instance="worker:9464"}'
+        values: "2x20"
+      - series: 'mscd_job_outbox_stuck_rows{job="api", instance="api:9464"}'
+        values: "2x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: JobOutboxStuck
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: JobOutboxStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "2 job outbox rows are stuck"
+              action: "Check the worker log and Valkey. See docs/saas/monitoring.md#joboutboxstuck"
+
+  # ---------------------------------------------------------------------------------------
+  # Security spikes
+  # ---------------------------------------------------------------------------------------
+  - name: MfaLockSpike fires at 3 lockouts within 15 minutes
+    interval: 1m
+    input_series:
+      # The api and the worker report the same count from the platform audit log.
+      - series: 'mscd_mfa_locks_total{job="api", instance="api:9464"}'
+        values: "4x20 5 6 7 7 7"
+      - series: 'mscd_mfa_locks_total{job="worker", instance="worker:9464"}'
+        values: "4x20 5 6 7 7 7"
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: MfaLockSpike
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: MfaLockSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: security
+            exp_annotations:
+              summary: "3 second-factor lockouts in 15 minutes"
+              action: "Look for one address or one organisation behind them. See docs/saas/monitoring.md#mfalockspike"
+
+  - name: AccessDeniedSpike fires above 50 refused requests within 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", route="/api/v1/admin/users"}'
+        values: "0x10 0+10x10"
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", route="/api/v1/registers"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AccessDeniedSpike
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AccessDeniedSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: security
+            exp_annotations:
+              summary: "90 requests refused by the permission check in 10 minutes"
+              action: "Find the address and account in the api log. See docs/saas/monitoring.md#accessdeniedspike"
+
+  # ---------------------------------------------------------------------------------------
+  # Host
+  # ---------------------------------------------------------------------------------------
+  - name: HostDiskFull fires above 80 percent for 15 minutes, real disks only
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node", instance="node-exporter:9100", device="/dev/sda1", fstype="ext4", mountpoint="/"}'
+        values: "15x30"
+      - series: 'node_filesystem_size_bytes{job="node", instance="node-exporter:9100", device="/dev/sda1", fstype="ext4", mountpoint="/"}'
+        values: "100x30"
+      - series: 'node_filesystem_avail_bytes{job="node", instance="node-exporter:9100", device="/dev/sdb", fstype="ext4", mountpoint="/var/lib/docker"}'
+        values: "60x30"
+      - series: 'node_filesystem_size_bytes{job="node", instance="node-exporter:9100", device="/dev/sdb", fstype="ext4", mountpoint="/var/lib/docker"}'
+        values: "100x30"
+      - series: 'node_filesystem_avail_bytes{job="node", instance="node-exporter:9100", device="tmpfs", fstype="tmpfs", mountpoint="/run"}'
+        values: "1x30"
+      - series: 'node_filesystem_size_bytes{job="node", instance="node-exporter:9100", device="tmpfs", fstype="tmpfs", mountpoint="/run"}'
+        values: "100x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HostDiskFull
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: HostDiskFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node
+              instance: "node-exporter:9100"
+              device: /dev/sda1
+              fstype: ext4
+              mountpoint: /
+            exp_annotations:
+              summary: "/ is 85 percent full"
+              action: "Find what grows and free space. See docs/saas/monitoring.md#hostdiskfull"
+
+  - name: HostMemoryPressure fires under 10 percent available memory for 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes{job="node", instance="node-exporter:9100"}'
+        values: "1000000000x20"
+      - series: 'node_memory_MemTotal_bytes{job="node", instance="node-exporter:9100"}'
+        values: "16000000000x20"
+      - series: 'node_pressure_memory_waiting_seconds_total{job="node", instance="node-exporter:9100"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HostMemoryPressure
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: HostMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node
+              instance: "node-exporter:9100"
+            exp_annotations:
+              summary: "The server is short of memory"
+              action: "Find the container that uses the most memory. See docs/saas/monitoring.md#hostmemorypressure"
+
+  - name: HostMemoryPressure fires when processes wait for memory, even with memory available
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes{job="node", instance="node-exporter:9100"}'
+        values: "8000000000x20"
+      - series: 'node_memory_MemTotal_bytes{job="node", instance="node-exporter:9100"}'
+        values: "16000000000x20"
+      # 30 seconds of waiting per minute: half of the time.
+      - series: 'node_pressure_memory_waiting_seconds_total{job="node", instance="node-exporter:9100"}'
+        values: "0+30x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HostMemoryPressure
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: HostMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node
+              instance: "node-exporter:9100"
+            exp_annotations:
+              summary: "The server is short of memory"
+              action: "Find the container that uses the most memory. See docs/saas/monitoring.md#hostmemorypressure"
+
+  - name: HostMemoryPressure stays quiet on a healthy server
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes{job="node", instance="node-exporter:9100"}'
+        values: "8000000000x20"
+      - series: 'node_memory_MemTotal_bytes{job="node", instance="node-exporter:9100"}'
+        values: "16000000000x20"
+      - series: 'node_pressure_memory_waiting_seconds_total{job="node", instance="node-exporter:9100"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HostMemoryPressure
+        exp_alerts: []
+
+  - name: HostRebootNeeded fires once a needed reboot has waited 7 days
+    interval: 1h
+    input_series:
+      # reboot.prom of the reboot marker (M2-S03): needed since day 1.
+      - series: 'mscd_host_reboot_required{job="node", instance="node-exporter:9100"}'
+        values: "1x240"
+      - series: 'mscd_host_reboot_required_since_timestamp_seconds{job="node", instance="node-exporter:9100"}'
+        values: "86400x240"
+    alert_rule_test:
+      - eval_time: 7d
+        alertname: HostRebootNeeded
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: HostRebootNeeded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node
+              instance: "node-exporter:9100"
+            exp_annotations:
+              summary: "The server has needed a reboot for 8d 0h 0m 0s"
+              action: "Reboot in the next maintenance window. See docs/saas/monitoring.md#hostrebootneeded"
+
+  - name: HostRebootNeeded stays quiet when no reboot is needed
+    interval: 1h
+    input_series:
+      - series: 'mscd_host_reboot_required{job="node", instance="node-exporter:9100"}'
+        values: "0x240"
+      - series: 'mscd_host_reboot_required_since_timestamp_seconds{job="node", instance="node-exporter:9100"}'
+        values: "0x240"
+    alert_rule_test:
+      - eval_time: 9d
+        alertname: HostRebootNeeded
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------------------
+  # Certificates
+  # ---------------------------------------------------------------------------------------
+  - name: CertificateExpiringSoon fires under 14 days left, after 15 minutes
+    interval: 1m
+    input_series:
+      # Expires at day 10.
+      - series: 'probe_ssl_earliest_cert_expiry{job="public-url", instance="https://app.example.com/healthz"}'
+        values: "864000x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CertificateExpiringSoon
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CertificateExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: public-url
+              instance: "https://app.example.com/healthz"
+            exp_annotations:
+              summary: "The certificate of https://app.example.com/healthz expires in 9d 23h 40m 0s"
+              action: "Read the Caddy log for certificate errors. See docs/saas/monitoring.md#certificateexpiringsoon"
+
+  - name: CertificateExpiringSoon stays quiet with 60 days left
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="public-url", instance="https://app.example.com/healthz"}'
+        values: "5184000x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CertificateExpiringSoon
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------------------
+  # Backups
+  # ---------------------------------------------------------------------------------------
+  - name: BackupTooOld fires when the last backup is over 26 hours old
+    interval: 1h
+    input_series:
+      # backup.prom of the backup script (M2-S07): last success at time 0.
+      - series: 'mscd_backup_last_success_timestamp_seconds{job="node", instance="node-exporter:9100"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: BackupTooOld
+        exp_alerts: []
+      - eval_time: 27h
+        alertname: BackupTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "The last successful backup is 1d 3h 0m 0s old"
+              action: "Read the log of the last backup run. See docs/saas/monitoring.md#backuptooold"
+
+  - name: BackupTooOld stays quiet while backups run every night
+    interval: 1h
+    input_series:
+      # A new success every 24 hours.
+      - series: 'mscd_backup_last_success_timestamp_seconds{job="node", instance="node-exporter:9100"}'
+        values: "0x23 86400x23 172800x23"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: BackupTooOld
+        exp_alerts: []
+      - eval_time: 30h
+        alertname: BackupMissing
+        exp_alerts: []
+
+  - name: BackupMissing fires after 26 hours without any backup report
+    interval: 1h
+    input_series:
+      - series: 'up{job="node", instance="node-exporter:9100"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: BackupMissing
+        exp_alerts: []
+      - eval_time: 27h
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No successful backup has been reported"
+              action: "Check that the backup timer is installed and runs. See docs/saas/monitoring.md#backupmissing"
+
+  # ---------------------------------------------------------------------------------------
+  # Watchdog
+  # ---------------------------------------------------------------------------------------
+  - name: Watchdog always fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="prometheus", instance="localhost:9090"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: "The alert pipeline works"
+              action: "Nothing to do. The heartbeat service alerts when this stops arriving."

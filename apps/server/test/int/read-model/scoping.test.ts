@@ -1,13 +1,32 @@
 // Scoping of the UI parity reads (build plan D-04, F.7, G.5, D-34, A.4): a Domain Owner (`bagus`) sees only own
 // records with counts computed on the full data; an external auditor gets the `EaProjection`; a QMS-only Domain
-// Owner sees nothing of ABMS in `TITLES` or `CHAINS`; `LICENCE`, `PACKS`, `REPOS` and `ROUTING` follow the
-// permissions; `ROLES` outside demo personas.
+// Owner sees nothing of ABMS in `TITLES` or `CHAINS` and only the QMS evidence examples; `LICENCE`, `PACKS`, `REPOS`
+// and `ROUTING` follow the permissions; `ROLES` outside demo personas.
 import type { UiMsSnapshot, UiOrgSnapshot } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { useTestDatabase } from '../../setup/test-db';
+import { useTestDatabase, type TestDatabase } from '../../setup/test-db';
 import { inScope } from '../db/helpers';
 import { createReadModelApp, ORG_IDS, sessionFor, userId, type ReadModelApp } from './helpers';
+
+/**
+ * The pack examples of clause 7.2 Competence of the ndt QMS (a requirement of ISO 9001) and of Annex A 7.2 Physical
+ * entry of the ndt ISMS (a catalogue item of ISO/IEC 27001), read from `ref` for the editions the systems run on.
+ */
+async function sevenTwoExamples(db: TestDatabase): Promise<{ qms: string; isms: string }> {
+  const editions = await inScope(db.migrator, { orgId: ORG_IDS.ndt, schema: 'org_ndt' }, (trx) =>
+    sql<{ slug: string; edition: string }>`
+      select slug, framework_version_id as edition from management_system where slug in ('isms', 'qms') and deleted_at is null`.execute(trx),
+  );
+  const edition = (slug: string) => editions.rows.find((r) => r.slug === slug)!.edition;
+  const qms = await sql<{ example: string }>`
+    select evidence_example as example from ref.requirement
+     where framework_version_id = ${edition('qms')} and requirement_code = '7.2'`.execute(db.migrator);
+  const isms = await sql<{ example: string }>`
+    select evidence_example as example from ref.catalogue_item
+     where framework_version_id = ${edition('isms')} and item_code = 'A.7.2'`.execute(db.migrator);
+  return { qms: qms.rows[0]!.example, isms: isms.rows[0]!.example };
+}
 
 describe('UI parity reads: scoping (D-04, F.7, D-34)', () => {
   const db = useTestDatabase('demo');
@@ -30,6 +49,33 @@ describe('UI parity reads: scoping (D-04, F.7, D-34)', () => {
     expect(Object.keys(fullOrg.PACKS)).toEqual(['isms', 'qms', 'bcms', 'abms']);
     expect(fullOrg.REPOS.map((r) => r.id)).toEqual(['sp', 'gd', 'vault', 'od']);
     expect(fullOrg.ROUTING).toHaveLength(4);
+  });
+
+  it('lists the evidence examples of each system under its own key: QMS 7.2 Competence and Annex A 7.2 (M2-04)', async () => {
+    const examples = await sevenTwoExamples(db);
+    expect(examples.qms).toBeTruthy();
+    expect(examples.isms).toBeTruthy();
+    expect(examples.qms).not.toBe(examples.isms);
+    // The QMS clause shows the QMS example and the ISMS control shows the Annex A example; no bare key is left.
+    expect(fullOrg.EXAMPLES['qms:7.2']).toBe(examples.qms);
+    expect(fullOrg.EXAMPLES['isms:7.2']).toBe(examples.isms);
+    expect(fullOrg.EXAMPLES).not.toHaveProperty('7.2');
+    const systems = new Set(Object.keys(fullOrg.EXAMPLES).map((key) => key.split(':')[0]));
+    expect([...systems].sort()).toEqual(['abms', 'bcms', 'isms', 'qms']);
+  });
+
+  it('gives each system the clause at risk of its own stages: ABMS control 8.1, ISMS control 6.1.3 d) (M2-04)', async () => {
+    const stages = await sql<{ pack: string; stage: string; clause: string }>`
+      select v.pack_id as pack, c.stage_key as stage, c.clause_at_risk as clause
+        from ref.traceability_chain_def c join ref.framework_version v on v.id = c.framework_version_id
+       where c.stage_key = 'control' and v.pack_id in ('ISO27001-2022', 'ISO37001-2025')`.execute(db.migrator);
+    expect(Object.fromEntries(stages.rows.map((r) => [r.pack, r.clause]))).toEqual({ 'ISO27001-2022': '6.1.3 d)', 'ISO37001-2025': '8.1' });
+    expect(fullOrg.CLAUSE_AT_RISK['isms:control']).toBe('6.1.3 d)');
+    expect(fullOrg.CLAUSE_AT_RISK['abms:control']).toBe('8.1');
+    expect(fullOrg.CLAUSE_AT_RISK).not.toHaveProperty('control');
+    // Every stage of every system has its entry, under the system's slug.
+    const keys = Object.entries(fullOrg.STAGES).flatMap(([ms, list]) => list.map((stage) => `${ms}:${stage.id}`));
+    expect(Object.keys(fullOrg.CLAUSE_AT_RISK).sort()).toEqual(keys.sort());
   });
 
   it('limits a Domain Owner (bagus) to own records, keeps the counts of the full data, and hides licence, packs and storage', async () => {
@@ -157,8 +203,14 @@ describe('UI parity reads: scoping (D-04, F.7, D-34)', () => {
     const chainCodes = new Set(Object.values(org.CHAINS).flat().flatMap((c) => [c.id, ...c.nodes.map((n) => n[1])]));
     for (const code of Object.keys(org.TITLES)) expect(chainCodes.has(code)).toBe(true);
     expect(org.TITLES['RO-07']).toBeDefined();
+    // Evidence examples of the QMS only: clause 7.2 shows the QMS example, and no ISMS text comes under another key.
+    const examples = await sevenTwoExamples(db);
+    expect(Object.keys(org.EXAMPLES).length).toBeGreaterThan(0);
+    expect(Object.keys(org.EXAMPLES).every((key) => key.startsWith('qms:'))).toBe(true);
+    expect(org.EXAMPLES['qms:7.2']).toBe(examples.qms);
+    expect(Object.values(org.EXAMPLES)).not.toContain(examples.isms);
     // Clauses at risk of the QMS stages only (no ISMS treatment or SoA, no ABMS or ISMS control stage).
-    expect(Object.keys(org.CLAUSE_AT_RISK).sort()).toEqual(['action', 'context', 'document', 'evidence', 'metric', 'objective', 'process', 'risk']);
+    expect(Object.keys(org.CLAUSE_AT_RISK).sort()).toEqual(['action', 'context', 'document', 'evidence', 'metric', 'objective', 'process', 'risk'].map((stage) => `qms:${stage}`));
     expect(org.orgs.find((o) => o.id === 'ndt')!.ms).toEqual(['qms']);
     expect(org.PEOPLE).toHaveProperty('staff01');
     expect((await client.get('/api/v1/ui/ms/abms')).status).toBe(403);

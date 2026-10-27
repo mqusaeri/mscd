@@ -1,0 +1,100 @@
+# MSCD SaaS: Prometheus of the monitoring overlay (Milestone 2 plan K, M2-S08).
+# Mounted read-only at /etc/prometheus/prometheus.yml by docker-compose.ops.yml.
+# docs/saas/monitoring.md explains every alert and what to do first.
+#
+# Prometheus sits on the internal mscd network only and publishes no port. It scrapes the
+# metrics listener (port 9464) of api, worker and storage-gateway, the exporters of the
+# overlay and Caddy's metrics site (conf.d/ops.caddy), and sends alerts to Alertmanager.
+# The probe target (the public URL) is written by ops-init into
+# /etc/prometheus/rendered/probe-targets.yml from MSCD_PUBLIC_URL.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+storage:
+  tsdb:
+    retention:
+      # Metrics are kept 30 days (records of processing, docs/saas/records-of-processing.md).
+      # The size cap only applies if the volume would otherwise fill up first.
+      time: 30d
+      size: 8GB
+
+rule_files:
+  - rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  # The MSCD processes label job runs with the job name ("job"), which Prometheus moves to
+  # "exported_job" because "job" names the scrape job. The relabelling renames it to
+  # "job_name" (used by the job alerts); worker and storage-gateway reuse it.
+  - job_name: api
+    static_configs:
+      - targets: ["api:9464"]
+    metric_relabel_configs: &job_name
+      - source_labels: [exported_job]
+        target_label: job_name
+      - action: labeldrop
+        regex: exported_job
+
+  - job_name: worker
+    static_configs:
+      - targets: ["worker:9464"]
+    metric_relabel_configs: *job_name
+
+  - job_name: storage-gateway
+    static_configs:
+      - targets: ["storage-gateway:9464"]
+    metric_relabel_configs: *job_name
+
+  # Host: CPU, memory, disks, and the text files of /opt/mscd/metrics (reboot needed,
+  # last backup).
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # Caddy's own metrics (upstream health, certificates, process), served on the internal
+  # network by conf.d/ops.caddy, never by Caddy's admin endpoint.
+  - job_name: caddy
+    static_configs:
+      - targets: ["caddy:9180"]
+
+  # The blackbox exporter itself.
+  - job_name: blackbox
+    static_configs:
+      - targets: ["blackbox-exporter:9115"]
+
+  # HTTPS probe of the public URL: answer 200 from /healthz and the certificate's expiry
+  # date, seen from outside the stack (through the egress network).
+  - job_name: public-url
+    scrape_interval: 60s
+    metrics_path: /probe
+    params:
+      module: [https_healthz]
+    file_sd_configs:
+      - files: ["/etc/prometheus/rendered/probe-targets.yml"]
+        refresh_interval: 5m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

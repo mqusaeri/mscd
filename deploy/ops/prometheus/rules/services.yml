@@ -1,0 +1,57 @@
+# MSCD SaaS alert rules: services (M2-S08). docs/saas/monitoring.md has the first action
+# for every alert. Each rule has a unit test in ../tests/alerts.test.yml.
+groups:
+  - name: mscd-services
+    rules:
+      # A scrape target (an MSCD process, an exporter, Caddy or Alertmanager) did not answer.
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is not answering ({{ $labels.instance }})"
+          action: "Check the container: docker compose ps {{ $labels.job }} and its logs. See docs/saas/monitoring.md#targetdown"
+
+      # The public address does not answer 200 on /healthz over HTTPS, seen from the server.
+      - alert: PublicUrlDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} does not answer"
+          action: "Open the address in a browser, then check Caddy and web. See docs/saas/monitoring.md#publicurldown"
+
+      # PostgreSQL does not accept the monitoring connection.
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is not reachable"
+          action: "Check the postgres container and its disk. See docs/saas/monitoring.md#databasedown"
+
+      # More than 2 percent of the requests of the api or the storage gateway end in a
+      # server error (status 500 to 599), for 10 minutes.
+      - alert: HttpErrorRateHigh
+        expr: |
+          sum by (job) (rate(mscd_http_request_duration_seconds_count{status=~"5.."}[5m]))
+            / sum by (job) (rate(mscd_http_request_duration_seconds_count[5m]))
+            > 0.02
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of {{ $labels.job }} requests fail with a server error"
+          action: "Read the error lines of the {{ $labels.job }} log. See docs/saas/monitoring.md#httperrorratehigh"
+
+      # Alertmanager could not deliver alerts by email or Telegram.
+      - alert: AlertDeliveryFailing
+        expr: sum by (integration) (increase(alertmanager_notifications_failed_total{integration=~"email|telegram"}[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alerts could not be sent by {{ $labels.integration }}"
+          action: "Check the mail or Telegram settings and the alertmanager log. See docs/saas/monitoring.md#alertdeliveryfailing"

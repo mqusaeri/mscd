@@ -1,0 +1,33 @@
+# MSCD SaaS alert rules: background jobs (M2-S08). The worker counts every failed run of a
+# job handler; a failed run is retried, so a single failure is not an alert.
+groups:
+  - name: mscd-jobs
+    rules:
+      # Three or more failed runs of one job within 30 minutes.
+      - alert: JobFailuresRising
+        expr: sum by (job_name) (increase(mscd_job_failures_total[30m])) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "The job {{ $labels.job_name }} failed {{ $value | printf \"%.0f\" }} times in 30 minutes"
+          action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
+
+      # The oldest waiting job of a queue has waited more than 15 minutes.
+      - alert: JobQueueStuck
+        expr: max by (queue) (mscd_queue_oldest_age_seconds) > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs of {{ $labels.queue }} wait for {{ $value | humanizeDuration }}"
+          action: "Check that the worker runs and is healthy. See docs/saas/monitoring.md#jobqueuestuck"
+
+      # Outbox rows that the job relay cannot hand over (BullMQ driver only).
+      - alert: JobOutboxStuck
+        expr: max(mscd_job_outbox_stuck_rows) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} job outbox rows are stuck"
+          action: "Check the worker log and Valkey. See docs/saas/monitoring.md#joboutboxstuck"

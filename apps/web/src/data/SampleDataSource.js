@@ -12,6 +12,18 @@ import { ORGS } from './sample-orgs.js';
 import { data as deriveData, chain as deriveChain, deriveBundle } from './sample-derive.js';
 
 // Snapshot keys that hold one entry per management system; a snapshot keeps the systems of its organisation.
+/** `CLAUSE_AT_RISK` of the systems: each stage of each system under `<system>:<stage>`, with its own clause. */
+function clausesAtRisk(S, systems) {
+  const out = {};
+  for (const m of systems) {
+    for (const stage of S.STAGES[m.id] || []) {
+      const clause = (S.CLAUSE_AT_RISK_BY_MS?.[m.id] || {})[stage.id] ?? S.CLAUSE_AT_RISK[stage.id];
+      if (clause) out[m.id + ':' + stage.id] = clause;
+    }
+  }
+  return out;
+}
+
 const PER_SYSTEM = ['STAGES', 'X', 'CHAINS', 'EVENTS', 'FOCUS', 'PREP', 'PAST', 'CYCLE_ITEMS', 'DRIFT', 'PACKS'];
 const PAGE_ACTIONS = ['exportBoard', 'exportReadiness', 'exportSoa', 'exportDocs', 'evidencePack', 'auditorAccess', 'runCheck', 'calendarFeed', 'checkUpdates', 'importBundle', 'verifyPhase'];
 const RECORD_KINDS = ['req', 'soa', 'doc', 'ev', 'act', 'x', 'prep', 'cycle', 'drift'];
@@ -353,8 +365,12 @@ export class SampleDataSource {
       FREQ: S.FREQ,
       FREQ_ORDER: S.FREQ_ORDER,
       TITLES: S.TITLES,
-      CLAUSE_AT_RISK: S.CLAUSE_AT_RISK,
-      EXAMPLES: S.EXAMPLES,
+      // Keys name the system and the stage (`isms:control`, `abms:control`), as the API gives them (G.5), for the
+      // stages of the organisation's systems.
+      CLAUSE_AT_RISK: clausesAtRisk(S, MS),
+      // Keys name the system and the row (`isms:8.13`), as the API gives them (G.5). The sample's examples are Annex A
+      // examples of the ISMS; `mscd-data.js` keeps the bare keys that the pack extractor reads.
+      EXAMPLES: MS.some((m) => m.id === 'isms') ? Object.fromEntries(Object.entries(S.EXAMPLES).map(([key, example]) => ['isms:' + key, example])) : {},
       LICENCE: S.LICENCE,
       REPOS: S.REPOS.filter((r) => r.ms.some((x) => shorts.includes(x))).map((r) => ({ ...r, ms: r.ms.filter((x) => shorts.includes(x)) })),
       ROUTING: S.ROUTING.filter((r) => shorts.includes(r[0])),

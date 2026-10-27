@@ -156,7 +156,7 @@ describe('Per-screen read endpoints (TS 9.2)', () => {
       if ('hidden' in node || !node.id) continue;
       const item = full.bundle.chain.items.find((i) => i.id === node.id);
       expect({ id: node.id, status: node.status }).toEqual({ id: node.id, status: item ? item.st : 'ready' });
-      if (node.status === 'overdue' || node.status === 'missing') expect(node.clauseAtRisk).toBe(org.CLAUSE_AT_RISK[node.stage] ?? null);
+      if (node.status === 'overdue' || node.status === 'missing') expect(node.clauseAtRisk).toBe(org.CLAUSE_AT_RISK[`isms:${node.stage}`] ?? null);
     }
     const r014 = (await rina.get<ChainResponse>('/api/v1/ms/isms/audit/chain?anchor_id=r-014')).body;
     expect(r014.nodes.some((n) => !('hidden' in n) && n.id === 'R-014')).toBe(true);

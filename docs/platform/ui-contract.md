@@ -116,7 +116,7 @@ Shape: `{[PersonId]: [displayName, jobTitle]}`, with the sentinel `none: ['Unass
 | Field | Type | Example | Read by | Server source |
 |---|---|---|---|---|
 | `id` | string | `'A.8.13'`, `'Cl. 8.7'` | Rows, details, keys, chain and gate ids, golden thread, `titleOf`, evidence link `e.ctrl` | Catalogue item code with `A.` prefix, or requirement code with `Cl. ` prefix |
-| `key` | string | `'8.13'`, `'cl-5.1'` | `buildEvidence` (`ctrlKey`, evidence title lookup `EVT`, BCMS evidence filter); tasks `EXAMPLES` lookup; Controls screen grouping (Milestone 2) | Raw code. In a catalogue system (ISO/IEC 27001) a clause entry has the key `cl-<code>` (Milestone 2 D2-09, `clauseEntryKey` in `codes.ts`), for example `cl-5.1` with snapshot ref `isms:cl-5.1`, so it never shares a key with the Annex A control of the same number (`5.1`). The Controls screen lists `cl-` entries first, in a group "Clauses 4 to 10" with the label `Cl. 4.1` |
+| `key` | string | `'8.13'`, `'cl-5.1'` | `buildEvidence` (`ctrlKey`, evidence title lookup `EVT`, BCMS evidence filter); tasks `EXAMPLES` lookup (with the system: `isms:8.13`); Controls screen grouping (Milestone 2) | Raw code. In a catalogue system (ISO/IEC 27001) a clause entry has the key `cl-<code>` (Milestone 2 D2-09, `clauseEntryKey` in `codes.ts`), for example `cl-5.1` with snapshot ref `isms:cl-5.1`, so it never shares a key with the Annex A control of the same number (`5.1`). The Controls screen lists `cl-` entries first, in a group "Clauses 4 to 10" with the label `Cl. 4.1` |
 | `title` | string | `'Information backup'` | `reqRow`, `reqDetail`, chain title, `evRow` and `evDetail`, `titleOf`, tasks | Pack label |
 | `theme` | string | `'A.8 Technological'`, `'Clause 8'` | `reqRow` sub line when `note` is empty | Group label |
 | `st` | `ReqStatus` | `'partial'` | Badges, tab and chip counts, chain inclusion and action text, evidence inclusion, action availability | `applicability_entry.implementation_status` (see 5.1) |
@@ -164,7 +164,7 @@ Sample counts: ISMS 93 controls (61 implemented, 18 partial, 6 planned, 2 ns, 2 
 |---|---|---|---|---|
 | `code` | string | `'EV-0313'` | Rows, keys, chain id, golden thread, storage rows, `titleOf` | `evidence` business id |
 | `ctrl` | string | `'A.8.13'` | Link to the requirement (`d.evs.find(e => e.ctrl === c.id)` takes the first), facts, chain upstream, golden thread `'ev:' + ctrl` nodes | `evidence_target` |
-| `ctrlKey` | string | `'8.13'` | Tasks `EXAMPLES` lookup | Target raw code |
+| `ctrlKey` | string | `'8.13'` | Tasks `EXAMPLES` lookup (with the system: `isms:8.13`) | Target raw code |
 | `title` | string | `'Backup job log & restore test'` | Rows, details, chain title, tasks | `evidence.title` |
 | `freq` | `FreqId` | `'monthly'` | Frequency column, rule text, freshness filters, chain action text | `operating_criteria` frequency |
 | `p` | number (days) | `30` | `evDetail` rule text; `data()` recomputes `next` | Period length (0 for per-event) |
@@ -188,7 +188,7 @@ Sample counts: ISMS 79 (64 fresh, 6 aging, 6 expired, 3 critical; integrity 76 o
 
 | Field | Type | Example | Read by |
 |---|---|---|---|
-| `id` | string | `'risk'` | `chain` item `stage`, chain tabs, stage table, golden thread, `CLAUSE_AT_RISK` lookup, overview clause map |
+| `id` | string | `'risk'` | `chain` item `stage`, chain tabs, stage table, golden thread, `CLAUSE_AT_RISK` lookup (with the system: `isms:risk`), overview clause map |
 | `l` | `Pair` | `['Risk','Risiko']` | Tab labels, stage column, person stages list, golden thread stage label |
 | `q` | string | `'Show me how this risk was identified and assessed.'` | Item `q` ("Auditor is likely to ask"), `stageQ`, audit stage table |
 | `rec` | number | `38` | Record count for explicit and `soa` stages (denominator of stage readiness) |
@@ -221,7 +221,7 @@ Server: every stage record exposes the TS 9.3 pending record contract (`title`, 
 
 `TITLES`: `{id: title}` for ids that exist only as chain nodes, for example `'CI-02': 'Dependence on privileged administrators'`. Read by `titleOf` as the last fallback. Server: titles travel in chain node payloads.
 
-`CLAUSE_AT_RISK`: `{stageId: clause}`, for example `risk: '6.1.2'`. Read by `gtScreen` for broken nodes. Server: per stage in `traceability_chain_def`.
+`CLAUSE_AT_RISK`: `{'<ms>:<stageId>': clause}`, for example `'isms:risk': '6.1.2'`, one entry per stage of each system of the organisation. Read by `gtScreen` for broken nodes, with the system of the chain. The key names the system (Milestone 2, M2-04), so two systems with the same stage key keep their own clause: the control stage is 6.1.3 d) in the ISMS (`isms:control`) and 8.1 in the ABMS (`abms:control`). Server: per stage in `traceability_chain_def` of the system's active edition.
 
 ### 1.9 Phases and activities
 
@@ -270,7 +270,7 @@ No separate entity. `calScreen` reads `d.docs` (`id`, `title`, `owner`, `rev`, p
 
 ### 1.12 Tasks
 
-No separate entity. `taskItems(me)` collects chain items held by the current user across every system of the organisation (rule in 2.11). `EXAMPLES` (`{requirementKey: text}`, for example `'8.13': 'Backup job log export and restore test sign-off'`) supplies the "accepted evidence" hint. Server: a cross-system tasks endpoint returning chain records where the holder is the session user, and example text from the pack (`evidence_frequency_rule` or catalogue guidance).
+No separate entity. `taskItems(me)` collects chain items held by the current user across every system of the organisation (rule in 2.11). `EXAMPLES` (`{'<ms>:<requirementKey>': text}`, for example `'isms:8.13': 'Backup job log export and restore test sign-off'`) supplies the "accepted evidence" hint for evidence items, looked up with the item's system and its `ctrlKey`. The key names the system (Milestone 2, M2-04), so a row never shows the example of another system's row with the same number: QMS 7.2 Competence (`qms:7.2`) and Annex A 7.2 Physical entry (`isms:7.2`) each show their own. A key without an example shows the general hint. Server: a cross-system tasks endpoint returning chain records where the holder is the session user, and example text from the pack (`evidence_frequency_rule` or catalogue guidance).
 
 ### 1.13 Framework packs and licence
 
@@ -535,7 +535,7 @@ Golden thread node resolution (`gtScreen`), placement S (`/audit/chain?anchor_id
 4. Else an `X` record: the chain containing its exact id, else a single node.
 5. Else a chain containing the id as a node (case-insensitive), else requirements linking the id as a risk (`risk` node plus up to 4 `control` nodes), else the first `X` record whose `up` or `down` lists the id: two nodes, the hit placed on the adjacent stage (previous stage for `up`, next for `down`).
 
-Node fields: stage label, id, title (or the cause when broken), status label, colours, `clause` from `CLAUSE_AT_RISK` when broken, `shared`, owner (`n.h`, else requirement, document or evidence owner), sub line (evidence: repository, version, integrity, freshness, produced date, red when integ is not `ok` or freshness is expired or critical; document: version, status, review date, red unless approved; other non-ready nodes: cause and due). Suggestions: chain ids plus a hard-coded list per system, first 7.
+Node fields: stage label, id, title (or the cause when broken), status label, colours, `clause` from `CLAUSE_AT_RISK` (`<ms>:<stage>`) when broken, `shared`, owner (`n.h`, else requirement, document or evidence owner), sub line (evidence: repository, version, integrity, freshness, produced date, red when integ is not `ok` or freshness is expired or critical; document: version, status, review date, red unless approved; other non-ready nodes: cause and due). Suggestions: chain ids plus a hard-coded list per system, first 7.
 
 Review calendar (`calScreen`), placement C over the documents list: group `Overdue` with `dd(rev) < 0` sorted by `rev`; then for months 0 to 3 from the current month, documents with `rev` inside the month (month 0 only `dd(rev) >= 0`), sorted by `rev`; empty months skipped; documents more than four months out are not shown.
 

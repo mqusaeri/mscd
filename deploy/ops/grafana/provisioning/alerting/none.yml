@@ -1,0 +1,3 @@
+# MSCD SaaS: Grafana sends no alerts. The alert rules are Prometheus rules
+# (deploy/ops/prometheus/rules), sent by Alertmanager. Grafana reads this folder at start.
+apiVersion: 1

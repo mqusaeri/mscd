@@ -10,7 +10,7 @@ import { BUILTIN_SCREEN_IDS } from '../../src/screens/types';
 import { BUSINESS_ROLE_LABELS } from '../../src/screens/roles';
 import { NOT_COMPUTED } from '../../src/data/api/wire';
 import { clauseFixture } from '../fixtures/screens/clauses';
-import { json, meOf, readRoutes, sourceWith, uuidOf, wireOf } from './fixtures';
+import { json, meOf, readRoutes, refOf, sourceWith, uuidOf, wireOf } from './fixtures';
 import type { Routes } from './fixtures';
 import { problem } from '../auth/helpers';
 
@@ -155,6 +155,52 @@ describe('controller in API mode', () => {
     // The command reloads the changed system, the organisation and the tasks.
     expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(['/api/v1/ui/org', '/api/v1/ui/ms/isms', '/api/v1/tasks']));
     expect(app.state.toast).toBe(app.t('toastSaved'));
+  });
+
+  it('My Tasks: the evidence hint is the example of the item’s own system (QMS 7.2 and Annex A 7.2, M2-04)', async () => {
+    const fx = await wireOf();
+    const me = meOf();
+    // Evidence of QMS clause 7.2 Competence and of Annex A 7.2 Physical entry, both held by rina, under the same raw key.
+    const add = (ms: string, code: string) => {
+      const b = fx.ms[ms]!.bundle;
+      const req = b.reqs.find((r: AnyRecord) => r.key === '7.2');
+      b.evs.push({ ...b.evs[0], code, ctrl: req.id, ctrlKey: '7.2', owner: 'rina' });
+      const key = `${ms}:ev:${code}`;
+      fx.ms[ms]!.refs[key] = refOf(key, code);
+      b.chain.items.push({ key, stage: 'evidence', kind: 'ev', id: code, title: [code, code], act: ['Submit evidence', 'Serahkan bukti'], h: 'rina', due: '2026-10-20', st: 'pending', after: false, gate: false, up: [], down: [], q: '', refKey: key });
+    };
+    add('isms', 'EV-T72');
+    add('qms', 'EQ-T72');
+    fx.org.EXAMPLES = { ...fx.org.EXAMPLES, 'isms:7.2': 'Visitor log of the secure area', 'qms:7.2': 'Training record with competence evaluation' };
+    const { app } = await start(readRoutes(fx, me));
+    app.state = { ...app.state, screen: 'mytasks' };
+    const feed = app.renderVals().tasks.feed as AnyRecord[];
+    expect(feed.find((x) => x.id === 'EV-T72')!.examples).toBe('Visitor log of the secure area');
+    expect(feed.find((x) => x.id === 'EQ-T72')!.examples).toBe('Training record with competence evaluation');
+    // Evidence of a system without an example under its key shows the general hint, never another system's example.
+    delete fx.org.EXAMPLES['qms:7.2'];
+    const again = await start(readRoutes(fx, me));
+    again.app.state = { ...again.app.state, screen: 'mytasks' };
+    const general = (again.app.renderVals().tasks.feed as AnyRecord[]).find((x) => x.id === 'EQ-T72')!;
+    expect(general.examples).toBe('Export, screenshot or signed record dated within the period');
+  });
+
+  it('Golden Thread: a broken node shows the clause at risk of its stage in its own system (ABMS control 8.1, M2-04)', async () => {
+    const fx = await wireOf();
+    const me = meOf();
+    expect([fx.org.CLAUSE_AT_RISK['isms:control'], fx.org.CLAUSE_AT_RISK['abms:control']]).toEqual(['6.1.3 d)', '8.1']);
+    // A chain of each system whose control node has no record linked (a broken node).
+    fx.org.CHAINS = { ...fx.org.CHAINS, isms: [...fx.org.CHAINS.isms, { id: 'R-T01', nodes: [['risk', 'R-014'], ['control', null]] }], abms: [{ id: 'BA-T01', nodes: [['associate', 'BA-T01'], ['control', null]] }] };
+    const { app } = await start(readRoutes(fx, me));
+    const brokenControl = (ms: string, id: string) => {
+      app.state = { ...app.state, ms, gtId: id };
+      const nodes = app.gtScreen(app.data(app.MSL.find((m: AnyRecord) => m.id === ms))).gt.nodes as AnyRecord[];
+      const node = nodes.find((n) => n.id === '-')!;
+      expect(node.stLabel).toBe(app.t('broken'));
+      return node.clause;
+    };
+    expect(brokenControl('abms', 'BA-T01')).toBe('8.1');
+    expect(brokenControl('isms', 'R-T01')).toBe('6.1.3 d)');
   });
 
   it('commands queue behind the busy bar; warnings are added to the toast; errors show the api message', async () => {

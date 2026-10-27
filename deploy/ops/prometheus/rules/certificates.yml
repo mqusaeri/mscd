@@ -1,0 +1,14 @@
+# MSCD SaaS alert rules: certificates (M2-S08), from the HTTPS probe of the public URL.
+# Caddy renews a certificate when a third of its lifetime is left (30 days for a 90-day
+# certificate), so less than 14 days left means renewal has failed for some time.
+groups:
+  - name: mscd-certificates
+    rules:
+      - alert: CertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 86400
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The certificate of {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+          action: "Read the Caddy log for certificate errors. See docs/saas/monitoring.md#certificateexpiringsoon"

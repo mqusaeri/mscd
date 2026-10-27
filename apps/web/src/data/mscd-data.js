@@ -296,6 +296,9 @@ export const CHAINS = {
 };
 export const TITLES = { 'CI-02':'Dependence on privileged administrators','CI-05':'Reliance on public cloud providers','CI-03':'Ageing virtualisation platform in Surabaya','CI-01':'Multi-tenant hosting for regulated customers','R-003':'Unauthorised access to customer environments','T-003':'Role-based access with quarterly review','T-022':'Cloud provider assurance programme','M-03':'Cloud provider SLA breaches','M-02':'Access review completion rate','CI-Q01':'Competitive pressure on release cadence','ACT-04':'Automated release gate pilot','QO-01':'On-time release ≥ 95%','MQ-01':'Release defect rate' };
 export const CLAUSE_AT_RISK = { context:'4.1', risk:'6.1.2', treatment:'6.1.3', control:'6.1.3 d)', soa:'6.1.3 d)', document:'7.5', evidence:'8.1 / 9.1', metric:'9.1', action:'6.1', process:'4.4', objective:'6.2', product:'8.2.1', bia:'8.2.2', drisk:'8.2.3', strategy:'8.3', exercise:'8.5', brisk:'4.5', associate:'8.2' };
+// The clause at risk of a system's stage where it differs from CLAUSE_AT_RISK: the ISO 37001 control stage (M2-04,
+// E.2; packs/content/ISO37001-* hold the same clause). The snapshot gives each system its own entry (`abms:control`).
+export const CLAUSE_AT_RISK_BY_MS = { abms:{ control:'8.1' } };
 
 // ---------- Certification cycle ----------
 export const EVENTS = {

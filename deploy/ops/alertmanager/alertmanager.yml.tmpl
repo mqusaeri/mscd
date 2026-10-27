@@ -1,0 +1,70 @@
+# MSCD SaaS: Alertmanager configuration template (Milestone 2 plan K, M2-S08).
+#
+# ops-init (deploy/ops/ops-init.sh) renders this file into
+# /etc/alertmanager/rendered/alertmanager.yml each time the monitoring overlay starts. Never
+# edit the rendered file: change the settings it reads instead (docs/saas/monitoring.md):
+#   - the MSCD_SMTP_* values and MSCD_MAIL_FROM of .env, and the secret file smtp.password,
+#     the same mail relay the app uses;
+#   - the files of /opt/mscd/secrets/ops/ that deploy-prod.yml writes: ALERT_EMAIL_TO,
+#     TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (optional), HEARTBEAT_WATCHDOG_URL.
+#
+# Rendering: each @NAME@ is replaced by a checked value. A line that starts with
+# "#@<part>:" is kept without that prefix when the part is set up (smtp-auth: the relay has a
+# login; telegram: bot token and chat id are set; heartbeat: the watchdog URL is set) and is
+# left out otherwise. Secrets never appear in the rendered file: Alertmanager reads them from
+# the files under /etc/alertmanager/rendered/secrets/.
+# alertmanager.yml.example is this template rendered with example values.
+
+global:
+  smtp_smarthost: @SMTP_SMARTHOST@
+  smtp_from: @SMTP_FROM@
+  smtp_hello: @SMTP_HELLO@
+  # STARTTLS on port 587 must succeed before the login (port 465 uses TLS from the start).
+  smtp_require_tls: @SMTP_REQUIRE_TLS@
+#@smtp-auth:  smtp_auth_username: @SMTP_USERNAME@
+#@smtp-auth:  smtp_auth_password_file: /etc/alertmanager/rendered/secrets/smtp_password
+  resolve_timeout: 5m
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: owner
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # The always-firing Watchdog pings the external heartbeat service about every minute.
+    # When the pings stop, that service alerts the owner (the server or the alert path is down).
+    - matchers: ['alertname="Watchdog"']
+      receiver: heartbeat
+      group_wait: 0s
+      group_interval: 30s
+      repeat_interval: 1m
+    - matchers: ['severity="critical"']
+      receiver: owner
+      repeat_interval: 1h
+
+receivers:
+  - name: owner
+    email_configs:
+      - to: @EMAIL_TO@
+        send_resolved: true
+        headers:
+          Subject: '[MSCD @DOMAIN@] {{ template "mscd.title" . }}'
+        html: '{{ template "mscd.email.html" . }}'
+        text: '{{ template "mscd.email.text" . }}'
+#@telegram:    telegram_configs:
+#@telegram:      - bot_token_file: /etc/alertmanager/rendered/secrets/telegram_bot_token
+#@telegram:        chat_id: @TELEGRAM_CHAT_ID@
+#@telegram:        parse_mode: ""
+#@telegram:        message: '[MSCD @DOMAIN@] {{ template "mscd.telegram.message" . }}'
+#@telegram:        send_resolved: true
+
+  # Without HEARTBEAT_WATCHDOG_URL this receiver sends nothing.
+  - name: heartbeat
+#@heartbeat:    webhook_configs:
+#@heartbeat:      - url_file: /etc/alertmanager/rendered/secrets/heartbeat_watchdog_url
+#@heartbeat:        send_resolved: false
+#@heartbeat:        max_alerts: 1

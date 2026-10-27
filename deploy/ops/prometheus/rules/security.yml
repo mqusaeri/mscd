@@ -1,0 +1,25 @@
+# MSCD SaaS alert rules: security spikes (M2-S08). These are early signs of an attack or a
+# breach. Under UU PDP a personal data breach must be reported within 3 x 24 hours, so every
+# spike is looked at the same day (docs/saas/incident-response.md).
+groups:
+  - name: mscd-security
+    rules:
+      # Three or more accounts locked after wrong second-factor codes within 15 minutes.
+      - alert: MfaLockSpike
+        expr: max(increase(mscd_mfa_locks_total[15m])) >= 3
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} second-factor lockouts in 15 minutes"
+          action: "Look for one address or one organisation behind them. See docs/saas/monitoring.md#mfalockspike"
+
+      # More than 50 requests refused by the permission check within 10 minutes.
+      - alert: AccessDeniedSpike
+        expr: sum(increase(mscd_authz_denied_total[10m])) > 50
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} requests refused by the permission check in 10 minutes"
+          action: "Find the address and account in the api log. See docs/saas/monitoring.md#accessdeniedspike"

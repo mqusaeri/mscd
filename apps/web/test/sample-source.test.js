@@ -120,6 +120,33 @@ describe('snapshot of the sample source', () => {
     expect(act(snap, 'isms', '6.8').title).toBe('Approve procedures, plans and registers');
   });
 
+  it('gives the evidence examples under the system and the key of the row, as the API does (M2-04)', async () => {
+    const snap = await createSampleDataSource().load('ndt');
+    // The sample's examples are Annex A examples of the ISMS; mscd-data.js keeps the bare keys the pack extractor reads.
+    expect(Object.keys(snap.EXAMPLES).sort()).toEqual(Object.keys(SAMPLE.EXAMPLES).map((key) => 'isms:' + key).sort());
+    expect(snap.EXAMPLES['isms:8.13']).toBe(SAMPLE.EXAMPLES['8.13']);
+    // QMS evidence of clause 6.3 (EQ-0127) finds no example under its own key, so it never shows the Annex A 6.3 text.
+    const eq = bundleOf(snap, 'qms').evs.find((e) => e.code === 'EQ-0127');
+    expect(eq.ctrlKey).toBe('6.3');
+    expect(snap.EXAMPLES['qms:6.3']).toBeUndefined();
+    expect(snap.EXAMPLES['isms:6.3']).toBe(SAMPLE.EXAMPLES['6.3']);
+  });
+
+  it('gives each system the clause at risk of its own stages, as the API does (M2-04)', async () => {
+    const ds = createSampleDataSource();
+    const ndt = await ds.load('ndt');
+    expect(ndt.CLAUSE_AT_RISK['isms:control']).toBe('6.1.3 d)');
+    expect(ndt.CLAUSE_AT_RISK['abms:control']).toBe('8.1');
+    expect(ndt.CLAUSE_AT_RISK['abms:brisk']).toBe('4.5');
+    expect(ndt.CLAUSE_AT_RISK['qms:process']).toBe('4.4');
+    const keys = (snap) => Object.entries(snap.STAGES).flatMap(([ms, stages]) => stages.map((stage) => ms + ':' + stage.id)).sort();
+    expect(Object.keys(ndt.CLAUSE_AT_RISK).sort()).toEqual(keys(ndt));
+    // Only the stages of the organisation's systems.
+    const bsd = await ds.load('bsd');
+    expect(Object.keys(bsd.CLAUSE_AT_RISK).sort()).toEqual(keys(bsd));
+    expect(Object.keys(bsd.CLAUSE_AT_RISK).every((key) => key.startsWith('isms:') || key.startsWith('qms:'))).toBe(true);
+  });
+
   it('equals the old controller derivation for every organisation, system and language', async () => {
     const ds = createSampleDataSource();
     for (const org of ORGS) await expectLegacy(ds, {}, org.id);

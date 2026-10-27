@@ -1,0 +1,68 @@
+{{/*
+  MSCD SaaS: message templates of Alertmanager (M2-S08), for email and Telegram.
+  Mounted read-only at /etc/alertmanager/templates by docker-compose.ops.yml.
+  Every alert rule sets two annotations: "summary" (what is wrong) and "action" (the first
+  step, with the section of docs/saas/monitoring.md). Times are UTC (WIB is UTC + 7).
+*/}}
+
+{{ define "mscd.title" -}}
+{{ if eq .Status "firing" }}Alert{{ else }}Resolved{{ end }}: {{ .CommonLabels.alertname }}
+{{- if gt (len .Alerts.Firing) 1 }} ({{ len .Alerts.Firing }} at once){{ end }}
+{{- end }}
+
+{{ define "mscd.alert.text" -}}
+{{ .Labels.alertname }} ({{ .Labels.severity }})
+{{ .Annotations.summary }}
+First step: {{ .Annotations.action }}
+Since: {{ .StartsAt.UTC.Format "2006-01-02 15:04 UTC" }}
+{{- if eq .Status "resolved" }}
+Resolved: {{ .EndsAt.UTC.Format "2006-01-02 15:04 UTC" }}
+{{- end }}
+{{- end }}
+
+{{ define "mscd.email.text" -}}
+{{ if .Alerts.Firing }}Firing now:
+{{ range .Alerts.Firing }}
+{{ template "mscd.alert.text" . }}
+{{ end }}{{ end -}}
+{{ if .Alerts.Resolved }}
+Resolved:
+{{ range .Alerts.Resolved }}
+{{ template "mscd.alert.text" . }}
+{{ end }}{{ end -}}
+{{ end }}
+
+{{ define "mscd.email.html" -}}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="color-scheme" content="light dark"></head>
+<body style="font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-height: 1.5; color: #1a1a1a; background: #ffffff; margin: 0; padding: 16px;">
+<h1 style="font-size: 20px; margin: 0 0 16px 0;">{{ template "mscd.title" . }}</h1>
+{{ if .Alerts.Firing }}<h2 style="font-size: 18px; margin: 16px 0 8px 0; color: #8a1c1c;">Firing now</h2>
+{{ range .Alerts.Firing }}<div style="border-left: 4px solid #8a1c1c; padding: 4px 12px; margin: 0 0 12px 0;">
+<p style="margin: 0;"><strong>{{ .Labels.alertname }}</strong> ({{ .Labels.severity }})</p>
+<p style="margin: 0;">{{ .Annotations.summary }}</p>
+<p style="margin: 0;">First step: {{ .Annotations.action }}</p>
+<p style="margin: 0; color: #4a4a4a;">Since {{ .StartsAt.UTC.Format "2006-01-02 15:04 UTC" }}</p>
+</div>
+{{ end }}{{ end -}}
+{{ if .Alerts.Resolved }}<h2 style="font-size: 18px; margin: 16px 0 8px 0; color: #1d5e2c;">Resolved</h2>
+{{ range .Alerts.Resolved }}<div style="border-left: 4px solid #1d5e2c; padding: 4px 12px; margin: 0 0 12px 0;">
+<p style="margin: 0;"><strong>{{ .Labels.alertname }}</strong> ({{ .Labels.severity }})</p>
+<p style="margin: 0;">{{ .Annotations.summary }}</p>
+<p style="margin: 0; color: #4a4a4a;">From {{ .StartsAt.UTC.Format "2006-01-02 15:04 UTC" }} to {{ .EndsAt.UTC.Format "2006-01-02 15:04 UTC" }}</p>
+</div>
+{{ end }}{{ end -}}
+<p style="margin: 16px 0 0 0; color: #4a4a4a;">What each alert means: docs/saas/monitoring.md in the MSCD repository.</p>
+</body>
+</html>
+{{- end }}
+
+{{ define "mscd.telegram.message" -}}
+{{ template "mscd.title" . }}
+{{ range .Alerts.Firing }}
+{{ template "mscd.alert.text" . }}
+{{ end }}{{ range .Alerts.Resolved }}
+{{ template "mscd.alert.text" . }}
+{{ end }}
+{{- end }}

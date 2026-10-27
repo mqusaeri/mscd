@@ -356,8 +356,8 @@ describe('WP-39 RecordResolver and ScopePolicy (D.1, D-04, D-34, F.7, G.5)', () 
       STAGES: { isms: [{ id: 'risk', l: P, q: 'q' }], qms: [{ id: 'process', l: P, q: 'q' }] },
       CHAINS: { isms: [{ id: 'R-1', nodes: [['risk', 'R-1'], ['control', 'A.5.1'], ['doc', 'DOC-9']] }, { id: 'R-2', nodes: [['risk', 'R-2']] }], qms: [{ id: 'P-1', nodes: [['process', 'P-1']] }] },
       TITLES: { 'R-1': 'Risk 1', 'R-2': 'Risk 2', 'DOC-9': 'Doc 9', 'P-1': 'Process 1' },
-      CLAUSE_AT_RISK: { risk: '6.1', process: '4.4' },
-      EXAMPLES: { '5.1': 'Policy' },
+      CLAUSE_AT_RISK: { 'isms:risk': '6.1', 'isms:control': '6.1.3 d)', 'qms:process': '4.4' },
+      EXAMPLES: { 'isms:5.1': 'Policy' },
       FREQ: {},
       FREQ_ORDER: [],
       permissions: { org: [], ms: {} },
@@ -372,7 +372,7 @@ describe('WP-39 RecordResolver and ScopePolicy (D.1, D-04, D-34, F.7, G.5)', () 
     const mm = await filtered('mm');
     expect(Object.keys(mm.CHAINS)).toEqual(['isms']);
     expect(mm.TITLES).toEqual({ 'R-1': 'Risk 1', 'R-2': 'Risk 2', 'DOC-9': 'Doc 9' });
-    expect(mm.CLAUSE_AT_RISK).toEqual({ risk: '6.1' });
+    expect(mm.CLAUSE_AT_RISK).toEqual({ 'isms:risk': '6.1', 'isms:control': '6.1.3 d)' });
     expect(Object.keys(mm.PEOPLE).sort()).toEqual(['bagus', 'none', 'rina']);
     expect(mm.LICENCE).not.toBeNull();
 
@@ -388,6 +388,7 @@ describe('WP-39 RecordResolver and ScopePolicy (D.1, D-04, D-34, F.7, G.5)', () 
     expect(ta.TITLES).toEqual({});
     expect(ta.PEOPLE).toEqual({ none: ['Unassigned', '-'] });
     expect(ta.EXAMPLES).toEqual({});
+    expect(ta.CLAUSE_AT_RISK).toEqual({});
 
     const ea = await filtered('ea');
     expect(ea.PEOPLE).toEqual({ rina: ['Rina', '-'], bagus: ['Bagus', '-'], none: ['Unassigned', '-'] });
@@ -396,5 +397,6 @@ describe('WP-39 RecordResolver and ScopePolicy (D.1, D-04, D-34, F.7, G.5)', () 
     expect(ea.PACKS).toEqual({});
     expect(ea.LICENCE).toBeNull();
     expect(Object.keys(ea.STAGES)).toEqual(['isms']);
+    expect(ea.CLAUSE_AT_RISK).toEqual({ 'isms:risk': '6.1', 'isms:control': '6.1.3 d)' });
   });
 });

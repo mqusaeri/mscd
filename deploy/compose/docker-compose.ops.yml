@@ -1,0 +1,348 @@
+# MSCD SaaS monitoring overlay (Milestone 2 plan K, M2-S08): metrics, alerts and probes.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.saas.yml -f docker-compose.ops.yml \
+#     --env-file .env up -d --wait
+#
+# docs/saas/monitoring.md explains what each alert means, the first action, and how to set up
+# the external heartbeat and uptime checks. The deploy script uses this file when it exists.
+#
+# Services (about 1.5 GB of memory together, each with a limit):
+#   ops-init           one-shot set-up at every start (deploy/ops/ops-init.sh): the database
+#                      role mscd_monitor, the probe target, the Alertmanager configuration
+#                      from its template, and the optional Grafana site of Caddy
+#   prometheus         scrapes api, worker and storage-gateway (port 9464), the exporters and
+#                      Caddy, evaluates the alert rules of deploy/ops/prometheus/rules, keeps
+#                      30 days of metrics
+#   alertmanager       sends alerts by email (and Telegram when set up) and pings the watchdog
+#                      heartbeat; the only service here besides the probe that reaches outside
+#   node-exporter      the server: processor, memory, disks, and the text files of
+#                      /opt/mscd/metrics (reboot needed, last backup)
+#   postgres-exporter  PostgreSQL, as the read-only role mscd_monitor (pg_monitor)
+#   blackbox-exporter  HTTPS probe of the public URL and its certificate, from outside the stack
+#   grafana            optional (profile grafana): dashboards behind Caddy on ops.<domain>
+#
+# Networks: prometheus, node-exporter, postgres-exporter and grafana are on the internal mscd
+# network only (no route out). alertmanager (mail, Telegram, heartbeat) and blackbox-exporter
+# (the public URL) are also on egress. No service publishes a port. Caddy joins mscd so that
+# Prometheus can read its metrics (conf.d/ops.caddy) and Caddy can reach Grafana.
+#
+# Settings: the MSCD_SMTP_* values and MSCD_MAIL_FROM of .env and the secret file smtp.password
+# (the app's mail relay), and the files of ${MSCD_SECRETS_DIR}/ops/ that deploy-prod.yml writes
+# (ALERT_EMAIL_TO, HEARTBEAT_WATCHDOG_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and for Grafana
+# OPS_DOMAIN, OPS_BASIC_AUTH_USER, OPS_BASIC_AUTH_HASH).
+#
+# Images (S-5): exact versions at least two weeks old, pinned by the digest of their index.
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "10"
+
+# Hardening shared by the long-running monitoring services.
+x-ops: &ops
+  pull_policy: missing
+  restart: unless-stopped
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  stop_grace_period: 20s
+  logging: *logging
+
+services:
+  ops-init:
+    # The image of the bundled database (psql for the role); no new image.
+    image: postgres:16.15-alpine
+    pull_policy: missing
+    restart: "no"
+    # Root with three capabilities only: read the secret files of other users (DAC_OVERRIDE),
+    # and give the rendered files to the user of the service that reads them (CHOWN, FOWNER).
+    user: "0:0"
+    entrypoint: ["sh", "/ops-config/ops-init.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MSCD_DOMAIN: ${MSCD_DOMAIN:?set MSCD_DOMAIN (app.<domain>)}
+      MSCD_PUBLIC_URL: ${MSCD_PUBLIC_URL:?set MSCD_PUBLIC_URL (https://app.<domain>)}
+      # The address the HTTPS probe checks; default <MSCD_PUBLIC_URL>/healthz.
+      MSCD_OPS_PROBE_URL: ${MSCD_OPS_PROBE_URL:-}
+      # The alerts use the app's mail relay unless MSCD_OPS_SMTP_* name another one.
+      MSCD_OPS_SMTP_HOST: ${MSCD_OPS_SMTP_HOST:-${MSCD_SMTP_HOST:-}}
+      MSCD_OPS_SMTP_PORT: ${MSCD_OPS_SMTP_PORT:-${MSCD_SMTP_PORT:-587}}
+      MSCD_OPS_SMTP_USER: ${MSCD_OPS_SMTP_USER-${MSCD_SMTP_USER:-}}
+      MSCD_OPS_MAIL_FROM: ${MSCD_OPS_MAIL_FROM:-${MSCD_MAIL_FROM:-}}
+      MSCD_OPS_SMTP_REQUIRE_TLS: ${MSCD_OPS_SMTP_REQUIRE_TLS:-true}
+    secrets:
+      - postgres-admin.password
+      - smtp.password
+    volumes:
+      - ../ops:/ops-config:ro,z
+      # Written by deploy-prod.yml (one file per setting, mode 0400). Never created here, so
+      # a missing folder stops ops-init instead of leaving a folder the deploy cannot write.
+      - type: bind
+        source: ${MSCD_SECRETS_DIR:-/opt/mscd/secrets}/ops
+        target: /run/ops-secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - ops_state:/ops/state
+      - ops_prometheus:/ops/prometheus
+      - ops_alertmanager:/ops/alertmanager
+      - ops_caddy:/ops/caddy
+    networks:
+      - mscd
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  prometheus:
+    <<: *ops
+    image: prom/prometheus:v3.13.4@sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.listen-address=:9090
+    volumes:
+      - ../ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - ../ops/prometheus/rules:/etc/prometheus/rules:ro,z
+      - ops_prometheus:/etc/prometheus/rendered:ro
+      - prometheus_data:/prometheus
+    networks:
+      - mscd
+    depends_on:
+      ops-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "${MSCD_PROMETHEUS_CPUS:-1.0}"
+          memory: ${MSCD_PROMETHEUS_MEMORY:-768M}
+          pids: 256
+
+  alertmanager:
+    <<: *ops
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    command:
+      - --config.file=/etc/alertmanager/rendered/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+      # One instance: no cluster port.
+      - --cluster.listen-address=
+    volumes:
+      - ../ops/alertmanager/templates:/etc/alertmanager/templates:ro,z
+      - ops_alertmanager:/etc/alertmanager/rendered:ro
+      - alertmanager_data:/alertmanager
+    # mscd: Prometheus sends the alerts; egress: mail relay, Telegram, heartbeat service.
+    networks:
+      - mscd
+      - egress
+    depends_on:
+      ops-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: ${MSCD_ALERTMANAGER_MEMORY:-128M}
+          pids: 128
+
+  node-exporter:
+    <<: *ops
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=:9100
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|var/lib/docker/.+|var/lib/containerd/.+|var/lib/containers/storage/.+)($|/)
+    volumes:
+      # The host's file systems, read-only, for processor, memory and disk use.
+      - /:/host:ro
+      # reboot.prom (bootstrap-host.sh, M2-S03) and backup.prom (backup.sh, M2-S07).
+      - ${MSCD_METRICS_DIR:-/opt/mscd/metrics}:/textfile:ro
+    networks:
+      - mscd
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+          pids: 64
+
+  postgres-exporter:
+    <<: *ops
+    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+    command:
+      - --web.listen-address=:9187
+      # Per-table statistics would multiply with every organisation schema.
+      - --no-collector.stat_user_tables
+      - --no-collector.statio_user_tables
+    environment:
+      DATA_SOURCE_URI: postgres:5432/mscd?sslmode=disable
+      DATA_SOURCE_USER: mscd_monitor
+      DATA_SOURCE_PASS_FILE: /run/ops-state/monitor.password
+    volumes:
+      - ops_state:/run/ops-state:ro
+    networks:
+      - mscd
+    depends_on:
+      ops-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9187/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+          pids: 64
+
+  blackbox-exporter:
+    <<: *ops
+    image: prom/blackbox-exporter:v0.29.0@sha256:9613f2884689b6fad9f1939f6a3b0388c93a022cfaededb19545b329b5c83dea
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+      - --web.listen-address=:9115
+    volumes:
+      - ../ops/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro,z
+    # mscd: Prometheus asks for the probes; egress: the public URL, as a visitor reaches it.
+    networks:
+      - mscd
+      - egress
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9115/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+          pids: 64
+
+  grafana:
+    <<: *ops
+    # grafana/grafana is the open-source edition (the grafana/grafana-oss name gets no new
+    # releases since June 2026).
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    profiles: [grafana]
+    user: "472:0"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      # Sign-in only through Caddy's basic auth (conf.d/ops.caddy): Caddy passes the checked
+      # user name, and Grafana trusts that header only from the mscd network.
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_WHITELIST: ${MSCD_SUBNET:-172.31.250.0/24}
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      # Viewers may use Explore for their own queries; dashboards stay as provisioned.
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      # The mscd network has no route out: no update checks, news, reporting or plugin
+      # downloads.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_LOG_MODE: console
+    volumes:
+      - ../ops/grafana/provisioning:/etc/grafana/provisioning:ro,z
+      - ../ops/grafana/dashboards:/var/lib/grafana-dashboards:ro,z
+      - grafana_data:/var/lib/grafana
+    networks:
+      - mscd
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: ${MSCD_GRAFANA_MEMORY:-384M}
+          pids: 256
+
+  caddy:
+    environment:
+      # Only these addresses get an answer from the metrics site of conf.d/ops.caddy.
+      MSCD_SUBNET: ${MSCD_SUBNET:-172.31.250.0/24}
+    volumes:
+      # The Grafana site that ops-init writes (empty when Grafana is not set up).
+      - ops_caddy:/etc/caddy-ops:ro
+    networks:
+      mscd: {}
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  # Written by ops-init only: the password of mscd_monitor.
+  ops_state:
+  # Rendered by ops-init, one volume per reader.
+  ops_prometheus:
+  ops_alertmanager:
+  ops_caddy:

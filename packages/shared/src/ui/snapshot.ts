@@ -127,6 +127,12 @@ export const FreqEntry = named(
 );
 export type FreqEntry = z.infer<typeof FreqEntry>;
 
+/**
+ * Key of an organisation-wide entry of one system's chain stage, `<system slug>:<stage key>` (G.5 `CLAUSE_AT_RISK`):
+ * two systems with the same stage key keep their own clause (`isms:control` 6.1.3 d), `abms:control` 8.1).
+ */
+const SystemStageKey = z.string().regex(/^[a-z][a-z0-9-]{1,19}:[a-z][a-z0-9_]{0,19}$/);
+
 export const UiOrgSnapshot = named(
   'UiOrgSnapshot',
   z.object({
@@ -144,7 +150,7 @@ export const UiOrgSnapshot = named(
     STAGES: z.record(MsId, z.array(Stage)),
     CHAINS: z.record(MsId, z.array(ChainInstance)),
     TITLES: z.record(z.string(), z.string()),
-    CLAUSE_AT_RISK: z.record(StageKey, z.string()),
+    CLAUSE_AT_RISK: z.record(SystemStageKey, z.string()),
     EXAMPLES: z.record(z.string(), z.string()),
     FREQ: z.record(FreqId, FreqEntry),
     FREQ_ORDER: z.array(FreqId),
@@ -153,7 +159,10 @@ export const UiOrgSnapshot = named(
   'GET /ui/org: organisation-wide snapshot keys (D.2, G.5). LICENCE is null without license.read; PACKS omits systems without pack.read (A.4)',
   {
     valid: [EXAMPLE_ORG_SNAPSHOT, { ...EXAMPLE_ORG_SNAPSHOT, LICENCE: null, PACKS: {}, REPOS: [], ROUTING: [] }],
-    invalid: [{ ...EXAMPLE_ORG_SNAPSHOT, LICENCE: undefined }, { ...EXAMPLE_ORG_SNAPSHOT, today: '29 Sep 2026' }, { ...EXAMPLE_ORG_SNAPSHOT, LOC: { sp: ['SharePoint Online', 'sharepoint', 'SharePoint'] } }],
+    invalid: [
+      { ...EXAMPLE_ORG_SNAPSHOT, LICENCE: undefined }, { ...EXAMPLE_ORG_SNAPSHOT, today: '29 Sep 2026' }, { ...EXAMPLE_ORG_SNAPSHOT, LOC: { sp: ['SharePoint Online', 'sharepoint', 'SharePoint'] } },
+      { ...EXAMPLE_ORG_SNAPSHOT, CLAUSE_AT_RISK: { risk: '6.1.2' } },
+    ],
   },
 );
 export type UiOrgSnapshot = z.infer<typeof UiOrgSnapshot>;

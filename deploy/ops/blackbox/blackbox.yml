@@ -1,0 +1,24 @@
+# MSCD SaaS: blackbox exporter of the monitoring overlay (M2-S08). Mounted read-only at
+# /etc/blackbox_exporter/config.yml by docker-compose.ops.yml.
+#
+# Prometheus (job public-url) asks it to probe the public URL of the app. The exporter sits on
+# the mscd network (Prometheus reaches it there) and on egress, so it reaches the public
+# address the way a visitor does. The probe gives probe_success (alert PublicUrlDown) and
+# probe_ssl_earliest_cert_expiry (alert CertificateExpiringSoon).
+modules:
+  https_healthz:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      # Plain HTTP is a failure: the probe checks the certificate too, against the public
+      # certificate authorities of the image (Let's Encrypt among them).
+      fail_if_not_ssl: true
+      # The redirect to /healthz from somewhere else would hide a wrong configuration.
+      follow_redirects: false
+      # The egress network has IPv4 only.
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      headers:
+        User-Agent: MSCD monitoring probe

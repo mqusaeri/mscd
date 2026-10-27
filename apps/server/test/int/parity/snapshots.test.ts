@@ -29,31 +29,15 @@ const CARD_PACKS: Record<string, Record<string, string>> = {
   abms: { '': 'ISO37001-2025' },
 };
 
-/**
- * Keys of an organisation's `EXAMPLES` that the pack rows of more than one system give: an Annex A control of the
- * ISMS (`7.2` for A.7.2) and clause rows of ISO 9001, ISO 22301 and ISO 37001 with the same number, and clause rows
- * those three standards share (`4.1`). The read model keeps one flat map in which the first system in position order
- * wins (`evidenceExamples` in `read-model/build/organisation.ts`), so the clause rows of the later systems show the
- * example of another system's row: QMS 7.2 Competence shows the example of Annex A 7.2 Physical entry. The counts are
- * fixed here so that the collision stays visible and a change to it fails this test; the fix is one map or one key per
- * system in the read model and the web (M2-04 follow-up), after which this list goes.
- */
-const EXAMPLE_COLLISIONS: Record<Exclude<DemoOrg, 'tst'>, { control: number; clause: number }> = {
-  // ISMS, QMS, BCMS and ABMS: 20 Annex A keys (5.1 to 8.10) and 36 clause keys of the other three standards.
-  ndt: { control: 20, clause: 36 },
-  // ISMS and QMS: 5.3, 6.3, 7.2, 7.3, 7.4, 8.1 and 8.6.
-  bsd: { control: 7, clause: 0 },
-  rmn: { control: 0, clause: 0 },
-};
-
 /** Pack content the known differences are checked against, read from `ref` of the demo database. */
 interface PackContent {
   /**
-   * The evidence examples of each installed edition by the key of G.5 `EXAMPLES` (D2-09): `5.23` for Annex A 5.23,
-   * `cl-4.1` for a clause row of an edition with a catalogue, the clause code for a requirement of the other editions.
+   * The evidence examples of each installed edition by the key of its row (D2-09): `5.23` for Annex A 5.23, `cl-4.1`
+   * for a clause row of an edition with a catalogue, the clause code for a requirement of the other editions. G.5
+   * `EXAMPLES` lists them under the system and that key (`isms:5.23`, `qms:7.2`).
    */
   examplesByEdition: Map<string, Map<string, { control: boolean; example: string }>>;
-  /** The systems of each organisation in position order (the order in which the read model merges `EXAMPLES`). */
+  /** The systems of each organisation in position order. */
   systems: Map<DemoOrg, { slug: string; editionId: string }[]>;
   /** The stages of the ISO 37001:2025 chain with their English auditor questions, in stage order. */
   abmsStages: { key: string; q: string }[];
@@ -126,17 +110,36 @@ describe('UI snapshot parity with the sample (J.4)', () => {
     shared.q += ' (changed)';
     const { api: a, sample: e, wireMismatches } = normaliseMs(changed, sampleMsSnapshot(sample.snapshots.ndt!, 'abms'));
     expect(differences(a, e).length + wireMismatches.length).toBeGreaterThan(0);
-    // Evidence examples are checked per key: two pack examples that swap keys are reported.
+    // Evidence examples are checked per system and key: the examples of Annex A 7.2 (ISMS) and clause 7.2 Competence
+    // (QMS) are reported when they swap.
     const org = await clients.get('bsd')!.get<UiOrgSnapshot>('/api/v1/ui/org');
     const sampleOrg = sampleOrgSnapshot(sample.snapshots.bsd!);
     const swapped = structuredClone(org.body) as unknown as Record<string, unknown>;
     const examples = swapped.EXAMPLES as Record<string, string>;
-    const [one, two] = Object.keys(examples).filter((key) => !(key in (sampleOrg.EXAMPLES as Record<string, string>)));
-    [examples[one!], examples[two!]] = [examples[two!], examples[one!]];
+    const [isms, qms] = [examples['isms:7.2'], examples['qms:7.2']];
+    expect(isms).toBeTruthy();
+    expect(qms).toBeTruthy();
+    expect(isms).not.toBe(qms);
+    [examples['isms:7.2'], examples['qms:7.2']] = [qms!, isms!];
     const checks = knownOrgDifferences('bsd', swapped, sampleOrg, content);
     expect(() => checks.forEach((check) => check())).toThrow();
     const unchanged = knownOrgDifferences('bsd', structuredClone(org.body) as unknown as Record<string, unknown>, sampleOrgSnapshot(sample.snapshots.bsd!), content);
     expect(() => unchanged.forEach((check) => check())).not.toThrow();
+    // Clauses at risk are compared per system and stage: the ABMS control stage (8.1) is reported when it shows the
+    // clause of the ISMS control stage (6.1.3 d)).
+    const ndtOrg = (await clients.get('ndt')!.get<UiOrgSnapshot>('/api/v1/ui/org')).body;
+    const orgDifferences = (body: UiOrgSnapshot) => {
+      const api = structuredClone(body) as unknown as Record<string, unknown>;
+      const expected = sampleOrgSnapshot(sample.snapshots.ndt!);
+      knownOrgDifferences('ndt', api, expected, content);
+      const normalised = normaliseOrg(api, expected);
+      return differences(normalised.api, normalised.sample);
+    };
+    expect([ndtOrg.CLAUSE_AT_RISK['isms:control'], ndtOrg.CLAUSE_AT_RISK['abms:control']]).toEqual(['6.1.3 d)', '8.1']);
+    expect(orgDifferences(ndtOrg)).toEqual([]);
+    const firstWins = structuredClone(ndtOrg);
+    firstWins.CLAUSE_AT_RISK['abms:control'] = firstWins.CLAUSE_AT_RISK['isms:control']!;
+    expect(orgDifferences(firstWins).length).toBeGreaterThan(0);
   });
 
   for (const org of ORGS) {
@@ -174,10 +177,10 @@ describe('UI snapshot parity with the sample (J.4)', () => {
 /**
  * Differences between the API and the sample that follow from decisions, asserted on the API side and then aligned
  * so the remaining comparison is exact:
- * - The sample organisation snapshot carries the licence card, `TITLES` and `CLAUSE_AT_RISK` of the whole sample for
- *   every organisation (WP-07 deviation 3). The API composes the licence card from the organisation's own licence
- *   (G.3: bound to the organisation, named after it) and its own systems, and lists titles and clauses of its own
- *   systems only (G.5).
+ * - The sample organisation snapshot carries the licence card and `TITLES` of the whole sample for every organisation
+ *   (WP-07 deviation 3). The API composes the licence card from the organisation's own licence (G.3: bound to the
+ *   organisation, named after it) and its own systems, and lists titles of its own systems only (G.5). `CLAUSE_AT_RISK`
+ *   lists the stages of the organisation's systems in both, under the system and the stage (`abms:control`, M2-04).
  * - `rina` is also a member of the test organisation `tst` (G.3), the last entry of her `orgs`.
  * - The sample lists only the repositories that a system uses; every organisation has a Managed Vault (A-41), so the
  *   API lists rmn's unused vault too (G.5 `REPOS[]`: repositories ordered by position).
@@ -186,9 +189,9 @@ describe('UI snapshot parity with the sample (J.4)', () => {
  *   version lives in `packs/content/<pack_id>/manifest.json`). The API shows the released versions.
  *   The update the sample's ABMS card offers (0.7.0) is that installed version, so the API offers none.
  * - Milestone 2 E.2 (M2-04): every Annex A control and every leaf clause row of the packs has an evidence example,
- *   while the sample keeps its ten Annex A examples. The API lists the examples of the active editions: each sample
- *   example unchanged, every key of the systems' pack rows with the example of its own row, and the keys that several
- *   systems give with the first system's example (`EXAMPLE_COLLISIONS`).
+ *   while the sample keeps its ten Annex A examples. The API lists the examples of the active editions under the
+ *   system and the key of the row (`isms:8.13`, `qms:7.2`): each sample example unchanged under the same key (the
+ *   sample's keys carry the system too), and every row of every system with its own example.
  * - Milestone 2 E.2 (M2-04): the ISO 37001 chain asks auditor questions, while the sample's ABMS stages keep empty
  *   questions, because the Indonesian question table of the extractor (`packs/scripts`) does not hold them yet.
  */
@@ -227,27 +230,24 @@ function knownOrgDifferences(org: DemoOrg, api: Record<string, unknown>, expecte
     checks.push(() => expect(releasedVersion('ISO37001-2025')).toBe('0.7.0'));
     expectedPacks.abms = { ...expectedPacks.abms, update: offered };
   }
-  // Milestone 2 E.2 (M2-04): evidence examples of the packs, each under the key of its own pack row.
+  // Milestone 2 E.2 (M2-04): evidence examples of the packs, each under its system and the key of its own pack row.
   const apiExamples = (api.EXAMPLES as Record<string, string> | undefined) ?? {};
   const sampleExamples = (expected.EXAMPLES as Record<string, string> | undefined) ?? {};
   checks.push(() => {
-    for (const [key, example] of Object.entries(sampleExamples)) expect(apiExamples[key], key).toBe(example);
+    // The sample's keys carry the system already (`isms:8.13`); each of its examples is listed unchanged.
+    expect(Object.keys(sampleExamples).length).toBeGreaterThan(0);
+    for (const [key, example] of Object.entries(sampleExamples)) {
+      expect(key, key).toMatch(/^isms:/);
+      expect(apiExamples[key], key).toBe(example);
+    }
     expect(Object.keys(apiExamples).length).toBeGreaterThan(Object.keys(sampleExamples).length);
-    const { owners, collisions } = exampleOwners(org, content);
-    // Every key of every system's pack rows is listed, and no key comes from anywhere else.
+    const owners = exampleOwners(org, content);
+    // Every row of every system is listed under its own key with its own example, and no key comes from anywhere else.
     expect(Object.keys(apiExamples).sort()).toEqual([...owners.keys()].sort());
-    for (const [key, rows] of owners) {
-      // A key of one system shows that row's example; a shared key shows the first system's row (the collision).
-      expect(apiExamples[key], key).toBe(rows[0]!.example);
-    }
-    // Only clause rows are hidden: the ISMS is the first system wherever it has a key, so each Annex A control shows
-    // its own example, and the clause rows of the later systems show the example of the first system's row.
-    for (const { key, shown, hidden } of collisions) {
-      expect(hidden.every((row) => !row.control), key).toBe(true);
-      if (shown.control) expect(shown.slug, key).toBe('isms');
-    }
-    const shared = { control: collisions.filter((c) => c.shown.control).length, clause: collisions.filter((c) => !c.shown.control).length };
-    expect(shared, `${org}: keys shared between systems`).toEqual(EXAMPLE_COLLISIONS[org as Exclude<DemoOrg, 'tst'>]);
+    for (const [key, example] of owners) expect(apiExamples[key], key).toBe(example);
+    // Rows of two systems with the same number keep their own examples (QMS 7.2 Competence and Annex A 7.2).
+    const slugs = (content.systems.get(org) ?? []).map((s) => s.slug);
+    if (slugs.includes('isms') && slugs.includes('qms')) expect(apiExamples['qms:7.2']).not.toBe(apiExamples['isms:7.2']);
   });
   api.EXAMPLES = Object.fromEntries(Object.keys(sampleExamples).map((key) => [key, apiExamples[key]]));
   // Milestone 2 E.2 (M2-04): the auditor questions of the ISO 37001 chain.
@@ -265,10 +265,6 @@ function knownOrgDifferences(org: DemoOrg, api: Record<string, unknown>, expecte
   const name = org === 'bsd' ? 'PT Bank Sentosa Digital' : 'RS Medika Nusantara';
   checks.push(() => expect(licence).toMatchObject({ org: name, fw: `${systems} of 4`, ms: `${systems} of 10`, users: '86 of 150' }));
   expected.LICENCE = { ...(expected.LICENCE as Record<string, unknown>), org: name, fw: `${systems} of 4`, ms: `${systems} of 10` };
-  const stages = new Set(Object.values(api.STAGES as Record<string, { id: string }[]>).flat().map((s) => s.id));
-  const clauses = expected.CLAUSE_AT_RISK as Record<string, string>;
-  checks.push(() => expect(Object.keys(api.CLAUSE_AT_RISK as object).sort()).toEqual(Object.keys(clauses).filter((k) => stages.has(k)).sort()));
-  expected.CLAUSE_AT_RISK = Object.fromEntries(Object.entries(clauses).filter(([k]) => stages.has(k)));
   const codes = new Set(Object.values(api.CHAINS as Record<string, { id: string; nodes: [string, string | null][] }[]>).flat().flatMap((c) => [c.id, ...c.nodes.map((n) => n[1])]));
   expected.TITLES = Object.fromEntries(Object.entries(expected.TITLES as Record<string, string>).filter(([k]) => codes.has(k)));
   if (org === 'rmn') {
@@ -296,27 +292,15 @@ function knownMsDifferences(ms: string, api: UiMsSnapshot, content: PackContent)
   ];
 }
 
-/** A pack row behind an `EXAMPLES` key: the system, whether it is an Annex A control, and its example. */
-interface ExampleRow {
-  slug: string;
-  control: boolean;
-  example: string;
-}
-
-/**
- * The pack rows behind each `EXAMPLES` key of an organisation, in system position order, and the keys that more than
- * one system's rows give (the first system's row is `shown`, the others are `hidden`).
- */
-function exampleOwners(org: DemoOrg, content: PackContent): {
-  owners: Map<string, ExampleRow[]>;
-  collisions: { key: string; shown: ExampleRow; hidden: ExampleRow[] }[];
-} {
-  const owners = new Map<string, ExampleRow[]>();
+/** The example of each pack row of an organisation's systems by its `EXAMPLES` key (`<system>:<key of the row>`). */
+function exampleOwners(org: DemoOrg, content: PackContent): Map<string, string> {
+  const owners = new Map<string, string>();
   for (const system of content.systems.get(org) ?? []) {
     for (const [key, row] of content.examplesByEdition.get(system.editionId) ?? []) {
-      owners.set(key, [...(owners.get(key) ?? []), { slug: system.slug, ...row }]);
+      const owner = `${system.slug}:${key}`;
+      expect(owners.has(owner), owner).toBe(false);
+      owners.set(owner, row.example);
     }
   }
-  const collisions = [...owners].filter(([, rows]) => rows.length > 1).map(([key, rows]) => ({ key, shown: rows[0]!, hidden: rows.slice(1) }));
-  return { owners, collisions };
+  return owners;
 }

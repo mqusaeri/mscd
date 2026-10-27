@@ -458,10 +458,9 @@ export class ScopePolicyService implements ScopePolicy {
     const TITLES: Record<string, string> = {};
     for (const [code, title] of Object.entries(snapshot.TITLES)) if (titled.has(code)) TITLES[code] = title;
 
-    const stageKeys = new Set<string>();
-    for (const ms of roleSystems) for (const stage of snapshot.STAGES[ms] ?? []) stageKeys.add(stage.id);
+    // `CLAUSE_AT_RISK` keys name the system and the stage (`abms:control`): the entries of the caller's systems.
     const CLAUSE_AT_RISK: Record<string, string> = {};
-    for (const [stage, clause] of Object.entries(snapshot.CLAUSE_AT_RISK)) if (stageKeys.has(stage)) CLAUSE_AT_RISK[stage] = clause;
+    for (const [key, clause] of Object.entries(snapshot.CLAUSE_AT_RISK)) if (roleSystems.has(key.slice(0, key.indexOf(':')))) CLAUSE_AT_RISK[key] = clause;
 
     let EXAMPLES: Record<string, string> = {};
     if (sources.exampleKeysByMs) {

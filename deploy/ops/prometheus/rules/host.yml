@@ -1,0 +1,40 @@
+# MSCD SaaS alert rules: the server (M2-S08), from node-exporter.
+groups:
+  - name: mscd-host
+    rules:
+      # A disk of the server is more than 80 percent full.
+      - alert: HostDiskFull
+        expr: |
+          100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay|squashfs|nsfs|fuse.*"}
+                   / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|overlay|squashfs|nsfs|fuse.*"}) > 80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} is {{ $value | printf \"%.0f\" }} percent full"
+          action: "Find what grows and free space. See docs/saas/monitoring.md#hostdiskfull"
+
+      # Less than 10 percent of the memory is available, or processes wait for memory more
+      # than 20 percent of the time (pressure stall information of the kernel).
+      - alert: HostMemoryPressure
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10)
+            or (rate(node_pressure_memory_waiting_seconds_total[5m]) > 0.20)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The server is short of memory"
+          action: "Find the container that uses the most memory. See docs/saas/monitoring.md#hostmemorypressure"
+
+      # A security update needs a reboot, and has waited more than 7 days. The marker comes
+      # from /opt/mscd/metrics/reboot.prom (bootstrap-host.sh, M2-S03).
+      - alert: HostRebootNeeded
+        expr: |
+          (time() - mscd_host_reboot_required_since_timestamp_seconds > 7 * 86400)
+            and mscd_host_reboot_required == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "The server has needed a reboot for {{ $value | humanizeDuration }}"
+          action: "Reboot in the next maintenance window. See docs/saas/monitoring.md#hostrebootneeded"

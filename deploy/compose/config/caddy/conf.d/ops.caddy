@@ -1,0 +1,61 @@
+# MSCD SaaS: the Caddy parts of the monitoring overlay (Milestone 2 plan K, M2-S08).
+# Imported by ../Caddyfile (import /etc/caddy/conf.d/*.caddy), so it may use the snippets
+# mscd_tls and mscd_log. docs/saas/monitoring.md explains both parts.
+#
+# 1. Caddy's own metrics for Prometheus on port 9180. The port is never published, and only
+#    addresses of the internal mscd network (MSCD_SUBNET) get an answer; docker-compose.ops.yml
+#    puts Caddy on that network. Caddy's admin endpoint stays on 127.0.0.1:2019 inside the
+#    container.
+# 2. The optional Grafana host ops.<domain> behind basic auth: the snippet mscd_ops_grafana
+#    below. ops-init writes /etc/caddy-ops/grafana.caddy, the site that uses it, when
+#    OPS_DOMAIN and OPS_BASIC_AUTH_HASH are set, and removes it otherwise. Without the
+#    monitoring overlay the folder does not exist and nothing is imported.
+
+http://:9180 {
+	@prometheus remote_ip {$MSCD_SUBNET:172.31.250.0/24}
+	handle @prometheus {
+		metrics /metrics
+	}
+	handle {
+		respond 403
+	}
+}
+
+# The Grafana host: import mscd_ops_grafana <user> <bcrypt hash of the password>.
+(mscd_ops_grafana) {
+	import mscd_tls
+	import mscd_log
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+		-Via
+	}
+
+	basic_auth {
+		{args[0]} {args[1]}
+	}
+
+	# Grafana signs the person in by the user name Caddy checked (auth proxy, viewer role).
+	# Caddy sets the header itself, so a header sent by the browser never reaches Grafana.
+	reverse_proxy grafana:3000 {
+		header_up X-WEBAUTH-USER {http.auth.user.id}
+		header_up -Authorization
+	}
+
+	# Answers of Caddy itself (401 without the password, 502 while Grafana is down): the
+	# same headers, and a short text.
+	handle_errors {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options "nosniff"
+			Cache-Control "no-store"
+			-Server
+		}
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}
+
+import /etc/caddy-ops/*.caddy

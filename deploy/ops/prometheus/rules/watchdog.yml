@@ -1,0 +1,13 @@
+# MSCD SaaS alert rules: the watchdog (M2-S08). It always fires. Alertmanager sends it to the
+# external heartbeat service every minute (HEARTBEAT_WATCHDOG_URL), which alerts the owner
+# when the pings stop: the server, Prometheus or Alertmanager is down, or alerts cannot leave.
+groups:
+  - name: mscd-watchdog
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "The alert pipeline works"
+          action: "Nothing to do. The heartbeat service alerts when this stops arriving."

@@ -1,0 +1,24 @@
+# MSCD SaaS alert rules: backups (M2-S08). Each successful backup writes
+# mscd_backup_last_success_timestamp_seconds to /opt/mscd/metrics/backup.prom (M2-S07). The
+# backup runs every night, and the recovery point is 24 hours (D-S6).
+groups:
+  - name: mscd-backups
+    rules:
+      # The last successful backup is more than 26 hours old.
+      - alert: BackupTooOld
+        expr: time() - max(mscd_backup_last_success_timestamp_seconds) > 26 * 3600
+        labels:
+          severity: critical
+        annotations:
+          summary: "The last successful backup is {{ $value | humanizeDuration }} old"
+          action: "Read the log of the last backup run. See docs/saas/monitoring.md#backuptooold"
+
+      # No backup has ever reported success on this server (for 26 hours).
+      - alert: BackupMissing
+        expr: absent(mscd_backup_last_success_timestamp_seconds)
+        for: 26h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup has been reported"
+          action: "Check that the backup timer is installed and runs. See docs/saas/monitoring.md#backupmissing"
