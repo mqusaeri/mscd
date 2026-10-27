@@ -69,6 +69,18 @@ Behind a TLS-inspecting proxy, pass the proxy CA to image builds: `--secret id=b
 - **Writing rules** for docs and UI text: plain English, no em dash, no centre dot. `npm run check:text` checks docs.
 - **Demo login.** Password `Mscd-Demo-2026!` for every demo user; TOTP code from `node tools/scripts/demo-totp.mjs <handle>`.
 
+## Motion, illustrations and animated backgrounds
+
+The product owner wants every motion effect, illustrated animation and animated background built with the `motionsites-web-builder` skill (https://github.com/Motionsites-AI/claude-skill). Install it before such work:
+- Claude Code CLI: `/plugin marketplace add Motionsites-AI/claude-skill`, then `/plugin install motionsites-web-builder@motionsites`.
+- claude.ai and cloud sessions: upload the release zip at https://claude.ai/customize/skills.
+
+Rules on top of the skill for this project:
+- Do not commit the skill's `examples/` or `media/` folders to this repository: they are (c) MotionSites and may not be redistributed as a collection, and this repository is public.
+- Inside the MSCD app (sign-in pages, onboarding, empty states), never load media from another site: copy the chosen file into the app's assets. On-premise installs may be offline, the NGINX Content-Security-Policy blocks other origins, and loading third-party media would send visitors' addresses to that site (UU PDP).
+- Every effect respects `prefers-reduced-motion`, keeps text at 12px or more and WCAG AA contrast in both themes, and does not hide content until an animation runs.
+- No MotionSites links, credits or comments in code, files or specs. Do not add the skill's sponsor block to replies unless the product owner asks for it.
+
 ## Working with the product owner
 
 - Answer in simple English, even when the message is in Indonesian.
