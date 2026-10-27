@@ -25,7 +25,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-05 Certification, internal audit and readiness server | 2a | Done, waiting for the wave commit | Its handoff lists the cross-package fixes the orchestrator applies at the end of wave 2a |
 | M2-07 Document control and register server additions | 2a | Done, waiting for the wave commit | APPL-ASSESS also applies on create (plan D.2 updated). Holdings include self-assessment gaps, audit activities and business associate relationship owners |
 | M2-06 Onboarding, accounts and operator server | 2a | Built; a follow-up run fixes the daily job catch-up after a time zone change | The orchestrator applied its three patches outside Owns (set-password link, invite test, CLI test) |
-| M2-04 Pack content | 2a | Built; its test updates outside Owns are applied (341ff9e); a follow-up run keys the evidence examples and the clause at risk per system | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. H.6 still open |
+| M2-04 Pack content | 2a | Done, waiting for the wave commit | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. Evidence examples and the clause at risk are keyed per system. H.6 still open |
 | MOT-03 In-app illustration library | L2 | Next (M2-01 is done) | |
 | M2-S05 Deploy script and deploy workflow, M2-S08 Monitoring and alerts | 2b | Running (started early: no server or web code) | |
 | M2-S07 Backups, M2-S10 Entitlements | 2b | Next, after the wave 2a commit | M2-S10: write `platform.entitlement` only in platform scope (see its brief) |
