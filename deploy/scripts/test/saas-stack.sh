@@ -40,10 +40,11 @@
 # Settings (environment):
 #   MSCD_SAAS_TEST_PROJECT      Compose project, also the image path (default mscd-saas-test)
 #   MSCD_SAAS_TEST_DIR          state folder: keys, secrets, .env, logs, caddy-root.crt
-#                               (default /tmp/mscd-saas-test)
+#                               (default /tmp/mscd-saas-test); a plain absolute path below
+#                               /tmp, /var/tmp or $TMPDIR, because down deletes it
 #   MSCD_SAAS_TEST_HTTP_PORT    published HTTP port of Caddy (default 18080)
 #   MSCD_SAAS_TEST_HTTPS_PORT   published HTTPS port of Caddy (default 18443)
-#   MSCD_SAAS_TEST_KEEP_IMAGES  true: down keeps the two built images (default false)
+#   MSCD_SAAS_TEST_KEEP_IMAGES  true: down keeps the images under localhost/<project>/ (default false)
 #   MSCD_SAAS_TEST_SCAN         gate (default): build-release-images.sh and its Trivy gate.
 #                               auto: for build machines that cannot reach the Alpine mirrors;
 #                               the scan only reports when the Alpine updates could not be
@@ -117,11 +118,27 @@ valid_settings() {
     valid_port "$HTTP_PORT" || die "MSCD_SAAS_TEST_HTTP_PORT must be a port number, got '$HTTP_PORT'"
     valid_port "$HTTPS_PORT" || die "MSCD_SAAS_TEST_HTTPS_PORT must be a port number, got '$HTTPS_PORT'"
     [[ $HTTP_PORT != "$HTTPS_PORT" ]] || die "The HTTP and HTTPS ports must differ"
-    case "$STATE" in
-        /tmp/?* | /var/tmp/?* | "${TMPDIR:-/nonexistent}"/?*) ;;
-        *) die "MSCD_SAAS_TEST_DIR must be a folder under /tmp or \$TMPDIR (down deletes it), got '$STATE'" ;;
-    esac
     [[ $STATE != *[[:space:]]* ]] || die "MSCD_SAAS_TEST_DIR must not contain spaces"
+    temp_folder "$STATE" ||
+        die "MSCD_SAAS_TEST_DIR must be a folder under /tmp, /var/tmp or \$TMPDIR, written as a plain absolute path without '.' or '..' parts, '//' or a final '/' (down deletes it), got '$STATE'"
+}
+
+# temp_folder PATH: true when PATH is a folder below /tmp, /var/tmp or $TMPDIR, written so
+# that the prefix check holds for the real location: absolute, no "." or ".." part, no
+# "//" and no final "/". down deletes the state folder, so /tmp/../etc must not pass.
+temp_folder() {
+    local path=$1 tmp=${TMPDIR:-}
+    [[ $path == /* && $path != */ && $path != *//* ]] || return 1
+    case "$path/" in
+        */./* | */../*) return 1 ;;
+    esac
+    case "$path" in
+        /tmp/?* | /var/tmp/?*) return 0 ;;
+    esac
+    while [[ $tmp == */ ]]; do tmp=${tmp%/}; done
+    # $TMPDIR counts only as an absolute folder other than "/"; "." and ".." parts in it
+    # cannot reach PATH, which has none.
+    [[ $tmp == /?* && $path == "$tmp"/?* ]]
 }
 
 # free_subnets: prints "<mscd octet> <edge octet>": two 172.31.x.0/24 ranges that no
@@ -285,7 +302,7 @@ up() {
     for tool in node openssl curl; do command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"; done
 
     step "Clean start"
-    if [[ -n $(project_containers) ]] || [[ -e $STATE ]]; then
+    if [[ -n $(project_resources) ]]; then
         info "Removing what an earlier run of $PROJECT left behind"
         down_quiet
     fi
@@ -658,13 +675,46 @@ check() {
 # down
 # ---------------------------------------------------------------------------
 
+# project_images: the images up builds, every tag under localhost/<project>/ (one per line).
+project_images() {
+    docker images --filter "reference=localhost/$PROJECT/*" \
+        --format '{{if ne .Tag "<none>"}}{{.Repository}}:{{.Tag}}{{else}}{{.Repository}}@{{.Digest}}{{end}}' 2>/dev/null || true
+}
+
+# project_resources: what is left of the project, one kind per line ("containers 2"),
+# images only when down removes them. Prints nothing when everything is gone.
+project_resources() {
+    local filter="label=com.docker.compose.project=$PROJECT" count images
+    count=$(docker ps -aq --filter "$filter" | wc -l)
+    ((count == 0)) || printf 'containers: %d\n' "$count"
+    count=$(docker volume ls -q --filter "$filter" | wc -l)
+    ((count == 0)) || printf 'volumes: %d\n' "$count"
+    count=$(docker network ls -q --filter "$filter" | wc -l)
+    ((count == 0)) || printf 'networks: %d\n' "$count"
+    if [[ $KEEP_IMAGES != true ]]; then
+        images=$(project_images | xargs)
+        [[ -z $images ]] || printf 'images: %s\n' "$images"
+    fi
+    if [[ -e $STATE ]]; then printf 'state folder: %s\n' "$STATE"; fi
+}
+
 # down_quiet: removes containers, networks and volumes of the project, the built images
-# and the state folder. Works without the state folder (by the Compose labels).
+# and the state folder. Works without the state folder (by the Compose labels and the
+# image path localhost/<project>/).
 down_quiet() {
-    local server_ref='' web_ref='' id
-    if [[ -f $STATE/digests.json ]]; then
-        server_ref=$(node -p 'const d=require(process.argv[1]); `${d.serverImage}:${d.version}`' "$STATE/digests.json" 2>/dev/null || true)
-        web_ref=$(node -p 'const d=require(process.argv[1]); `${d.webImage}:${d.version}`' "$STATE/digests.json" 2>/dev/null || true)
+    local refs='' id version
+    if [[ $KEEP_IMAGES != true ]]; then
+        # build-release-images.sh loads the images before its gate and writes digests.json
+        # only when they pass, so a failed build leaves images without that file. The names
+        # come from digests.json, the package version and every tag under localhost/<project>/.
+        if [[ -f $STATE/digests.json ]]; then
+            refs=$(node -p 'const d=require(process.argv[1]); `${d.serverImage}:${d.version} ${d.webImage}:${d.version}`' \
+                "$STATE/digests.json" 2>/dev/null || true)
+        fi
+        if version=$(package_version 2>/dev/null); then
+            refs="$refs localhost/$PROJECT/mscd-server:$version localhost/$PROJECT/mscd-web:$version"
+        fi
+        refs="$refs $(project_images | xargs)"
     fi
     if state_ready; then
         compose --profile cli down --volumes --remove-orphans --timeout 20 >/dev/null 2>&1 || true
@@ -679,15 +729,14 @@ down_quiet() {
     for id in $(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT"); do
         docker network rm "$id" >/dev/null 2>&1 || true
     done
-    if [[ $KEEP_IMAGES != true ]]; then
-        for id in $server_ref $web_ref; do
-            [[ $id == localhost/"$PROJECT"/* ]] || continue
-            docker image rm "$id" >/dev/null 2>&1 || true
-        done
-    fi
+    # Removed by name, so a base image that shares an ID with a test image keeps its own tags.
+    for id in $refs; do
+        [[ $id == localhost/"$PROJECT"/* ]] || continue
+        docker image rm "$id" >/dev/null 2>&1 || true
+    done
     if [[ -d $STATE ]]; then
         # The secrets belong to the container users; root of a helper container removes them
-        # when this user cannot.
+        # when this user cannot. valid_settings keeps $STATE a plain path below a temp folder.
         rm -rf -- "$STATE" 2>/dev/null ||
             docker run --rm --network none -v "$(dirname -- "$STATE"):/w" --entrypoint sh "$MAILPIT_IMAGE" \
                 -c 'rm -rf -- "/w/$1"' sh "$(basename -- "$STATE")" >/dev/null 2>&1 || true
@@ -695,15 +744,21 @@ down_quiet() {
 }
 
 down() {
-    title "MSCD SaaS test stack: down (project $PROJECT)"
-    down_quiet
     local left
-    left=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" | wc -l)
-    left=$((left + $(docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" | wc -l)))
-    if ((left > 0)) || [[ -e $STATE ]]; then
-        die "Some parts of $PROJECT could not be removed (containers, volumes or $STATE)"
+    title "MSCD SaaS test stack: down (project $PROJECT)"
+    # Without the daemon nothing could be removed or counted, so no PASS line.
+    docker info >/dev/null 2>&1 || die "Cannot reach the Docker daemon"
+    down_quiet
+    left=$(project_resources)
+    if [[ -n $left ]]; then
+        printf '%s\n' "$left" | sed 's/^/        left: /'
+        die "Some parts of $PROJECT could not be removed (listed above)"
     fi
-    pass "Containers, networks, volumes, images and $STATE removed"
+    if [[ $KEEP_IMAGES == true ]]; then
+        pass "Containers, networks, volumes and $STATE removed; images kept (MSCD_SAAS_TEST_KEEP_IMAGES=true): $(project_images | xargs)"
+    else
+        pass "Containers, networks, volumes, images and $STATE removed"
+    fi
 }
 
 main() {

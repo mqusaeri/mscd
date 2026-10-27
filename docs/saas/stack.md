@@ -198,15 +198,15 @@ curl --cacert /tmp/mscd-saas-test/caddy-root.crt https://localhost:18443/healthz
 - `/api/v1/system/profile` reports `saas`, and the marketing site answers with its own headers while `check.mjs` answers 404;
 - after a new organisation is created and the audit anchor job (`audit.verify-chain`) runs, the worker has signed an anchor and its log has no line "not among the anchor keys compiled into this build". This proves that the anchor key on the server matches the key built into the release image.
 
-`down` removes the containers, networks, volumes, the two test images and `/tmp/mscd-saas-test`.
+`down` removes the containers, networks, volumes, every image under `localhost/<project>/` (the two test images, also when a failed build left them behind) and `/tmp/mscd-saas-test`. It then checks that nothing is left and names whatever it could not remove.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `MSCD_SAAS_TEST_PROJECT` | `mscd-saas-test` | Compose project name, also used in the test image names |
-| `MSCD_SAAS_TEST_DIR` | `/tmp/mscd-saas-test` | Keys, secrets, `.env`, logs and `caddy-root.crt`; deleted by `down` |
+| `MSCD_SAAS_TEST_DIR` | `/tmp/mscd-saas-test` | Keys, secrets, `.env`, logs and `caddy-root.crt`; deleted by `down`. Must be a folder below `/tmp`, `/var/tmp` or `$TMPDIR`, written as a plain absolute path: no `.` or `..` part, no `//` and no final `/` |
 | `MSCD_SAAS_TEST_HTTP_PORT`, `MSCD_SAAS_TEST_HTTPS_PORT` | 18080, 18443 | Ports on `127.0.0.1` |
 | `MSCD_SAAS_TEST_SCAN` | `gate` | `gate` builds with `build-release-images.sh` and its vulnerability gate. `auto` is for build machines that cannot reach the Alpine package mirrors: the gate still applies when the Alpine updates could be applied, and the scan only reports when they could not. Test images are never pushed |
-| `MSCD_SAAS_TEST_KEEP_IMAGES` | `false` | `true` keeps the two test images after `down` |
+| `MSCD_SAAS_TEST_KEEP_IMAGES` | `false` | `true` keeps the test images under `localhost/<project>/` after `down` |
 | `MSCD_BUILD_CA` | empty | The certificate of a TLS-inspecting proxy for the image builds |
 
 When the networks `172.31.250.0/24` or `172.31.251.0/24` are already used by another Docker network on the build machine, `up` picks two free `172.31.x.0/24` ranges.
