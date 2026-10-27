@@ -79,6 +79,8 @@ Confirmed by the product owner on 2026-10-27 (the defaults that were already bui
 7. New SaaS organisations do not default to SSO-only sign-in.
 8. A moved or changed evidence file shows "cannot be verified" in evidence lists and does not lower the item status.
 
+9. Production target: MSCD runs as multi-tenant SaaS for many customer organisations, first on one VPS, deployed by a GitHub Actions workflow (the cloud agent cannot SSH). On-premise stays supported.
+
 Still open: the terminology changes proposed in `docs/product/USER-FLOWS.md`.
 
 ## Open follow-ups
