@@ -23,6 +23,7 @@
 - [I. Risks](#i-risks)
 - [J. Contract tables](#j-contract-tables)
 - [K. SaaS production track](#k-saas-production-track)
+- [L. Motion track](#l-motion-track)
 - [Review notes](#review-notes)
 
 ## 0. Rules for implementing agents
@@ -1940,6 +1941,90 @@ test -z "$(docker ps -q --filter label=mscd.test=true)"
 | Legal documents and penetration test booking take weeks | Go-live waits | M2-S04 runs in the first wave and hands the owner the inputs at once |
 | On-premise installs make their own anchor key, which the compiled keys do not include | In-app anchor checks fail on-premise | SaaS is fixed in M2-S05. The on-premise fix (compile the customer key in, or trust the installation's own `audit-anchor.pub`) goes in the M2-S05 handoff note as a follow-up |
 | The demo stack reaches a production server by mistake | Public development keys protect real data | S-7, the refusals in `saas-deploy.sh`, separate GitHub environments, checklist item |
+
+## L. Motion track
+
+The product owner wants motion, illustrated animation and animated backgrounds in three places, all built with the `motionsites-web-builder` skill (installed in `~/.claude/skills/motionsites-web-builder/` for this session; see the rule in `CLAUDE.md`). Follow the skill's workflow: decide, study the 2 or 3 closest examples, choose media, write the spec, build, then the look-and-fix loop with screenshots until the page scores 8 or more on the skill's `references/review.md`, nothing under 7. The skill's sponsor block never goes into files or replies.
+
+Rules for this track, on top of R-01 to R-18:
+
+| # | Rule |
+|---|---|
+| L-1 | No request to another origin at run time: fonts, scripts, videos and images are copied into the repository and served from the same site. A chosen MotionSites media file may be copied for this site (allowed by the skill's licence); the skill's `examples/` and `media/` folders are never committed. |
+| L-2 | `prefers-reduced-motion: reduce` shows a still frame or a static poster and stops every loop. Nothing is hidden until an animation runs (the page is complete at rest). |
+| L-3 | Text 12px or more and WCAG AA contrast in light and dark themes, measured over the moving background at its brightest frame (use a scrim where needed). |
+| L-4 | Performance: animated backgrounds pause when off screen or when the tab is hidden; a video background is at most 6 MB, H.264 MP4 with a WebM fallback and a poster image; no layout shift from media. |
+| L-5 | Brand: MSCD tokens (accent `#e8731a` dark, `#ad4f0b` light), IBM Plex Sans and IBM Plex Mono, the CyberLentera logo from `project/assets/`. |
+
+| Wave | Package | Depends on | Owns |
+|---|---|---|---|
+| L1 (now, parallel to wave 1a and 1b) | MOT-01 Marketing landing site | none | `apps/site/**`, `docs/site.md`, `docs/platform/handoff/MOT-01.md` |
+| L1 | MOT-02 Sign-in brand panel motion | none (must finish before M2-S11, which owns `apps/web/src/auth/**` in wave 3b) | `apps/web/src/auth/ui.tsx` (BrandPanel and AuthLayout only), `apps/web/src/auth/auth.css`, `apps/web/src/auth/motion/**`, `apps/web/public/motion/**`, `apps/web/test/auth/motion.test.tsx`, `apps/web/e2e/auth-motion.spec.js`, `docs/platform/handoff/MOT-02.md` |
+| L2 | MOT-03 In-app illustration library | M2-01 (uses its EmptyState in `apps/web/src/screens/ui/`) | `apps/web/src/illustrations/**`, `apps/web/test/illustrations/**`, `apps/web/e2e/illustrations.spec.js`, `docs/platform/handoff/MOT-03.md` |
+
+#### MOT-01 Marketing landing site
+
+| | |
+|---|---|
+| Wave, depends on | L1; none |
+| Owns | `apps/site/**`, `docs/site.md`, `docs/platform/handoff/MOT-01.md` |
+
+Brief:
+- A public marketing site for MSCD at `apps/site/`, the cinematic version of the design in `project/MSCD Landing.dc.html` (keep its sections, facts and message: one traceability chain from risk to evidence, ISO/IEC 27001, ISO 9001, ISO 22301 and ISO 37001, files stay in the customer's repository, SaaS and on-premise, MFA). Read that file and `project/MSCD Technical Proposal.dc.html` for the facts; invent no customer names, numbers or certifications.
+- Signature idea chosen through the skill. Good candidates: the chain Issue, Risk, Control, Document, Evidence, Finding drawn as a living thread across the hero; evidence files flowing into a vault; a calm dark cinematic video behind a precise headline.
+- Static files only: `apps/site/index.html` plus `apps/site/assets/**` (self-hosted fonts in WOFF2, any library copied from `node_modules` or vendored with its licence, media). No build step is needed; if one is used it must not change the root lockfile.
+- English first, with an Indonesian version at `apps/site/id/index.html` using the same assets.
+- Calls to action: "Request a demo" (a `mailto:` placeholder address `sales@example.com` the owner replaces, shown as text too) and "Sign in" (link to `/` of the app host, set in one constant).
+- `apps/site/check.mjs`: a Playwright script (use `@playwright/test` from the root `node_modules` and the Chromium at `/opt/pw-browsers` or the default install) that serves the folder on a free local port, takes screenshots at 1440x900 and 390x844 in light and dark (`colorScheme`), and fails on: any request to another origin, horizontal overflow, text under 12px, a contrast ratio under 4.5:1 for text over its background (sample the background at the text position), missing `<title>` or meta description, console errors, broken media. It also runs once with `reducedMotion: 'reduce'` and checks that no animation is running.
+- `docs/site.md`: what the site is, how to preview it, how to swap the media, and how it will be served (a follow-up for M2-S02: Caddy serves `apps/site` on the bare domain and the app on `app.<domain>`).
+
+Acceptance:
+
+```bash
+node apps/site/check.mjs
+node tools/scripts/check-text.mjs apps/site docs/site.md
+```
+
+#### MOT-02 Sign-in brand panel motion
+
+| | |
+|---|---|
+| Wave, depends on | L1; none |
+| Owns | `apps/web/src/auth/ui.tsx` (BrandPanel and AuthLayout only), `apps/web/src/auth/auth.css`, `apps/web/src/auth/motion/**`, `apps/web/public/motion/**`, `apps/web/test/auth/motion.test.tsx`, `apps/web/e2e/auth-motion.spec.js`, `docs/platform/handoff/MOT-02.md` |
+
+Brief:
+- Replace the static brand panel of the sign-in pages (`BrandPanel` in `apps/web/src/auth/ui.tsx`, used by every auth page through `AuthLayout`) with an animated background chosen through the skill: the traceability chain as a living illustration (canvas or SVG) or a calm self-hosted video loop, behind the existing text and facts.
+- The form side stays exactly as it is; only the brand panel changes. Keep every existing auth test and spec green (`apps/web/test/auth/**`, `apps/web/e2e/api-only/sign-in.spec.js`, `apps/web/e2e/contrast.spec.js`).
+- On narrow screens the panel collapses as today; the animation stops when the panel is hidden.
+- Rules L-1 to L-5 apply. The nginx Content-Security-Policy in `deploy/nginx/**` must not need a change: no new origins, no inline scripts beyond what the build already emits.
+
+Acceptance:
+
+```bash
+npm test -w @mscd/web -- test/auth
+CI=1 npm run test:e2e -w @mscd/web -- e2e/auth-motion.spec.js e2e/contrast.spec.js e2e/shell.spec.js
+npm run build -w @mscd/web
+```
+
+#### MOT-03 In-app illustration library
+
+| | |
+|---|---|
+| Wave, depends on | L2; M2-01 |
+| Owns | `apps/web/src/illustrations/**`, `apps/web/test/illustrations/**`, `apps/web/e2e/illustrations.spec.js`, `docs/platform/handoff/MOT-03.md` |
+
+Brief:
+- A small set of illustrated, lightly animated scenes for the app, built through the skill but quiet enough for daily work: Getting started (a path of steps lighting up), no systems yet, no documents yet, no evidence yet, no findings, all done, and an error or offline state. Each scene is a React component with a static frame and a short entrance (under 1.2 s), no endless loops inside the dashboard.
+- Each component takes a size and the theme from the tokens of `apps/web/src/styles.css`, has a text alternative, and plugs into the `EmptyState` of `apps/web/src/screens/ui/` (M2-01) through a prop, so screen packages pick a scene by name.
+- A gallery screen in sample mode only (`?screen=illustrations`) for review, registered through the M2-01 screen registry.
+- Follow-up for M2-16 and the screen packages: use these scenes for Getting started and empty states.
+
+Acceptance:
+
+```bash
+npm test -w @mscd/web -- test/illustrations
+CI=1 npm run test:e2e -w @mscd/web -- e2e/illustrations.spec.js e2e/contrast.spec.js
+```
 
 ## Review notes
 
