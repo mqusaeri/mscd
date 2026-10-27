@@ -396,6 +396,44 @@ describe('screen host in sample mode', () => {
     expect(app.state.screen).toBe('portfolio');
   });
 
+  it('?screen= with a ?persona= the screen does not list keeps that persona on its own landing (C.2)', async () => {
+    const app = await sampleApp();
+    app._start = { screen: 'license', persona: 'owner' };
+    app.state = { ...app.state, role: 'owner', screen: 'portfolio' };
+    app.afterFirstLoad();
+    expect([app.state.role, app.state.screen]).toEqual(['owner', 'mytasks']);
+    app._start = { screen: 'license', persona: 'auditor' };
+    app.state = { ...app.state, role: 'auditor', screen: 'portfolio' };
+    app.afterFirstLoad();
+    expect([app.state.role, app.state.screen]).toEqual(['auditor', 'portfolio']);
+    app._start = { screen: 'license', persona: 'top' };
+    app.state = { ...app.state, role: 'top', screen: 'portfolio' };
+    app.afterFirstLoad();
+    expect([app.state.role, app.state.screen]).toEqual(['top', 'license']);
+    // A persona alone lands where a persona switch lands.
+    app._start = { screen: null, persona: 'owner' };
+    app.state = { ...app.state, role: 'owner', screen: 'portfolio' };
+    app.afterFirstLoad();
+    expect(app.state.screen).toBe('mytasks');
+  });
+
+  it('the body of a host screen renders only for a persona that may open it, whatever set the screen (C.2)', async () => {
+    const app = await sampleApp();
+    app.state = { ...app.state, role: 'owner' };
+    app.go('license');
+    expect(app.state.screen).toBe('license');
+    const v = app.renderVals();
+    expect(v.hostScreen).toBeFalsy();
+    expect([v.title, v.isTasks]).toEqual(['My Tasks', true]);
+    expect(v.pageActions.map((a: AnyRecord) => a.label)).not.toContain('Install licence');
+    app.state = { ...app.state, role: 'auditor' };
+    const a = app.renderVals();
+    expect([a.title, a.isPortfolio, Boolean(a.hostScreen)]).toEqual(['Portfolio Overview', true, false]);
+    app.state = { ...app.state, role: 'top' };
+    const t = app.renderVals();
+    expect([t.title, Boolean(t.hostScreen)]).toEqual(['Licence', true]);
+  });
+
   it('a persona switch away from a host screen the new persona cannot open lands on its own screen', async () => {
     const app = await sampleApp();
     app.state = { ...app.state, screen: 'license' };

@@ -23,7 +23,7 @@
 // MSCD_TEST_PG_IMAGE replaces postgres:16.15-alpine; E2E_STACK_SKIP_BUILD=1 skips step 1 apart from ensure-built.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -343,8 +343,24 @@ async function main() {
   const dist = path.join(work, 'web-dist');
   const webEnv = { ...baseEnv, VITE_DATA_SOURCE: 'api', VITE_API_TARGET: `http://127.0.0.1:${PORTS.api}` };
   run('build the web app (VITE_DATA_SOURCE=api)', process.execPath, [VITE, 'build', '--outDir', dist, '--emptyOutDir'], { cwd: WEB, env: webEnv });
+  assertNoSampleMaterial(dist);
   startChild('web', process.execPath, [VITE, 'preview', '--port', String(PORTS.web), '--strictPort', '--outDir', dist], webEnv, WEB);
   log(`ready: web http://localhost:${PORTS.web}, api ${PORTS.api}, mock providers ${PORTS.mock}, gateway ${PORTS.gateway}, Mailpit ${mailApi}`);
+}
+
+// Texts only the sample build carries: the sample organisations of src/data/sample-orgs.js and the sample licence id
+// of the Licence screen's sample adapter. An api build holds no sample code or records (R-13, createDataSource.js);
+// a screen that imports its sample.ts statically instead of in the build's sample branch (C.6) puts them back.
+const SAMPLE_MARKERS = ['PT Nusantara Digital Teknologi', 'PT Bank Sentosa Digital', 'RS Medika Nusantara', 'LIC-SAMPLE'];
+function assertNoSampleMaterial(dist) {
+  const dir = path.join(dist, 'assets');
+  const hits = [];
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
+    const text = readFileSync(path.join(dir, name), 'utf8');
+    for (const marker of SAMPLE_MARKERS) if (text.includes(marker)) hits.push(`${name} (${marker})`);
+  }
+  if (hits.length) throw new Error(`the api build holds sample material: ${hits.join(', ')}`);
+  log('the api build holds no sample material');
 }
 
 main().catch((error) => {

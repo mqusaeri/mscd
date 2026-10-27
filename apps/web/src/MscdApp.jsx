@@ -98,10 +98,14 @@ export default class MscdApp extends React.Component {
   isScreen(id){ return BUILTIN_SCREEN_IDS.includes(id)||!!hostById(id); }
   // After the first snapshot: the screen of ?screen= (sample builds; a host screen of another persona switches to its
   // first persona), else in API mode the landing of a user without a system role (C.3 administration landing).
+  // With ?persona= the persona rules of C.2 hold: a screen that persona cannot open is ignored, and the persona lands
+  // on its own first screen, as after a persona switch.
   afterFirstLoad(){ const start=this.sampleStart();
-    if(!this.api&&start&&start.screen&&this.isScreen(start.screen)){ const id=start.screen; const def=hostById(id); const r=def&&!start.persona&&!def.roles.includes(this.state.role)?def.roles[0]:null;
+    if(!this.api&&start&&(start.persona||start.screen)){ const id=start.screen&&this.isScreen(start.screen)?start.screen:null; const def=id?hostById(id):null; const r=def&&!start.persona&&!def.roles.includes(this.state.role)?def.roles[0]:null;
       if(r) return this.ds.switchPersona(r).then(snap=>this.setState(s=>({...this.applySnap(snap,s),role:r,screen:id})),e=>console.warn('persona switch failed',e));
-      return this.setState({screen:id}); }
+      if(!id&&!start.persona) return;
+      const role=this.state.role; const to=this.landing(role,id||(role==='owner'?'mytasks':'portfolio'),this.MSL.length<2);
+      if(to!==this.state.screen) this.setState({screen:to}); return; }
     if(this.api&&!this.MSL.length){ const id=this.landingWithoutSystem(); if(id&&id!==this.state.screen) this.setState({screen:id}); } }
   // C.3: a Tenant Admin or Storage Admin without a business role lands on the first administration screen, a platform
   // operator without a membership on the first platform screen; everyone else keeps the no-system message.
@@ -601,7 +605,10 @@ export default class MscdApp extends React.Component {
     // administrator the Framework library and Storage repositories as well.
     const noMs=!this.MSL.length; const adminRoles=this.api&&D.me?(D.me.adminRoles||[]):[];
     const L=this.L; const t=new Proxy({},{get:(_,k)=>this.t(k)}); const ms=noMs?NO_MS:this.msObj; const deploy=st.deploy??this.props.deploy??'saas'; const role=st.role; const meId=this.me; const meP=this.personOf(meId);
-    const single=this.MSL.length<2; const screen=st.screen==='portfolio'&&single?'m1overview':st.screen; const d=noMs?null:this.data(); const org=this.org;
+    const single=this.MSL.length<2; let screen=st.screen==='portfolio'&&single?'m1overview':st.screen; const d=noMs?null:this.data(); const org=this.org;
+    // A host screen renders only for a session that may open it (C.2, C.3), whatever led to it (?screen=, ctx.go, a
+    // stale state): otherwise the role's landing renders, or the no-system landing (C.3) without a system.
+    if(hostById(screen)&&!canOpenHost(screen,ctx,role)) screen=noMs?((this.api&&this.landingWithoutSystem())||''):this.landing(role,screen,single);
     const hv=hostVals(screen,ctx); const needsMs=!hv&&noMs&&screen!=='fw'&&screen!=='storage';
     const sbOpen=st.sb; const orgVals={sbOpen,sbClosed:!sbOpen,sbW:sbOpen?'224px':'68px',sbPad:sbOpen?'12px':'10px',logoMax:sbOpen?'90px':'40px',orgPad:sbOpen?'10px 10px':'8px 4px',orgInitials:org.name.replace(/^(PT|RS)\s+/,'').split(' ').map(w=>w[0]).slice(0,3).join(''),navJustify:sbOpen?'space-between':'center',navPx:sbOpen?'10px':'0px',toggleSb:()=>this.setState(x=>({sb:!x.sb})),orgName:org.name,orgSub:this.MSL.length+' '+this.li(this.MSL.length===1?['management system','sistem manajemen']:['management systems','sistem manajemen'])+', '+org.sites+' '+this.li(org.sites===1?['site','lokasi']:['sites','lokasi']),orgMenu:st.orgMenu,toggleOrgMenu:()=>this.setState(s=>({orgMenu:!s.orgMenu,msMenu:false,roleMenu:false})),msArrow:!single,msMenuOpen:st.msMenu&&!single,orgOptions:this.ORGS.map(o=>({name:o.name,sub:o.ms.length+' '+this.li(o.ms.length===1?['management system','sistem manajemen']:['management systems','sistem manajemen'])+', '+this.t(o.deploy==='saas'?'saas':'onprem').split(',')[0],bg:o.id===org.id?'var(--accbg)':'transparent',go:()=>this.setOrg(o.id)})),single};
     const NAV=[{id:'top',label:null,items:[{id:'portfolio',label:t.portfolio}]},{id:'impl',label:t.g_impl,items:[{id:'m1overview',label:t.nav_overview},{id:'controls',label:t.nav_controls},{id:'phases',label:t.nav_phases},{id:'docs',label:t.nav_docs}]},{id:'audit',label:t.g_audit,items:[{id:'audit',label:t.nav_audit},{id:'chain',label:t.nav_chain},{id:'gt',label:t.nav_gt}]},{id:'surv',label:t.g_surv,items:[{id:'timeline',label:t.nav_timeline},{id:'fresh',label:t.nav_fresh},{id:'cal',label:t.nav_cal}]},{id:'tasks',label:null,items:[{id:'mytasks',label:t.mytasks}]},{id:'admin',label:t.admin,items:[{id:'fw',label:t.nav_fw},{id:'storage',label:t.nav_storage}]}];

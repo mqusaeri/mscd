@@ -2,7 +2,8 @@
 // dates, the seats and management systems in use against their limits, what it includes, and "Install licence"
 // for whoever holds `license.manage` (a Tenant Admin with single tenancy; the platform operator with multi tenancy).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ApiError } from '../../data/api/ApiClient';
+import type { ApiClient, ApiError } from '../../data/api/ApiClient';
+import type { ControllerData } from '../../data/types';
 import type { HostContext, ScreenProps } from '../types';
 import { fieldErrors } from '../api';
 import { Alert, Badge, Button, Card, EmptyState, Facts, Field, FileInput, Meter, Modal, Textarea, UI_TEXT } from '../ui';
@@ -10,12 +11,34 @@ import type { Tone } from '../ui';
 import { createApiAdapter } from './api';
 import { ADAPTER_NAMES, FEATURE_NAMES, FRAMEWORK_NAMES, isExpired } from './model';
 import type { LicenceAdapter, LicenceModel } from './model';
-import { createSampleAdapter } from './sample';
 import { TEXT } from './text';
 
-/** The adapter of the build: the api's routes in API mode, the sample licence otherwise (C.6). */
-export function adapterFor(ctx: Pick<HostContext, 'mode' | 'client' | 'D'>, getD: () => HostContext['D'] = () => ctx.D): LicenceAdapter {
-  return ctx.mode === 'api' ? createApiAdapter(ctx.client) : createSampleAdapter(getD);
+/** An adapter whose module is loaded on first use; a failed load keeps the next call free to try again. */
+export function deferredAdapter(load: () => Promise<LicenceAdapter>): LicenceAdapter {
+  let pending: Promise<LicenceAdapter> | null = null;
+  const get = () => {
+    pending ??= load().catch((e: unknown) => {
+      pending = null;
+      throw e;
+    });
+    return pending;
+  };
+  return {
+    load: () => get().then((a) => a.load()),
+    install: (document) => get().then((a) => a.install(document)),
+  };
+}
+
+/**
+ * The adapter of the build (C.6): the api's routes when the build's `VITE_DATA_SOURCE` is `api`, the sample licence
+ * otherwise. The value is written out in full so Vite replaces it and drops the other branch; the sample adapter
+ * comes through a dynamic import, so an api build holds no sample code or data (R-13). Unit tests call
+ * `createApiAdapter` and `createSampleAdapter` directly.
+ */
+export function adapterFor(client: ApiClient | null, getD: () => ControllerData | null): LicenceAdapter {
+  return import.meta.env.VITE_DATA_SOURCE === 'api'
+    ? createApiAdapter(client)
+    : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(getD)));
 }
 
 /** The state badges of a licence: its state, and Expired once the end date has passed. */
@@ -186,8 +209,8 @@ export function InstallDialog({ ctx, open, adapter, onClose, onInstalled }: {
 export default function LicenceScreen({ ctx }: ScreenProps) {
   const data = useRef(ctx.D);
   data.current = ctx.D;
-  const { mode, client } = ctx;
-  const adapter = useMemo(() => adapterFor({ mode, client, D: null }, () => data.current), [mode, client]);
+  const { client } = ctx;
+  const adapter = useMemo(() => adapterFor(client, () => data.current), [client]);
   const [state, setState] = useState<{ loading: boolean; licence: LicenceModel | null; error: ApiError | null }>({ loading: true, licence: null, error: null });
   const [open, setOpen] = useState(false);
   const load = useCallback(() => {

@@ -153,7 +153,14 @@ export function useMutation<I, O = unknown>(run: (input: I) => Promise<ApiResult
   const [error, setError] = useState<ApiError | null>(null);
   const running = useRef<Promise<ApiResult<O>> | null>(null);
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Set on every mount: React StrictMode unmounts and mounts again once in development, and a ref that only ever
+  // turns false would leave the form busy for good after that.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const submit = useCallback((input: I) => {
     if (running.current) return running.current;
     setBusy(true);

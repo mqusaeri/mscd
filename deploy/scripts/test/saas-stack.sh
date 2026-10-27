@@ -681,7 +681,7 @@ project_images() {
         --format '{{if ne .Tag "<none>"}}{{.Repository}}:{{.Tag}}{{else}}{{.Repository}}@{{.Digest}}{{end}}' 2>/dev/null || true
 }
 
-# project_resources: what is left of the project, one kind per line ("containers 2"),
+# project_resources: what is left of the project, one kind per line ("containers: 2"),
 # images only when down removes them. Prints nothing when everything is gone.
 project_resources() {
     local filter="label=com.docker.compose.project=$PROJECT" count images
