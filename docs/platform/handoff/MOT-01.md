@@ -77,20 +77,22 @@ Playwright's Chromium has no H.264 decoder (`canPlayType('video/mp4; codecs="avc
 | At 360px the chain still showed three links per row, 5px between "04 Document" and "05 Evidence" against 8px inside one label | Two links per row now apply at 380px and narrower (the film band rule moves with them); the viewer tag rule stays below 360px. Smallest space between labels: 55px at 360px (63px Indonesian), 12px at 381px, 15px at 390px |
 | `check.mjs` never opened 360px | New size 360x800, and the label spacing check above at every size. Run on the previous version of the site, it reports "04 Document" and "05 Evidence" 5px apart at 360px |
 | Found while fixing: from 641 to about 730px the six labels sat in one row and touched (0px apart), with 7px from 644 to 672px elsewhere in the row | The chain wraps three per row at 760px and narrower (it used to wrap at 640px). The width sweep reported this on the previous version ("0px apart at widths 360 to 376, 644 to 728px") and finds nothing now |
-| Found while fixing: from 641 to 760px the thread of the full film crossed the hero text. On the previous version the same check, run once at 641x800, 667x375 and 740x360, reported the subtitle (down to 1.39:1) and "See how it works" (down to 1.43:1) under 4.5:1. Wrapping the chain alone also put its first row on the thread ("01" at 3.39:1) | The phone treatment of the hero now applies at 760px and narrower: the film becomes a band right above the chain and the hero grows with its content. Between 641 and 760px the band sits 20px higher, because the chain has more bottom padding on taller screens. The same check, run once at 641x800, 667x375, 700x900, 740x360, 760x1000 and 761x1000 in both languages, passes. On the previous version, 800x600, 812x375, 834x1112, 844x390, 900x700, 932x430, 1024x768, 1180x820, 1280x720 and 1366x768 passed already. 740x360 is now one of the check's sizes |
+| Found while fixing: from 641 to 760px the thread of the full film crossed the hero text. On the previous version the same check, run once at 641x800, 667x375 and 740x360, reported the subtitle (down to 1.39:1) and "See how it works" (down to 1.43:1) under 4.5:1. Wrapping the chain alone also put its first row on the thread ("01" at 3.39:1) | The phone treatment of the hero now applies at 760px and narrower: the film becomes a band right above the chain and the hero grows with its content. Between 641 and 760px the band sits 20px higher, because the chain has more bottom padding on taller screens. The same check, run once at 641x800, 667x375, 700x900, 740x360, 760x1000 and 761x1000 in both languages, passes. On the previous version (English, dark theme), 800x600, 812x375, 834x1112, 844x390, 900x700, 932x430, 1024x768, 1180x820, 1280x720 and 1366x768 passed already. 740x360 is now one of the check's sizes |
 
 ## Acceptance results
 
+Results of the run after the second review fixes. Other packages were changing `apps/web`, `apps/server` and `packs/sources` at the same time; the failures below are in their files, and none of them loads `apps/site` (it is not a workspace).
+
 | Command | Result |
 |---|---|
-| `node apps/site/check.mjs` | Pass: both film files checked on disk and fully decoded, then 20 runs (2 languages, 3 sizes, 2 themes, reduced motion at each size, no JavaScript), "Site check passed.", about 6 minutes |
-| `node tools/scripts/check-text.mjs apps/site docs/site.md` | Pass: 11 files, no em dash or centre dot |
+| `node apps/site/check.mjs` | Pass: both film files checked on disk and fully decoded, then 34 runs (2 languages; 5 sizes in 2 themes; reduced motion at each size; one width sweep of 281 widths; no JavaScript), "Site check passed.", about 9.5 minutes |
+| `node tools/scripts/check-text.mjs apps/site docs/site.md` | Pass: 12 files with the handoff note, no em dash or centre dot |
 | `node apps/site/apply-config.mjs --check` | Pass: pages match `site.config.mjs` |
 | `npm run typecheck` | Pass |
 | `npm run lint` | Pass (`apps/site` is linted with the root configuration) |
-| `npm test` | Pass, every workspace |
-| `npm run check:text` | Pass: 64 files |
-| `MSCD_TEST_CONTAINER_PREFIX=mot-01- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | Pass: 6 files, 49 tests; no `mot-01-` container left |
-| `CI=1 npm run test:e2e -w @mscd/web` | Pass: 268 tests |
+| `npm test` | Fails outside this package: `apps/web` `test/api/controller.test.ts` (1 test, controller code being changed by M2-01) and `packages/pack-tools` (9 tests expect pack version 1.2.0, `packs/sources` now holds 1.2.1). Every other workspace passes |
+| `npm run check:text` | Pass: 66 files |
+| `MSCD_TEST_CONTAINER_PREFIX=mot-01- npm run test:int -w @mscd/server -- test/int/seed test/int/parity` | Fails outside this package: 44 of 49 tests pass; the 5 failures expect the earlier pack versions (for example `ISO27001-2022 1.2.0`, now 1.2.1). No `mot-01-` container left |
+| `CI=1 npm run test:e2e -w @mscd/web` | 284 passed, 1 failed outside this package: `e2e/chain.spec.js` "a due date cannot be cleared" (web app screens being changed by M2-01) |
 
-All results above are from the run after the review fixes.
+Probe runs, made once with copies of `check.mjs` and not part of the acceptance: the previous site against the new spacing check (reports the 360px and 644 to 728px problems), and both versions at 641x800, 667x375, 700x900, 740x360, 760x1000 and 761x1000 (the current version passes).
