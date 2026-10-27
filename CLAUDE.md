@@ -11,7 +11,7 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 - **Milestone 1 is done.** All 39 work packages of `docs/platform/BUILD-PLAN.md` are built and verified. `main` holds the work (the old `mscd-platform` branch is the same history).
 - **Milestone 2 is planned, not started.** `docs/platform/MILESTONE-2.md` is the plan of record: the core track (M2-01 to M2-18: admin screens, data-entry forms, ISO clauses 4 to 10, readiness, certification cycle, bulk import) and the SaaS production track (section K, M2-Sxx: release images, Compose on one VPS with Caddy, GitHub Actions deploy, backups, monitoring, operator console, go-live checklist).
 - The demo runs with `deploy/scripts/deploy-demo.sh`. A new customer cannot yet be run from the web app alone; Milestone 2 fixes that.
-- `docs/product/USER-FLOWS.md` is a draft of the four user flows. Its ISO lead-auditor review is still to do.
+- `docs/product/USER-FLOWS.md` holds the four user flows and the audit glossary (81 label proposals). They passed an agent ISO lead-auditor review and a code accuracy check; a human lead auditor should confirm them before customers see them.
 
 ## Next steps
 
