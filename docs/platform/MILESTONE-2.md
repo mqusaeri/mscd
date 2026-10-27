@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | Purpose | The implementation plan for Milestone 2: decisions, server additions, pack content, web extension points and ordered work packages, written for the agents that build them |
-| Goal | A real customer can be onboarded and run its ISO programme entirely from the web app, on a fresh organisation with no demo data, without the browser console helper, after the installer has created the organisation and its first administrator (A.2) |
-| Inputs | `docs/platform/BUILD-PLAN.md` (Milestone 1, cited as "BP" with its section, for example "BP F.6"), `docs/platform/ui-contract.md`, `docs/platform/handoff/WP-*.md`, the user-flow gap study (customer onboarding, user and role assignment, document preparation, clauses) and code research on the web app, the API contract, the server and the packs, checked against the repository on 27 October 2026 |
+| Goal | A real customer can be onboarded and run its ISO programme entirely from the web app, on a fresh organisation with no demo data, without the browser console helper, after the installer or the platform operator has created the organisation and its first administrator (A.2). The same release runs in production as a multi-tenant SaaS service, and on-premise stays supported (A.1, section K) |
+| Inputs | `docs/platform/BUILD-PLAN.md` (Milestone 1, cited as "BP" with its section, for example "BP F.6"), `docs/platform/ui-contract.md`, `docs/platform/handoff/WP-*.md`, the user-flow gap study (customer onboarding, user and role assignment, document preparation, clauses) and code research on the web app, the API contract, the server and the packs, checked against the repository on 27 October 2026, plus the SaaS research on operator tools, deployment, backups, monitoring and Indonesian data protection (section K) |
 | Starting point | All 39 Milestone 1 work packages are built and verified on branch `mscd-platform`. The web app reaches 52 of the 185 contract routes. The other 133 are reachable only through the API |
 | Out of scope | Section B |
-| Build environment | As BP header: Linux container, 4 CPUs, 15 GB RAM, Node 22.22 and npm 10, Docker 29 with Compose v5, Playwright Chromium 1194, TLS-inspecting proxy (CA bundle `/root/.ccr/ca-bundle.crt`). At most four agents work at the same time in Milestone 2 (R-02) |
+| Build environment | As BP header: Linux container, 4 CPUs, 15 GB RAM, Node 22.22 and npm 10, Docker 29 with Compose v5, Playwright Chromium 1194, TLS-inspecting proxy (CA bundle `/root/.ccr/ca-bundle.crt`). At most four agents work at the same time in Milestone 2, counted across both tracks (R-02) |
 
 ## Contents
 
@@ -22,28 +22,29 @@
 - [H. Questions for the product owner](#h-questions-for-the-product-owner)
 - [I. Risks](#i-risks)
 - [J. Contract tables](#j-contract-tables)
+- [K. SaaS production track](#k-saas-production-track)
 - [Review notes](#review-notes)
 
 ## 0. Rules for implementing agents
 
-The rules R-01 to R-13 of BP section 0 still apply to every Milestone 2 work package (M2 package), with the changes in the second column. R-14 to R-18 are new.
+The rules R-01 to R-13 of BP section 0 still apply to every Milestone 2 work package (M2 package), with the changes in the second column. R-14 to R-18 are new. All rules apply to both tracks of Milestone 2: the core track (sections C to J, packages M2-01 to M2-18) and the SaaS production track (section K, packages M2-S01 to M2-S13), which adds the rules S-1 to S-7 of K.1.
 
 | # | Status in Milestone 2 | Rule or change |
 |---|---|---|
 | R-01 | Applies | Work only inside the paths your package owns (G.2 "Owns"). A path owned by a finished package may be edited only when your package lists it. |
-| R-02 | Changed | At most four packages run at the same time (was two). Packages in one wave never own the same file. The shared files of Milestone 2 have exactly one owner per wave, named in G.1. |
+| R-02 | Changed | At most four packages run at the same time (was two), counted across both tracks. Packages in one wave never own the same file. The shared files of Milestone 2 have exactly one owner per wave, named in the combined wave table of G.1. |
 | R-03 | Changed | No new npm dependency is planned. Import parsing uses `exceljs` and `csv-parse`, already server dependencies. M2-03 is the only lockfile owner, for the server version change to 1.1.0 (`npm install --package-lock-only`). Any other missing package goes in the handoff note, and the orchestrator adds it between waves. |
 | R-04 | Applies | Never hand-edit `apps/web/src/views/*.jsx` (except `util.js`) or `apps/web/src/hover.css`. Changes go through `project/MSCD Mockup.dc.html` or the `PATCHES` of `apps/web/scripts/convert-template.mjs`, then `npm run gen:views -w @mscd/web`. In Milestone 2 only M2-01 and M2-17 change the converter or the template. |
 | R-05 | Changed | The fixed ports stay. The API E2E stack (4174, 3174, 4310, 4311) and the Compose stacks (18080, 18443, 18088, 18025) can run only once per host, so every run of `test:e2e:api`, `test:smoke` and the journey takes the host lock: `flock /tmp/mscd-stack.lock <command>`. Vitest suites keep random ports. |
 | R-06 | Applies | Docker Hub pull limit, images of BP A.3 only, no `:latest`, `TESTCONTAINERS_RYUK_DISABLED=true`. |
 | R-07 | Changed | Status codes, enum values and table names are exactly as written in BP and in section D of this plan. Section D wins where it changes BP. |
 | R-08 | Applies | Writing rules for documentation and UI text: plain English, no em dash, no centre dot, no notes about the writing itself. `npm run check:text` checks `docs`. |
-| R-09 | Changed | Definition of done as BP R-09. The handoff note goes to `docs/platform/handoff/M2-nn.md`. |
+| R-09 | Changed | Definition of done as BP R-09. The handoff note goes to `docs/platform/handoff/M2-nn.md` (core) or `docs/platform/handoff/M2-Snn.md` (SaaS). |
 | R-10 | Changed | Agents never commit or push. The orchestrator commits once at the end of each wave, so `git diff HEAD` in an acceptance block shows only the current package's changes. |
 | R-11 | Applies | Development keys only in the folders named in BP R-11. |
 | R-12 | Applies | Every image build passes `--secret id=build_ca,src="$MSCD_BUILD_CA"`. |
 | R-13 | Applies | Release artefacts never contain development keys, demo profiles or seed data. M2-18 extends `deploy/scripts/check-release-artefacts.sh` with a check for the demo texts listed in E.4. |
-| R-14 | New | New route ids appear only in wave 1a (M2-02), and every one is listed in D.1 and J.1. From wave 2 on, a package may change the request or response schema of a route in the area files it owns, but adds no route id and changes no permission, enum value or matrix row. A needed change of that kind goes in the handoff note, and the orchestrator applies it between waves. |
+| R-14 | New | New route ids, permissions, enum values, profile keys and the tenant and platform migrations of both tracks appear only in wave 1a (M2-02). Every new route id is listed in D.1 and J.1. The only other migration is the ref migration of M2-03 in wave 1b (D.3). From wave 2 on, a package may change the request or response schema of a route in the area files it owns, but adds no route id, profile key or migration and changes no permission, enum value or matrix row. A needed change of that kind goes in the handoff note, and the orchestrator applies it between waves. |
 | R-15 | New | The demo keeps working: `bash deploy/scripts/deploy-demo.sh` still loads, `npm run test:int -w @mscd/server -- test/int/seed test/int/parity` and `CI=1 npm run test:e2e -w @mscd/web` pass after every package, and no Milestone 1 test is deleted or weakened. A test whose expected value changes because of a deliberate content change (E.2) is updated in the same package, with the reason in the handoff note. |
 | R-16 | New | Every new screen, form, drawer and dialog follows decision D2-01: hand-written React (`.tsx`), tokens of `apps/web/src/styles.css` only, English and Indonesian text for every label, no text under 12px, WCAG AA contrast in light and dark. |
 | R-17 | New | Web packages call the API only through the ApiClient of the host context (C.4). They never create their own client, never import zod at run time and import only types from `@mscd/shared`. |
@@ -60,9 +61,11 @@ At the end of Milestone 2 a customer organisation that holds no demo data can do
 3. The internal auditor plans and runs internal audits and raises findings. Owners close corrective actions. Top management holds and closes the management review.
 4. The manager records certification audits, the audit result and the certificate. Readiness numbers move as the work progresses.
 
+SaaS production is in scope too (product decision 9 of `CLAUDE.md`). At the end of Milestone 2 the same release runs as a multi-tenant SaaS service for many customer organisations on one VPS with Docker Compose. Signed release images reach it only through an approved GitHub Actions workflow. Backups are tested by a weekly restore, alerts reach the owner, and the platform operator runs the whole organisation lifecycle (create, suspend, offboard, archive), plans and limits per organisation and verified email domains from the operator console. A go-live checklist covers security, operations and the Indonesian personal data protection law (UU PDP). Section K holds this track. On-premise stays supported and keeps its behaviour.
+
 ### A.2 What stays outside the browser
 
-Installing the software stays a technical task. On-premise, `install.sh --admin-email` creates the organisation and invites the first administrator, as today, and now emails the invitation when mail is configured. On SaaS, the platform operator account is created once with `mscd-server admin create-operator` (M2-06), and every later organisation is created from the operator console in the browser (M2-16). Everything after the first administrator's first sign-in happens in the web app.
+Installing the software stays a technical task. On-premise, `install.sh --admin-email` creates the organisation and invites the first administrator, as today, and now emails the invitation when mail is configured. On SaaS, the platform operator account is created once with `mscd-server admin create-operator` (M2-06), which the owner runs on the production server through the approved `ops-cli.yml` workflow (M2-S09). Every later organisation is created from the operator console in the browser (M2-16, extended with status, domains and plans by M2-S12). Everything after the first administrator's first sign-in happens in the web app.
 
 ### A.3 Decisions
 
@@ -82,6 +85,7 @@ Installing the software stays a technical task. On-premise, `install.sh --admin-
 | D2-12 | A single organisation administrator is supported with a clear warning: "Getting started" and the role grant form show that grants to yourself and to other administrators need a second administrator. No rule is relaxed (question H.3). |
 | D2-13 | Bulk import is one dry-run-then-commit flow per file for four kinds (applicability, documents, risks, evidence). The commit is all rows or none, through the existing command services, so business rules and the audit trail apply to imported rows. |
 | D2-14 | Host screens navigate through controller state, as the generated screens do. URL sync (research extension point 8) is not built in Milestone 2. Each screen id is the last segment of its intended route so React Router can map it later. |
+| D2-15 | SaaS production is a second track of Milestone 2 (section K, packages M2-S01 to M2-S13). Both tracks share one contract written by M2-02 in wave 1a (R-14, D.1, D.3, J), one combined wave table (G.1) and the four-agent limit (R-02). M2-06 builds `admin create-operator` and `ops.organizations.create`, M2-S09 builds the rest of the organisation lifecycle, M2-16 builds the operator console and M2-S12 extends it. |
 
 ### A.4 Corrections to the gap study
 
@@ -100,9 +104,9 @@ The code research corrected these points of the gap study. The plan follows the 
 
 | Item | Where it goes and why |
 |---|---|
-| SaaS self-service sign-up and billing | Later milestone, because no payment provider or price list is chosen. The operator console creates organisations (M2-16) |
+| SaaS self-service sign-up and billing | Later milestone, because no payment provider or price list is chosen (decision D-S1 in K.3: sales-led). The operator console creates organisations (M2-16, M2-S12) |
 | LDAP and Active Directory sign-in, SMB, S3 and WebDAV repositories | Deferred as in BP Appendix 1, because no customer has asked for them and each needs its own adapter and tests. M2-18 corrects the user guide, the demo licence texts and `docs/INSTALL-ONPREM.md` so nothing promises them |
-| Email domain verification for automatic account creation on first company sign-in | Stays the operator command `tenant verify-domain`, because proving domain ownership needs DNS access that only the operator has. Invitations work without it |
+| Email domain verification on-premise | Stays the operator command `tenant verify-domain`, because proving domain ownership needs DNS access that only the operator has. Invitations work without it. On SaaS, M2-S11 adds verification by a DNS TXT record from the operator console |
 | Zero-transit upload from the browser to Microsoft 365 or Google Drive (`storage.upload-intents.complete`) | Later milestone, because it needs upload sessions and CORS settings in each customer tenant that are not tested yet. Uploads go through the gateway as today |
 | Read confirmation of policies, retention periods and disposal review | Milestone 3, because retention needs a decision on legal hold and deletion of stored files. Proof of communication is kept as evidence files meanwhile |
 | Document editor and review comments inside MSCD | Not planned, because customers write in their own tools and MSCD keeps the approved version and its hash |
@@ -110,7 +114,7 @@ The code research corrected these points of the gap study. The plan follows the 
 | Periodic access review task (Annex A 5.18) and the top management pending totals panel | Milestone 3, because the access review needs a review cycle record and the totals panel waits for the answer to H.13 |
 | Seeding demo personas for Programme Owner, Risk Owner and Compliance Investigator, and sample-mode permissions taken from the F.6 matrix | Milestone 3, because the personas depend on the answers to H.4 |
 | React Router and deep links for every screen | Later (D2-14), because the controller state model works and the change touches every screen |
-| An offline `mscd-server diagnostics` command and the third-party notices file | Later milestone, because the online diagnostics download (M2-16) covers support needs for now and the notices file belongs to release packaging |
+| The third-party notices file | Later milestone, because it belongs to release packaging. The offline `mscd-server diagnostics` command is built in M2-S09 |
 | A change register for planned changes (clause 6.3 of ISO/IEC 27001, ISO 9001, ISO 22301 and ISO 37001:2025) | Not in Milestone 2, because clause 6.3 is covered by its clause row (D2-09) with an owner, a justification and evidence, which an auditor accepts as the record of planned changes |
 | Organisation-wide freshness defaults set on screen | Not in Milestone 2, because the built-in defaults apply to every system and each system can set its own limits (M2-07, M2-11) |
 | Golden Thread Viewer node and chain stage for audit findings | Later milestone, because the trace view needs a stage definition per standard; findings show on the clause or control they concern through `finding.target_code` (M2-05, M2-14) |
@@ -211,8 +215,20 @@ M2-02 adds every route below to the area file named, with request and response s
 | `imports.create` | `POST /api/v1/ms/:ms/imports/:kind` | `imports.ts` | `permissionBy` on the path member `kind`: `applicability` `applicability.manage`, `documents` `document.manage`, `risks` `risk.manage`, `evidence` `evidence.manage` | multipart upload, dry run: row results and an import id | `imports/imports.controller.ts` | M2-08 |
 | `imports.get` | `GET /api/v1/ms/:ms/imports/:id` | `imports.ts` | `ms.read`; the service answers 404 to anyone but the creator | state and row results | `imports/imports.controller.ts` | M2-08 |
 | `imports.commit` | `POST /api/v1/ms/:ms/imports/:id/commit` | `imports.ts` | `ms.read`; the service answers 404 to anyone but the creator and checks the kind's permission again | queue `import.run`; 202 with task id | `imports/imports.controller.ts` | M2-08 |
+| `ops.organizations.get` | `GET /api/v1/ops/organizations/:org` | `ops.ts` | `ops.read` platform [OP] | status, region, created date, member count, system count, entitlement summary, domains, last sign-in | `ops/ops.controller.ts` | M2-S09 |
+| `ops.organizations.status` | `POST /api/v1/ops/organizations/:org/status` | `ops.ts` | `ops.tenants.manage` platform [OP] | body `{status, reason, confirmSlug?}`: move the organisation along the status machine of J.8; audited `ops.organization_status_changed` | `ops/ops.controller.ts` | M2-S09 |
+| `ops.organizations.events` | `GET /api/v1/ops/organizations/:org/events` | `ops.ts` | `ops.read` platform [OP] | status history from `platform.organization_status_event` | `ops/ops.controller.ts` | M2-S09 |
+| `ops.domains.list` | `GET /api/v1/ops/organizations/:org/domains` | `ops-domains.ts` (new area) | `ops.read` platform [OP] | domains with status, method and the requested, verified and last checked times | `ops/domains/domains.controller.ts` (new) | M2-S11 |
+| `ops.domains.add` | `POST /api/v1/ops/organizations/:org/domains` | `ops-domains.ts` | `ops.tenants.manage` platform [OP] | body `{domain}`; returns `{domain, txtName, txtValue, status}`; audited `ops.domain_added` | `ops/domains/domains.controller.ts` | M2-S11 |
+| `ops.domains.verify` | `POST /api/v1/ops/organizations/:org/domains/:domain/verify` | `ops-domains.ts` | `ops.tenants.manage` platform [OP] | check the TXT record at once; audited `ops.domain_verified` or `ops.domain_verification_failed` | `ops/domains/domains.controller.ts` | M2-S11 |
+| `ops.domains.remove` | `DELETE /api/v1/ops/organizations/:org/domains/:domain` | `ops-domains.ts` | `ops.tenants.manage` platform [OP] | remove a domain; audited `ops.domain_removed` | `ops/domains/domains.controller.ts` | M2-S11 |
+| `ops.entitlements.get` | `GET /api/v1/ops/organizations/:org/entitlements` | `ops-entitlements.ts` (new area) | `ops.read` platform [OP] | the `platform.entitlement` row with current use, and its `ETag` | `license/entitlements.controller.ts` (new) | M2-S10 |
+| `ops.entitlements.set` | `PUT /api/v1/ops/organizations/:org/entitlements` | `ops-entitlements.ts` | `ops.entitlements.manage` platform [OP] (new), with `If-Match` | a preset from `license.plans` or explicit limits; audited `ops.entitlements_changed` | `license/entitlements.controller.ts` | M2-S10 |
+| `ops.plans.list` | `GET /api/v1/ops/plans` | `ops-entitlements.ts` | `ops.read` platform [OP] | the presets of `license.plans` | `license/entitlements.controller.ts` | M2-S10 |
 
-The guard cannot read a multipart body before the handler, so the import kind is a path member. A stub answers `501` with the new problem slug `not-implemented` after the guard (J.6). The WP-30 contract harness declares 501 for the routes listed in `apps/server/test/int/m2-pending/M2-nn.json` (route ids per building package), and the RBAC and security sweeps treat a 501 from a listed route as "guard passed, handler pending". Each building package deletes its own file. J.1 lists the same 27 routes in the format that the shared contract tests read.
+The guard cannot read a multipart body before the handler, so the import kind is a path member. A stub answers `501` with the new problem slug `not-implemented` after the guard (J.6). The WP-30 contract harness declares 501 for the routes listed in `apps/server/test/int/m2-pending/M2-nn.json` and `M2-Snn.json` (route ids per building package), and the RBAC and security sweeps treat a 501 from a listed route as "guard passed, handler pending". Each building package deletes its own file. J.1 lists the same 37 routes in the format that the shared contract tests read.
+
+The last ten rows are the routes of the SaaS track (K), built by M2-S09, M2-S10 and M2-S11. Like `ops.organizations.create`, they answer 409 `conflict` with `messageKey` `single_tenancy` in single tenancy.
 
 ### D.2 Changed behaviour of existing routes
 
@@ -232,11 +248,17 @@ The guard cannot read a multipart body before the handler, so the import kind is
 | `documents.create`, `documents.update` | `origin` (`internal` default, `external`), `externalSource`, `externalRef`, `receivedAt` | M2-07 |
 | `documents.versions` | optional `changeSummary` (up to 500 characters) | M2-07 |
 | `registers.list`, `registers.create`, `registers.update` | register kinds `objectives` (table `quality_objective`) and `competence` (table `competence_record`); `registerPermission` gains the cases `objectives` and `competence`, both `register.manage` (own rows, owner required), and the F.6 condition text of `register.manage` names the two kinds (J.2) | M2-02 (permission), M2-07 (behaviour) |
+| `ops.organizations.create` | body takes an optional `preset` (a key of `license.plans`); new organisations start with `local_login = 'allowed'` (product decision 7 of `CLAUDE.md`) and with `region` from `tenancy.default_region`; with `mail.required` true it refuses with 409 `conflict` and `messageKey` `mail_required` when SMTP is not configured, and it never returns an invitation link | M2-02 (schema), M2-06 (mail rule, sign-in policy), M2-S09 (preset through `applyPreset` of M2-S10, region) |
+| `ops.organizations.list` | items add `status`, `plan`, `validUntil` and `verifiedDomains` | M2-02 (schema), M2-S09 |
+| `admin.license.put`, `license.get` | in multi tenancy the upload still checks the signature (D-32) and now also writes the `platform.entitlement` row with source `signed_licence`; the effective licence of an organisation is its entitlement row | M2-S10 |
+| `system.profile` | adds `legal: {privacyUrl, termsUrl}` from the profile keys of D.3 | M2-02 (schema), M2-S11 |
+| `auth.providers` | the same answer shape and status for an unknown slug, an unknown domain and a known organisation without SSO (D-S10); its own limit of 20 per minute per address, answering 429 with `Retry-After` | M2-02 (schema), M2-S11 |
 | CLI `admin create-user` | sends the invitation email when mail is configured; prints the link as a fallback | M2-06 |
+| CLI `admin create-operator` | new (M2-06 brief); with `mail.required` true it refuses when SMTP is not configured and never prints the set-password link | M2-06 |
 
 ### D.3 Schema, enums and permissions
 
-M2-02 writes all of it in wave 1a, except the ref migration change named below (M2-03, wave 1b).
+M2-02 writes all of it in wave 1a, for both tracks, except the ref migration change named below (M2-03, wave 1b).
 
 - `apps/server/migrations/tenant/0008_milestone2.sql`:
   - `certification_cycle`: `certificate_expires_at date`, `certification_body varchar(200)`, `certified_scope text`; unique partial index on `management_system_id` where `status IN ('planned', 'active') AND deleted_at IS NULL`, so a certified cycle can stay while the next cycle is open.
@@ -258,7 +280,20 @@ M2-02 writes all of it in wave 1a, except the ref migration change named below (
 - `AUDIT_EVENT_TYPES` also types `ref.audit_activity_template.event_type`, so M2-03 adds `internal_audit` to that CHECK in `apps/server/migrations/ref/0002_milestone2.sql` (wave 1b), and the pack schema accepts internal audit activity templates; J.7 lists both columns.
 - UI contract: requirement-type entries of catalogue systems get the key `cl-<code>` (D2-09) in the UI contract types of `packages/shared/src/api/**` and in `docs/platform/ui-contract.md`.
 - Permission changes on existing routes: as D.2 (`audit-events.create`, `audit-events.update`, `audit-activities.generate`, `audit-activities.update`, `registers.*`). After wave 1a no package changes a permission (R-14).
-- Jobs: the four new jobs are registered in the worker module in wave 1a, each with a stub handler file in the folder of the package that builds it: `modules/packs/applicability-sync.job.ts` (M2-03), `modules/implementation/readiness/readiness-recompute.job.ts` and `modules/notifications/certificate-expiry.job.ts` (M2-05), `modules/imports/import-run.job.ts` (M2-08).
+- Jobs: the six new jobs are registered in the worker module in wave 1a, each with a stub handler file in the folder of the package that builds it: `modules/packs/applicability-sync.job.ts` (M2-03), `modules/implementation/readiness/readiness-recompute.job.ts` and `modules/notifications/certificate-expiry.job.ts` (M2-05), `modules/imports/import-run.job.ts` (M2-08), `modules/license/entitlement-expiry.job.ts` (M2-S10), `modules/ops/domains/domain-verify.job.ts` (M2-S11). The building package adds the schedule entry in `modules/jobs/schedules.ts`, which has one owner per wave (G.1).
+- CLI: `apps/server/src/program.ts` registers three new command modules whose actions are stubs (`notImplemented` of `cli/not-implemented.ts`, exit code 2): `cli/license.ts` (filled by M2-06, extended by M2-S10), `cli/backup.ts` (M2-S07) and `cli/diagnostics.ts` (M2-S09). No later package edits `program.ts`, and no Milestone 2 package edits `apps/server/src/main.ts`.
+- SaaS track (section K), also in wave 1a:
+  - `apps/server/migrations/platform/0005_milestone2_saas.sql`. The platform folder ends at `0004_operations.sql` and the core track adds no platform migration, so the number is free. A correction goes in `0006_milestone2_fix.sql` (I).
+    - New table `platform.organization_status_event`: `id`, `organization_id`, `from_status`, `to_status` (both with the CHECK list of `platform.organization.status`), `reason text NOT NULL`, `actor_user_id`, `created_at`.
+    - `platform.verified_domain` adds `status` (`pending`, `verified`, `failed`; default `verified`, so existing rows stay verified), `txt_token_hash`, `requested_at`, `last_checked_at` and `method` (`dns`, `manual`; default `manual` for existing rows). `verified_at` and `verified_by` become nullable for pending rows. A unique index on `lower(domain)` where `status = 'verified'`; when verified duplicates already exist, the migration stops and lists them.
+    - New table `platform.entitlement`: primary key `organization_id`; `plan`, `source` (`preset`, `manual`, `signed_licence`), `max_users`, `max_management_systems`, `frameworks`, `storage_adapters`, `features`, `rate_user_per_minute`, `rate_org_per_minute`, `valid_from`, `valid_until`, `grace_days`, `version`, `updated_at`, `updated_by`.
+    - Grants and RLS like the other platform tables.
+  - Kysely types of the new columns and tables in `apps/server/src/db/types/platform.ts`.
+  - Profile keys in `apps/server/src/config/profile.schema.ts` and in `apps/server/profiles/{saas,onprem,demo,test}.yaml`, with defaults that keep on-premise unchanged: `tenancy.default_region` (default `id`); `license.plans` (map of preset name to limits; `saas.yaml` holds the D-S4 presets `trial` and `standard`); `network.dns_resolvers` (default `[]`); `legal.privacy_url` and `legal.terms_url` (default null); `mail.required` (`true` in `saas.yaml`, `false` elsewhere).
+  - `enums.ts`: permission `ops.entitlements.manage`; audit actions `ops.organization_status_changed`, `ops.domain_added`, `ops.domain_verified`, `ops.domain_verification_failed`, `ops.domain_removed`, `ops.entitlements_changed`; job names `domain.verify`, `entitlement.expiry`; notification kind `organization_status_changed`. No new problem slug: the SaaS refusals use existing slugs with the message keys of J.6.
+  - `authz/matrix.ts`: `ops.entitlements.manage: platform([OP])`.
+  - `machines.ts`: the organisation status machine of J.8 with owner `M2-02`.
+  - Stub handlers for the ten SaaS routes of D.1 in `ops/ops.controller.ts`, `ops/domains/domains.controller.ts` and `license/entitlements.controller.ts`, registered in `ops.module.ts` and `license.module.ts`.
 - J lists every enum value, permission row, job, notification kind, audit action, rule id, CHECK list and machine above in the formats the shared tests parse.
 
 ### D.4 Certification lifecycle
@@ -345,7 +380,7 @@ The pack content drops demo facts from prep tasks and cycle titles (`NC-2025-02`
 |---|---|
 | Server integration | `apps/server/test/int/<area>/**` for the package's routes and jobs: success, every business rule, scope policy, audit entry, `If-Match` |
 | Shared contract | `packages/shared/test/{routes,enums,authz,machines}.test.ts` compare the code with the plan tables. M2-02 makes `helpers.ts` read BP and section J of this plan, so the tests stay as strict as in Milestone 1 |
-| Contract, RBAC, security | M2-02 adds the routes and matrix rows; the generated sweeps cover them. Record-table entries and RBAC expectations of each building package live in `security/record-tables/M2-nn.ts` and `rbac/expectations/M2-nn.ts`, merged by the sweeps. Building packages delete their `m2-pending` file and run `test/int/rbac test/int/contract test/int/security` |
+| Contract, RBAC, security | M2-02 adds the routes and matrix rows; the generated sweeps cover them. Record-table entries and RBAC expectations of each building package live in `security/record-tables/M2-nn.ts` and `rbac/expectations/M2-nn.ts` (`M2-Snn.ts` for M2-S09, M2-S10 and M2-S11), merged by the sweeps. Building packages delete their `m2-pending` file and run `test/int/rbac test/int/contract test/int/security` |
 | Web unit | `apps/web/test/screens/<screen>.test.tsx` (run because `vitest.config.js` includes `.tsx`, C.7; each run must report at least one test, G.1): `renderToStaticMarkup` in both languages and both themes, adapter tests with the fake fetch of `test/auth/helpers.ts` (method, path, body, `X-CSRF-Token`, field errors kept), route contract test |
 | Web E2E sample | `apps/web/e2e/screens/<screen>.spec.js`, tagged `@sample-only` unless written to pass in both modes (D2-04), opened with `openScreen` and the `sampleRole` of `meta.json` (C.2) |
 | Web E2E API | `apps/web/e2e/api-only/<screen>.spec.js`, tagged `@api-only`, with the `apiSession` option (`tenant.admin` for admin screens, `rina` for manager flows, `maya` for internal auditor flows, `hendra` for top management, `bagus` for owner flows, `ops` for the operator console). Each spec opens every form and drawer and calls `expectOverlayReadable` in light and dark |
@@ -356,20 +391,52 @@ The pack content drops demo facts from prep tasks and cycle titles (`NC-2025-02`
 
 ### G.1 Waves
 
-A wave starts when every package of the previous wave is done and committed (R-10). Inside a wave at most four packages run at once (R-02). Packages in one wave own disjoint paths. API E2E and Compose runs take the host lock (R-05).
+This is the one wave table for both tracks. A wave starts when every package of the previous wave is done and committed (R-10). Each wave holds at most four packages (R-02), so all its packages start together; the order inside a wave is the start order when fewer agents are free. Packages in one wave own disjoint paths, and a shared file has one owner per wave, named in the last column and in the shared file table below. API E2E and Compose runs take the host lock (R-05). Where other sections say "wave 2", they mean waves 2a and 2b, and "wave 3" means waves 3a to 3c.
 
-| Wave | Work packages | Lockfile owner | Owners of shared files in this wave |
+| Wave | Work packages, in start order | Lockfile owner | Owners of shared files in this wave |
 |---|---|---|---|
-| 1a | M2-02 Server contract, schema and permissions | none | `packages/shared/src/api/*`, `enums.ts`, `authz/matrix.ts`, `machines.ts`, `index.ts`, `packages/shared/test/**`, tenant migrations, DB types except `ref.ts`, `apps/server/src/app/*.module.ts`, module files that register new controllers and jobs, the stub job files of D.3, contract snapshot, RBAC and security sweep files, `docs/platform/ui-contract.md`: M2-02 |
-| 1b | M2-01 Web screen host and Administration area; M2-03 Pack format and upgrade path | M2-03 (server version only) | web controller, converter, generated views, `styles.css`, `vitest.config.js`, `e2e/helpers.js`, shared E2E specs, `controller.test.ts`, `SampleDataSource.js`, `data/api/**`, `auth/boot.tsx`: M2-01. `packages/shared/src/pack/**`, ref migration, `apps/server/package.json`, lockfile: M2-03 |
-| 2 | M2-04 Pack content; M2-05 Certification, internal audit and readiness server; M2-06 Onboarding, accounts and operator server; M2-07 Document control and register server additions | none | `mscd-data.js`, seed snapshot, mock fixture, the Milestone 1 specs listed in M2-04: M2-04. `apps/server/src/modules/jobs/schedules.ts`, `apps/server/src/seed/**`, the command helpers of D.6: M2-05. `docs/INSTALL-ONPREM.md`, `deploy/scripts/install.sh`, `modules/jobs/scheduler-tick.job.ts`: M2-06. Area files: as listed per package (R-14) |
-| 3 | M2-08 Bulk import; M2-09 Storage and management system administration; M2-10 People, roles and sign-in; M2-11 Controls, evidence and phases forms; M2-12 Document control screens; M2-13 Registers screen; M2-14 Audit registers screens; M2-15 Certification timeline and auditor workspace; M2-16 Getting started, account, notifications and operator console | none | `packages/shared/src/api/imports.ts` and `apps/server/src/modules/imports/**`: M2-08. Otherwise none (each package owns only its folders) |
-| 4 | M2-17 Terminology (gated on H.1) | none | may edit any web text, the template and the converter, pack labels and docs (alone in the wave) |
+| 1a | M2-02 Server contract, schema and permissions (both tracks); M2-S01 Release images, signing and supply chain; M2-S03 Server bootstrap; M2-S04 Go-live checklist and owner pack | none | M2-02: `packages/shared/src/**` (every file, with the new area files `imports.ts`, `ops-domains.ts` and `ops-entitlements.ts`), `packages/shared/test/**`, tenant migration 0008 and platform migration 0005, DB types except `ref.ts`, `apps/server/src/config/profile.schema.ts` and the new keys in `apps/server/profiles/*.yaml`, `apps/server/src/program.ts` and the CLI stubs, `apps/server/src/app/*.module.ts`, module files that register new controllers and jobs, the stub controllers and job files of D.3, contract snapshot, RBAC and security sweep files, `m2-pending/**`, `docs/platform/ui-contract.md`. M2-S01: `deploy/scripts/build-bundle.sh`, `tools/scripts/check-workflows.mjs`, `.github/dependabot.yml`. M2-S04: `docs/saas/README.md`, `docs/saas/go-live-checklist.md` |
+| 1b | M2-01 Web screen host and Administration area; M2-03 Pack format and upgrade path; M2-S02 SaaS Compose stack and TLS | M2-03 (server version only) | M2-01: web controller, converter, generated views, `styles.css`, `vitest.config.js`, `e2e/helpers.js`, shared E2E specs, `controller.test.ts`, `SampleDataSource.js`, `data/api/**`, `auth/boot.tsx`, `screens/license/**`. M2-03: `packages/shared/src/pack/**`, ref migration, `apps/server/package.json`, lockfile. M2-S02: `apps/server/profiles/saas.yaml` (values; the keys of M2-02 stay), `deploy/nginx/**`, `deploy/compose/.env.saas.example`, `deploy/compose/config/caddy/**` |
+| 2a | M2-04 Pack content; M2-05 Certification, internal audit and readiness server; M2-06 Onboarding, accounts and operator server; M2-07 Document control and register server additions | none | M2-04: `mscd-data.js`, seed snapshot, `tools/mock-providers/fixtures/demo.json`, the Milestone 1 specs listed in M2-04. M2-05: `apps/server/src/modules/jobs/schedules.ts`, `apps/server/src/seed/**`, the command helpers of D.6. M2-06: `apps/server/src/modules/ops/**`, `apps/server/src/cli/{admin,tenant,license}.ts`, `identity/mail-templates.ts`, `modules/jobs/scheduler-tick.job.ts`, `docs/INSTALL-ONPREM.md`, `deploy/scripts/install.sh`. Area files: as listed per package (R-14) |
+| 2b | M2-S10 Per-organisation entitlements; M2-S05 Deploy script and deploy workflow; M2-S07 Backups and restore test; M2-S08 Monitoring and alerts | none | M2-S10: `apps/server/src/modules/license/**`, `apps/server/src/cli/license.ts`, `apps/server/profiles/saas.yaml` (`license.plans` values), `identity/mail-templates.ts`, `modules/jobs/schedules.ts`, `modules/platform/rate-limit.ts`, `modules/tenancy/rate-limit-store.ts`, `packages/shared/src/api/{license,ops-entitlements}.ts` (schemas only). M2-S05: `.github/workflows/deploy-prod.yml`, which also writes the backup and monitoring secrets that M2-S07 and M2-S08 read. M2-S07: `apps/server/src/cli/backup.ts`. M2-S08: `deploy/compose/config/caddy/conf.d/ops.caddy` |
+| 3a | M2-S09 Operator commands and organisation lifecycle; M2-08 Bulk import; M2-09 Storage and management system administration; M2-10 People, roles and sign-in | none | M2-S09: `apps/server/src/modules/ops/**` except `ops/domains/**`, `apps/server/src/modules/tenancy/**`, `apps/server/src/db/tenant-provisioner.ts`, `apps/server/src/cli/{tenant,diagnostics}.ts`, `identity/{mail-templates.ts,session-resolver.ts}`, `modules/jobs/scheduler-tick.job.ts`, `packages/shared/src/api/ops.ts` (schemas only). M2-08: `packages/shared/src/api/imports.ts`, `apps/server/src/modules/imports/**`. Web packages: own folders only |
+| 3b | M2-S11 Organisation discovery at sign-in; M2-16 Getting started, account, notifications and operator console; M2-11 Controls, evidence and phases forms; M2-12 Document control screens | none | M2-S11: `apps/web/src/auth/**` (with `i18n.ts`), `apps/web/test/auth/**`, `tools/mock-providers/**`, `apps/server/src/cli/tenant.ts` (`verify-domain` only), `apps/server/src/modules/ops/domains/**`, `identity/mail-templates.ts`, `modules/jobs/schedules.ts`, `modules/platform/system-profile.controller.ts`, `packages/shared/src/api/{auth,ops-domains}.ts` (schemas only). M2-16: `apps/web/src/screens/{ops,license}/**`. Web packages: own folders only |
+| 3c | M2-S12 Operator console: organisations, status, domains and entitlements; M2-13 Registers screen; M2-14 Audit registers screens; M2-15 Certification timeline and auditor workspace | none | M2-S12: `apps/web/src/screens/ops/**`. Otherwise each package owns only its folders |
+| 4 | M2-17 Terminology (gated on H.1) | none | may edit any web text (with `apps/web/src/auth/i18n.ts`), the template and the converter, pack labels, `tools/mock-providers/fixtures/demo.json`, `tools/smoke/tests/**` and docs (alone in the wave) |
 | 5 | M2-18 Fresh-organisation journey and release check | none | `tools/smoke/**`, `docs/INSTALL-ONPREM.md`, `project/MSCD User Guide.dc.html`, `deploy/scripts/check-release-artefacts.sh` |
+| 6 | M2-S13 SaaS end-to-end run, CI jobs and go-live evidence | none | `.github/workflows/ci.yml`, `tools/smoke/**`, `apps/server/test/setup/**`, `apps/server/package.json` (script only), `docs/saas/go-live-checklist.md` (status and evidence columns) |
 
-Wave 1a runs alone because M2-01 and M2-03 build on its route ids, enum values, job names and module registration, and R-10 commits only at the end of a wave.
+Wave 1a holds M2-02 and the three SaaS packages that need no core work. M2-01 and M2-03 build on the route ids, enum values, job names and module registration of M2-02, and R-10 commits only at the end of a wave, so they wait for wave 1b. M2-S01, M2-S03 and M2-S04 own no file of M2-02 and use none of its output. M2-S10 runs in wave 2b, before M2-S09, because M2-S09 calls its `applyPreset` and reuses its change notice (K.6). M2-S11 runs in wave 3b, after M2-S09, because both edit `cli/tenant.ts` and `identity/mail-templates.ts`. M2-17 runs after M2-S11 and M2-S12, because it may change their text.
 
-When H.1 has no answer by the end of wave 3, wave 5 runs first, and M2-17 runs later followed by the M2-18 acceptance again. Without M2-17 the product still shows each of the eight business roles under its own label and the readiness block as "Internal progress score" (M2-01), in the current product words.
+Files that both tracks touch, with one owner per wave:
+
+| File or path | Owner per wave |
+|---|---|
+| `packages/shared/src/**` | M2-02 (1a, every file). Then schemas only, in the area files each package lists: M2-03 `pack/**` (1b); M2-05, M2-06 and M2-07 (2a); M2-S10 `api/{license,ops-entitlements}.ts` (2b); M2-S09 `api/ops.ts` and M2-08 `api/imports.ts` (3a); M2-S11 `api/{auth,ops-domains}.ts` (3b) |
+| `apps/server/src/config/profile.schema.ts` | M2-02 (1a) only |
+| `apps/server/profiles/saas.yaml` | M2-02 (1a, new keys), M2-S02 (1b, mail port and comments), M2-S10 (2b, `license.plans` values) |
+| `apps/server/src/program.ts` | M2-02 (1a) only; it registers every new command module (D.3) |
+| `apps/server/src/main.ts` | no package |
+| `apps/server/src/cli/license.ts` | M2-02 (1a, stub), M2-06 (2a), M2-S10 (2b) |
+| `apps/server/src/cli/tenant.ts` | M2-06 (2a), M2-S09 (3a), M2-S11 (3b, `verify-domain` only) |
+| `apps/server/src/modules/ops/**` | M2-02 (1a, stubs), M2-06 (2a), M2-S09 (3a, except `domains/**`), M2-S11 (3b, `domains/**`) |
+| `apps/server/src/modules/license/**` | M2-02 (1a, stubs and module registration), M2-S10 (2b) |
+| `apps/server/src/modules/tenancy/**` | M2-S10 (2b, `rate-limit-store.ts` only), M2-S09 (3a) |
+| `apps/server/src/modules/identity/mail-templates.ts` | M2-06 (2a), M2-S10 (2b), M2-S09 (3a), M2-S11 (3b) |
+| `apps/server/src/modules/jobs/schedules.ts` | M2-05 (2a), M2-S10 (2b), M2-S11 (3b) |
+| `apps/server/src/modules/jobs/scheduler-tick.job.ts` | M2-06 (2a), M2-S09 (3a) |
+| `apps/server/test/int/{contract,rbac,security}/**` | M2-02 (1a). Later each building package owns only its own `record-tables/M2-xx.ts`, `expectations/M2-xx.ts` and `m2-pending/M2-xx.json` |
+| `apps/server/package.json` | M2-03 (1b, version), M2-S13 (6, script `test:int:saas`) |
+| `apps/web/src/auth/**` | M2-01 (1b, `boot.tsx`), M2-S11 (3b), M2-17 (4, `i18n.ts` and other text) |
+| `apps/web/src/screens/ops/**` | M2-16 (3b), M2-S12 (3c) |
+| `tools/mock-providers/**` | M2-04 (2a, `fixtures/demo.json`), M2-S11 (3b), M2-17 (4, `fixtures/demo.json`) |
+| `tools/smoke/**` | M2-17 (4, `tests/**`), M2-18 (5), M2-S13 (6) |
+| `.github/workflows/ci.yml` | M2-S13 (6) only |
+| `deploy/compose/config/caddy/**` | M2-S02 (1b), M2-S08 (2b, `conf.d/ops.caddy`) |
+| `docs/INSTALL-ONPREM.md` | M2-06 (2a), M2-18 (5) |
+| `docs/saas/go-live-checklist.md` | M2-S04 (1a), M2-S13 (6, status and evidence columns) |
+
+When H.1 has no answer by the end of wave 3c, waves 5 and 6 run first, and M2-17 runs later, followed by the acceptance of M2-18 and M2-S13 again. Without M2-17 the product still shows each of the eight business roles under its own label and the readiness block as "Internal progress score" (M2-01), in the current product words.
 
 Common acceptance for every package (not repeated below): `npm run typecheck`, `npm run lint` and `npm test` pass; `npm run check:text` passes; `npm run test:int -w @mscd/server -- test/int/seed test/int/parity` and `CI=1 npm run test:e2e -w @mscd/web` pass (R-15); web packages also pass `npm run gen:views:check -w @mscd/web`, and each of their unit test commands reports at least one test (the zero-test check of M2-01, with the package's own test files); the handoff note exists (R-09).
 
@@ -415,16 +482,17 @@ The zero-test line fails when Vitest finds no test file, which `--passWithNoTest
 | | |
 |---|---|
 | Wave, depends on | 1a; Milestone 1 |
-| Owns | `packages/shared/src/api/**` (including the new `imports.ts` and the UI contract types), `packages/shared/src/{enums.ts,machines.ts,examples.ts,index.ts,openapi.ts}`, `packages/shared/src/authz/**`, `packages/shared/test/**`, `apps/server/migrations/tenant/0008_milestone2.sql`, `apps/server/src/db/types/*` except `ref.ts`, `apps/server/src/app/*.module.ts`, the `*.module.ts` and controller files named in D.1, the guard file that reads `permissionBy` (body source), `apps/server/src/modules/imports/**` (skeleton), the stub job files of D.3, `apps/server/test/int/{contract,rbac,security,db}/**`, `apps/server/test/int/m2-pending/**`, `docs/platform/ui-contract.md` |
+| Owns | `packages/shared/src/api/**` (including the new `imports.ts`, `ops-domains.ts`, `ops-entitlements.ts` and the UI contract types), `packages/shared/src/{enums.ts,machines.ts,examples.ts,index.ts,openapi.ts}`, `packages/shared/src/authz/**`, `packages/shared/test/**`, `apps/server/migrations/tenant/0008_milestone2.sql`, `apps/server/migrations/platform/0005_milestone2_saas.sql`, `apps/server/src/db/types/*` except `ref.ts`, `apps/server/src/config/profile.schema.ts`, `apps/server/profiles/{saas,onprem,demo,test}.yaml` (new keys only), `apps/server/src/program.ts`, the CLI stubs `apps/server/src/cli/{license,backup,diagnostics}.ts`, `apps/server/src/app/*.module.ts`, the `*.module.ts` and controller files named in D.1 (with the stubs `apps/server/src/modules/ops/domains/**` and `apps/server/src/modules/license/entitlements.controller.ts`), the guard file that reads `permissionBy` (body source), `apps/server/src/modules/imports/**` (skeleton), the stub job files of D.3, `apps/server/test/int/{contract,rbac,security,db}/**`, `apps/server/test/int/m2-pending/**`, `docs/platform/ui-contract.md` |
 
 Brief:
 - Every route of D.1 with zod schemas, examples and OpenAPI output; the schema and permission changes of D.2 on existing routes; D.3 in full; the `cl-` key of D2-09 in the UI contract types and in `docs/platform/ui-contract.md`.
-- Stub handlers behind `@ApiRoute` answering 501 with the problem slug `not-implemented`; new controllers registered in their module files; the `imports` module registered in the api and worker modules; the four new jobs registered with stub handler files (D.3).
+- The contract of the SaaS track (K) in the same pass: the ten SaaS routes of D.1, the D.2 schema changes of `ops.organizations.create`, `ops.organizations.list`, `system.profile` and `auth.providers`, the platform migration, profile keys, permission, enum values and organisation status machine of D.3, so no SaaS package adds any of them (R-14, S-3). Every profile still loads, and the defaults of the new keys leave on-premise behaviour unchanged.
+- Stub handlers behind `@ApiRoute` answering 501 with the problem slug `not-implemented`; new controllers registered in their module files; the `imports` module registered in the api and worker modules; the six new jobs registered with stub handler files (D.3); the three new CLI modules registered in `program.ts` with stub actions (D.3).
 - `admin.packs.import` and `admin.packs.list` from a platform operator session in multi tenancy (D.2): check, and fix the schema or guard here when they refuse it.
-- Plan-anchored shared tests: `packages/shared/test/{routes,enums,authz,machines}.test.ts` compare the code with tables parsed from `docs/platform/BUILD-PLAN.md`. `packages/shared/test/helpers.ts` reads BP and section J of this plan and merges them (J overrides a BP CHECK list of the same column). `WORK_PACKAGE_IDS` and the owner types of `RouteDef.owner` and `Machine.owner` (today `WP-${string}`) also accept `M2-01` to `M2-18`, read from the `#### M2-nn` headings of this plan. New route owners are the building package of D.1. The `RULE_IDS` length check becomes the sum of both plans (57 plus 3). `PROBLEM_SLUGS` gets `not-implemented` 501, and the D.1 count of 17 becomes 18. No assertion is removed or loosened.
-- `m2-pending/M2-05.json` to `M2-08.json` with the route ids each package builds; the WP-30 contract harness declares 501 for listed routes, and the RBAC, owner-scope and external auditor sweeps read them (D.1).
-- Split the sweep data so later packages do not share one file: `security/record-tables.ts` and `rbac/expectations.ts` merge `security/record-tables/M2-nn.ts` and `rbac/expectations/M2-nn.ts` (one file per building package, M2-05 to M2-08). Record-table entries for every new GET route go in the file of its building package, so the owner-scope sweep checks them once the stubs are replaced.
-- Contract snapshot updated once for the 27 new route ids. Schema drift test passes with the new columns and tables.
+- Plan-anchored shared tests: `packages/shared/test/{routes,enums,authz,machines}.test.ts` compare the code with tables parsed from `docs/platform/BUILD-PLAN.md`. `packages/shared/test/helpers.ts` reads BP and section J of this plan and merges them (J overrides a BP CHECK list of the same column). `WORK_PACKAGE_IDS` and the owner types of `RouteDef.owner` and `Machine.owner` (today `WP-${string}`) also accept `M2-01` to `M2-18` and `M2-S01` to `M2-S13`, read from the `#### M2-nn` and `#### M2-Snn` headings of this plan. New route owners are the building package of D.1. The `RULE_IDS` length check becomes the sum of both plans (57 plus 3). `PROBLEM_SLUGS` gets `not-implemented` 501, and the D.1 count of 17 becomes 18. No assertion is removed or loosened.
+- `m2-pending/M2-05.json` to `M2-08.json` and `M2-S09.json` to `M2-S11.json` with the route ids each package builds; the WP-30 contract harness declares 501 for listed routes, and the RBAC, owner-scope and external auditor sweeps read them (D.1).
+- Split the sweep data so later packages do not share one file: `security/record-tables.ts` and `rbac/expectations.ts` merge `security/record-tables/M2-nn.ts` and `rbac/expectations/M2-nn.ts` (one file per building package: M2-05 to M2-08 and M2-S09 to M2-S11). Record-table entries for every new GET route go in the file of its building package, so the owner-scope sweep checks them once the stubs are replaced.
+- Contract snapshot updated once for the 37 new route ids. Schema drift test passes with the new columns and tables.
 - Existing behaviour unchanged: no Milestone 1 route answers differently.
 
 Acceptance:
@@ -435,9 +503,11 @@ git diff --quiet HEAD -- docs/platform/BUILD-PLAN.md
 npm run openapi
 npm run test:int -w @mscd/server -- test/int/db test/int/contract test/int/rbac test/int/security
 npm run test:int -w @mscd/server
-test "$(ls apps/server/test/int/m2-pending/*.json | wc -l)" -eq 4
-test "$(ls apps/server/test/int/security/record-tables/M2-*.ts apps/server/test/int/rbac/expectations/M2-*.ts | wc -l)" -eq 8
-node -e "const s=require('fs').readFileSync('apps/server/test/int/contract/__snapshots__/routes.test.ts.snap','utf8');for(const id of ['ms.certification','admin.onboarding','imports.commit','records.holdings.reassign','applicability.targets','documented-info.link','ops.users.reset-mfa'])if(!s.includes(id+' '))process.exit(1)"
+test "$(ls apps/server/test/int/m2-pending/*.json | wc -l)" -eq 7
+test "$(ls apps/server/test/int/security/record-tables/M2-*.ts apps/server/test/int/rbac/expectations/M2-*.ts | wc -l)" -eq 14
+node -e "const s=require('fs').readFileSync('apps/server/test/int/contract/__snapshots__/routes.test.ts.snap','utf8');for(const id of ['ms.certification','admin.onboarding','imports.commit','records.holdings.reassign','applicability.targets','documented-info.link','ops.users.reset-mfa','ops.organizations.status','ops.domains.add','ops.entitlements.set','ops.plans.list'])if(!s.includes(id+' '))process.exit(1)"
+test -e apps/server/migrations/platform/0005_milestone2_saas.sql && test "$(ls apps/server/migrations/platform/0005_*.sql | wc -l)" -eq 1
+npm run build -w @mscd/server && node apps/server/dist/main.js backup --help >/dev/null && node apps/server/dist/main.js diagnostics --help >/dev/null && git diff --quiet HEAD -- apps/server/src/main.ts
 ```
 
 #### M2-03 Pack format and upgrade path
@@ -476,7 +546,7 @@ npm run test:int -w @mscd/server
 
 | | |
 |---|---|
-| Wave, depends on | 2; M2-03 |
+| Wave, depends on | 2a; M2-03 |
 | Owns | `packs/content/**`, `packs/sources/**`, `packs/README.md`, `apps/web/src/data/mscd-data.js`, `apps/server/src/seed/demo/sample-snapshot.json`, `tools/mock-providers/fixtures/demo.json`, `apps/server/test/int/packs/**`, `apps/server/test/int/parity/**`, `apps/web/e2e/{audit,calendar,chain,display,documents,framework,freshness,golden-thread,i18n,mytasks}.spec.js`, `apps/web/test/sample-source.test.js` |
 
 Brief:
@@ -516,7 +586,7 @@ ISO 9001:2026 and ISO 37001:2025 are checked by the same script once their trees
 
 | | |
 |---|---|
-| Wave, depends on | 2; M2-02, M2-03 |
+| Wave, depends on | 2a; M2-02, M2-03 |
 | Owns | `packages/shared/src/api/{admin-ms,audit-events}.ts` (schemas only, R-14), `apps/server/src/modules/management-systems/certification.*`, `apps/server/src/modules/registers/audit-events.service.ts`, `apps/server/src/modules/audit-registers/{internal-audit.controller.ts,audit-activities.service.ts,cycle-derive.service.ts,cycle-derive.job.ts}`, `apps/server/src/modules/implementation/readiness/**` (new), `apps/server/src/modules/notifications/certificate-expiry.job.ts` (new), `apps/server/src/modules/implementation/command-support.ts`, `apps/server/src/modules/registers/command-support.ts`, `apps/server/src/modules/risk-registers/support.ts`, `apps/server/src/modules/audit-registers/{findings.service.ts,corrective-actions.service.ts}`, `apps/server/src/modules/read-model/derive/{overview.ts,ms-fields.ts}`, `apps/server/src/modules/jobs/schedules.ts`, `apps/server/src/seed/**` except `seed/demo/sample-snapshot.json`, `apps/server/test/int/certification/**` (new), `apps/server/test/int/security/record-tables/M2-05.ts`, `apps/server/test/int/rbac/expectations/M2-05.ts`, `apps/server/test/int/m2-pending/M2-05.json` (deletes) |
 
 Brief:
@@ -541,16 +611,16 @@ npm run test:int -w @mscd/server
 
 | | |
 |---|---|
-| Wave, depends on | 2; M2-02, M2-03 |
-| Owns | `packages/shared/src/api/{admin-users,me,notifications,ops,license}.ts` (schemas only), `apps/server/src/modules/admin-users/**`, `apps/server/src/modules/authz/{me.controller.ts,me.service.ts,me-assembler.ts}`, `apps/server/src/modules/identity/recovery-codes.*`, `apps/server/src/modules/identity/{invitation.service.ts,mail-templates.ts}`, `apps/server/src/modules/notifications/{notifications.controller.ts,notifications.service.ts}`, `apps/server/src/modules/ops/**`, `apps/server/src/modules/management-systems/management-systems.service.ts`, `apps/server/src/modules/jobs/scheduler-tick.job.ts` (M2-05 keeps `schedules.ts`), `apps/server/src/cli/{admin.ts,tenant.ts,license.ts}` (new `license.ts` registered in the commander program of `apps/server/src/program.ts`), `apps/server/src/program.ts`, `deploy/scripts/install.sh`, `deploy/helm/mscd/templates/admin-job.yaml` (new), `deploy/helm/mscd/values.yaml` (the `adminJob` block), `deploy/helm/mscd/ci/{validate.sh,assert-render.mjs}`, `docs/INSTALL-ONPREM.md`, `apps/server/test/int/onboarding/**` (new), `apps/server/test/int/security/record-tables/M2-06.ts`, `apps/server/test/int/rbac/expectations/M2-06.ts`, `apps/server/test/int/m2-pending/M2-06.json` (deletes) |
+| Wave, depends on | 2a; M2-02, M2-03 |
+| Owns | `packages/shared/src/api/{admin-users,me,notifications,ops,license}.ts` (schemas only), `apps/server/src/modules/admin-users/**`, `apps/server/src/modules/authz/{me.controller.ts,me.service.ts,me-assembler.ts}`, `apps/server/src/modules/identity/recovery-codes.*`, `apps/server/src/modules/identity/{invitation.service.ts,mail-templates.ts}`, `apps/server/src/modules/notifications/{notifications.controller.ts,notifications.service.ts}`, `apps/server/src/modules/ops/**` except `ops/domains/**`, `apps/server/src/modules/management-systems/management-systems.service.ts`, `apps/server/src/modules/jobs/scheduler-tick.job.ts` (M2-05 keeps `schedules.ts`), `apps/server/src/cli/{admin.ts,tenant.ts,license.ts}` (`license.ts` fills the stub that M2-02 registered in `program.ts`), `deploy/scripts/install.sh`, `deploy/helm/mscd/templates/admin-job.yaml` (new), `deploy/helm/mscd/values.yaml` (the `adminJob` block), `deploy/helm/mscd/ci/{validate.sh,assert-render.mjs}`, `docs/INSTALL-ONPREM.md`, `apps/server/test/int/onboarding/**` (new), `apps/server/test/int/security/record-tables/M2-06.ts`, `apps/server/test/int/rbac/expectations/M2-06.ts`, `apps/server/test/int/m2-pending/M2-06.json` (deletes) |
 
 Brief:
 - Routes and changes of D.1 and D.2 marked M2-06, with D.5 including the steps `team`, `verifiers` and `internal_auditor` and the `doneBy` and `assignee` fields.
 - `ops.users.reset-mfa`: finds the account by email, refuses with 404 when it has no factor set up, resets it as `admin.users.reset-mfa` does, ends the account's sessions, sends the security mail, audits `auth.mfa_reset` with the reason.
 - `deploy/scripts/install.sh`: before it runs `tenant create`, it prints that the organisation slug can never be changed and asks for confirmation (skipped with `--yes`).
 - `admin.ms.create` calls `seedApplicability` (D2-09) in its transaction and audits `applicability.seeded` with the count.
-- `ops.organizations.create`: `{slug, name, timeZone, siteCount, firstAdmin: {email, displayName}}`, uses `TenantProvisioner.create`, creates the invitation, emails it when mail is configured and returns the link once only when it is not; warns in the response that the slug is permanent; in single tenancy answers 409 `conflict` with `messageKey` `single_tenancy`.
-- CLI: `admin create-operator --email <email> [--name <name>]` and `admin revoke-operator --email <email>` (platform role `platform_operator`, one-time set-password link from token kind `set_password`, TOTP enrolment forced at first sign-in, audit entry); `license show-id` prints the installation id; `admin create-user` emails the invitation (D.2).
+- `ops.organizations.create`: `{slug, name, timeZone, siteCount, firstAdmin: {email, displayName}, preset?}`, uses `TenantProvisioner.create`, creates the organisation with `local_login = 'allowed'` (product decision 7 of `CLAUDE.md`), creates the invitation and emails it; warns in the response that the slug is permanent; in single tenancy answers 409 `conflict` with `messageKey` `single_tenancy`. With `mail.required` true (SaaS) and no SMTP configured it refuses with 409 `conflict` and `messageKey` `mail_required` and never returns the invitation link; with `mail.required` false and mail off it returns the link once. The schema accepts `preset`, which M2-S09 applies in wave 3a (D.2). The rest of the organisation lifecycle (status, detail, history, `tenant onboard`) is M2-S09.
+- CLI: `admin create-operator --email <email> [--name <name>]` and `admin revoke-operator --email <email>` (platform role `platform_operator`, one-time set-password link from token kind `set_password`, TOTP enrolment forced at first sign-in, audit entry); `license show-id` prints the installation id; `admin create-user` emails the invitation (D.2). With `mail.required` true, `admin create-operator` refuses when SMTP is not configured, never prints the set-password link, and prints "Invitation sent to <email>".
 - Helm: an optional Job (`adminJob.enabled`) that runs `tenant create`, `admin create-user` or `admin create-operator` with values, documented in `docs/INSTALL-ONPREM.md` with the new CLI commands (open follow-up of `CLAUDE.md`).
 
 Acceptance:
@@ -566,13 +636,13 @@ npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/sec
 npm run test:int -w @mscd/server
 ```
 
-`validate.sh` runs `helm` in a container (WP-29); M2-06 adds a render with `adminJob.enabled=true` and an assertion for the Job to `ci/assert-render.mjs`. `test/int/onboarding` covers every D.5 step on a fresh organisation, organisation update and time zone change, pending memberships with accept and decline, email and notification for an existing active account with the same 202 for the admin, recovery codes (old codes stop working, ten new ones, audit, security mail), read-all, operator organisation create in multi tenancy and 409 in single tenancy, operator factor reset for an account with two memberships, and system creation that seeds one entry per catalogue item plus one per leaf requirement row of the installed ISO 27001 pack, with the expected count computed from the installed pack (M2-04 runs in the same wave; the literal 93 plus 30 is checked in M2-09 and M2-18).
+`validate.sh` runs `helm` in a container (WP-29); M2-06 adds a render with `adminJob.enabled=true` and an assertion for the Job to `ci/assert-render.mjs`. `test/int/onboarding` covers every D.5 step on a fresh organisation, organisation update and time zone change, pending memberships with accept and decline, email and notification for an existing active account with the same 202 for the admin, recovery codes (old codes stop working, ten new ones, audit, security mail), read-all, operator organisation create in multi tenancy with local sign-in allowed, 409 in single tenancy, and 409 `mail_required` when `mail.required` is true and SMTP is missing, operator factor reset for an account with two memberships, and system creation that seeds one entry per catalogue item plus one per leaf requirement row of the installed ISO 27001 pack, with the expected count computed from the installed pack (M2-04 runs in the same wave; the literal 93 plus 30 is checked in M2-09 and M2-18).
 
 #### M2-07 Document control and register server additions
 
 | | |
 |---|---|
-| Wave, depends on | 2; M2-02, M2-03 |
+| Wave, depends on | 2a; M2-02, M2-03 |
 | Owns | `packages/shared/src/api/{implementation,documents,files,records,risk-registers,audit-registers}.ts` (schemas only), `apps/server/src/modules/implementation/{targets.controller.ts,freshness-thresholds.*,documented-info.*,applicability.service.ts,rules/**}`, `apps/server/src/modules/freshness/**`, `apps/server/src/modules/registers/{document-versions.controller.ts,holdings.*,documents.service.ts,records.service.ts}`, `apps/server/src/modules/files/**`, `apps/server/src/modules/risk-registers/**` except `risk-registers/support.ts` (M2-05), `apps/server/src/modules/audit-registers/{review-edit.controller.ts,management-reviews.service.ts}`, `apps/server/src/modules/read-model/load/**`, `apps/server/src/modules/read-model/derive/requirements.ts`, `apps/server/test/int/records-extra/**` (new), `apps/server/test/int/security/record-tables/M2-07.ts`, `apps/server/test/int/rbac/expectations/M2-07.ts`, `apps/server/test/int/m2-pending/M2-07.json` (deletes) |
 
 Brief:
@@ -601,7 +671,7 @@ npm run test:int -w @mscd/server
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-02, M2-07 (the resolver reads `applicability.targets` and the commit calls the command services M2-07 changes) |
+| Wave, depends on | 3a; M2-01, M2-02, M2-07 (the resolver reads `applicability.targets` and the commit calls the command services M2-07 changes) |
 | Owns | `packages/shared/src/api/imports.ts` (schemas only), `apps/server/src/modules/imports/**`, `apps/server/test/int/imports/**` (new), `apps/server/test/int/security/record-tables/M2-08.ts`, `apps/server/test/int/rbac/expectations/M2-08.ts`, `apps/server/test/int/m2-pending/M2-08.json` (deletes), `apps/web/src/screens/import/**`, `apps/web/test/screens/import.test.tsx`, `apps/web/e2e/screens/import.spec.js`, `apps/web/e2e/api-only/import.spec.js` |
 
 Brief:
@@ -625,7 +695,7 @@ npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/sec
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-02, M2-04, M2-06, M2-07 (the Controls count of the API spec needs the content, the seeding at system creation and the clause entries of the loader) |
+| Wave, depends on | 3a; M2-01, M2-02, M2-04, M2-06, M2-07 (the Controls count of the API spec needs the content, the seeding at system creation and the clause entries of the loader) |
 | Owns | `apps/web/src/screens/{storage-admin,routing,systems}/**`, `apps/web/test/screens/{storage-admin,routing,systems}.test.tsx`, `apps/web/e2e/screens/{storage-admin,routing,systems}.spec.js`, `apps/web/e2e/api-only/{storage-admin,routing,systems}.spec.js` |
 
 Brief:
@@ -649,7 +719,7 @@ The API specs connect a SharePoint repository against the mock provider, test it
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-06, M2-07 |
+| Wave, depends on | 3a; M2-01, M2-06, M2-07 |
 | Owns | `apps/web/src/screens/{users,approvals,handover,identity-providers}/**`, `apps/web/test/screens/{users,approvals,handover,identity-providers}.test.tsx`, `apps/web/e2e/screens/{users,approvals,handover,identity-providers}.spec.js`, `apps/web/e2e/api-only/{users,approvals,handover,identity-providers}.spec.js` (the Milestone 1 spec `e2e/api-only/sign-in.spec.js` stays as it is) |
 
 Brief:
@@ -674,7 +744,7 @@ The API specs: `tenant.admin` invites a person (the email arrives in Mailpit); `
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-04, M2-07 |
+| Wave, depends on | 3b; M2-01, M2-04, M2-07 |
 | Owns | `apps/web/src/screens/{controls-edit,evidence-edit,phases-edit}/**`, their tests in `apps/web/test/screens/`, `apps/web/e2e/screens/` and `apps/web/e2e/api-only/` |
 
 Brief:
@@ -697,7 +767,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-04, M2-07 |
+| Wave, depends on | 3b; M2-01, M2-04, M2-07 |
 | Owns | `apps/web/src/screens/{docs-edit,documented-info}/**`, their tests in `apps/web/test/screens/`, `apps/web/e2e/screens/` and `apps/web/e2e/api-only/` |
 
 Brief:
@@ -721,7 +791,7 @@ The API spec registers a document as `bagus`, attaches a vault upload, cannot ap
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-07 |
+| Wave, depends on | 3c; M2-01, M2-07 |
 | Owns | `apps/web/src/screens/registers/**`, `apps/web/test/screens/registers.test.tsx`, `apps/web/e2e/screens/registers.spec.js`, `apps/web/e2e/api-only/registers.spec.js` |
 
 Brief:
@@ -743,7 +813,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-05, M2-07 |
+| Wave, depends on | 3c; M2-01, M2-05, M2-07 |
 | Owns | `apps/web/src/screens/{internal-audit,findings,management-review}/**`, their tests in `apps/web/test/screens/`, `apps/web/e2e/screens/` and `apps/web/e2e/api-only/` |
 
 Brief:
@@ -765,7 +835,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-05, M2-07 |
+| Wave, depends on | 3c; M2-01, M2-05, M2-07 |
 | Owns | `apps/web/src/screens/{timeline-edit,auditor-access,audit-trail}/**`, their tests in `apps/web/test/screens/`, `apps/web/e2e/screens/` and `apps/web/e2e/api-only/` |
 
 Brief:
@@ -787,7 +857,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | 3; M2-01, M2-06 |
+| Wave, depends on | 3b; M2-01, M2-06 |
 | Owns | `apps/web/src/screens/{getting-started,organization,account,notifications,invitations,ops}/**`, `apps/web/src/screens/license/**` (installation id panel), their tests in `apps/web/test/screens/`, `apps/web/e2e/screens/` and `apps/web/e2e/api-only/` |
 
 Brief:
@@ -796,7 +866,7 @@ Brief:
 - Top bar (`hostTopbar`): notification bell with the unread count (`GET /notifications?unread=true&pageSize=1`), panel with the list, "Mark read", "Mark all read", links to the record; "My account" entry.
 - "My account" (`account`, `/account`, nav false): profile, "Change password" (hidden for SSO-only accounts), "Replace authenticator" (the existing enrolment page with a return path), recovery codes left and "Get new recovery codes" (current code, codes shown once with "Copy" and "Download"), linked company sign-in identities with "Link" (`me.identity.link`), one "Revoke calendar feed" button per system the user can read (`calendar-feed.revoke` is per system and no list route exists), preferences (language, theme, density) saved with `PUT /me/preferences` and applied at once (boot applies them on the next start, M2-01).
 - `invitations`: banner in the host layer "You were invited to <organisation>" with "Accept" (LIC-USERS message) and "Decline".
-- "Operator console" (`ops`, `/ops`, group `ops`, scope `platform`, perm `ops.read`): health (components, migrations, queues, licence states), queue statistics, "Run job" for allow-listed jobs, "Download diagnostics", organisations list, "Create organisation" (slug with the permanence warning, name, time zone, sites, first administrator email and name; the one-time link when mail is off), "Install licence" for an organisation (multi tenancy, `PUT /admin/license` with `{org, licence}`), "Framework packs" with the installed pack list (`admin.packs.list`) and "Install pack" (signed `.bundle` upload to `admin.packs.import`, progress through the task id, signature and engine version errors shown next to the field), so SaaS organisations get new pack versions (E.3) without the command line, and "Reset sign-in factor" (email and reason, `ops.users.reset-mfa`) for accounts with several memberships.
+- "Operator console" (`ops`, `/ops`, group `ops`, scope `platform`, perm `ops.read`): health (components, migrations, queues, licence states), queue statistics, "Run job" for allow-listed jobs, "Download diagnostics", organisations list (M2-S12 adds status, plan, domains and entitlements in wave 3c), "Create organisation" (slug with the permanence warning, name, time zone, sites, first administrator email and name; the one-time link only when the response carries one, which never happens on SaaS because `mail.required` is true there), "Install licence" for an organisation (multi tenancy, `PUT /admin/license` with `{org, licence}`), "Framework packs" with the installed pack list (`admin.packs.list`) and "Install pack" (signed `.bundle` upload to `admin.packs.import`, progress through the task id, signature and engine version errors shown next to the field), so SaaS organisations get new pack versions (E.3) without the command line, and "Reset sign-in factor" (email and reason, `ops.users.reset-mfa`) for accounts with several memberships.
 
 Acceptance:
 
@@ -812,7 +882,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | 4; M2-10 to M2-16; product owner approval of H.1 |
+| Wave, depends on | 4; M2-10 to M2-16, M2-S11 and M2-S12 (it may change their text); product owner approval of H.1 |
 | Owns | `project/MSCD Mockup.dc.html`, `apps/web/scripts/convert-template.mjs`, the regenerated views, `apps/web/src/MscdApp.jsx`, `apps/web/src/data/{static.js,mscd-data.js}`, `apps/web/src/auth/i18n.ts`, `apps/web/src/screens/roles.ts`, `apps/web/src/screens/*/text.ts`, `apps/web/e2e/**`, `apps/web/test/**`, `packs/content/**` and `packs/sources/**` (labels only, with a patch version bump), `apps/server/src/seed/demo/sample-snapshot.json`, `tools/mock-providers/fixtures/demo.json`, `tools/smoke/tests/**`, `docs/**` (alone in its wave) |
 
 Brief:
@@ -838,13 +908,13 @@ The `grep` line lists only the renamed terms the product owner approved.
 
 | | |
 |---|---|
-| Wave, depends on | 5; every other M2 package (M2-17 when approved) |
+| Wave, depends on | 5; every other core package (M2-17 when approved) and every SaaS package except M2-S13 |
 | Owns | `tools/smoke/**`, `docs/INSTALL-ONPREM.md`, `project/MSCD User Guide.dc.html`, `deploy/scripts/check-release-artefacts.sh`, `deploy/compose/config/demo-licences/**` texts if present, `docs/platform/handoff/M2-18.md` |
 
 Brief:
 - `tools/smoke/run-journey.mjs` and script `journey` in `tools/smoke/package.json`: the on-premise Compose file with the server demo image (development keys accepted) and an overlay that turns the demo seed off, plus Mailpit and the mock providers. The database holds no organisation until the journey runs `tenant create` and `admin create-user` (the installer step, A.2). A licence for the new organisation id is signed at run time with `node packages/pack-tools/dist/cli.js licence sign` and the development licence key.
 - `tools/smoke/tests/fresh-org.spec.mjs`, one browser session per person, every step on screen: first admin accepts the invitation and enrols TOTP; installs the licence; invites a second admin and the team (emails read from Mailpit); second admin approves grants; connects a SharePoint repository on the mock and tests it; adds a routing rule; sets local sign-in to "admins only" after a company sign-in test; creates an ISO 27001 system with scope, body and default repository; grants MS Manager (primary), Top Management, Domain Owner and Internal Auditor; starts implementation; plans Stage 1 and Stage 2 events; Getting started shows every step done; imports justifications for 10 controls and edits one control on screen; registers POL-01 from the template, uploads a file, approves it as another person; defines evidence on A.5.1 with a file and verifies the control; records a risk with a treatment and residual acceptance; plans and records an internal audit with an activity; raises a finding and closes a corrective action with an effectiveness check by a third person; holds and closes a management review with all inputs; records the Stage 2 outcome and the certificate; checks that the readiness numbers on Overview moved above 0 and that the system shows as certified with its expiry date. The journey fails on any page error, console error or 5xx answer, and runs `expectReadableText` on every new screen it visits.
-- SaaS variant (`--saas`): `admin create-operator`, the operator creates the organisation in the console and installs its licence there (`PUT /admin/license` with `{org, licence}`, because `license.manage` and `pack.install` belong to the platform operator in multi tenancy), the Licence screen shows no "Install licence" to the Tenant Admin, then the same steps up to the system creation.
+- SaaS variant (`--saas`): `admin create-operator` (the set-password email read from Mailpit, because `mail.required` is true), the operator creates the organisation in the console of M2-16 and M2-S12 and installs its licence there (`PUT /admin/license` with `{org, licence}`, because `license.manage` and `pack.install` belong to the platform operator in multi tenancy), the Licence screen shows no "Install licence" to the Tenant Admin, then the same steps up to the system creation.
 - Make `SMOKE_STRICT_LAYOUT=1` the default (open follow-up of `CLAUDE.md`).
 - `check-release-artefacts.sh` fails on the demo strings of E.4 in built packs, and on a pack bundle whose pack and version have no lead auditor sign-off row in `packs/README.md` (E.2). The journey and the test suites use development bundles and are not release runs.
 - `docs/INSTALL-ONPREM.md`: replace the browser console helper section with the screens of Milestone 2, correct any text that offers LDAP, Active Directory, SMB, S3 or WebDAV, and add a short "Not yet available" list of the deferred features of B (LDAP and Active Directory sign-in, SMB, S3 and WebDAV repositories, self-service sign-up, zero-transit upload).
@@ -883,8 +953,25 @@ Each question has a default that is built when no answer arrives before the pack
 | H.9 | Scope: keep the scope text on the management system and add a "Scope statement" document (template SCO-01) linked to clause 4.3, or replace the text with the document? | Keep both; the document is the controlled version | M2-04, M2-12 |
 | H.10 | Certificate expiry reminders at 90, 30 and 7 days to MS Managers and Programme Owners: right days and people? | Yes | M2-05 |
 | H.11 | Who may plan internal audits: MS Manager and Internal Auditor? | Yes | M2-02 |
-| H.12 | The operator console creates SaaS organisations. Should it also be offered on-premise, or stay hidden there? | SaaS (multi tenancy) only | M2-06, M2-16 |
+| H.12 | The operator console creates SaaS organisations. Should it also be offered on-premise, or stay hidden there? | SaaS (multi tenancy) only | M2-06, M2-16, M2-S12 |
 | H.13 | Pending work per person (open question 2 of `CLAUDE.md`, with HR sign-off): MS Manager and Programme Owner see each person's open items, Top Management sees totals only. Confirm before the People and Handover screens show holdings per person | Confirmed by the product owner on 2026-10-27: MS Manager and Programme Owner see detail, Top Management totals only, Tenant Admin counts without titles | M2-07, M2-10 |
+| H.14 | SaaS owner decisions D-S1 to D-S12: onboarding model, hosting location, public address, plans and limits, read-only period after a contract ends, backup retention, uptime target, CDN or firewall, telemetry, sign-in discovery, key management, key copies for the restore test | The defaults in [K.3](#k3-decisions-for-the-owner) | The SaaS package named per decision in K.3 |
+
+The items that only the owner can buy, sign or approve for SaaS (servers, domain, mail provider, backup storage, release keys, legal documents, penetration test) are listed in [K.2](#k2-what-the-owner-provides).
+
+The product owner confirmed these decisions on 2026-10-27 (`CLAUDE.md`, "Product decisions"). The plan keeps them as follows:
+
+| # | Confirmed decision | Where the plan keeps it |
+|---|---|---|
+| 1 | Google Drive repositories in a personal My Drive are allowed, as well as Shared Drives | The connect wizard of M2-09 offers a shared drive or My Drive |
+| 2 | Pending work per person: MS Manager and Programme Owner see the detail, Top Management sees totals only | H.13; `records.holdings` needs `record.assign` [MM, PO] and `admin.users.holdings` returns counts only (M2-07, M2-10); the totals panel for Top Management is Milestone 3 (B) |
+| 3 | Internal Auditors do not verify items and do not see everyone's pending list | H.4; their new permission `internal_audit.manage` covers internal audits only (J.2), and `records.holdings` stays [MM, PO] |
+| 4 | Phases are shown in order; the hard block applies only at critical gates | M2-11 records blockers through the existing BR-39 and BR-46 and adds no new block |
+| 5 | The licence user count is active members, without guests | Licence screen of M2-01; entitlement limits of M2-S10 (`LIC-USERS`) |
+| 6 | The Programme Owner keeps verify and approve rights | H.4; no matrix row of these rights changes |
+| 7 | New SaaS organisations do not default to SSO-only sign-in | `ops.organizations.create` (M2-06) and `tenant onboard` (M2-S09) create organisations with local sign-in allowed; the Tenant Admin changes the policy later (M2-10) |
+| 8 | A moved or changed evidence file shows "cannot be verified" in evidence lists and does not lower the item status | No Milestone 2 package changes this behaviour; M2-07 changes freshness thresholds only |
+| 9 | Production target: multi-tenant SaaS for many customer organisations on one VPS, deployed by a GitHub Actions workflow; on-premise stays supported | A.1, D2-15 and section K |
 
 ## I. Risks
 
@@ -896,8 +983,10 @@ Each question has a default that is built when no answer arrives before the pack
 | Content changes break parity tests and the demo | Milestone 1 tests go red | Sample data, seed snapshot and packs change in the same package (M2-03, M2-04); demo readiness rows become `manual`; R-15 |
 | The installer never deletes and matches by code | A wrong code shipped once stays for every customer | The `retired` flag and the 422 check of E.1 land before any content change |
 | `engine_min_version` 1.1.0 against image tags such as `smoke` or other non-numeric `MSCD_VERSION` values | Packs refused in test images | M2-03 checks how the version comparison treats such values and sets the image builds' `MSCD_VERSION` or the comparison accordingly, with a test |
-| One host lock for API E2E and Compose runs | Packages queue for the lock in waves 2 and 3 | Run focused specs first, the full API suite once at the end of each package; four agents at most |
-| Tenant migration 0008 is written before the code that uses it | Later packages find a column missing or wrong | R-14 lets the orchestrator apply a correction migration (`0009_milestone2_fix.sql`) between waves; no package edits 0008 after wave 1a |
+| One host lock for API E2E and Compose runs | Packages queue for the lock in waves 2 and 3, and the SaaS packages add Compose runs | Run focused specs first, the full API suite once at the end of each package; four agents at most across both tracks |
+| Tenant migration 0008 and platform migration 0005 are written before the code that uses them | Later packages find a column missing or wrong | R-14 lets the orchestrator apply a correction migration (`tenant/0009_milestone2_fix.sql` or `platform/0006_milestone2_fix.sql`) between waves; no package edits 0008 or 0005 after wave 1a |
+| The SaaS contract is written in wave 1a, three to five waves before M2-S09, M2-S10 and M2-S11 build it | A SaaS package finds a schema or value missing | The SaaS rows of D.1 to D.3 and J come from the SaaS research with field lists; the pending files keep the stubs in the sweeps; a gap goes in the handoff note and the orchestrator fixes it between waves (R-14) |
+| Two tracks share four agents | Go-live waits for core waves, or the core waits for SaaS work | The SaaS packages that need no core work start in wave 1a; the combined table of G.1 leaves only one slot free in waves 1a to 3c |
 | Import commits large files in one transaction | Long locks on a busy system | Limits of 5,000 rows and 5 MB; the commit runs in the worker; the integration test measures a 5,000-row file |
 | Admin screens show business data to a Tenant Admin | Breach of the F.6 separation | Admin routes return counts only (D.5, `admin.users.holdings`); the security sweep covers every new GET route |
 | Time zone change of an organisation | Daily jobs run twice or skip a day | M2-06 handles the change day as D.2 says, with a test |
@@ -940,6 +1029,16 @@ Paths below `/api/v1`, in the BP D.3 notation.
 | `POST /ms/{ms}/imports/{kind}` | `imports.create` | M2-08 |
 | `GET /ms/{ms}/imports/{id}` | `imports.get` | M2-08 |
 | `POST /ms/{ms}/imports/{id}/commit` | `imports.commit` | M2-08 |
+| `GET /ops/organizations/{org}` | `ops.organizations.get` | M2-S09 |
+| `POST /ops/organizations/{org}/status` | `ops.organizations.status` | M2-S09 |
+| `GET /ops/organizations/{org}/events` | `ops.organizations.events` | M2-S09 |
+| `GET /ops/organizations/{org}/domains` | `ops.domains.list` | M2-S11 |
+| `POST /ops/organizations/{org}/domains` | `ops.domains.add` | M2-S11 |
+| `POST /ops/organizations/{org}/domains/{domain}/verify` | `ops.domains.verify` | M2-S11 |
+| `DELETE /ops/organizations/{org}/domains/{domain}` | `ops.domains.remove` | M2-S11 |
+| `GET /ops/organizations/{org}/entitlements` | `ops.entitlements.get` | M2-S10 |
+| `PUT /ops/organizations/{org}/entitlements` | `ops.entitlements.set` | M2-S10 |
+| `GET /ops/plans` | `ops.plans.list` | M2-S10 |
 
 ### J.2 Permission matrix
 
@@ -947,6 +1046,7 @@ Paths below `/api/v1`, in the BP D.3 notation.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `internal_audit.manage` | ms | yes | | | | yes | | | | | | |
 | `ops.tenants.manage` | platform | | | | | | | | | | | yes |
+| `ops.entitlements.manage` | platform | | | | | | | | | | | yes |
 
 The BP row of `register.manage` keeps its cells; its condition text now reads "context, interested parties, assets, metrics, objectives, competence" (D.2).
 
@@ -958,6 +1058,8 @@ The BP row of `register.manage` keeps its cells; its condition text now reads "c
 | `certificate.expiry` (M2-05) | `scheduler.tick` | daily, local time | D.4 |
 | `import.run` (M2-08) | `imports.commit` | none | applies every row in one transaction, audits `import.committed`, sends `import_finished` |
 | `applicability.sync` (M2-03) | pack install that updates an edition in use | none | E.3 |
+| `entitlement.expiry` (M2-S10) | `scheduler.tick` | daily | emails platform operators 30, 7 and 1 days before `valid_until`, and the organisation's Tenant Admins 30 and 7 days before |
+| `domain.verify` (M2-S11) | `ops.domains.add`, `ops.domains.verify`; `scheduler.tick` | hourly for pending domains up to 7 days, then `failed`; monthly for verified domains | checks the TXT record, audits `ops.domain_verified` or `ops.domain_verification_failed`, emails the operators when a verified record is gone (the status stays verified) |
 
 ### J.4 Notifications
 
@@ -967,10 +1069,12 @@ The BP row of `register.manage` keeps its cells; its condition text now reads "c
 | `certificate_expiring` | `certificate.expiry` | MS Managers and Programme Owners | no |
 | `import_finished` | `import.run` | the import creator | no |
 | `pack_content_updated` | `applicability.sync` | MS Managers of systems on the edition | no |
+| `organization_status_changed` | `ops.organizations.status` | Tenant Admins of the organisation, also by email | no |
 
 ### J.5 Audit actions
 
 - Actions: `ms.certified`, `certification_cycle.created`, `certification_cycle.expired`, `certification_cycle.closed`, `org.updated`, `freshness_threshold.changed`, `auth.recovery_codes_regenerated`, `membership.declined`, `holdings.reassigned`, `import.validated`, `import.committed`, `ops.organization_created`, `applicability.seeded`, `pack.content_synced`, `document_code.linked`.
+- SaaS track: `ops.organization_status_changed`, `ops.domain_added`, `ops.domain_verified`, `ops.domain_verification_failed`, `ops.domain_removed`, `ops.entitlements_changed`.
 
 ### J.6 Problems and rules
 
@@ -979,10 +1083,11 @@ The BP row of `register.manage` keeps its cells; its condition text now reads "c
 | Problem slugs | `not-implemented` 501 (a route stub of D.1 whose id is listed in `m2-pending`); added after the 17 slugs of BP D.1 |
 | Errors | platform rule ids added to the extension member `rule`: `APPL-ASSESS`, `PACK-ROW-REMOVED` |
 | Warnings | `AUD-INDEP` (auditor independence, D.2) |
+| Message keys | no new problem slug for the SaaS track; refusals carry a `messageKey` on an existing slug: `single_tenancy` and `mail_required` (409 `conflict`), `invalid_status_transition` (409 `transition-not-allowed`), `domain_taken` (409 `conflict`), `domain_not_allowed` and `confirmation_mismatch` (422 `business-rule`) |
 
 ### J.7 CHECK lists
 
-Column fragments in the DDL notation of BP C.4 to C.6, for the tests; the migrations are `tenant/0008_milestone2.sql` and `ref/0002_milestone2.sql`.
+Column fragments in the DDL notation of BP C.4 to C.6, for the tests; the migrations are `tenant/0008_milestone2.sql`, `ref/0002_milestone2.sql` and `platform/0005_milestone2_saas.sql`.
 
 ```sql
 CREATE TABLE audit_event (
@@ -1004,19 +1109,31 @@ CREATE TABLE import_run (
   kind varchar(15) NOT NULL CHECK (kind IN ('applicability', 'documents', 'risks', 'evidence')),
   status varchar(12) NOT NULL CHECK (status IN ('validated', 'committing', 'committed', 'failed', 'expired')),
 );
+CREATE TABLE platform.organization_status_event (
+  from_status varchar(20) NOT NULL CHECK (from_status IN ('active', 'suspended', 'offboarding', 'archived')),
+  to_status varchar(20) NOT NULL CHECK (to_status IN ('active', 'suspended', 'offboarding', 'archived')),
+);
+CREATE TABLE platform.verified_domain (
+  status varchar(10) NOT NULL DEFAULT 'verified' CHECK (status IN ('pending', 'verified', 'failed')),
+  method varchar(10) NOT NULL DEFAULT 'manual' CHECK (method IN ('dns', 'manual')),
+);
+CREATE TABLE platform.entitlement (
+  source varchar(15) NOT NULL CHECK (source IN ('preset', 'manual', 'signed_licence')),
+);
 ```
 
 ### J.8 State machines
 
 | Machine | Transitions |
 |---|---|
+| `organization.status` (M2-02) | `active` to `suspended` or `offboarding`; `suspended` to `active` or `offboarding`; `offboarding` to `active` or `archived`: `ops.tenants.manage` through `ops.organizations.status` or `tenant set-status`, reason required; `offboarding` and `archived` also need `confirmSlug` equal to the slug. `archived` is final until the purge of K.8 |
 | `certification_cycle.status` (M2-02) | (new) to `planned` or `active`: `audit_event.manage`, or system on the first `stage1` or `recertification` event. `planned` to `active`: system on the first `stage1` event, or `audit_event.manage`. `active` to `certified`: only through `ms.certification` with `ms.transition`. `certified` to `closed`: system, when the next cycle is certified. `certified` to `expired`: system (`certificate.expiry`). `certified` to `suspended` and back, `suspended` to `withdrawn`: `ms.transition`. `active` to `closed`: `ms.transition`, reason required |
 
 The BP row `management_system.status` keeps its entity; its transition `implementing` to `certified` now runs through `ms.certification` (D.2).
 
 ## K. SaaS production track
 
-This track makes MSCD ready to run as a multi-tenant SaaS service for paying customers. The core waves of section G build the product screens. This track builds the operator tools, the production deployment, and the checks needed before go-live. It builds on M2-06 (`admin create-operator`, `ops.organizations.create`) and M2-16 (operator console). It changes one row of section B: email domain verification moves into M2-S11, which adds DNS TXT verification.
+This track makes MSCD ready to run as a multi-tenant SaaS service for paying customers. The core packages of section G build the product screens. This track builds the operator tools, the production deployment, and the checks needed before go-live. It builds on M2-06 (`admin create-operator`, `ops.organizations.create`) and M2-16 (operator console base). Its contract (route ids, permission, enum values, organisation status machine, platform migration and profile keys) is written by M2-02 in wave 1a (D.1, D.2, D.3, J), and its packages run in the combined wave table of G.1. On SaaS, email domains are verified by a DNS TXT record (M2-S11); on-premise keeps the operator command of section B.
 
 **Chosen deployment: Docker Compose on one Ubuntu VPS** (option a). The stack uses:
 - the existing `deploy/compose/docker-compose.yml`;
@@ -1043,10 +1160,10 @@ R-01 to R-18 apply. Handoff notes go to `docs/platform/handoff/M2-Sxx.md`. The r
 |---|---|
 | S-1 | No agent holds a production or staging secret, connects to those servers, or approves a protected GitHub environment. An agent may start `deploy-prod.yml`, `bootstrap-prod.yml` or `ops-cli.yml` with `gh workflow run` only when the owner asks. The run then waits for the owner's approval. |
 | S-2 | Acceptance runs on the build host with throwaway keys made at test time (`deploy/scripts/saas-keys.sh --out <tmp>`) and deleted afterwards. Keys from `packages/pack-tools/dev-keys/` stay limited to demo-flavour images (R-11, R-13). |
-| S-3 | New route ids, permissions, enum values, profile keys and the platform migration of this track appear only in M2-S06. Later packages follow R-14. |
+| S-3 | The contract of this track (route ids, permissions, enum values, profile keys and the platform migration `0005_milestone2_saas.sql`) is written by M2-02 in wave 1a. SaaS packages follow R-14 like the core packages: they change schemas only in the area files they own and add no contract item. |
 | S-4 | Every third-party action in a new workflow is pinned to a full commit SHA, with the tag in a comment. Secrets reach `run` steps only through `env`. `tools/scripts/check-workflows.mjs --saas` (M2-S01) enforces both. |
 | S-5 | New container images are only those of K.4. Each is pinned to an exact version at least two weeks old plus its digest, and recorded in the handoff note. R-06 applies. |
-| S-6 | SaaS packages share the four-agent limit of R-02 with the core packages. The orchestrator fills free slots in the order of K.5. Compose runs take the host lock (R-05) and use ports 18080 and 18443. |
+| S-6 | SaaS packages share the four-agent limit of R-02 with the core packages and run in the combined wave table of G.1. Compose runs take the host lock (R-05) and use ports 18080 and 18443. |
 | S-7 | The demo stack and demo images never run on the production or staging server. `saas-deploy.sh` refuses image names ending in `-demo` and the `demo.yaml` and `test.yaml` profiles. |
 
 ### K.2 What the owner provides
@@ -1058,7 +1175,7 @@ Agents cannot buy, sign, register or approve any of these items. Each item names
 | Production server | Ubuntu 24.04 LTS VPS. 4 vCPU or more, 16 GB RAM, 80 GB system disk, a separate block volume of 200 GB or more for Docker data. Public IPv4, plus IPv6 if offered. The provider's first root SSH key. Located as decided in K.3 (D-S2) | Secrets `BOOTSTRAP_SSH_KEY` (deleted after bootstrap), `DEPLOY_HOST` in environment `production` | First run of `bootstrap-prod.yml` |
 | Staging server (recommended) | A smaller VPS (8 GB RAM, same OS) for release rehearsals and the penetration test. It is separate from the demo server | Same secret names in environment `staging` | First release rehearsal |
 | Domain and DNS | A host name such as `app.<domain>`. A and AAAA records pointing to the VPS. A CAA record for `letsencrypt.org`. Optionally `ops.<domain>` for Grafana. DNS access to add records | Variable `MSCD_DOMAIN`, `ACME_EMAIL` | M2-S05 first deploy |
-| Mail provider | An account with a transactional SMTP provider (for example Amazon SES, Mailgun, Brevo or Postmark) on port 587. SPF, DKIM and DMARC records for the sending domain | Variables `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`; secrets `SMTP_USER`, `SMTP_PASSWORD` | First deploy (SaaS refuses to start without mail, M2-S09) |
+| Mail provider | An account with a transactional SMTP provider (for example Amazon SES, Mailgun, Brevo or Postmark) on port 587. SPF, DKIM and DMARC records for the sending domain | Variables `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`; secrets `SMTP_USER`, `SMTP_PASSWORD` | First deploy (with `mail.required`, SaaS creates no organisation and no operator without mail, M2-06 and M2-S09) |
 | Off-site backup storage | An S3-compatible bucket at a different provider or region, with versioning or object lock. One access key limited to that bucket, plus a second key limited to the secrets prefix | Secrets `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY`, `BACKUP_SECRETS_ACCESS_KEY`, `BACKUP_SECRETS_SECRET_KEY`, `BACKUP_RESTIC_PASSWORD` | M2-S07 first scheduled run |
 | Monitoring accounts | A heartbeat service (for example healthchecks.io) with three check URLs: watchdog, backup and restore test. An external uptime check of `https://<domain>/healthz`. An alert email address. Optionally a Telegram bot token and chat id, and a hosted status page | Secrets `HEARTBEAT_WATCHDOG_URL`, `HEARTBEAT_BACKUP_URL`, `HEARTBEAT_RESTORE_URL`, `TELEGRAM_BOT_TOKEN`; variables `ALERT_EMAIL_TO`, `TELEGRAM_CHAT_ID` | M2-S08 first deploy |
 | GitHub settings | Environments `release`, `staging`, `production` and `restore-test`. The owner is required reviewer on `release` and `production`. `restore-test` is limited to the default branch. A tag protection rule for `v*.*.*`. GHCR packages kept private | Repository settings | M2-S01 first release |
@@ -1100,15 +1217,9 @@ Each decision has a default that is built when no answer arrives in time.
 | Backup tools | Built from `postgres:16.15-alpine` with `restic` and `rclone` from Alpine packages (`deploy/docker/backup.Dockerfile`) | M2-S07 |
 | Image and config scanning | `aquasec/trivy:0.74.0` (already in CI) | M2-S01 |
 
-### K.5 Waves
+### K.5 Waves and common acceptance
 
-| Wave | Work packages | Can start when | Owners of shared files in this wave |
-|---|---|---|---|
-| S1 | M2-S01 Release images, signing and supply chain; M2-S02 SaaS Compose stack and TLS; M2-S03 Server bootstrap; M2-S04 Go-live checklist and owner pack | Core wave 1 is committed | `deploy/scripts/build-bundle.sh`: M2-S01. `apps/server/profiles/saas.yaml`, `deploy/nginx/**`: M2-S02 |
-| S2 | M2-S05 Deploy script and deploy workflow; M2-S06 SaaS contract, schema and permissions; M2-S07 Backups and restore test; M2-S08 Monitoring and alerts | Wave S1 done and core wave 2 committed (M2-06) | `packages/shared/src/**`, `apps/server/migrations/platform/0005_saas.sql`, `profile.schema.ts`, `saas.yaml`, contract snapshot, RBAC and security sweep files: M2-S06. `apps/server/src/main.ts`: M2-S07 |
-| S3 | M2-S09 Operator commands and organisation lifecycle; M2-S10 Per-organisation entitlements; M2-S11 Organisation discovery at sign-in | Wave S2 done and core wave 3 committed; never at the same time as M2-17 (both edit `apps/web/src/auth/i18n.ts`) | `apps/server/src/main.ts`, `apps/server/src/cli/tenant.ts`: M2-S09. `saas.yaml`: M2-S10. `apps/web/src/auth/**`, `tools/mock-providers/**`: M2-S11 |
-| S4 | M2-S12 Operator console: organisations, status, domains and entitlements | Wave S3 done and M2-16 committed | none |
-| S5 | M2-S13 SaaS end-to-end run, CI jobs and go-live evidence | Wave S4 done and M2-18 committed | `.github/workflows/ci.yml`, `tools/smoke/**`, `apps/server/test/setup/**`, `docs/saas/go-live-checklist.md` (status and evidence columns) |
+The SaaS packages run in the combined wave table of G.1: M2-S01, M2-S03 and M2-S04 in wave 1a; M2-S02 in 1b; M2-S10, M2-S05, M2-S07 and M2-S08 in 2b; M2-S09 in 3a; M2-S11 in 3b; M2-S12 in 3c; M2-S13 in wave 6. M2-S06 is merged into M2-02 (K.6). G.1 also names the owner per wave of every file that both tracks touch.
 
 Common acceptance for every SaaS package (not repeated below):
 - the common acceptance of G.1;
@@ -1121,7 +1232,7 @@ Common acceptance for every SaaS package (not repeated below):
 
 | | |
 |---|---|
-| Wave, depends on | S1; Milestone 1 |
+| Wave, depends on | 1a; Milestone 1 |
 | Owns | `.github/workflows/release.yml`, `.github/workflows/security-scan.yml`, `.github/dependabot.yml`, `deploy/scripts/build-release-images.sh`, `deploy/scripts/build-bundle.sh` (new `--images-only` mode), `deploy/scripts/saas-keys.sh`, `tools/scripts/check-workflows.mjs`, `docs/saas/release.md`, `docs/platform/handoff/M2-S01.md` |
 
 Brief:
@@ -1178,7 +1289,7 @@ rm -rf "$K"
 
 | | |
 |---|---|
-| Wave, depends on | S1; Milestone 1 (uses `build-release-images.sh` from M2-S01 in its test script, so it finishes after M2-S01) |
+| Wave, depends on | 1b; M2-S01 (its test script uses `build-release-images.sh`), M2-02 (the new keys in `saas.yaml`) |
 | Owns | `deploy/compose/docker-compose.saas.yml`, `deploy/compose/.env.saas.example`, `deploy/compose/config/caddy/**`, `deploy/nginx/**`, `apps/server/profiles/saas.yaml`, `deploy/scripts/test/saas-stack.sh`, `docs/saas/stack.md`, `docs/platform/handoff/M2-S02.md` |
 
 Brief:
@@ -1210,7 +1321,7 @@ Brief:
   - The limits answer 429 with the problem headers.
   - The defaults are generous so an office behind one carrier NAT address is not locked out.
   - The on-premise defaults stay unchanged.
-- `saas.yaml`: SMTP port 587. Comments say that Compose sets `trust_proxy` and the public URL through environment variables. The anchor key file stays at `/run/secrets/audit-anchor.key`.
+- `saas.yaml`: SMTP port 587. Comments say that Compose sets `trust_proxy` and the public URL through environment variables. The keys that M2-02 added in wave 1a stay as they are. The anchor key file stays at `/run/secrets/audit-anchor.key`.
 - `saas-stack.sh up|check|down`: the local test stack, project `mscd-saas-test`, ports 18080 and 18443.
   - **up:** makes throwaway keys with `saas-keys.sh` and builds release images with them. It writes `.env` from the example with `MSCD_TLS_MODE=internal` and `MSCD_DOMAIN=localhost`, adds Mailpit for mail, starts the stack, runs migrate, and copies Caddy's local root certificate to `/tmp/mscd-saas-test/caddy-root.crt`.
   - **check:** asserts five things:
@@ -1240,7 +1351,7 @@ The `check` step also runs `curl --cacert /tmp/mscd-saas-test/caddy-root.crt htt
 
 | | |
 |---|---|
-| Wave, depends on | S1; Milestone 1 |
+| Wave, depends on | 1a; Milestone 1 |
 | Owns | `deploy/scripts/bootstrap-host.sh`, `deploy/host/{ssh,docker,firewall,system,test}/**`, `.github/workflows/bootstrap-prod.yml`, `docs/saas/bootstrap.md`, `docs/platform/handoff/M2-S03.md` |
 
 Brief:
@@ -1283,7 +1394,7 @@ rm -rf "$R"
 
 | | |
 |---|---|
-| Wave, depends on | S1; none |
+| Wave, depends on | 1a; none |
 | Owns | `docs/saas/README.md`, `docs/saas/go-live-checklist.md`, `docs/saas/owner-inputs.md`, `docs/saas/legal-inputs.md`, `docs/saas/records-of-processing.md`, `docs/saas/incident-response.md`, `docs/saas/pentest-scope.md`, `tools/scripts/check-golive.mjs`, `docs/platform/handoff/M2-S04.md` |
 
 Brief:
@@ -1359,7 +1470,7 @@ grep -q 'PLATFORM_KEY' docs/saas/owner-inputs.md && grep -q 'BACKUP_RESTIC_PASSW
 
 | | |
 |---|---|
-| Wave, depends on | S2; M2-S01, M2-S02, M2-S03 |
+| Wave, depends on | 2b; M2-S01, M2-S02, M2-S03 |
 | Owns | `deploy/scripts/saas-deploy.sh`, `deploy/scripts/lib/saas.sh`, `deploy/scripts/test/saas-rehearsal.sh`, `.github/workflows/deploy-prod.yml`, `docs/saas/deploy.md`, `docs/platform/handoff/M2-S05.md` |
 
 Brief:
@@ -1388,6 +1499,7 @@ Brief:
     4. Over SSH: `docker login ghcr.io --password-stdin` with the job's `GITHUB_TOKEN`, which expires with the job; `saas-deploy.sh` with secret values on stdin and never as arguments; `docker logout`.
     5. From the runner, check `https://<domain>/healthz` and the reported version.
   - **Cleanup:** the runner always removes the key.
+- `deploy-prod.yml` also writes the backup and monitoring secrets and variables of K.2 (`BACKUP_*`, `HEARTBEAT_*`, `TELEGRAM_BOT_TOKEN`, `ALERT_EMAIL_TO`, `TELEGRAM_CHAT_ID`) as one file per name under `/opt/mscd/secrets/backup/` and `/opt/mscd/secrets/ops/` (mode 0400, sent on stdin). M2-S07 and M2-S08 read them there, so they need no change to this workflow in the same wave, and `.env.saas.example` keeps one owner (M2-S02).
 - `saas-rehearsal.sh` proves deploy, upgrade, automatic rollback and manual rollback on the build host.
   - It starts a local registry on `127.0.0.1:5000`. It builds and pushes two versions with throwaway keys, and makes a broken third version by tagging the web image as the server image so migrate fails.
   - It runs `saas-deploy.sh` against `/tmp/mscd-rehearsal` four times: deploy rc.1, upgrade to rc.2, try rc.3 and expect the automatic restore to rc.2, then `rollback` to rc.1.
@@ -1410,75 +1522,16 @@ flock /tmp/mscd-stack.lock bash deploy/scripts/test/saas-rehearsal.sh
 flock /tmp/mscd-stack.lock npm run test:smoke
 ```
 
-#### M2-S06 SaaS contract, schema and permissions
+#### M2-S06 Merged into M2-02
 
-| | |
-|---|---|
-| Wave, depends on | S2; M2-06 |
-| Owns | `packages/shared/src/api/{ops,auth,system,license}.ts`, `packages/shared/src/{enums.ts,machines.ts,examples.ts,index.ts,openapi.ts}`, `packages/shared/src/authz/matrix.ts`, `packages/shared/test/**`, `apps/server/migrations/platform/0005_saas.sql`, `apps/server/src/db/types/platform.ts`, `apps/server/src/config/profile.schema.ts`, `apps/server/profiles/{saas,onprem,demo,test}.yaml` (new keys only), stub files `apps/server/src/modules/ops/domains/**` and `apps/server/src/modules/license/entitlements.controller.ts`, the stub routes added to `apps/server/src/modules/ops/ops.controller.ts`, the module files that register them, `apps/server/test/int/{contract,rbac,security,db}/**`, `apps/server/test/int/m2-pending/M2-S{09,10,11}.json`, `docs/platform/handoff/M2-S06.md` |
-
-Brief:
-- New routes. All are platform scope and answer 409 `single_tenancy` in single tenancy.
-
-| Route id | Method and path | Permission | Built by |
-|---|---|---|---|
-| `ops.organizations.get` | `GET /api/v1/ops/organizations/:org` | `ops.read` [OP] | M2-S09 |
-| `ops.organizations.status` | `POST /api/v1/ops/organizations/:org/status` `{status, reason, confirmSlug?}` | `ops.tenants.manage` [OP] | M2-S09 |
-| `ops.organizations.events` | `GET /api/v1/ops/organizations/:org/events` | `ops.read` [OP] | M2-S09 |
-| `ops.domains.list` | `GET /api/v1/ops/organizations/:org/domains` | `ops.read` [OP] | M2-S11 |
-| `ops.domains.add` | `POST /api/v1/ops/organizations/:org/domains` `{domain}` returns `{domain, txtName, txtValue, status}` | `ops.tenants.manage` [OP] | M2-S11 |
-| `ops.domains.verify` | `POST /api/v1/ops/organizations/:org/domains/:domain/verify` | `ops.tenants.manage` [OP] | M2-S11 |
-| `ops.domains.remove` | `DELETE /api/v1/ops/organizations/:org/domains/:domain` | `ops.tenants.manage` [OP] | M2-S11 |
-| `ops.entitlements.get` | `GET /api/v1/ops/organizations/:org/entitlements` | `ops.read` [OP] | M2-S10 |
-| `ops.entitlements.set` | `PUT /api/v1/ops/organizations/:org/entitlements` with `If-Match` | `ops.entitlements.manage` [OP] (new) | M2-S10 |
-| `ops.plans.list` | `GET /api/v1/ops/plans` | `ops.read` [OP] | M2-S10 |
-
-- Changed schemas:
-  - `ops.organizations.create` takes an optional `preset`;
-  - `ops.organizations.list` items add `status`, `plan`, `validUntil` and `verifiedDomains`;
-  - `system.profile` adds `legal: {privacyUrl, termsUrl}`;
-  - `auth.providers` documents the same answer for unknown slugs and domains, plus 429.
-- `enums.ts`:
-  - **Permission:** `ops.entitlements.manage`.
-  - **Audit actions:** `ops.organization_status_changed`, `ops.domain_added`, `ops.domain_verified`, `ops.domain_verification_failed`, `ops.domain_removed`, `ops.entitlements_changed`.
-  - **Job names:** `domain.verify`, `entitlement.expiry`.
-  - **Notification kind:** `organization_status_changed`.
-  - **Problem codes:** `invalid_status_transition` (409), `domain_taken` (409), `domain_not_allowed` (422), `confirmation_mismatch` (422).
-- `machines.ts`: the organisation status machine. Allowed moves:
-  - `active` to `suspended` or `offboarding`;
-  - `suspended` to `active` or `offboarding`;
-  - `offboarding` to `active` or `archived`;
-  - `archived` is final, until the purge of K.8.
-- `0005_saas.sql`:
-  - **New table `platform.organization_status_event`:** organisation, from, to, reason, actor, time.
-  - **`platform.verified_domain`:** adds `status` (`pending`, `verified`, `failed`), `txt_token_hash`, `requested_at`, `verified_at`, `last_checked_at` and `method` (`dns`, `manual`). It gets a unique index on `lower(domain)` where `status = 'verified'`. When duplicates already exist, the migration stops and lists them.
-  - **New table `platform.entitlement`:** primary key `organization_id`; `plan`, `source` (`preset`, `manual`, `signed_licence`), `max_users`, `max_management_systems`, `frameworks`, `storage_adapters`, `features`, `rate_user_per_minute`, `rate_org_per_minute`, `valid_from`, `valid_until`, `grace_days`, `version`, `updated_at`, `updated_by`.
-  - **Access:** grants and RLS like the other platform tables.
-- New profile keys, with defaults that keep on-premise unchanged:
-  - `tenancy.default_region` (default `id`);
-  - `license.plans` (map of preset name to limits; the D-S4 defaults in `saas.yaml`);
-  - `network.dns_resolvers` (default `[]`);
-  - `legal.privacy_url` and `legal.terms_url` (default `null`);
-  - `mail.required` (`true` in `saas.yaml`, `false` elsewhere).
-- Stubs answer 501 `not_implemented`. The pending files list the route ids per package. Record-table entries are added for the new GET routes, and the contract snapshot is updated once.
-
-Acceptance:
-
-```bash
-npm test -w @mscd/shared
-npm run openapi
-npm run test:int -w @mscd/server -- test/int/db test/int/contract test/int/rbac test/int/security
-npm run test:int -w @mscd/server
-test "$(ls apps/server/test/int/m2-pending/M2-S*.json | wc -l)" -eq 3
-node -e "const s=require('fs').readFileSync('apps/server/test/int/contract/__snapshots__/routes.test.ts.snap','utf8');for(const id of ['ops.organizations.status','ops.domains.add','ops.entitlements.set','ops.plans.list'])if(!s.includes(id+' '))process.exit(1)"
-```
+This is no longer a separate package. Its contract work is part of M2-02 in wave 1a, so R-14 holds for both tracks: the ten SaaS routes with stubs, pending files and sweep files (D.1, J.1), the schema changes of `ops.organizations.create`, `ops.organizations.list`, `system.profile` and `auth.providers` (D.2), the permission `ops.entitlements.manage`, the enum values, the organisation status machine, the platform migration `0005_milestone2_saas.sql` and the profile keys (D.3, J). Profile values that are not contract stay with the package that uses them: the mail settings of `saas.yaml` with M2-S02 and the `license.plans` presets with M2-S10. The id M2-S06 is not reused.
 
 #### M2-S07 Backups and restore test
 
 | | |
 |---|---|
-| Wave, depends on | S2; M2-S02, M2-06 |
-| Owns | `deploy/docker/backup.Dockerfile`, `deploy/compose/docker-compose.backup.yml`, `deploy/backup/**`, `deploy/host/systemd/mscd-backup.{service,timer}`, `.github/workflows/restore-test.yml`, `apps/server/src/cli/backup.ts`, `apps/server/src/main.ts`, `apps/server/test/int/backup/**`, `docs/saas/backup-restore.md`, `docs/platform/handoff/M2-S07.md` |
+| Wave, depends on | 2b; M2-S02, M2-06, M2-02 (the `backup` command stub) |
+| Owns | `deploy/docker/backup.Dockerfile`, `deploy/compose/docker-compose.backup.yml`, `deploy/backup/**`, `deploy/host/systemd/mscd-backup.{service,timer}`, `.github/workflows/restore-test.yml`, `apps/server/src/cli/backup.ts` (fills the stub that M2-02 registered in `program.ts`), `apps/server/test/int/backup/**`, `docs/saas/backup-restore.md`, `docs/platform/handoff/M2-S07.md` |
 
 Brief:
 - `backup.Dockerfile`: `postgres:16.15-alpine` plus `restic` and `rclone`. It runs as non-root and mounts the build CA as in R-12.
@@ -1487,9 +1540,9 @@ Brief:
   2. `rclone sync` of bucket `mscd-vault` from `objectstore:8333` to the off-site bucket while the stack runs. Vault objects are already sealed by the gateway.
   3. A restic-encrypted copy of `/opt/mscd/secrets`, `.env` and `/opt/mscd/state` under a separate prefix with the separate credentials, plus the last 25 hours of worker `audit.anchor` log lines.
 - Retention: `restic forget` 14 daily, 8 weekly, 12 monthly (D-S6). Each success pings `HEARTBEAT_BACKUP_URL` and writes `mscd_backup_last_success_timestamp_seconds` to `/opt/mscd/metrics/backup.prom` for the node-exporter of M2-S08.
-- The backup secrets of K.2 reach the server through `deploy-prod.yml`, as files under `/opt/mscd/secrets/backup/`.
+- The backup secrets of K.2 reach the server as files under `/opt/mscd/secrets/backup/`, written by `deploy-prod.yml` (M2-S05). This package reads them there and edits neither that workflow nor `.env.saas.example`.
 - `restore.sh`: a documented full restore onto a new server bootstrapped with M2-S03. It covers secrets, database, vault, start and checks.
-- `mscd-server backup verify [--sample <n>] [--write-probe]`:
+- `mscd-server backup verify [--sample <n>] [--write-probe]`, in `cli/backup.ts`:
   - checks the database and gateway;
   - unwraps each tenant data key with `platform.key`;
   - opens n vault objects per organisation through the gateway;
@@ -1521,7 +1574,7 @@ flock /tmp/mscd-stack.lock bash deploy/backup/restore-test.sh --local
 
 | | |
 |---|---|
-| Wave, depends on | S2; M2-S02 |
+| Wave, depends on | 2b; M2-S02 |
 | Owns | `deploy/compose/docker-compose.ops.yml`, `deploy/ops/**`, `deploy/compose/config/caddy/conf.d/ops.caddy`, `docs/saas/monitoring.md`, `docs/platform/handoff/M2-S08.md` |
 
 Brief:
@@ -1547,6 +1600,7 @@ Brief:
   - email through the SMTP secrets (`smtp_auth_password_file`) to `ALERT_EMAIL_TO`, and Telegram when `TELEGRAM_BOT_TOKEN` is set (`bot_token_file`);
   - the Watchdog goes to `HEARTBEAT_WATCHDOG_URL` every minute, so the external service alerts the owner when the box itself is down;
   - `ops-init` renders the config from a template.
+  - Settings and secrets come from `/opt/mscd/secrets/ops/` and the SMTP secret files, written by `deploy-prod.yml` (M2-S05). This package edits neither that workflow nor `.env.saas.example`.
 - Promtool unit tests in `deploy/ops/prometheus/tests/` for every rule.
 - `deploy/ops/test-ops.sh`: starts the M2-S02 test stack with the ops overlay, checks that every target is up through the Prometheus API inside the container, fires a test alert with `amtool`, and checks that the email arrives in Mailpit.
 - `docs/saas/monitoring.md`:
@@ -1570,26 +1624,27 @@ flock /tmp/mscd-stack.lock bash deploy/ops/test-ops.sh
 
 | | |
 |---|---|
-| Wave, depends on | S3; M2-S06, M2-06, M2-S05 (for `ops-cli.yml`) |
-| Owns | `apps/server/src/modules/ops/**` except `ops/domains/**`, `apps/server/src/modules/tenancy/**`, `apps/server/src/db/tenant-provisioner.ts`, the session revocation helper in `apps/server/src/modules/identity/` it adds (`org-sessions.ts`), the `organization_status_changed` mail template, `apps/server/src/cli/{tenant.ts,diagnostics.ts}`, `apps/server/src/main.ts`, `.github/workflows/ops-cli.yml`, `deploy/scripts/saas-ops.sh`, `apps/server/test/int/saas-ops/**`, `apps/server/test/int/m2-pending/M2-S09.json` (deletes), `docs/saas/operator.md`, `docs/platform/handoff/M2-S09.md` |
+| Wave, depends on | 3a; M2-02, M2-06, M2-S05 (for `ops-cli.yml`), M2-S10 (`applyPreset` and the change notice) |
+| Owns | `packages/shared/src/api/ops.ts` (schemas only), `apps/server/src/modules/ops/**` except `ops/domains/**`, `apps/server/src/modules/tenancy/**`, `apps/server/src/db/tenant-provisioner.ts`, `apps/server/src/modules/identity/org-sessions.ts` (new, session revocation), `apps/server/src/modules/identity/session-resolver.ts` (cache drop only), `apps/server/src/modules/identity/mail-templates.ts` (the `organization_status_changed` template), `apps/server/src/modules/jobs/scheduler-tick.job.ts` (skips organisations that are not active), `apps/server/src/cli/{tenant.ts,diagnostics.ts}` (`diagnostics.ts` fills the stub of M2-02), `.github/workflows/ops-cli.yml`, `deploy/scripts/saas-ops.sh`, `apps/server/test/int/saas-ops/**`, `apps/server/test/int/security/record-tables/M2-S09.ts`, `apps/server/test/int/rbac/expectations/M2-S09.ts`, `apps/server/test/int/m2-pending/M2-S09.json` (deletes), `docs/saas/operator.md`, `docs/platform/handoff/M2-S09.md` |
 
 Brief:
 - Routes `ops.organizations.get`, `.status` and `.events`. The detail shows status, region, created date, member count, system count, entitlement summary, domains and last sign-in.
+- `ops.organizations.list` items get `status`, `plan`, `validUntil` (from the entitlement row of M2-S10) and `verifiedDomains`. `ops.organizations.create` applies its `preset` with `applyPreset` of M2-S10 (D.2). M2-06 keeps the rest of `ops.organizations.create` as built.
 - Status change:
-  - follows the machine of M2-S06 and requires a reason;
+  - follows the machine of J.8 and requires a reason;
   - `offboarding` and `archived` also need `confirmSlug` equal to the slug;
   - one transaction writes the status, the status event and a platform-chain audit entry;
   - `suspended` and `archived` revoke every session whose current organisation is this one, and users keep their other memberships;
-  - a `NOTIFY mscd_tenant_changed` makes every api and worker process drop its tenant resolver and session cache within 2 seconds;
+  - it sends the `mscd_tenant_changed` notice of M2-S10, and every api and worker process drops its tenant resolver and session cache within 2 seconds (this package adds those two listeners);
   - the organisation's Tenant Admins get an email with the new status and reason.
 - CLI:
   - `tenant list` shows slug, id, status, plan, valid until and members;
   - `tenant show --org <slug>`;
   - `tenant set-status --org <slug> --status <status> --reason <text> [--confirm <slug>]`;
-  - `tenant onboard --slug --name --time-zone --site-count --admin-email --admin-name [--preset <name>]` does `tenant create`, the entitlement preset (once M2-S10 is done) and the first administrator invitation in one step, through the same service as `ops.organizations.create`;
+  - `tenant onboard --slug --name --time-zone --site-count --admin-email --admin-name [--preset <name>]` does `tenant create`, the entitlement preset (M2-S10) and the first administrator invitation in one step, through the same service as `ops.organizations.create`;
   - `diagnostics --out <file>` writes the redacted archive of `POST /ops/diagnostics` without the api (open follow-up of `CLAUDE.md`).
 - New organisations get `region` from `tenancy.default_region`.
-- With `mail.required` (SaaS), `ops.organizations.create`, `tenant onboard` and `admin create-operator` refuse when SMTP is not configured. They never print or return an invitation or set-password link. They print "Invitation sent to <email>".
+- `tenant onboard` follows the mail rule that M2-06 built for `ops.organizations.create` and `admin create-operator`: with `mail.required` it refuses when SMTP is not configured, never prints an invitation link, and prints "Invitation sent to <email>". It creates the organisation with local sign-in allowed (product decision 7 of `CLAUDE.md`).
 - `saas-ops.sh` is the server-side allow-list wrapper. It accepts only these commands, each with validated arguments, mapped to `docker compose run --rm cli ...`:
   - `create-operator`, `revoke-operator`;
   - `tenant-list`, `tenant-show`, `tenant-onboard`, `tenant-set-status`;
@@ -1621,26 +1676,27 @@ npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/sec
 ```
 
 `test/int/saas-ops` covers:
-- every allowed status move, and every refused one with 409 `invalid_status_transition`;
-- 422 `confirmation_mismatch`;
+- every allowed status move, and every refused one with 409 `transition-not-allowed` and `messageKey` `invalid_status_transition`;
+- 422 `business-rule` with `messageKey` `confirmation_mismatch`;
 - sessions revoked, while the other organisation's sessions keep working;
 - a second api process seeing the new status within 2 seconds;
 - jobs skipping suspended organisations;
 - the audit entry and the email;
 - onboarding refused in multi tenancy when mail is missing;
-- 409 `single_tenancy` for each new route in single tenancy.
+- 409 `conflict` with `messageKey` `single_tenancy` for each new route in single tenancy.
 
 #### M2-S10 Per-organisation entitlements
 
 | | |
 |---|---|
-| Wave, depends on | S3; M2-S06, M2-06 |
-| Owns | `apps/server/src/modules/license/**`, `apps/server/src/modules/platform/rate-limit.ts`, `apps/server/src/cli/license.ts`, `apps/server/profiles/saas.yaml` (`license.plans` values), `apps/server/test/int/license/**`, `apps/server/test/int/entitlements/**`, `apps/server/test/int/m2-pending/M2-S10.json` (deletes), `docs/saas/entitlements.md`, `docs/platform/handoff/M2-S10.md` |
+| Wave, depends on | 2b; M2-02, M2-06 |
+| Owns | `packages/shared/src/api/{license,ops-entitlements}.ts` (schemas only), `apps/server/src/modules/license/**`, `apps/server/src/modules/platform/rate-limit.ts`, `apps/server/src/modules/tenancy/rate-limit-store.ts` (limits per organisation), `apps/server/src/cli/license.ts`, `apps/server/profiles/saas.yaml` (`license.plans` values), `apps/server/src/modules/identity/mail-templates.ts` (the entitlement expiry templates), `apps/server/src/modules/jobs/schedules.ts` (the `entitlement.expiry` entry), `apps/server/test/int/license/**`, `apps/server/test/int/entitlements/**`, `apps/server/test/int/security/record-tables/M2-S10.ts`, `apps/server/test/int/rbac/expectations/M2-S10.ts`, `apps/server/test/int/m2-pending/M2-S10.json` (deletes), `docs/saas/entitlements.md`, `docs/platform/handoff/M2-S10.md` |
 
 Brief:
-- In multi tenancy, the effective licence of each organisation is its `platform.entitlement` row. LicenceGate reads it through a cache of up to 60 seconds, which the `NOTIFY` of M2-S09 also clears.
+- In multi tenancy, the effective licence of each organisation is its `platform.entitlement` row. LicenceGate reads it through a cache of up to 60 seconds. Every entitlement write sends `NOTIFY mscd_tenant_changed` with the organisation id, and each process clears its cache entry on that notice. The helper `publishTenantChange(trx, orgId)` and the listener live in `modules/license/`; M2-S09 reuses them in wave 3a.
 - What stays the same:
   - the codes `LIC-USERS`, `LIC-MS`, `LIC-FEATURE`, the adapter checks, read-only after grace, and `license.check`;
+  - `LIC-USERS` counts active members without guests (product decision 5 of `CLAUDE.md`);
   - single tenancy, which still uses the signed licence file;
   - `PUT /admin/license {org, licence}` (D-32): it still verifies the signature and now writes the entitlement row with source `signed_licence`, so the M2-16 "Install licence" button keeps working.
 - `ops.entitlements.set`:
@@ -1648,9 +1704,9 @@ Brief:
   - needs `If-Match`;
   - writes one audit entry with the old and new values;
   - when a limit falls below current use, it is accepted with a warning in the response, and new invitations then stop with `LIC-USERS`.
-- `ops.plans.list` returns the presets. `ops.organizations.create` and `tenant onboard` apply the given preset.
+- `ops.plans.list` returns the presets. `EntitlementService.applyPreset(trx, orgId, preset)` writes the row for a preset; M2-S09 calls it from `ops.organizations.create` and `tenant onboard` in wave 3a. Until then an organisation without a row keeps the Milestone 1 rule: no licence, so no users or systems can be added.
 - Rate limits per organisation and per user come from the entitlement, with `DEFAULT_RATE_LIMITS` when a value is null.
-- The daily `entitlement.expiry` job emails platform operators at 30, 7 and 1 days before `valid_until`, and the organisation's Tenant Admins at 30 and 7 days. `mscd_licence_days_left` reads the registry.
+- The daily `entitlement.expiry` job emails platform operators at 30, 7 and 1 days before `valid_until`, and the organisation's Tenant Admins at 30 and 7 days. `mscd_licence_days_left` reads the registry through `LicenceService.evaluateOrg`, so the collector in `modules/ops/` does not change.
 - CLI: `license entitlements show --org <slug>` and `license entitlements set --org <slug> (--preset <name> | --max-users <n> --max-systems <n> --valid-until <date> ...)`.
 - `docs/saas/entitlements.md`: presets, how to change a customer's plan, and what users see at each limit.
 
@@ -1677,16 +1733,17 @@ npm run test:int -w @mscd/server
 
 | | |
 |---|---|
-| Wave, depends on | S3; M2-S06, M2-10 |
-| Owns | `apps/server/src/modules/identity/oidc/{auth-providers.service.ts,provider-lookup.ts}`, `apps/server/src/modules/ops/domains/**`, the `verify-domain` command block in `apps/server/src/cli/tenant.ts` (coordinated with M2-S09: M2-S11 edits only that block), `apps/server/test/int/domains/**`, `apps/server/test/int/m2-pending/M2-S11.json` (deletes), `apps/web/src/auth/**`, `apps/web/test/auth/**`, `apps/web/e2e/api-only/sign-in-discovery.spec.js`, `tools/mock-providers/**`, `docs/saas/sign-in.md`, `docs/platform/handoff/M2-S11.md` |
+| Wave, depends on | 3b; M2-02, M2-10, M2-S09 (both edit `cli/tenant.ts` and `identity/mail-templates.ts`, so this package comes one wave later) |
+| Owns | `packages/shared/src/api/{auth,ops-domains}.ts` (schemas only), `apps/server/src/modules/identity/oidc/{auth-providers.service.ts,provider-lookup.ts}`, `apps/server/src/modules/ops/domains/**`, `apps/server/src/modules/platform/system-profile.controller.ts` (the `legal` member), `apps/server/src/modules/identity/mail-templates.ts` (the missing-record template), `apps/server/src/modules/jobs/schedules.ts` (the `domain.verify` entries), `apps/server/src/cli/tenant.ts` (the `verify-domain` command only), `apps/server/test/int/domains/**`, `apps/server/test/int/security/record-tables/M2-S11.ts`, `apps/server/test/int/rbac/expectations/M2-S11.ts`, `apps/server/test/int/m2-pending/M2-S11.json` (deletes), `apps/web/src/auth/**`, `apps/web/test/auth/**`, `apps/web/e2e/api-only/sign-in-discovery.spec.js`, `tools/mock-providers/**`, `docs/saas/sign-in.md`, `docs/platform/handoff/M2-S11.md` |
 
 Brief:
 - Domain verification by DNS TXT:
-  - `ops.domains.add` normalises the domain (lower case, IDN to punycode). It refuses free mail domains (for example `gmail.com`, `yahoo.com`, `yahoo.co.id`, `outlook.com`, `hotmail.com`) with 422 `domain_not_allowed`.
+  - `ops.domains.add` normalises the domain (lower case, IDN to punycode). It refuses free mail domains (for example `gmail.com`, `yahoo.com`, `yahoo.co.id`, `outlook.com`, `hotmail.com`) with 422 `business-rule` and `messageKey` `domain_not_allowed`.
   - It returns the record `_mscd-verify.<domain>` TXT `mscd-verify=<token>`, with a 32-byte random token. Only the token's hash is stored.
   - The worker job `domain.verify` checks pending domains every hour for 7 days, then marks them `failed`. "Verify now" checks at once. Lookups use `node:dns` with `network.dns_resolvers`.
-  - A verified domain belongs to one organisation only. A second claim gets 409 `domain_taken`.
+  - A verified domain belongs to one organisation only. A second claim gets 409 `conflict` with `messageKey` `domain_taken`.
   - A monthly re-check emails the operators when the record is gone. The status stays verified.
+- `system.profile` returns `legal: {privacyUrl, termsUrl}` from the profile keys (D.2), for the sign-in page footer.
 - `tenant verify-domain --by <name>` stays for on-premise. In multi tenancy it also needs `--manual-reason <text>` and is audited with method `manual`.
 - `GET /auth/providers` gives the same answer shape and status for an unknown slug, an unknown domain and a known organisation without SSO (D-S10). It has its own limit of 20 per minute per address, which answers 429 with `Retry-After`.
 - Login page:
@@ -1722,14 +1779,14 @@ npm run test:int -w @mscd/server -- test/int/rbac test/int/contract test/int/sec
 
 | | |
 |---|---|
-| Wave, depends on | S4; M2-16, M2-S09, M2-S10, M2-S11 |
+| Wave, depends on | 3c; M2-16, M2-S09, M2-S10, M2-S11 |
 | Owns | `apps/web/src/screens/ops/**`, `apps/web/test/screens/ops*.test.tsx`, `apps/web/e2e/screens/ops*.spec.js`, `apps/web/e2e/api-only/ops-organizations.spec.js`, `docs/platform/handoff/M2-S12.md` |
 
 Brief:
 - Organisations table:
   - adds the columns status, plan, users "used of limit", valid until with days left, and verified domains;
   - filters by status and search by slug or name.
-- "Create organisation" gains the plan preset (`ops.plans.list`) and drops the one-time link in multi tenancy, because mail is required.
+- "Create organisation" gains the plan preset (`ops.plans.list`). It shows no one-time link on SaaS, because `mail.required` is true there (M2-06).
 - Organisation drawer tabs:
   - **Overview:** the `ops.organizations.get` fields.
   - **Status:** shows the current status with one plain sentence on what users can do. Actions are "Suspend", "Reactivate", "Start offboarding" and "Archive". Each needs a reason, and the last two also need the slug typed again. The effects are listed before confirming.
@@ -1753,7 +1810,7 @@ git diff --quiet HEAD -- apps/web/src/MscdApp.jsx apps/web/src/views apps/web/sr
 
 | | |
 |---|---|
-| Wave, depends on | S5; every other SaaS package, M2-18 |
+| Wave, depends on | 6; every other SaaS package, M2-18 |
 | Owns | `.github/workflows/ci.yml`, `tools/smoke/**`, `apps/server/vitest.int-saas.config.ts`, `apps/server/package.json` (script `test:int:saas` only; lockfile unchanged), `apps/server/test/setup/**` (a multi-tenancy template database), `docs/saas/go-live-checklist.md` (status and evidence columns), `docs/platform/handoff/M2-S13.md` |
 
 Brief:
