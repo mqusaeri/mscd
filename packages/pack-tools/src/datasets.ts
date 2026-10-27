@@ -7,7 +7,7 @@
 // version, installed versions, rows an update drops) are checked by the server's pack installer.
 import type { z } from 'zod';
 import {
-  MAPPING_CSV_HEADER, MAPPING_FILE_RE, MappingRow, PACK_CSV_HEADERS, PACK_CSV_ROW_SCHEMAS, PACK_DATASET_FILES, PACK_JSON_SCHEMAS,
+  MAPPING_CSV_HEADER, MAPPING_FILE_RE, MappingRow, compareSemver, PACK_CSV_HEADERS, PACK_CSV_ROW_SCHEMAS, PACK_DATASET_FILES, PACK_JSON_SCHEMAS,
   REQUIRED_LOOKUP_DOMAINS,
   type ActivityRow, type AuditActivityRow, type CatalogueRow, type ChainRow, type CycleRequirementRow, type DocumentTemplateRow,
   type DocumentedInfoRow, type DriftRuleDef, type FindingConditionRow, type FrequencyRow, type LookupRow, type PackCsvFile,
@@ -41,12 +41,12 @@ export interface PackDatasets {
 }
 
 /** The manifest fields the dataset checks need (a source manifest or a built manifest). */
-export type DatasetManifestFields = Pick<PackSourceManifest, 'pack_id' | 'edition' | 'catalogue' | 'applicability_target' | 'supersedes'>;
+export type DatasetManifestFields = Pick<PackSourceManifest, 'pack_id' | 'pack_version' | 'edition' | 'catalogue' | 'applicability_target' | 'supersedes'>;
 
 /** Datasets and the warnings of a parse (`parsePackDatasetsWithWarnings`). */
 export interface ParsedPackDatasets {
   readonly datasets: PackDatasets;
-  /** Content references that do not resolve in a pack without documented information (`contentReferencesStrict`). */
+  /** Content references that do not resolve, in a pack that may still leave them open (`contentReferencesStrict`). */
   readonly warnings: readonly string[];
 }
 
@@ -78,13 +78,31 @@ export function clauseAtRiskCodes(value: string): string[] | null {
 }
 
 /**
- * Whether the content references of Milestone 2 E.1 (cycle requirement codes, chain `clause_at_risk` values, activity
- * output documents, documented information templates) must resolve. They must in a pack that lists its documented
- * information (the content format of E.2); in a pack without that list, written before it, an unresolved reference is
- * a warning, so the Milestone 1 content still builds and installs.
+ * The first version of each Milestone 1 pack that must resolve every content reference: the content step of
+ * Milestone 2 E.3 (M2-04). The versions before it carry the Milestone 1 content, which names subclauses and documents
+ * the pack does not hold, so their unresolved references are warnings and they still build and install (also the
+ * fixture versions tests build from them). A fixed cut-over by version, so a later version cannot skip the check by
+ * leaving `documented_info.csv` empty. `packs/scripts/lib/pack-format.mjs` holds the same table for the validator.
  */
-export function contentReferencesStrict(d: Pick<PackDatasets, 'documentedInfo'>): boolean {
-  return d.documentedInfo.length > 0;
+export const CONTENT_REFERENCES_STRICT_FROM: Readonly<Record<string, string>> = Object.freeze({
+  'ISO27001-2022': '1.3.0',
+  'ISO9001-2015': '1.5.0',
+  'ISO9001-2026': '0.10.0',
+  'ISO22301-2019': '1.1.0',
+  'ISO37001-2016': '1.1.0',
+  'ISO37001-2025': '0.7.0',
+});
+
+/**
+ * Whether the content references of Milestone 2 E.1 (cycle requirement codes, chain `clause_at_risk` values, activity
+ * output documents, documented information templates) must resolve. They must in every pack, except a version of a
+ * Milestone 1 pack below its cut-over (`CONTENT_REFERENCES_STRICT_FROM`, compared without a pre-release suffix) that
+ * lists no documented information; there an unresolved reference is a warning.
+ */
+export function contentReferencesStrict(manifest: Pick<PackSourceManifest, 'pack_id' | 'pack_version'>, d: Pick<PackDatasets, 'documentedInfo'>): boolean {
+  if (d.documentedInfo.length > 0) return true;
+  const from = CONTENT_REFERENCES_STRICT_FROM[manifest.pack_id];
+  return from === undefined || compareSemver(manifest.pack_version.split('-')[0] as string, from) >= 0;
 }
 
 function zodIssues(error: z.ZodError): string[] {
@@ -250,8 +268,8 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
     if (problem !== null) issues.add('documented_info.csv', `${i.code}: requirement_code ${i.requirement_code} ${problem}`);
   }
 
-  // Content references of E.1: errors in a pack with documented information, warnings before it.
-  const content = contentReferencesStrict(d) ? issues : warnings;
+  // Content references of E.1: errors, except warnings in a Milestone 1 pack version before its cut-over.
+  const content = contentReferencesStrict(manifest, d) ? issues : warnings;
   const templateCodes = new Set(d.documentTemplates.map((t) => t.code));
   for (const i of d.documentedInfo) {
     if (i.template_code !== null && !templateCodes.has(i.template_code)) {
@@ -344,7 +362,7 @@ export function parsePackDatasets(files: ReadonlyMap<string, Buffer>, manifest: 
   return parsePackDatasetsWithWarnings(files, manifest).datasets;
 }
 
-/** `parsePackDatasets`, also returning the content references that a pack without documented information leaves open. */
+/** `parsePackDatasets`, also returning the content references that a Milestone 1 pack version leaves open. */
 export function parsePackDatasetsWithWarnings(files: ReadonlyMap<string, Buffer>, manifest: DatasetManifestFields): ParsedPackDatasets {
   const issues = new Issues();
   const known = new Set<string>(PACK_DATASET_FILES);

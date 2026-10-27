@@ -1,8 +1,10 @@
 // `applicability.sync` (Milestone 2 E.3, J.3; M2-03). After a pack installation updates an edition in use, every
-// system on that edition gets the content of the new version: applicability entries for new catalogue items and leaf
-// requirements (`seedApplicability`, `not_started`, unassigned), cycle items for new cycle requirements in its open
-// cycles, and nothing is ever deleted. The MS Managers get one `pack_content_updated` notice with the codes added,
-// retitled and retired, and the run is audited as `pack.content_synced` (platform audit log, with the system).
+// system on that edition gets the content of the new version: applicability entries for the catalogue items and leaf
+// requirements that are new in it (`newTargets` of the change summary, through `seedApplicability`, `not_started`,
+// unassigned), cycle items for new cycle requirements in its open cycles, and nothing is ever deleted. Rows that were
+// already in the standard are left alone: a system keeps the entries its team chose, and an entry the team deleted is
+// not created again. The MS Managers get one `pack_content_updated` notice with the codes added, retitled and
+// retired, and the run is audited as `pack.content_synced` (platform audit log, with the system).
 //
 // Which systems wait for a sync is read from the database, so a run is idempotent: an update installation of the
 // system's edition after the system was created, newer than the last installation synced for it. The change summary
@@ -282,15 +284,19 @@ export class ApplicabilitySyncService implements OnApplicationBootstrap, OnAppli
   private async syncSystem(trx: Trx, org: TenantInfo, item: PendingSystem, today: string): Promise<SystemSyncResult> {
     const { system, installs } = item;
     const latest = installs[installs.length - 1]!;
-    const seeded = await seedApplicability(trx, system.id, { actorUserId: SYSTEM_USER_ID });
     const changes = installs.map((i) => i.changes).filter((c): c is PackContentChanges => c !== null);
+    // Entries only for the rows that joined the target list in the waiting versions; an installation without a change
+    // summary (made by a Milestone 1 build) adds none. The seeder skips rows retired again since and deleted entries.
+    const newTargets = new Set(changes.flatMap((c) => c.newTargets));
+    const seeded = newTargets.size > 0 ? await seedApplicability(trx, system.id, { actorUserId: SYSTEM_USER_ID, only: newTargets }) : null;
     // The cycle requirements new in the waiting installations; every one of the edition when a change summary is missing.
     const newCycleCodes = changes.length === installs.length ? new Set(changes.flatMap((c) => c.cycleRequirementsAdded)) : null;
     const cycleItems = await this.addCycleItems(trx, system, today, newCycleCodes);
     const retitled = unite(changes.map((c) => c.retitled));
     const retired = unite(changes.map((c) => c.retired));
     const restored = unite(changes.map((c) => c.restored));
-    const entriesAdded = seeded.added.map((e) => e.code);
+    const added = seeded?.added ?? [];
+    const entriesAdded = added.map((e) => e.code);
 
     await this.audit.record(trx, {
       action: 'pack.content_synced',
@@ -335,7 +341,7 @@ export class ApplicabilitySyncService implements OnApplicationBootstrap, OnAppli
       // New entries feed freshness and clause readiness (R-18); both jobs are debounced per system.
       await this.jobs.send(
         'freshness.recompute',
-        { orgId: org.id, requestedBy: SYSTEM_USER_ID, payload: { msId: system.id, entryIds: seeded.added.map((e) => e.id) } },
+        { orgId: org.id, requestedBy: SYSTEM_USER_ID, payload: { msId: system.id, entryIds: added.map((e) => e.id) } },
         { singletonKey: `fr:${org.id}:${system.id}`, startAfterSeconds: 5 },
         trx,
       );

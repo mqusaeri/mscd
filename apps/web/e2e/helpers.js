@@ -28,7 +28,9 @@ export const test = base.extend({
     // Host screens load their data after they open (MILESTONE-2 C.6), so a test that loads another page while such a
     // read is under way aborts it. The start of every page load is kept to tell those reads from real failures.
     const loads = [];
+    const starts = new WeakMap();
     page.on('request', (r) => {
+      starts.set(r, Date.now());
       if (r.isNavigationRequest() && r.frame() === page.mainFrame()) loads.push(Date.now());
     });
     page.on('requestfailed', async (r) => {
@@ -37,8 +39,8 @@ export const test = base.extend({
         // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
         if (await r.response().catch(() => null)) return;
         // A read of the api that a later page load of the test cut off.
-        const started = r.timing().startTime;
-        if (['fetch', 'xhr'].includes(r.resourceType()) && r.method() === 'GET' && started > 0 && loads.some((t) => t >= started - 1)) return;
+        const started = starts.get(r);
+        if (['fetch', 'xhr'].includes(r.resourceType()) && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
       }
       problems.push('requestfailed: ' + r.url());
     });

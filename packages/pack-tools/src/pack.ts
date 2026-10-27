@@ -121,7 +121,7 @@ export interface BuiltPack {
   readonly bytes: Buffer;
   readonly manifest: PackManifest;
   readonly datasets: PackDatasets;
-  /** Content references left open by a pack without documented information (`parsePackDatasetsWithWarnings`). */
+  /** Content references left open by a Milestone 1 pack version (`parsePackDatasetsWithWarnings`, `contentReferencesStrict`). */
   readonly warnings: readonly string[];
   /** Key id of the signing key. */
   readonly keyId: string;
@@ -197,7 +197,7 @@ export interface VerifiedPack {
   /** Exact bytes of `manifest.json`. */
   readonly manifestBytes: Buffer;
   readonly datasets: PackDatasets;
-  /** Content references left open by a pack without documented information (`parsePackDatasetsWithWarnings`). */
+  /** Content references left open by a Milestone 1 pack version (`parsePackDatasetsWithWarnings`, `contentReferencesStrict`). */
   readonly warnings: readonly string[];
   /** Dataset files by name, exactly as in the archive. */
   readonly files: ReadonlyMap<string, Buffer>;

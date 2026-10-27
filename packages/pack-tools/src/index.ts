@@ -13,7 +13,7 @@ export {
   type PackLimits,
 } from './archive.js';
 export {
-  clauseAtRiskCodes, contentReferencesStrict, datasetCounts, parsePackDatasets, parsePackDatasetsWithWarnings, type DatasetManifestFields,
+  CONTENT_REFERENCES_STRICT_FROM, clauseAtRiskCodes, contentReferencesStrict, datasetCounts, parsePackDatasets, parsePackDatasetsWithWarnings, type DatasetManifestFields,
   type PackDatasets, type ParsedPackDatasets,
 } from './datasets.js';
 export {

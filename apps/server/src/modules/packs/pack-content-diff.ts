@@ -1,16 +1,18 @@
 // What a newer version of an installed edition changes (Milestone 2 E.1, E.3): the requirement and catalogue codes
 // it drops (refused: rule PACK-ROW-REMOVED, a row leaves the standard only by being marked retired), and the summary
-// of an accepted update (codes added, retitled, retired, back in the standard; new cycle requirements; activity and
-// preparation task templates the version no longer lists, which stay in ref). The summary goes into the
-// `pack.installed` audit entry, and `applicability.sync` reads it from there for the `pack_content_updated` notice.
+// of an accepted update (codes added, retitled, retired, back in the standard; the rows that join the D2-09 target list;
+// new cycle requirements; activity and preparation task templates the version no longer lists, which stay in ref). The
+// summary goes into the `pack.installed` audit entry, and `applicability.sync` reads it from there: it seeds only the
+// new targets and lists the codes in the `pack_content_updated` notice.
 import type { PackDatasets } from '@mscd/pack-tools';
 import { sql } from 'kysely';
 import type { Trx } from '../../common/tokens';
+import { targetKey, targetKeysOf } from '../implementation/applicability-seed';
 import { PackRejectedError } from './pack-verification';
 
 /** Rows of an installed edition that an update is compared with. */
 export interface EditionRows {
-  requirements: ReadonlyMap<string, { title: string; retired: boolean }>;
+  requirements: ReadonlyMap<string, { title: string; retired: boolean; parent: string | null }>;
   catalogue: ReadonlyMap<string, { title: string; retired: boolean }>;
   cycleRequirements: ReadonlySet<string>;
   /** `<phase_no>.<activity_no>` */
@@ -28,6 +30,12 @@ export interface PackContentChanges {
   retired: string[];
   /** Codes retired before and in the standard again. */
   restored: string[];
+  /**
+   * The D2-09 targets of this version that were no target of the installed one (`targetKey`, pack order): new rows,
+   * rows back in the standard, and clause rows left without a sub-clause that is still in the standard. These are the
+   * entries `applicability.sync` may add (E.3).
+   */
+  newTargets: string[];
   /** Cycle requirement codes new in this version. */
   cycleRequirementsAdded: string[];
   /** Activity templates (`<phase>.<activity>`) this version no longer lists; they stay in ref. */
@@ -45,8 +53,10 @@ export interface RemovedRows {
 /** The rows of one framework version (installer or app connection: `ref` is readable by both). */
 export async function loadEditionRows(trx: Trx, frameworkVersionId: string): Promise<EditionRows> {
   // One connection: the queries run one after the other.
-  const requirements = await sql<{ code: string; title: string; retired: boolean }>`
-    select requirement_code as code, title_short as title, retired from ref.requirement where framework_version_id = ${frameworkVersionId}`.execute(trx);
+  const requirements = await sql<{ code: string; title: string; retired: boolean; parent: string | null }>`
+    select r.requirement_code as code, r.title_short as title, r.retired, p.requirement_code as parent
+      from ref.requirement r left join ref.requirement p on p.id = r.parent_id
+     where r.framework_version_id = ${frameworkVersionId}`.execute(trx);
   const catalogue = await sql<{ code: string; title: string; retired: boolean }>`
     select item_code as code, title_short as title, retired from ref.catalogue_item where framework_version_id = ${frameworkVersionId}`.execute(trx);
   const cycle = await sql<{ code: string }>`select code from ref.cycle_requirement_def where framework_version_id = ${frameworkVersionId}`.execute(trx);
@@ -54,7 +64,7 @@ export async function loadEditionRows(trx: Trx, frameworkVersionId: string): Pro
     select phase_no::text || '.' || activity_no::text as code from ref.activity_template where framework_version_id = ${frameworkVersionId}`.execute(trx);
   const prep = await sql<{ code: string }>`select code from ref.prep_task_template where framework_version_id = ${frameworkVersionId}`.execute(trx);
   return {
-    requirements: new Map(requirements.rows.map((r) => [r.code, { title: r.title, retired: r.retired }])),
+    requirements: new Map(requirements.rows.map((r) => [r.code, { title: r.title, retired: r.retired, parent: r.parent }])),
     catalogue: new Map(catalogue.rows.map((r) => [r.code, { title: r.title, retired: r.retired }])),
     cycleRequirements: new Set(cycle.rows.map((r) => r.code)),
     activities: new Set(activities.rows.map((r) => r.code)),
@@ -91,7 +101,7 @@ export function rowRemovedError(pack: { packId: string; version: string }, remov
 /** The change summary of a version against the installed rows of its edition. */
 export function contentChanges(installed: EditionRows, datasets: PackDatasets): PackContentChanges {
   const changes: PackContentChanges = {
-    added: [], retitled: [], retired: [], restored: [], cycleRequirementsAdded: [], activitiesDropped: [], prepTasksDropped: [],
+    added: [], retitled: [], retired: [], restored: [], newTargets: [], cycleRequirementsAdded: [], activitiesDropped: [], prepTasksDropped: [],
   };
   const compare = (code: string, title: string, retired: boolean, before: { title: string; retired: boolean } | undefined) => {
     if (!before) {
@@ -104,6 +114,16 @@ export function contentChanges(installed: EditionRows, datasets: PackDatasets): 
   };
   for (const r of datasets.requirements) compare(r.requirement_code, r.title_short, r.retired, installed.requirements.get(r.requirement_code));
   for (const c of datasets.catalogue) compare(c.item_code, c.title_short, c.retired, installed.catalogue.get(c.item_code));
+  const before = new Set(
+    targetKeysOf(
+      [...installed.requirements].map(([code, r]) => ({ code, parent: r.parent, retired: r.retired })),
+      [...installed.catalogue].map(([code, c]) => ({ code, retired: c.retired })),
+    ),
+  );
+  changes.newTargets = targetKeysOf(
+    datasets.requirements.map((r) => ({ code: r.requirement_code, parent: r.parent_code, retired: r.retired })),
+    datasets.catalogue.map((c) => ({ code: c.item_code, retired: c.retired })),
+  ).filter((key) => !before.has(key));
   changes.cycleRequirementsAdded = datasets.cycleRequirements.map((c) => c.code).filter((code) => !installed.cycleRequirements.has(code));
   const activityCodes = new Set(datasets.activities.map((a) => `${a.phase_no}.${a.activity_no}`));
   changes.activitiesDropped = [...installed.activities].filter((code) => !activityCodes.has(code)).sort(byNumbers);
@@ -123,16 +143,23 @@ function byNumbers(a: string, b: string): number {
   return pa - pb || aa - ab;
 }
 
-/** Reads a change summary stored in a `pack.installed` audit entry (written by this build), else null. */
+/**
+ * Reads a change summary stored in a `pack.installed` audit entry, else null (an installation of a Milestone 1 build
+ * has none). A summary without `newTargets` takes the added and restored codes as targets of either kind.
+ */
 export function parseContentChanges(value: unknown): PackContentChanges | null {
   if (typeof value !== 'object' || value === null) return null;
   const v = value as Record<string, unknown>;
   const list = (key: string): string[] => (Array.isArray(v[key]) ? (v[key] as unknown[]).filter((x): x is string => typeof x === 'string') : []);
+  const newTargets = Array.isArray(v.newTargets)
+    ? list('newTargets')
+    : [...list('added'), ...list('restored')].flatMap((code) => [targetKey('catalogue_item', code), targetKey('requirement', code)]);
   return {
     added: list('added'),
     retitled: list('retitled'),
     retired: list('retired'),
     restored: list('restored'),
+    newTargets,
     cycleRequirementsAdded: list('cycleRequirementsAdded'),
     activitiesDropped: list('activitiesDropped'),
     prepTasksDropped: list('prepTasksDropped'),

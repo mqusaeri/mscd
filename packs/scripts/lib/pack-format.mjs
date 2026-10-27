@@ -117,6 +117,38 @@ export const ALLOWED = Object.freeze({
 export const ENGINE_MIN_VERSION = '1.1.0';
 
 /**
+ * The first version of each Milestone 1 pack that must resolve every content reference (cycle
+ * requirement codes, chain clause_at_risk values, activity output documents, documented
+ * information templates): the content step of MILESTONE-2 E.3 (M2-04). Before it, a pack that
+ * lists no documented information reports them as warnings; every other pack must resolve them.
+ * The same table as CONTENT_REFERENCES_STRICT_FROM of @mscd/pack-tools (a pack-tools test checks).
+ */
+export const CONTENT_REFERENCES_STRICT_FROM = Object.freeze({
+  'ISO27001-2022': '1.3.0',
+  'ISO9001-2015': '1.5.0',
+  'ISO9001-2026': '0.10.0',
+  'ISO22301-2019': '1.1.0',
+  'ISO37001-2016': '1.1.0',
+  'ISO37001-2025': '0.7.0',
+});
+
+/**
+ * True when the content references of a pack must resolve (contentReferencesStrict of
+ * @mscd/pack-tools): it lists documented information, it is no Milestone 1 pack, or its version
+ * (without a pre-release suffix) has reached the cut-over. A version that is not a semantic
+ * version counts as strict.
+ */
+export function contentReferencesStrict(packId, packVersion, documentedInfoRows) {
+  if (documentedInfoRows > 0) return true;
+  const from = CONTENT_REFERENCES_STRICT_FROM[packId];
+  if (from === undefined || typeof packVersion !== 'string' || !SEMVER_RE.test(packVersion)) return true;
+  const a = packVersion.split('-')[0].split('.').map(Number);
+  const b = from.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+}
+
+/**
  * Key of a row of each CSV dataset: how `packs/content` rows replace extracted rows and how
  * `removed.csv` names a row. Activities are keyed `<phase_no>.<activity_no>`, lookups
  * `<domain>/<code>`, mapping rows `<source_code> <target_code>`.

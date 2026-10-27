@@ -1,16 +1,19 @@
 // The upgrade path of an installed edition (Milestone 2 E.1, E.3; M2-03). The six development packs are installed
-// into an organisation with systems, whose D2-09 entries are seeded; then a fixture version built from them marks
-// 10.3 retired, retitles 10.1, adds the leaf row 9.2.1 under 9.2 and a cycle requirement. Checked: no row is deleted,
-// 10.3 is retired and leaves the target list (what `applicability.targets` and the seeder read), the new row gets an
-// entry and the open cycle the new item, `pack_content_updated` is sent once, a second run adds nothing, a version that
-// drops a code instead of retiring it is refused (422 business-rule, rule PACK-ROW-REMOVED), a version that drops an
-// activity template is accepted, an installation made outside the worker is picked up by `queuePending`, and a demo
-// organisation (`demo_deploy_label` set) gets no entry and no notification.
+// into an organisation with systems, whose D2-09 entries are seeded, and a system that holds only the few entries its
+// team added (as a Milestone 1 system does); then a fixture version built from them marks 10.3 retired, retitles 10.1,
+// adds the leaf row 9.2.1 under 9.2 and a cycle requirement. Checked: no row is deleted, 10.3 is retired and leaves the
+// target list (what `applicability.targets` and the seeder read), the new row gets an entry in every system and the
+// open cycle the new item, rows already in the standard get no entry (no backfill of the Milestone 1 system), an entry
+// the team deleted is not created again, `pack_content_updated` is sent once per system, a second run adds nothing, a
+// version that drops a code instead of retiring it is refused (422 business-rule, rule PACK-ROW-REMOVED), a version
+// that drops an activity template is accepted, an installation made outside the worker is picked up by
+// `queuePending`, a row back in the standard and a clause row left without a sub-clause get entries only where none
+// existed, and a demo organisation (`demo_deploy_label` set) gets no entry and no notification.
 import { parse } from 'csv-parse/sync';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
-import { seedApplicability, seedTargets } from '../../../src/modules/implementation/applicability-seed';
+import { seedApplicability, seedTargets, targetKey } from '../../../src/modules/implementation/applicability-seed';
 import { ApplicabilitySyncService } from '../../../src/modules/packs/applicability-sync.service';
 import { PackRejectedError } from '../../../src/modules/packs/pack-verification';
 import { TenantScope, systemContextOf } from '../../../src/modules/tenancy/tenant-scope';
@@ -77,6 +80,19 @@ function fixtureChanges(s: MutableSource): void {
   ]);
 }
 
+/** 1.2.3 on: activity 9.7 is no longer listed. */
+function dropActivity97(s: MutableSource): void {
+  editCsv(s, 'activities.csv', (rows) => rows.filter((r) => !(r.phase_no === '9' && r.activity_no === '7')));
+}
+
+/** 1.2.4 on: the leaf row 9.3.1 under 9.3. */
+function addRow931(s: MutableSource): void {
+  editCsv(s, 'requirements.csv', (rows) => {
+    rows.push({ ...rows.find((r) => r.requirement_code === '9.3')!, requirement_code: '9.3.1', parent_code: '9.3', title_short: 'Management review inputs', is_hs_common: 'false' });
+    return rows.sort(byCode).map((r, i) => ({ ...r, sort_order: String(i + 1) }));
+  });
+}
+
 function version(v: string, ...changes: ((s: MutableSource) => void)[]) {
   return changedPack('ISO27001-2022', (s) => {
     s.manifest.pack_version = v;
@@ -103,19 +119,32 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
   let demo: CreatedTenant;
   let app: PackApp;
   let mm: string;
+  /** MS Manager of the Milestone 1 system. */
+  let mmLegacy: string;
   let demoMm: string;
   const systems: Record<string, string> = {};
   let isoVersionId: string;
 
   const tenantRows = <T>(tenant: CreatedTenant, fn: (trx: Parameters<Parameters<typeof inScope>[2]>[0]) => Promise<T>) =>
     inScope(db.migrator, { orgId: tenant.id, schema: tenant.schemaName }, fn);
-  const entryCodes = (tenant: CreatedTenant, msId: string) =>
+  const entryCodes = (tenant: CreatedTenant, msId: string, withDeleted = false) =>
     tenantRows(tenant, async (trx) => {
       const { rows } = await sql<{ code: string }>`
         select coalesce(c.item_code, r.requirement_code) as code from applicability_entry e
           left join ref.catalogue_item c on c.id = e.catalogue_item_id left join ref.requirement r on r.id = e.requirement_id
-         where e.management_system_id = ${msId} and e.deleted_at is null order by e.position`.execute(trx);
+         where e.management_system_id = ${msId} and (e.deleted_at is null or ${withDeleted}) order by e.position`.execute(trx);
       return rows.map((r) => r.code);
+    });
+  /** The team deletes the entry of `code` (records.delete sets `deleted_at`). */
+  const deleteEntry = (tenant: CreatedTenant, msId: string, code: string) =>
+    tenantRows(tenant, async (trx) => {
+      const { numAffectedRows } = await sql`
+        update applicability_entry e set deleted_at = now()
+          from (select e2.id from applicability_entry e2
+                  left join ref.catalogue_item c on c.id = e2.catalogue_item_id left join ref.requirement r on r.id = e2.requirement_id
+                 where e2.management_system_id = ${msId} and e2.deleted_at is null and coalesce(c.item_code, r.requirement_code) = ${code}) t
+         where e.id = t.id`.execute(trx);
+      expect(Number(numAffectedRows)).toBe(1);
     });
   const notices = (tenant: CreatedTenant, userId: string) =>
     tenantRows(tenant, async (trx) =>
@@ -137,15 +166,18 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     mm = await addMember(db, 'mm.upg', org.id);
     const demoTa = await addMember(db, 'ta.dmo', demo.id, ['tenant_admin']);
     demoMm = await addMember(db, 'mm.dmo', demo.id);
+    mmLegacy = await addMember(db, 'mm2.upg', org.id);
     app = await createPackApp(db, {
-      identities: { ...orgIdentities(org, { ta, mm }, ['isms', 'qms']), ...orgIdentities(demo, { ta: demoTa, mm: demoMm }, ['isms']) },
+      identities: { ...orgIdentities(org, { ta, mm }, ['isms', 'qms', 'legacy']), ...orgIdentities(demo, { ta: demoTa, mm: demoMm }, ['isms']) },
     });
-    for (const [tenant, who, list] of [[org, 'ta@upg', ['isms', 'qms']], [demo, 'ta@dmo', ['isms']]] as const) {
+    for (const [tenant, who, list] of [[org, 'ta@upg', ['isms', 'qms', 'legacy']], [demo, 'ta@dmo', ['isms']]] as const) {
       expect((await app.app.inject({ method: 'PUT', url: '/api/v1/admin/license', headers: as(who), payload: devLicence(tenant.id) })).statusCode).toBe(200);
       for (const slug of list) {
         const body = slug === 'isms'
           ? { slug, code: 'ISMS', name: 'Information security', packId: 'ISO27001-2022', edition: '2022' }
-          : { slug, code: 'QMS', name: 'Quality', packId: 'ISO9001-2015', edition: '2015' };
+          : slug === 'legacy'
+            ? { slug, code: 'LEG', name: 'Information security, Milestone 1', packId: 'ISO27001-2022', edition: '2022' }
+            : { slug, code: 'QMS', name: 'Quality', packId: 'ISO9001-2015', edition: '2015' };
         const created = await app.app.inject({
           method: 'POST',
           url: '/api/v1/admin/management-systems',
@@ -156,7 +188,12 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
         systems[`${tenant.slug}:${slug}`] = created.json().id as string;
       }
     }
+    // Every system starts without entries here (M2-06 seeds them at creation), so the tests below decide what each holds.
+    for (const [key, id] of Object.entries(systems)) {
+      await tenantRows(key.startsWith('upg:') ? org : demo, (trx) => sql`delete from applicability_entry where management_system_id = ${id}`.execute(trx));
+    }
     await grantRole(db, org, systems['upg:isms']!, mm, 'ms_manager');
+    await grantRole(db, org, systems['upg:legacy']!, mmLegacy, 'ms_manager');
     await grantRole(db, demo, systems['dmo:isms']!, demoMm, 'ms_manager');
     isoVersionId = (await sql<{ id: string }>`select id from ref.framework_version where pack_id = 'ISO27001-2022'`.execute(db.migrator)).rows[0]!.id;
 
@@ -197,6 +234,17 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     // A second call finds every target and adds nothing.
     const again = await scope.withTenant(systemContextOf({ id: org.id, schema: org.schemaName }), (trx) => seedApplicability(trx, systems['upg:isms']!));
     expect([again.added.length, again.existing]).toEqual([0, 117]);
+
+    // A Milestone 1 system: the team added a few entries from the picker. `only` seeds the listed targets alone and
+    // ignores a key that is no target; an entry the team deleted counts as held.
+    const legacy = (only: string[]) =>
+      scope.withTenant(systemContextOf({ id: org.id, schema: org.schemaName }), (trx) => seedApplicability(trx, systems['upg:legacy']!, { only: new Set(only) }));
+    const picked = await legacy([targetKey('catalogue_item', 'A.5.1'), targetKey('catalogue_item', 'A.8.34'), targetKey('requirement', '4.1'), targetKey('requirement', 'A.5.2'), targetKey('requirement', '99.1')]);
+    expect([picked.added.map((e) => e.code), picked.existing]).toEqual([['A.5.1', 'A.8.34', '4.1'], 0]);
+    await deleteEntry(org, systems['upg:legacy']!, 'A.5.1');
+    const deleted = await legacy([targetKey('catalogue_item', 'A.5.1')]);
+    expect([deleted.added.length, deleted.existing]).toEqual([0, 1]);
+    expect(await entryCodes(org, systems['upg:legacy']!)).toEqual(['A.8.34', '4.1']);
   });
 
   it('refuses a version that drops a code without retiring it (422 PACK-ROW-REMOVED), at the import and in the installer', async () => {
@@ -232,6 +280,8 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
 
   it('installs an update, keeps every row, and adds its content to the systems on the edition once', async () => {
     const before = await refRowCounts(db);
+    // The team of the ISMS deleted the entry of A.8.34 before the update.
+    await deleteEntry(org, systems['upg:isms']!, 'A.8.34');
     const ismsBefore = await entryCodes(org, systems['upg:isms']!);
     const response = await postImport(app, 'ta@upg', version('1.2.2', fixtureChanges).bytes);
     expect(response.statusCode, response.body).toBe(202);
@@ -265,13 +315,19 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     );
     expect(installed).toHaveLength(1);
     expect(installed[0]!.after_data.changes).toEqual({
-      added: ['9.2.1'], retitled: ['10.1'], retired: ['10.3'], restored: [], cycleRequirementsAdded: ['FIXTURE_ITEM'], activitiesDropped: [], prepTasksDropped: [],
+      added: ['9.2.1'], retitled: ['10.1'], retired: ['10.3'], restored: [], newTargets: ['requirement:9.2.1'], cycleRequirementsAdded: ['FIXTURE_ITEM'], activitiesDropped: [], prepTasksDropped: [],
     });
 
-    // The ISMS of the organisation: one entry more, every earlier entry kept (also on 10.3 and on 9.2).
+    // The ISMS of the organisation: one entry more, every earlier entry kept (also on 10.3 and on 9.2), and the entry
+    // the team deleted is not created again.
     const ismsAfter = await entryCodes(org, systems['upg:isms']!);
     expect(ismsAfter).toEqual([...ismsBefore, '9.2.1']);
     expect(ismsAfter).toEqual(expect.arrayContaining(['10.3', '9.2']));
+    expect(ismsAfter).not.toContain('A.8.34');
+    expect((await entryCodes(org, systems['upg:isms']!, true)).filter((code) => code === 'A.8.34')).toHaveLength(1);
+    // The Milestone 1 system gets the new row only: the targets it never held (other controls, other clause rows)
+    // are left to its team.
+    expect(await entryCodes(org, systems['upg:legacy']!)).toEqual(['A.8.34', '4.1', '9.2.1']);
     // The open cycle got the new item, owned by the primary MS Manager and due at the cycle end (no audit event).
     const items = await tenantRows(org, (trx) =>
       trx.selectFrom('cycle_requirement_status').select(['requirement_code', 'title', 'owner_user_id', 'status', 'due_at']).where('management_system_id', '=', systems['upg:isms']!).orderBy('position').execute(),
@@ -293,6 +349,12 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
       '1 new entry: 9.2.1. New titles: 10.1. No longer in the standard: 10.3. Their entries stay and are marked as such. New certification cycle items: FIXTURE_ITEM. New entries start as not started and without an owner.',
     );
     expect(sent[0]!.body_id).toContain('Tidak lagi ada dalam standar: 10.3.');
+    const legacySent = await notices(org, mmLegacy);
+    expect(legacySent).toHaveLength(1);
+    expect(legacySent[0]).toMatchObject({ management_system_id: systems['upg:legacy'], title_en: 'LEG: framework content updated to ISO27001-2022 1.2.2' });
+    expect(legacySent[0]!.body_en).toBe(
+      '1 new entry: 9.2.1. New titles: 10.1. No longer in the standard: 10.3. Their entries stay and are marked as such. New entries start as not started and without an owner.',
+    );
     const audited = await synced();
     expect(audited).toEqual([
       expect.objectContaining({
@@ -301,9 +363,15 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
         edition: 'ISO27001-2022 1.2.2',
         after_data: expect.objectContaining({ pack_version: '1.2.2', entries_added: 1, added: ['9.2.1'], retitled: ['10.1'], retired: ['10.3'], cycle_items_added: ['FIXTURE_ITEM'] }),
       }),
+      expect.objectContaining({
+        organization_id: org.id,
+        management_system_id: systems['upg:legacy'],
+        edition: 'ISO27001-2022 1.2.2',
+        after_data: expect.objectContaining({ pack_version: '1.2.2', entries_added: 1, added: ['9.2.1'], retitled: ['10.1'], retired: ['10.3'], cycle_items_added: [] }),
+      }),
     ]);
     // The new entries are queued for freshness and readiness (debounced, so they wait).
-    expect(app.queue.waitingJobs('readiness.recompute').map((j) => j.env.payload)).toEqual([{ msId: systems['upg:isms'] }]);
+    expect(app.queue.waitingJobs('readiness.recompute').map((j) => j.env.payload)).toEqual([{ msId: systems['upg:isms'] }, { msId: systems['upg:legacy'] }]);
 
     // Other systems are untouched: the QMS is on another edition, the demo organisation is skipped.
     expect(await entryCodes(org, systems['upg:qms']!)).toHaveLength(28);
@@ -314,25 +382,28 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
 
   it('adds nothing on a second run, and never syncs a demo organisation', async () => {
     const entries = await entryCodes(org, systems['upg:isms']!);
+    const legacyEntries = await entryCodes(org, systems['upg:legacy']!);
     expect(await sync().sync(org.id, { frameworkVersionIds: [isoVersionId] })).toEqual({ systems: [] });
     expect(await sync().queuePending()).toEqual({ organisations: [] });
     expect(await sync().sync(demo.id, { frameworkVersionIds: [isoVersionId] })).toEqual({ skipped: 'demo', systems: [] });
     await app.runJobs();
     expect(await entryCodes(org, systems['upg:isms']!)).toEqual(entries);
+    expect(await entryCodes(org, systems['upg:legacy']!)).toEqual(legacyEntries);
     expect(await entryCodes(demo, systems['dmo:isms']!)).toHaveLength(117);
     expect(await notices(org, mm)).toHaveLength(1);
+    expect(await notices(org, mmLegacy)).toHaveLength(1);
     expect(await notices(demo, demoMm)).toEqual([]);
-    expect(await synced()).toHaveLength(1);
+    expect(await synced()).toHaveLength(2);
   });
 
   it('accepts a version that drops an activity template: the template stays installed and activity copies are unchanged', async () => {
     const before = await refRowCounts(db);
     const copies = await tenantRows(org, (trx) => trx.selectFrom('implementation_activity_progress').select(['phase_no', 'activity_no', 'title']).where('management_system_id', '=', systems['upg:isms']!).execute());
-    const dropped = version('1.2.3', fixtureChanges, (s) => editCsv(s, 'activities.csv', (rows) => rows.filter((r) => !(r.phase_no === '9' && r.activity_no === '7'))));
+    const dropped = version('1.2.3', fixtureChanges, dropActivity97);
     const outcome = await testInstaller(db.packInstaller).install(dropped.bytes, { actor: OPERATOR });
     expect(outcome).toMatchObject({ status: 'installed', version: '1.2.3', updatedEdition: true, previousVersion: '1.2.2' });
     expect(outcome.status === 'installed' && outcome.changes).toEqual({
-      added: [], retitled: [], retired: [], restored: [], cycleRequirementsAdded: [], activitiesDropped: ['9.7'], prepTasksDropped: [],
+      added: [], retitled: [], retired: [], restored: [], newTargets: [], cycleRequirementsAdded: [], activitiesDropped: ['9.7'], prepTasksDropped: [],
     });
     expect(await refRowCounts(db)).toEqual(before);
     const kept = await sql<{ title: string }>`select title from ref.activity_template where framework_version_id = ${isoVersionId} and phase_no = 9 and activity_no = 7`.execute(db.migrator);
@@ -346,23 +417,56 @@ describe('pack upgrade path (Milestone 2 E.1, E.3)', () => {
     expect(await sync().queuePending()).toEqual({ organisations: [org.id] });
     await app.runJobs();
     // 1.2.3 changed no row a system holds: an audit entry, no entry and no notice.
-    expect((await synced()).map((s) => (s.after_data as { pack_version: string }).pack_version)).toEqual(['1.2.2', '1.2.3']);
+    expect((await synced()).map((s) => (s.after_data as { pack_version: string }).pack_version)).toEqual(['1.2.2', '1.2.2', '1.2.3', '1.2.3']);
     expect(await notices(org, mm)).toHaveLength(1);
+    expect(await notices(org, mmLegacy)).toHaveLength(1);
 
-    const another = version('1.2.4', fixtureChanges, (s) => {
-      editCsv(s, 'activities.csv', (rows) => rows.filter((r) => !(r.phase_no === '9' && r.activity_no === '7')));
-      editCsv(s, 'requirements.csv', (rows) => {
-        rows.push({ ...rows.find((r) => r.requirement_code === '9.3')!, requirement_code: '9.3.1', parent_code: '9.3', title_short: 'Management review inputs', is_hs_common: 'false' });
-        return rows.sort(byCode).map((r, i) => ({ ...r, sort_order: String(i + 1) }));
-      });
-    });
-    expect(await testInstaller(db.packInstaller).install(another.bytes, { actor: OPERATOR })).toMatchObject({ status: 'installed', version: '1.2.4' });
+    expect(await testInstaller(db.packInstaller).install(version('1.2.4', fixtureChanges, dropActivity97, addRow931).bytes, { actor: OPERATOR })).toMatchObject({ status: 'installed', version: '1.2.4' });
     expect(await sync().queuePending({ frameworkVersionIds: [isoVersionId] })).toEqual({ organisations: [org.id] });
     await app.runJobs();
     expect((await entryCodes(org, systems['upg:isms']!)).slice(-2)).toEqual(['9.2.1', '9.3.1']);
+    expect(await entryCodes(org, systems['upg:legacy']!)).toEqual(['A.8.34', '4.1', '9.2.1', '9.3.1']);
     const sent = await notices(org, mm);
     expect(sent).toHaveLength(2);
     expect(sent.map((n) => n.title_en)).toContain('ISMS: framework content updated to ISO27001-2022 1.2.4');
+    expect(await notices(org, mmLegacy)).toHaveLength(2);
+    expect(await sync().queuePending()).toEqual({ organisations: [] });
+    expect(await entryCodes(demo, systems['dmo:isms']!)).toHaveLength(117);
+  });
+
+  it('adds an entry for a row back in the standard and a clause row left without a sub-clause, only where the system never held one', async () => {
+    // The team of the ISMS deleted the entry of 10.3 once it was no longer in the standard.
+    await deleteEntry(org, systems['upg:isms']!, '10.3');
+    const ismsBefore = await entryCodes(org, systems['upg:isms']!);
+    // 1.2.5: 10.3 is back in the standard and 9.2.1 is retired, so 9.2 is a leaf clause row again.
+    const restored = version('1.2.5', fixtureChanges, dropActivity97, addRow931, (s) => {
+      editCsv(s, 'requirements.csv', (rows) =>
+        rows.map((r) => (r.requirement_code === '10.3' ? { ...r, retired: 'false' } : r.requirement_code === '9.2.1' ? { ...r, retired: 'true' } : r)),
+      );
+    });
+    const outcome = await testInstaller(db.packInstaller).install(restored.bytes, { actor: OPERATOR });
+    expect(outcome).toMatchObject({ status: 'installed', version: '1.2.5', previousVersion: '1.2.4' });
+    expect(outcome.status === 'installed' && outcome.changes).toEqual({
+      added: [], retitled: [], retired: ['9.2.1'], restored: ['10.3'], newTargets: ['requirement:9.2', 'requirement:10.3'], cycleRequirementsAdded: [], activitiesDropped: ['9.7'], prepTasksDropped: [],
+    });
+    expect(await sync().queuePending({ frameworkVersionIds: [isoVersionId] })).toEqual({ organisations: [org.id] });
+    await app.runJobs();
+
+    // The ISMS holds 9.2 already and its team deleted 10.3: no entry is added, and the notice names no new entry.
+    expect(await entryCodes(org, systems['upg:isms']!)).toEqual(ismsBefore);
+    expect((await entryCodes(org, systems['upg:isms']!, true)).filter((code) => code === '10.3')).toHaveLength(1);
+    const ismsNotice = (await notices(org, mm)).find((n) => n.title_en === 'ISMS: framework content updated to ISO27001-2022 1.2.5');
+    expect(ismsNotice?.body_en).toBe('No longer in the standard: 9.2.1. Their entries stay and are marked as such. Back in the standard: 10.3.');
+    // The Milestone 1 system never held either row: both get an entry.
+    expect(await entryCodes(org, systems['upg:legacy']!)).toEqual(['A.8.34', '4.1', '9.2.1', '9.3.1', '9.2', '10.3']);
+    const legacyNotice = (await notices(org, mmLegacy)).find((n) => n.title_en === 'LEG: framework content updated to ISO27001-2022 1.2.5');
+    expect(legacyNotice?.body_en).toBe(
+      '2 new entries: 9.2, 10.3. No longer in the standard: 9.2.1. Their entries stay and are marked as such. Back in the standard: 10.3. New entries start as not started and without an owner.',
+    );
+    expect((await synced()).slice(-2)).toEqual([
+      expect.objectContaining({ management_system_id: systems['upg:isms'], after_data: expect.objectContaining({ pack_version: '1.2.5', entries_added: 0, added: [], retired: ['9.2.1'], restored: ['10.3'] }) }),
+      expect.objectContaining({ management_system_id: systems['upg:legacy'], after_data: expect.objectContaining({ pack_version: '1.2.5', entries_added: 2, added: ['9.2', '10.3'], retired: ['9.2.1'], restored: ['10.3'] }) }),
+    ]);
     expect(await sync().queuePending()).toEqual({ organisations: [] });
     expect(await entryCodes(demo, systems['dmo:isms']!)).toHaveLength(117);
   });

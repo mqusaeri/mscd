@@ -47,7 +47,7 @@ PostgreSQL gets settings that fit its 4 GB limit: `shared_buffers=1GB`, `effecti
 ## How a request travels
 
 1. The browser connects to `https://app.<domain>`. Caddy answers with the certificate it got from Let's Encrypt. A request on plain HTTP (port 80) gets a permanent redirect (308) to HTTPS.
-2. Caddy passes the request to the web container, by its fixed IPv4 address on the `edge` network, and sets the header `X-Forwarded-For` to the address the browser connected from. A value the browser sent itself is thrown away, so nobody can pretend to come from another address.
+2. Caddy passes the request to the web container, by its fixed IPv4 address on the `edge` network, and sets the header `X-Forwarded-For` to the address the browser connected from. A value the browser sent itself is thrown away, so nobody can pretend to come from another address. Caddy limits the request body to the upload limit plus 1 MiB (413 above it), adds HSTS, and removes the `Server` and `Via` headers from the answer.
 3. The web server (NGINX) trusts `X-Forwarded-For` only when the request comes from Caddy's fixed address (`MSCD_TRUSTED_PROXY_CIDRS`). It applies the request limits per client address, serves the app files and passes `/api/` to the api.
 4. The api trusts `X-Forwarded-For` only from the web container's fixed address on the internal `mscd` network (`MSCD__HTTP__TRUST_PROXY`). The api never trusts Caddy directly.
 

@@ -191,7 +191,8 @@ describe('installing the development packs (E.8)', () => {
         select v.id, (select count(*) from ref.requirement r where r.framework_version_id = v.id) as n
         from ref.framework_version v where v.pack_id = 'ISO27001-2022'`.execute(db.migrator);
       const update = changedPack('ISO27001-2022', (s) => {
-        s.manifest.pack_version = '1.3.0';
+        // Below 1.3.0, the content step: the Milestone 1 content may leave content references open (E.1).
+        s.manifest.pack_version = '1.2.9';
         editDataset(s, 'activities.csv', ',Secure top management mandate,', ',Secure the mandate of top management,');
         editDataset(s, 'requirements.csv', 'Understanding the organization and its context', 'Understanding the organisation and its context');
         editDataset(s, 'catalogue.csv', 'Policies for information security', 'Information security policies');
@@ -199,12 +200,12 @@ describe('installing the development packs (E.8)', () => {
         editDataset(s, 'lookups.csv', 'doc_type,policy,Policy,', 'doc_type,policy,Policy document,');
       });
       const outcome = await testInstaller(db.packInstaller).install(update.bytes, { actor: OPERATOR });
-      expect(outcome).toMatchObject({ status: 'installed', version: '1.3.0', updatedEdition: true, previousVersion: '1.2.1' });
+      expect(outcome).toMatchObject({ status: 'installed', version: '1.2.9', updatedEdition: true, previousVersion: '1.2.1' });
 
       const after = await sql<{ id: string; pack_version: string; status: string; n: string }>`
         select v.id, v.pack_version, v.status, (select count(*) from ref.requirement r where r.framework_version_id = v.id) as n
         from ref.framework_version v where v.pack_id = 'ISO27001-2022'`.execute(db.migrator);
-      expect(after.rows).toEqual([{ id: before.rows[0]!.id, pack_version: '1.3.0', status: 'current', n: before.rows[0]!.n }]);
+      expect(after.rows).toEqual([{ id: before.rows[0]!.id, pack_version: '1.2.9', status: 'current', n: before.rows[0]!.n }]);
       const titles = await sql<{ requirement: string; item: string; activity: string; label: string; lookup: string }>`
         select (select title_short from ref.requirement where framework_version_id = v.id and requirement_code = '4.1') as requirement,
                (select title_short from ref.catalogue_item where framework_version_id = v.id and item_code = 'A.5.1') as item,
@@ -222,7 +223,7 @@ describe('installing the development packs (E.8)', () => {
       const installs = (await packInstallRows(db)).filter((r) => r.pack_id === 'ISO27001-2022');
       expect(installs).toEqual([
         { pack_id: 'ISO27001-2022', pack_version: '1.2.1', status: 'superseded' },
-        { pack_id: 'ISO27001-2022', pack_version: '1.3.0', status: 'installed' },
+        { pack_id: 'ISO27001-2022', pack_version: '1.2.9', status: 'installed' },
       ]);
 
       // The tenant's activity copies keep the titles and the template version of the activation.
@@ -242,7 +243,7 @@ describe('installing the development packs (E.8)', () => {
       const older = changedPack('ISO27001-2022', (s) => {
         s.manifest.pack_version = '1.1.0';
       });
-      await expectRejected(testInstaller(db.packInstaller).install(older.bytes, { actor: OPERATOR }), 'downgrade', /older than the installed version 1\.3\.0/);
+      await expectRejected(testInstaller(db.packInstaller).install(older.bytes, { actor: OPERATOR }), 'downgrade', /older than the installed version 1\.2\.9/);
       expect(await totalRefRows(db)).toBe(refBefore);
       expect(await packInstallRows(db)).toEqual(installsBefore);
       const rejected = await auditActions(db, 'pack.rejected');

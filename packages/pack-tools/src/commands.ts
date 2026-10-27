@@ -62,7 +62,7 @@ function printWarnings(io: CliIo, packId: string, warnings: readonly string[]): 
   if (warnings.length === 0) return;
   const listed = warnings.slice(0, WARNINGS_LISTED).map((w) => `  - ${w}\n`).join('');
   const more = warnings.length > WARNINGS_LISTED ? `  - and ${warnings.length - WARNINGS_LISTED} more\n` : '';
-  io.stderr(`warning: ${packId} has ${warnings.length} content reference${warnings.length === 1 ? '' : 's'} that do not resolve yet (they become errors once the pack lists its documented information):\n${listed}${more}`);
+  io.stderr(`warning: ${packId} has ${warnings.length} content reference${warnings.length === 1 ? '' : 's'} that do not resolve yet (they are errors from the content step of the pack, CONTENT_REFERENCES_STRICT_FROM, or once it lists its documented information):\n${listed}${more}`);
 }
 
 function devMark(keyId: string): string {

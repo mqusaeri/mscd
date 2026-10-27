@@ -1,14 +1,16 @@
 // The pack format of engine 1.1.0 (Milestone 2 E.1): retired rows, documented information, the template clause, review
 // kinds, internal audit templates, derivation kinds, and the content references (cycle requirement codes, chain
-// clause_at_risk values, activity output documents, documented information templates), which are warnings in a pack
-// without documented information and errors in a pack with it. Also the engine version rule of the shared format.
+// clause_at_risk values, activity output documents, documented information templates), which are errors, except
+// warnings in a Milestone 1 pack version before its content step that lists no documented information. Also the
+// engine version rule of the shared format.
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { engineVersionSatisfies } from '@mscd/shared';
 import { describe, expect, it } from 'vitest';
 import { parseCsvRecords } from '../src/csv.js';
-import { PackError, buildPack, clauseAtRiskCodes, contentReferencesStrict, verifyPack } from '../src/index.js';
-import { SOURCES_DIR, tempDir, testPack } from './helpers.js';
+import { CONTENT_REFERENCES_STRICT_FROM, PackError, buildPack, clauseAtRiskCodes, contentReferencesStrict, verifyPack } from '../src/index.js';
+import { REPO_ROOT, SOURCES_DIR, tempDir, testPack } from './helpers.js';
 
 type Row = Record<string, string>;
 
@@ -37,6 +39,11 @@ function writeRows(dir: string, file: string, header: readonly string[], rows: r
 function editRows(dir: string, file: string, edit: (rows: Row[]) => Row[]): void {
   const { header, rows } = readRows(dir, file);
   writeRows(dir, file, header, edit(rows));
+}
+
+function setVersion(dir: string, version: string): void {
+  const file = path.join(dir, 'manifest.json');
+  writeFileSync(file, `${JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pack_version: version }, null, 2)}\n`);
 }
 
 function packError(fn: () => unknown): PackError {
@@ -150,9 +157,9 @@ describe('new datasets and columns (E.1)', () => {
 });
 
 describe('content references (E.1)', () => {
-  it('are warnings in a pack without documented information, so the Milestone 1 content builds', () => {
+  it('are warnings in a Milestone 1 pack version without documented information, so the Milestone 1 content builds', () => {
     const pack = testPack().pack;
-    expect(contentReferencesStrict(pack.datasets)).toBe(false);
+    expect(contentReferencesStrict(pack.manifest, pack.datasets)).toBe(false);
     expect(pack.warnings).toEqual(expect.arrayContaining([
       'cycle_requirements.csv: RISK_ASSESSMENT: requirement_code 6.1.2 is not in requirements.csv',
       'cycle_requirements.csv: DOCUMENT_REVIEW: requirement_code 7.5.2 is not in requirements.csv',
@@ -185,9 +192,34 @@ describe('content references (E.1)', () => {
       ...outputs.map((code) => ({ code, title: `Template ${code}`, doc_type: 'procedure', requirement_code: '' })),
     ]);
     const pack = buildPack(dir, key().privateKey);
-    expect(contentReferencesStrict(pack.datasets)).toBe(true);
+    expect(contentReferencesStrict(pack.manifest, pack.datasets)).toBe(true);
     expect(pack.warnings).toEqual([]);
     expect(pack.datasets.requirements.find((r) => r.requirement_code === '6.1.2')?.parent_code).toBe('6.1');
+  });
+
+  it('are errors from the content step of each Milestone 1 pack, also with documented_info.csv left empty, and in every other pack', () => {
+    const dir = sourceCopy();
+    const warnings = buildPack(dir, key().privateKey).warnings;
+    expect(warnings.length).toBeGreaterThan(0);
+    setVersion(dir, '1.2.9');
+    expect(buildPack(dir, key().privateKey).warnings).toEqual(warnings);
+    for (const version of ['1.3.0', '1.3.0-rc.1', '2.0.0']) {
+      setVersion(dir, version);
+      const error = packError(() => buildPack(dir, key().privateKey));
+      expect(error.code, version).toBe('dataset');
+      expect(error.issues, version).toEqual(expect.arrayContaining([...warnings]));
+    }
+    const none = { documentedInfo: [] };
+    expect(contentReferencesStrict({ pack_id: 'ISO22301-2019', pack_version: '1.0.9' }, none)).toBe(false);
+    expect(contentReferencesStrict({ pack_id: 'ISO22301-2019', pack_version: '1.1.0' }, none)).toBe(true);
+    expect(contentReferencesStrict({ pack_id: 'ISO37001-2025', pack_version: '0.6.1' }, none)).toBe(false);
+    expect(contentReferencesStrict({ pack_id: 'ISO37001-2025', pack_version: '0.7.0' }, none)).toBe(true);
+    expect(contentReferencesStrict({ pack_id: 'ISO14001-2015', pack_version: '0.1.0' }, none)).toBe(true);
+  });
+
+  it('use the same cut-over table in the source validator', async () => {
+    const format = (await import(pathToFileURL(path.join(REPO_ROOT, 'packs/scripts/lib/pack-format.mjs')).href)) as { CONTENT_REFERENCES_STRICT_FROM: Record<string, string> };
+    expect(format.CONTENT_REFERENCES_STRICT_FROM).toEqual(CONTENT_REFERENCES_STRICT_FROM);
   });
 
   it('reads clause_at_risk as clause codes with an optional list item, several joined by " / "', () => {

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ALLOWED, CSV_HEADERS, ISO_DATE_RE, JSON_FILES, LOOKUP_CODE_RE, MAPPING_HEADER, REQUIRED_FILES,
-  REQUIRED_LABEL_KEYS, RULE_ID_RE, SEMVER_RE, clauseAtRiskCodes, parseCsv, toJson,
+  REQUIRED_LABEL_KEYS, RULE_ID_RE, SEMVER_RE, clauseAtRiskCodes, contentReferencesStrict, parseCsv, toJson,
 } from './lib/pack-format.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -33,8 +33,10 @@ pack file format and prints the dataset counts per pack. Exits 1 on any error.
   --verbose  list every warning instead of a count per pack
 
 Content references (cycle requirement codes, chain clause_at_risk values, activity output
-documents, documented information templates) must resolve in a pack that lists documented
-information; in a pack without documented information they are warnings.
+documents, documented information templates) must resolve. They are warnings only in a version
+of a Milestone 1 pack below its content step (ISO27001-2022 1.3.0, ISO9001-2015 1.5.0,
+ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0) that lists
+no documented information.
 `;
 
 const SNAKE_RE = /^[a-z][a-z0-9_]*$/;
@@ -669,9 +671,12 @@ function validatePack(report, sourcesDir, packId) {
   }
   counts.mappings = mappingCount;
 
-  // Content references of E.1: errors in a pack that lists documented information, warnings
-  // before it (the Milestone 1 content names subclauses and documents the pack does not hold).
-  const strict = infoRows.length > 0;
+  // Content references of E.1: errors, except warnings in a Milestone 1 pack version before its
+  // content step that lists no documented information (the Milestone 1 content names subclauses
+  // and documents the pack does not hold). The cut-over is fixed by version, so an empty
+  // documented_info.csv in a later version does not turn the check off.
+  const m = json('manifest.json');
+  const strict = contentReferencesStrict(packId, isPlainObject(m) ? m.pack_version : undefined, infoRows.length);
   let unresolved = 0;
   for (const ref of contentRefs) {
     let problems = [];
@@ -695,7 +700,6 @@ function validatePack(report, sourcesDir, packId) {
   counts.unresolvedReferences = unresolved;
 
   // Manifest last: it is checked against the datasets.
-  const m = json('manifest.json');
   if (m !== undefined) validateManifest(report, at('manifest.json'), packId, m, catRows.length);
 
   return counts;
@@ -846,7 +850,7 @@ function main(argv) {
   if (asJson) process.stdout.write(JSON.stringify(Object.fromEntries(results.map(([id, c]) => [id, jsonCounts(c)])), null, 2) + '\n');
   else printCounts(results);
   if (report.warnings.length) {
-    note(`\n${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'}: content references that do not resolve yet (errors once a pack lists its documented information)`);
+    note(`\n${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'}: content references that do not resolve yet (errors from the content step of each pack or once it lists its documented information)`);
     if (verbose) {
       for (const w of report.warnings) note('  ' + w);
     } else {
