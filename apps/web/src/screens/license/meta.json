@@ -1,0 +1,13 @@
+{
+  "id": "license",
+  "label": ["Licence", "Lisensi"],
+  "group": "admin",
+  "order": 30,
+  "scope": "org",
+  "perm": "license.read",
+  "roles": ["manager", "top"],
+  "nav": true,
+  "pageActions": [["Install licence", "Pasang lisensi"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

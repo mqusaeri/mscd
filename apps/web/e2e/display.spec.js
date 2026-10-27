@@ -1,6 +1,6 @@
 import {
   test, expect, SCREENS, SCREENS_ID, openApp, go, ui, list, listRows, tabs, switchMs, closeDrawer,
-  expectNoHorizontalOverflow, expectNoTextOverflow, expectReadableText,
+  expectNoHorizontalOverflow, expectNoTextOverflow, expectReadableText, navFor,
 } from './helpers.js';
 
 const SYSTEMS = ['ISMS', 'QMS', 'BCMS', 'ABMS'];
@@ -89,7 +89,8 @@ test.describe('Display settings', () => {
   for (const ms of SYSTEMS) {
     test(`Indonesian renders every ${ms} screen with translated titles and no leftover keys`, async ({ page }) => {
       await openIn(page, '?lang=id', ms);
-      await expect(page.locator('aside nav button')).toHaveCount(SCREENS_ID.length);
+      await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
+      expect(SCREENS_ID).toHaveLength(await navFor(page, 'manager'));
       for (const label of SCREENS_ID) {
         await go(page, label);
         const text = await page.locator('main').innerText();

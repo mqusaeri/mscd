@@ -52,7 +52,7 @@ describe('buildPack', () => {
     const again = buildPack(path.join(SOURCES_DIR, 'ISO27001-2022'), key.privateKey);
     expect(again.bytes.equals(pack.bytes)).toBe(true);
     expect(again.sha256).toBe(pack.sha256);
-    expect(pack.fileName).toBe('ISO27001-2022-1.2.0.pack');
+    expect(pack.fileName).toBe('ISO27001-2022-1.2.1.pack');
     expect(pack.bytes[8]).toBe(2); // gzip XFL: maximum compression
     const names = readTar(gunzipSync(pack.bytes), { maxEntries: 100 }).map((e) => e.path);
     const sorted = names.slice(0, -1);
@@ -105,9 +105,9 @@ describe('buildPack', () => {
       ['bom', (d) => writeFileSync(path.join(d, 'lookups.csv'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), readFileSync(path.join(d, 'lookups.csv'))])), /^lookups\.csv: starts with a byte order mark/],
       ['crlf', (d) => writeFileSync(path.join(d, 'chain.csv'), readFileSync(path.join(d, 'chain.csv'), 'utf8').replaceAll('\n', '\r\n')), /^chain\.csv: has carriage returns/],
       ['utf8', (d) => writeFileSync(path.join(d, 'prep_tasks.csv'), Buffer.concat([readFileSync(path.join(d, 'prep_tasks.csv')), Buffer.from([0xc3, 0x28, 0x0a])])), /^prep_tasks\.csv: is not valid UTF-8/],
-      ['quote', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order\nMRI-1,"open,true,1\n'), /^review_inputs\.csv: is not valid CSV/],
-      ['fields', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order\nMRI-1,x,true\n'), /^review_inputs\.csv:2: has 3 fields, expected 4/],
-      ['empty line', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order\n\nMRI-1,x,true,1\n'), /^review_inputs\.csv:2: has 1 fields/],
+      ['quote', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order,review_kind\nMRI-1,"open,true,1,management\n'), /^review_inputs\.csv: is not valid CSV/],
+      ['fields', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order,review_kind\nMRI-1,x,true,1\n'), /^review_inputs\.csv:2: has 4 fields, expected 5/],
+      ['empty line', (d) => writeFileSync(path.join(d, 'review_inputs.csv'), 'code,title,mandatory,sort_order,review_kind\n\nMRI-1,x,true,1,management\n'), /^review_inputs\.csv:2: has 1 fields/],
       ['json', (d) => writeFileSync(path.join(d, 'drift_rules.json'), '[{"code": 1}]'), /^drift_rules\.json: 0\.code/],
       ['catalogue ref', (d) => writeFileSync(path.join(d, 'catalogue.csv'), readFileSync(path.join(d, 'catalogue.csv'), 'utf8').replace('A.5.1,A.5,Policies for information security,,', 'A.5.1,A.5,Policies for information security,99.9,')), /requirement_code 99\.9 is not in requirements\.csv/],
       ['duplicate', (d) => writeFileSync(path.join(d, 'frequencies.csv'), `${readFileSync(path.join(d, 'frequencies.csv'), 'utf8')}daily,Daily,Harian,1,99\n`), /duplicate code: daily/],
@@ -178,13 +178,16 @@ describe('verifyPack', () => {
     const verified = verifyPack(pack.bytes, [key.publicKey]);
     expect(verified.keyId).toBe(key.keyId);
     expect(verified.sha256).toBe(pack.sha256);
-    expect(verified.manifest.pack_version).toBe('1.2.0');
+    expect(verified.manifest.pack_version).toBe('1.2.1');
+    expect(verified.manifest.engine_min_version).toBe('1.1.0');
     expect(verified.datasets.catalogue).toHaveLength(93);
     expect(verified.datasets.activities).toHaveLength(69);
     expect(verified.datasets.chain).toHaveLength(8);
     expect(verified.datasets.auditActivities).toHaveLength(6);
     expect(verified.datasets.catalogue[0]).toMatchObject({ item_code: 'A.5.1', theme_code: 'A.5', requirement_code: null, sort_order: 1 });
-    expect(verified.files.size).toBe(17);
+    expect(verified.files.size).toBe(18);
+    expect(verified.datasets.documentedInfo).toEqual([]);
+    expect(verified.datasets.requirements.every((r) => r.retired === false)).toBe(true);
   });
 
   it('accepts the trusted keys of a server build, using only pack keys', () => {
@@ -197,7 +200,7 @@ describe('verifyPack', () => {
 
   it('rejects a manifest changed after signing', () => {
     const { key, files } = testPack();
-    const manifest = (files.get('manifest.json') as Buffer).toString().replace('"pack_version": "1.2.0"', '"pack_version": "1.2.1"');
+    const manifest = (files.get('manifest.json') as Buffer).toString().replace('"pack_version": "1.2.1"', '"pack_version": "1.2.2"');
     const tampered = new Map(files).set('manifest.json', Buffer.from(manifest));
     const error = packError(() => verifyPack(archiveOf(tampered), [key.publicKey]));
     expect(error.code).toBe('signature');
@@ -252,7 +255,7 @@ describe('verifyPack', () => {
   it('reads a pack with the archive limits the caller passes', () => {
     const { key, pack } = testPack();
     expect(packError(() => verifyPack(pack.bytes, [key.publicKey], { limits: { maxEntries: 5 } })).code).toBe('archive');
-    expect(readPack(pack.bytes, { maxEntries: 19 }).files.size).toBe(19);
+    expect(readPack(pack.bytes, { maxEntries: 20 }).files.size).toBe(20);
   });
 });
 
@@ -264,8 +267,8 @@ describe('buildAllPacks', () => {
     writeFileSync(path.join(out, 'README.txt'), 'kept');
     const result = buildAllPacks(SOURCES_DIR, key.privateKey, out);
     const expected = [
-      'ISO22301-2019-1.0.0.pack', 'ISO27001-2022-1.2.0.pack', 'ISO37001-2016-1.0.0.pack', 'ISO37001-2025-0.6.0.pack', 'ISO9001-2015-1.4.2.pack',
-      'ISO9001-2026-0.9.0.pack',
+      'ISO22301-2019-1.0.1.pack', 'ISO27001-2022-1.2.1.pack', 'ISO37001-2016-1.0.1.pack', 'ISO37001-2025-0.6.1.pack', 'ISO9001-2015-1.4.3.pack',
+      'ISO9001-2026-0.9.1.pack',
     ];
     expect(result.packs.map((p) => p.fileName)).toEqual(expected);
     expect(result.removed).toEqual([path.join(out, 'ISO27001-2022-1.1.0.pack')]);

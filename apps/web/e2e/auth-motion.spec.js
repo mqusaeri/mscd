@@ -174,9 +174,15 @@ function brandTextBoxes(page) {
   });
 }
 
-/** The brightest background pixel under each box in a screenshot of the page (text hidden by the caller). */
-async function brightestUnder(page, boxes) {
-  const png = await page.screenshot({ type: 'png', animations: 'allow' });
+/**
+ * The brightest background pixel under each box in a screenshot of the page (text hidden by the caller). With `clip`,
+ * only that part of the page is captured, which keeps the frames of a large window quick.
+ */
+async function brightestUnder(page, boxes, clip = null) {
+  const png = await page.screenshot({ type: 'png', animations: 'allow', ...(clip ? { clip } : {}) });
+  const dx = clip ? clip.x : 0;
+  const dy = clip ? clip.y : 0;
+  const shifted = boxes.map((b) => ({ x: b.x - dx, y: b.y - dy, w: b.w, h: b.h }));
   return page.evaluate(async ({ b64, boxes: list }) => {
     const img = new Image();
     img.src = `data:image/png;base64,${b64}`;
@@ -198,7 +204,7 @@ async function brightestUnder(page, boxes) {
       for (let i = 0; i < d.length; i += 4) best = Math.max(best, 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]));
       return best;
     });
-  }, { b64: png.toString('base64'), boxes });
+  }, { b64: png.toString('base64'), boxes: shifted });
 }
 
 function luminanceOf(rgb) {
@@ -257,35 +263,67 @@ test('the brand panel moves behind the sign-in form without touching the form', 
   expect(await page.evaluate(() => [...document.scripts].filter((s) => !s.src).length)).toBe(0);
 });
 
+/**
+ * Measures every line of brand text over the brightest frame of the motion: WCAG AA against the brightest pixel in
+ * its box, and a rendered size of at least 12px. Returns the failures. The page must be settled.
+ */
+async function brandTextFailures(page) {
+  const boxes = await brandTextBoxes(page);
+  expect(boxes.length).toBeGreaterThanOrEqual(15);
+  // Text, its shadows and the halo of the chain labels hidden: what is left under each box is the background alone.
+  await page.addStyleTag({
+    content: '.au-brand,.au-brand *{color:transparent!important;text-shadow:none!important}.au-chain text{fill:transparent!important;stroke:none!important}',
+  });
+  const panel = await page.locator('.au-brand').boundingBox();
+  const clip = { x: Math.floor(panel.x), y: Math.floor(panel.y), width: Math.ceil(panel.width), height: Math.ceil(panel.height) };
+  // Sample frames across the first run of the signal (it starts 1.2 s after the motion) and the motes.
+  const brightest = boxes.map(() => 0);
+  const start = Date.now();
+  while (Date.now() - start < 6500) {
+    (await brightestUnder(page, boxes, clip)).forEach((l, i) => {
+      brightest[i] = Math.max(brightest[i], l);
+    });
+    await page.waitForTimeout(250);
+  }
+  const failures = [];
+  boxes.forEach((b, i) => {
+    const large = b.size >= 24 || (b.weight >= 700 && b.size >= 18.66);
+    const min = large ? 3 : 4.5;
+    const fg = luminanceOf(b.color);
+    const ratio = (Math.max(fg, brightest[i]) + 0.05) / (Math.min(fg, brightest[i]) + 0.05);
+    if (ratio < min) failures.push(`${ratio.toFixed(2)} < ${min}: "${b.text.slice(0, 40)}"`);
+    if (b.size < 11.95) failures.push(`${b.size.toFixed(2)}px < 12px: "${b.text.slice(0, 40)}"`);
+  });
+  return failures;
+}
+
 for (const theme of ['light', 'dark']) {
   test(`brand text keeps WCAG AA contrast over the brightest frame of the motion and is at least 12px, ${theme} theme`, async ({ page }) => {
     test.setTimeout(90_000);
     await openSignIn(page, `?theme=${theme}`);
     await settled(page);
-    const boxes = await brandTextBoxes(page);
-    expect(boxes.length).toBeGreaterThanOrEqual(15);
-    await page.addStyleTag({
-      content: '.au-brand,.au-brand *{color:transparent!important;text-shadow:none!important}.au-chain text{fill:transparent!important}',
-    });
-    // Sample frames across the first run of the signal (it starts 1.2 s after the motion) and the motes.
-    const brightest = boxes.map(() => 0);
-    const start = Date.now();
-    while (Date.now() - start < 6500) {
-      (await brightestUnder(page, boxes)).forEach((l, i) => {
-        brightest[i] = Math.max(brightest[i], l);
-      });
-      await page.waitForTimeout(250);
-    }
-    const failures = [];
-    boxes.forEach((b, i) => {
-      const large = b.size >= 24 || (b.weight >= 700 && b.size >= 18.66);
-      const min = large ? 3 : 4.5;
-      const fg = luminanceOf(b.color);
-      const ratio = (Math.max(fg, brightest[i]) + 0.05) / (Math.min(fg, brightest[i]) + 0.05);
-      if (ratio < min) failures.push(`${ratio.toFixed(2)} < ${min}: "${b.text.slice(0, 40)}"`);
-      if (b.size < 11.95) failures.push(`${b.size.toFixed(2)}px < 12px: "${b.text.slice(0, 40)}"`);
-    });
-    expect(failures).toEqual([]);
+    expect(await brandTextFailures(page)).toEqual([]);
+  });
+}
+
+// The chain labels grow in viewBox units as the hero narrows, and the Indonesian labels are longer, so the same check
+// runs at the narrowest hero (a 901px window), at common laptop and desktop windows and on a tall portrait screen.
+const LAYOUTS = [
+  { width: 901, height: 800, lang: 'id' },
+  { width: 960, height: 1200, lang: 'en' },
+  { width: 1000, height: 800, lang: 'id' },
+  { width: 1280, height: 720, lang: 'id' },
+  { width: 2560, height: 1440, lang: 'id' },
+];
+for (const { width, height, lang } of LAYOUTS) {
+  test(`brand text keeps WCAG AA contrast and 12px at ${width} x ${height}, ${lang === 'id' ? 'Indonesian' : 'English'}`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width, height });
+    await openSignIn(page, `?lang=${lang}`);
+    await expect(page.locator('.au-root')).toHaveAttribute('lang', lang);
+    await expect(canvas(page)).toHaveAttribute('data-motion', 'running');
+    await settled(page);
+    expect(await brandTextFailures(page)).toEqual([]);
   });
 }
 

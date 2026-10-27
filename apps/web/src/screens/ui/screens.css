@@ -1,0 +1,118 @@
+/* UI kit of the host screens (MILESTONE-2 C.6, D2-01): only the tokens of src/styles.css, through .mx- classes.
+   No text below 12px; every text colour reaches 4.5:1 on its background in the light and the dark theme. A disabled
+   control keeps full text contrast (--tx3 on --sur2) and is marked by a dashed border, never by opacity. */
+
+.mx-screen{display:flex;flex-direction:column;gap:var(--pad);min-width:0}
+.mx-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mx-stack{display:flex;flex-direction:column;gap:12px;min-width:0}
+.mx-muted{color:var(--tx2)}
+.mx-small{font-size:12px;color:var(--tx2)}
+.mx-mono{font-family:var(--ffm)}
+
+/* Card */
+.mx-card{background:var(--sur);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh);min-width:0}
+.mx-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px var(--pad);border-bottom:1px solid var(--bd)}
+.mx-card-title{font-weight:600;color:var(--tx)}
+.mx-card-sub{display:block;font-size:12px;font-weight:400;color:var(--tx2);margin-top:2px}
+.mx-card-body{padding:var(--pad)}
+.mx-card-body.mx-flush{padding:0}
+
+/* Facts: a two-column list of label and value */
+.mx-facts{display:grid;grid-template-columns:minmax(140px,220px) minmax(0,1fr);row-gap:8px;column-gap:16px;margin:0}
+.mx-facts dt{color:var(--tx2);font-size:max(12px,.9em)}
+.mx-facts dd{margin:0;color:var(--tx);min-width:0;overflow-wrap:anywhere}
+
+/* Table */
+.mx-table-wrap{overflow-x:auto}
+.mx-table{width:100%;border-collapse:collapse;font-size:var(--fs)}
+.mx-table th{text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);padding:10px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.mx-table td{padding:10px 12px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:top}
+.mx-table tr[data-hov]{cursor:pointer}
+.mx-table td.mx-num,.mx-table th.mx-num{text-align:right}
+
+/* Meter of a used amount against its limit */
+.mx-meter{display:block;width:100%;max-width:280px;height:6px;border-radius:3px;background:var(--bd);overflow:hidden;margin-top:6px}
+.mx-meter>span{display:block;height:100%;border-radius:3px}
+
+/* Badge */
+.mx-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;line-height:1.4}
+.mx-tone-ok{background:var(--okbg);color:var(--ok)}
+.mx-tone-warn{background:var(--warnbg);color:var(--warn)}
+.mx-tone-bad{background:var(--badbg);color:var(--bad)}
+.mx-tone-info{background:var(--infobg);color:var(--info)}
+.mx-tone-acc{background:var(--accbg);color:var(--acc)}
+.mx-tone-mute{background:var(--sur2);color:var(--tx2)}
+
+/* Button */
+.mx-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--bd);background:var(--sur);color:var(--tx);font:inherit;font-size:var(--fs);font-weight:500;cursor:pointer;white-space:nowrap}
+.mx-btn:hover{background:var(--sur2)}
+.mx-btn-primary{background:var(--acc);border-color:var(--acc);color:var(--onacc)}
+.mx-btn-primary:hover{background:var(--acc);filter:brightness(1.06)}
+.mx-btn-danger{background:var(--bad);border-color:var(--bad);color:var(--onst)}
+.mx-btn-danger:hover{background:var(--bad);filter:brightness(1.06)}
+.mscd .mx-btn:disabled,.mscd .mx-btn[aria-disabled="true"]{opacity:1;background:var(--sur2);color:var(--tx3);border:1px dashed var(--field);cursor:not-allowed!important;filter:none}
+.mx-btn-link{border:0;background:transparent;padding:0;height:auto;color:var(--acc);text-decoration:underline;font-weight:500}
+.mx-btn-link:hover{background:transparent;color:var(--tx)}
+.mx-btn-group{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mx-reason{font-size:12px;color:var(--tx2)}
+
+/* Fields */
+.mx-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.mx-label{font-size:12px;font-weight:600;color:var(--tx2)}
+.mx-req{color:var(--bad);margin-left:2px}
+.mx-hint{font-size:12px;color:var(--tx2)}
+.mx-error{font-size:12px;color:var(--bad);font-weight:500}
+.mx-input,.mx-select,.mx-textarea{box-sizing:border-box;width:100%;height:36px;padding:0 10px;border-radius:8px;border:1px solid var(--field);background:var(--sur2);color:var(--tx);font:inherit;font-size:var(--fs)}
+.mx-input::placeholder,.mx-textarea::placeholder{color:var(--tx3);opacity:1}
+.mx-textarea{height:auto;min-height:96px;padding:8px 10px;line-height:1.45;resize:vertical}
+.mx-input[aria-invalid="true"],.mx-select[aria-invalid="true"],.mx-textarea[aria-invalid="true"]{border-color:var(--bad)}
+.mx-input:disabled,.mx-select:disabled,.mx-textarea:disabled{color:var(--tx3);border-style:dashed;cursor:not-allowed}
+.mx-file{position:relative;display:flex;align-items:center;gap:10px;min-width:0}
+.mx-file-input{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden}
+.mx-file .mx-btn{border-color:var(--field)}
+.mx-file-input:focus-visible+label{outline:2px solid var(--ring);outline-offset:2px}
+.mx-file-name{min-width:0;overflow-wrap:anywhere}
+.mx-check{display:inline-flex;align-items:center;gap:8px;color:var(--tx);font-size:var(--fs);cursor:pointer}
+.mx-check input{width:16px;height:16px;margin:0;accent-color:var(--acc)}
+.mx-radios{display:flex;flex-direction:column;gap:6px;border:0;padding:0;margin:0}
+.mx-radios legend{padding:0;margin-bottom:6px}
+.mx-picker-list{border:1px solid var(--bd);border-radius:8px;max-height:240px;overflow:auto;background:var(--sur)}
+.mx-picker-option{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--bd);padding:8px 10px;background:transparent;color:var(--tx);font:inherit;font-size:var(--fs);cursor:pointer}
+.mx-picker-option[aria-selected="true"]{background:var(--accbg)}
+.mx-picker-option:hover{background:var(--sur2)}
+.mx-picker-option .mx-small{flex:none}
+
+/* Tabs */
+.mx-tabs{display:flex;gap:4px;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.mx-tab{display:inline-flex;align-items:center;gap:6px;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 12px;margin-bottom:-1px;color:var(--tx2);font:inherit;font-size:var(--fs);font-weight:500;cursor:pointer}
+.mx-tab[aria-selected="true"]{color:var(--tx);border-bottom-color:var(--acc);font-weight:600}
+.mx-tab-count{font-size:12px;font-weight:600;padding:0 6px;border-radius:999px;background:var(--sur2);color:var(--tx2)}
+
+/* Alert */
+.mx-alert{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:var(--r);border:1px solid var(--bd);line-height:1.45}
+.mx-alert-mark{font-weight:700;flex:none}
+.mx-alert-title{display:block;font-weight:600}
+
+/* Empty state */
+.mx-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:calc(var(--pad) * 2) var(--pad);text-align:center}
+.mx-empty-art{display:flex;justify-content:center}
+.mx-empty-title{font-weight:600;color:var(--tx)}
+.mx-empty-text{color:var(--tx2);max-width:520px}
+
+/* Modal and drawer: the geometry and z-index values of the generated layers (C.6) */
+.mx-dialog{display:flex;flex-direction:column;background:var(--sur);color:var(--tx);font-family:var(--ff);font-size:var(--fs);line-height:1.45}
+.mx-dialog-head{padding:16px 20px;border-bottom:1px solid var(--bd)}
+.mx-dialog-title{margin:0;font-weight:600;font-size:15px;color:var(--tx)}
+.mx-dialog-sub{color:var(--tx2);margin-top:2px;font-size:12px}
+.mx-dialog-body{padding:16px 20px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0}
+.mx-dialog-foot{padding:12px 20px;border-top:1px solid var(--bd);display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap}
+.mx-drawer-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px var(--pad);border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--sur);z-index:1}
+.mx-drawer-body{padding:var(--pad) calc(var(--pad) + 4px);display:flex;flex-direction:column;gap:16px}
+.mx-close{border:1px solid var(--bd);background:var(--sur2);color:var(--tx);border-radius:6px;width:28px;height:28px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none}
+
+/* Detail extensions below the generated detail fields (C.5) */
+.mx-ext{display:flex;flex-direction:column;gap:12px;padding-top:12px;border-top:1px solid var(--bd);min-width:0}
+.mx-ext-inline{display:inline-flex;width:100%;flex-wrap:wrap;gap:6px;margin-top:4px;text-decoration:none}
+
+/* No-system notice inside the shell (C.3) */
+.mx-notice{max-width:560px;line-height:1.5;color:var(--tx2)}

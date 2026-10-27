@@ -1,22 +1,28 @@
 #!/usr/bin/env node
 // Writes the framework pack sources (packs/sources/<pack_id>/) from the web sample data
-// (apps/web/src/data/mscd-data.js), in the file layout of BUILD-PLAN E.8 and with the
-// content rules of G.7. The output is deterministic: running the script twice gives the
-// same bytes. `--check` regenerates in memory and exits 1 on any difference with the files
-// on disk. Packs hold numbering and short titles only, never ISO text (PRD 3.3).
+// (apps/web/src/data/mscd-data.js), in the file layout of BUILD-PLAN E.8 and MILESTONE-2 E.1
+// and with the content rules of G.7, then merges the hand-written content of
+// packs/content/<pack_id>/ over the extract (MILESTONE-2 E.1). The output is deterministic:
+// running the script twice gives the same bytes. `--check` regenerates in memory and exits 1
+// on any difference with the files on disk. Packs hold numbering and short titles only, never
+// ISO text (PRD 3.3).
 
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CSV_HEADERS, compareCodes, toCsv, toJson } from './lib/pack-format.mjs';
+import {
+  CSV_HEADERS, ENGINE_MIN_VERSION, MAPPING_HEADER, ROW_KEYS, SEMVER_RE, compareCodes, parseCsv, toCsv, toJson,
+} from './lib/pack-format.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SAMPLE_FILE = path.join(ROOT, 'apps', 'web', 'src', 'data', 'mscd-data.js');
 const SOURCES_DIR = path.join(ROOT, 'packs', 'sources');
+const CONTENT_DIR = path.join(ROOT, 'packs', 'content');
 
 const USAGE = `Usage: node packs/scripts/extract-from-sample.mjs [--check]
 
-Writes packs/sources/<pack_id>/ for the six demo packs from apps/web/src/data/mscd-data.js.
+Writes packs/sources/<pack_id>/ for the six demo packs from apps/web/src/data/mscd-data.js,
+with the hand-written content of packs/content/<pack_id>/ merged over the extract.
 
   --check   regenerate in memory and exit 1 when any file under packs/sources differs,
             is missing or is not produced by this script (nothing is written)
@@ -29,11 +35,12 @@ Writes packs/sources/<pack_id>/ for the six demo packs from apps/web/src/data/ms
 // ---------------------------------------------------------------------------------------
 
 /**
- * Minimum MSCD engine version for this pack format. The installer (WP-12) compares it with
- * the server version; raise it when the pack format changes in a way older engines cannot read.
+ * `version` is the pack version the sample shows (`PACKS[ms].v`), checked against the sample.
+ * The released version of a pack is `pack_version` of packs/content/<pack_id>/manifest.json
+ * when that file exists (never lower than the sample's), so content work raises versions
+ * without touching the sample (MILESTONE-2 E.3). `engine_min_version` is the format version
+ * of pack-format.mjs.
  */
-const ENGINE_MIN_VERSION = '1.0.0';
-
 const PACK_DEFS = [
   { packId: 'ISO27001-2022', version: '1.2.0', ms: 'isms', frameworkCode: 'ISO27001', edition: '2022', status: 'current', preRelease: false },
   { packId: 'ISO9001-2026', version: '0.9.0', ms: 'qms', frameworkCode: 'ISO9001', edition: '2026', status: 'current', preRelease: false, supersedes: { edition: '2015', transition_ends: '2029-09-15' } },
@@ -418,45 +425,184 @@ function pair(value, what) {
 // Dataset builders
 // ---------------------------------------------------------------------------------------
 
-function buildPack(S, def) {
+function buildPack(S, def, content) {
   const ms = S.MS.find((m) => m.id === def.ms) ?? fail(`sample MS "${def.ms}" not found`);
   checkPackAgainstSample(S, def, ms);
 
-  const files = new Map();
   const requirements = requirementRows(S, ms);
-  const catalogue = ms.unit === 'ctrl' ? catalogueRows(S, ms) : [];
   const chain = chainRows(S, ms);
-  const lookups = lookupRows(S, ms);
-
-  files.set('manifest.json', toJson(manifest(def, ms)));
-  files.set('requirements.csv', toCsv(CSV_HEADERS['requirements.csv'], requirements));
-  files.set('catalogue.csv', toCsv(CSV_HEADERS['catalogue.csv'], catalogue));
-  files.set('chain.csv', toCsv(CSV_HEADERS['chain.csv'], chain));
-  files.set('activities.csv', toCsv(CSV_HEADERS['activities.csv'], activityRows(S, ms)));
-  files.set('frequencies.csv', toCsv(CSV_HEADERS['frequencies.csv'], frequencyRows(S)));
-  const labels = labelSets(ms);
-  files.set('labels.en.json', toJson(labels.en));
-  files.set('labels.id.json', toJson(labels.id));
-  files.set('cycle_requirements.csv', toCsv(CSV_HEADERS['cycle_requirements.csv'], cycleRows(S, ms)));
-  files.set('drift_rules.json', toJson(driftRules(S, ms)));
-  files.set('prep_tasks.csv', toCsv(CSV_HEADERS['prep_tasks.csv'], prepRows(S, ms)));
-  files.set('review_inputs.csv', toCsv(CSV_HEADERS['review_inputs.csv'], []));
   const auditContent = AUDIT_CONTENT_SYSTEMS.has(ms.id);
-  files.set('finding_conditions.csv', toCsv(CSV_HEADERS['finding_conditions.csv'], auditContent ? ISO27001_FINDING_CONDITIONS : []));
-  files.set('document_templates.csv', toCsv(CSV_HEADERS['document_templates.csv'], []));
-  files.set('audit_activities.csv', toCsv(CSV_HEADERS['audit_activities.csv'],
-    auditContent ? ISO27001_AUDIT_ACTIVITIES.map((a, i) => ({ ...a, sort_order: i + 1 })) : []));
-  files.set('lookups.csv', toCsv(CSV_HEADERS['lookups.csv'], lookups));
-  files.set('rules.json', toJson(rules(ms)));
-  files.set('risk_profiles.json', toJson(riskProfiles(chain)));
-
   if (auditContent) {
     const codes = new Set(requirements.map((r) => r.requirement_code));
     for (const c of ISO27001_FINDING_CONDITIONS) {
       if (!codes.has(c.requirement_code)) fail(`finding condition ${c.code} names requirement ${c.requirement_code}, which ${def.packId} does not hold`);
     }
   }
-  return files;
+
+  // The sample extract of every CSV dataset, before the content of packs/content is merged.
+  const extract = new Map([
+    ['requirements.csv', requirements],
+    ['catalogue.csv', ms.unit === 'ctrl' ? catalogueRows(S, ms) : []],
+    ['chain.csv', chain],
+    ['activities.csv', activityRows(S, ms)],
+    ['frequencies.csv', frequencyRows(S)],
+    ['cycle_requirements.csv', cycleRows(S, ms)],
+    ['prep_tasks.csv', prepRows(S, ms)],
+    ['review_inputs.csv', []],
+    ['finding_conditions.csv', auditContent ? ISO27001_FINDING_CONDITIONS : []],
+    ['document_templates.csv', []],
+    ['documented_info.csv', []],
+    ['audit_activities.csv', auditContent ? ISO27001_AUDIT_ACTIVITIES.map((a, i) => ({ ...a, sort_order: i + 1 })) : []],
+    ['lookups.csv', lookupRows(S, ms)],
+  ]);
+  const datasets = mergeContent(def.packId, extract, content);
+
+  const files = new Map();
+  files.set('manifest.json', toJson(manifest(def, ms, content)));
+  for (const [name, rows] of datasets) files.set(name, toCsv(CSV_HEADERS[name], rows));
+  const labels = labelSets(ms);
+  files.set('labels.en.json', toJson(labels.en));
+  files.set('labels.id.json', toJson(labels.id));
+  files.set('drift_rules.json', toJson(driftRules(S, ms)));
+  files.set('rules.json', toJson(rules(ms)));
+  // Risk profiles follow the chain as merged, so a content stage brings its profile.
+  files.set('risk_profiles.json', toJson(riskProfiles(datasets.get('chain.csv'))));
+  for (const [file, rows] of content?.mappings ?? []) files.set(`mappings/${file}`, toCsv(MAPPING_HEADER, rows));
+  return new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+// ---------------------------------------------------------------------------------------
+// Hand-written content (packs/content/<pack_id>/, MILESTONE-2 E.1)
+// ---------------------------------------------------------------------------------------
+
+/** Datasets a content folder may not drop: such a row is marked `retired` instead (E.1). */
+const NEVER_REMOVED = new Set(['requirements.csv', 'catalogue.csv']);
+const REMOVED_HEADER = ['dataset', 'code', 'reason'];
+/** Members of packs/content/<pack_id>/manifest.json. */
+const CONTENT_MANIFEST_KEYS = ['pack_version'];
+
+/** Reads a CSV file of a content folder into records keyed by its header, checking the header. */
+function readContentCsv(file, header) {
+  const where = displayPath(file);
+  const text = readFileSync(file, 'utf8');
+  if (text.includes('\r')) fail(`${where} has carriage returns (LF line endings only)`);
+  if (!text.endsWith('\n')) fail(`${where} does not end with a newline`);
+  let records;
+  try {
+    records = parseCsv(text);
+  } catch (err) {
+    fail(`${where}: ${err.message}`);
+  }
+  const [head = [], ...rows] = records;
+  if (head.join(',') !== header.join(',')) fail(`${where}: header is "${head.join(',')}", expected "${header.join(',')}"`);
+  return rows.map((fields, i) => {
+    if (fields.length !== header.length) fail(`${where}:${i + 2}: has ${fields.length} fields, expected ${header.length}`);
+    return Object.fromEntries(header.map((h, j) => [h, fields[j]]));
+  });
+}
+
+/**
+ * Reads packs/content/<pack_id>/: CSV datasets with the header of the dataset, `removed.csv`
+ * (dataset, code, reason), `manifest.json` ({pack_version}) and `mappings/<target>.csv`.
+ * Returns null when the pack has no content folder. Anything else in the folder stops the run.
+ */
+function readContent(packId) {
+  const dir = path.join(CONTENT_DIR, packId);
+  const st = lstatOrNull(dir);
+  if (!st) return null;
+  if (!st.isDirectory()) fail(`${displayPath(dir)} is not a folder (symbolic links are not followed)`);
+  const content = { csv: new Map(), removed: [], manifest: null, mappings: new Map() };
+  for (const rel of listFiles(dir)) {
+    const file = path.join(dir, rel);
+    if (rel === 'manifest.json') {
+      let value;
+      try {
+        value = JSON.parse(readFileSync(file, 'utf8'));
+      } catch (err) {
+        fail(`${displayPath(file)} is not valid JSON (${err.message})`);
+      }
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) fail(`${displayPath(file)} is not a JSON object`);
+      for (const key of Object.keys(value)) {
+        if (!CONTENT_MANIFEST_KEYS.includes(key)) fail(`${displayPath(file)}: ${key} is not a content manifest member (only ${CONTENT_MANIFEST_KEYS.join(', ')})`);
+      }
+      if (typeof value.pack_version !== 'string' || !SEMVER_RE.test(value.pack_version)) fail(`${displayPath(file)}: pack_version is not a semantic version`);
+      content.manifest = value;
+    } else if (rel === 'removed.csv') {
+      content.removed = readContentCsv(file, REMOVED_HEADER).map((r, i) => {
+        const where = `${displayPath(file)}:${i + 2}`;
+        if (!CSV_HEADERS[r.dataset]) fail(`${where}: dataset "${r.dataset}" is not a CSV dataset of a pack`);
+        if (NEVER_REMOVED.has(r.dataset)) fail(`${where}: rows of ${r.dataset} are never removed; mark the row retired instead`);
+        if (r.code === '') fail(`${where}: code is empty`);
+        if (r.reason.trim() === '') fail(`${where}: reason is empty`);
+        return r;
+      });
+      const keys = content.removed.map((r) => `${r.dataset} ${r.code}`);
+      const repeated = keys.filter((k, i) => keys.indexOf(k) !== i);
+      if (repeated.length) fail(`${displayPath(file)} lists ${repeated[0]} more than once`);
+    } else if (/^mappings\/[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/.test(rel)) {
+      content.mappings.set(rel.slice('mappings/'.length), readContentCsv(file, MAPPING_HEADER));
+    } else if (CSV_HEADERS[rel]) {
+      content.csv.set(rel, readContentCsv(file, CSV_HEADERS[rel]));
+    } else {
+      fail(`${displayPath(file)} is not a pack dataset, removed.csv or manifest.json`);
+    }
+  }
+  for (const [name, rows] of [...content.csv, ...[...content.mappings].map(([f, r]) => [`mappings/${f}`, r])]) {
+    const keyOf = name.startsWith('mappings/') ? ROW_KEYS.mapping : ROW_KEYS[name];
+    const keys = rows.map(keyOf);
+    const repeated = keys.filter((k, i) => keys.indexOf(k) !== i);
+    if (repeated.length) fail(`packs/content/${packId}/${name} holds ${repeated[0]} more than once`);
+  }
+  return content;
+}
+
+/**
+ * Merges the content of a pack over its extract. `removed.csv` drops sample rows first (each
+ * listed row must be in the extract and must not come back). A content row replaces the
+ * extracted row of the same key in place, or is added at the end. Requirements are then sorted
+ * by clause code and activities by phase and number; requirements and catalogue items are
+ * numbered from 1 (the content's `sort_order` of those two files is not used).
+ */
+function mergeContent(packId, extract, content) {
+  const out = new Map();
+  for (const [name, rows] of extract) {
+    const keyOf = ROW_KEYS[name];
+    let merged = [...rows];
+    for (const r of content?.removed ?? []) {
+      if (r.dataset !== name) continue;
+      const before = merged.length;
+      merged = merged.filter((row) => keyOf(row) !== r.code);
+      if (merged.length === before) fail(`packs/content/${packId}/removed.csv: ${name} ${r.code} is not in the sample extract`);
+    }
+    for (const row of content?.csv.get(name) ?? []) {
+      const at = merged.findIndex((m) => keyOf(m) === keyOf(row));
+      if (at >= 0) merged[at] = row;
+      else merged.push(row);
+    }
+    if (name === 'requirements.csv') merged.sort((a, b) => compareCodes(a.requirement_code, b.requirement_code));
+    if (name === 'activities.csv') merged.sort((a, b) => Number(a.phase_no) - Number(b.phase_no) || Number(a.activity_no) - Number(b.activity_no));
+    if (name === 'requirements.csv' || name === 'catalogue.csv') merged = merged.map((row, i) => ({ ...row, sort_order: i + 1 }));
+    for (const r of content?.removed ?? []) {
+      if (r.dataset === name && merged.some((row) => keyOf(row) === r.code)) {
+        fail(`packs/content/${packId}/removed.csv: ${name} ${r.code} is removed but still in the output (a content file adds it again)`);
+      }
+    }
+    out.set(name, merged);
+  }
+  return out;
+}
+
+/** Stops when packs/content holds anything but folders of the packs of PACK_DEFS. */
+function checkContentFolders() {
+  const st = lstatOrNull(CONTENT_DIR);
+  if (!st) return;
+  if (!st.isDirectory()) fail('packs/content must be a folder inside the repository, not a symbolic link');
+  for (const name of readdirSync(CONTENT_DIR).sort()) {
+    const entry = lstatSync(path.join(CONTENT_DIR, name));
+    if (name === 'README.md' && entry.isFile()) continue;
+    if (!entry.isDirectory()) fail(`packs/content/${name} is not a pack content folder`);
+    if (!PACK_DEFS.some((d) => d.packId === name)) fail(`packs/content/${name} is not a pack of this script (${PACK_DEFS.map((d) => d.packId).join(', ')})`);
+  }
 }
 
 /** Stops when the hard-coded pack set no longer matches the sample's pack cards. */
@@ -484,10 +630,27 @@ function checkPackAgainstSample(S, def, ms) {
   }
 }
 
-function manifest(def, ms) {
+/** Semantic version order of two plain versions (`1.2.0` before `1.10.0`, a pre-release first). */
+function compareVersions(a, b) {
+  const [ca, pa = null] = a.split('-', 2);
+  const [cb, pb = null] = b.split('-', 2);
+  const na = ca.split('.').map(Number);
+  const nb = cb.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) if (na[i] !== nb[i]) return na[i] - nb[i];
+  if (pa === pb) return 0;
+  if (pa === null) return 1;
+  if (pb === null) return -1;
+  return pa < pb ? -1 : 1;
+}
+
+function manifest(def, ms, content) {
+  const version = content?.manifest?.pack_version ?? def.version;
+  if (compareVersions(version, def.version) < 0) {
+    fail(`packs/content/${def.packId}/manifest.json: pack_version ${version} is lower than the sample's version ${def.version}`);
+  }
   const m = {
     pack_id: def.packId,
-    pack_version: def.version,
+    pack_version: version,
     framework_code: def.frameworkCode,
     framework_name: ms.code,
     edition: def.edition,
@@ -540,6 +703,8 @@ function requirementRows(S, ms) {
       // Evidence examples belong to the catalogue (G.7); requirement keys repeat Annex A keys.
       evidence_example: null,
       sort_order: i + 1,
+      // Rows are retired through packs/content, never by the sample (MILESTONE-2 E.1).
+      retired: false,
     };
   });
 }
@@ -563,6 +728,7 @@ function catalogueRows(S, ms) {
       default_frequency_code: c.freq,
       evidence_example: S.EXAMPLES[c.key] ?? null,
       sort_order: i + 1,
+      retired: false,
     };
   });
 }
@@ -763,9 +929,10 @@ function riskProfiles(chain) {
 /** Every generated file as a map from a path relative to packs/sources to its content. */
 async function generate() {
   const S = await import(pathToFileURL(SAMPLE_FILE).href);
+  checkContentFolders();
   const out = new Map();
   for (const def of PACK_DEFS) {
-    for (const [file, content] of buildPack(S, def)) out.set(`${def.packId}/${file}`, content);
+    for (const [file, text] of buildPack(S, def, readContent(def.packId))) out.set(`${def.packId}/${file}`, text);
   }
   return out;
 }

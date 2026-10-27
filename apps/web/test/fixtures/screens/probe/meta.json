@@ -1,0 +1,13 @@
+{
+  "id": "probe",
+  "label": ["Probe screen", "Layar uji"],
+  "group": "admin",
+  "order": 990,
+  "scope": "org",
+  "perm": "ms.admin",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Say hello", "Ucapkan salam"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

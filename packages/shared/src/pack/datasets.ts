@@ -3,7 +3,8 @@
 // decimal integers) and output typed rows. Lengths follow the `ref` columns of C.5. JSON datasets are parsed as is.
 import { z } from 'zod';
 import {
-  AuditEventType, ChainSource, ClauseGroup, DriftSeverity, DriftSourceKind, FindingClassification, MappingType,
+  AuditEventType, ChainSource, ClauseGroup, DocumentedInfoKind, DriftSeverity, DriftSourceKind, FindingClassification, MappingType,
+  ReviewKind,
 } from '../enums.js';
 import { named } from '../api/common.js';
 import { PackId } from './manifest.js';
@@ -71,13 +72,18 @@ export const RequirementRow = named(
     default_frequency_code: csvOptional(20),
     evidence_example: csvOptional(),
     sort_order: csvInt(-INT_MAX, INT_MAX),
+    retired: csvBool,
   }),
-  'requirements.csv row (ref.requirement)',
+  'requirements.csv row (ref.requirement). A retired row is no longer in the standard: it stays in the pack and in ref, and readers hide it (Milestone 2 E.1)',
   {
-    valid: [{ requirement_code: '4.1', parent_code: '', title_short: 'Understanding the organization and its context', clause_group: '4', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1' }],
+    valid: [
+      { requirement_code: '4.1', parent_code: '', title_short: 'Understanding the organization and its context', clause_group: '4', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1', retired: 'false' },
+      { requirement_code: '10.3', parent_code: '', title_short: 'Continual improvement', clause_group: '10', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '24', retired: 'true' },
+    ],
     invalid: [
-      { requirement_code: '4.1', parent_code: '', title_short: 'x', clause_group: '11', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1' },
-      { requirement_code: '4.1', parent_code: '', title_short: 'x', clause_group: '4', is_hs_common: 'yes', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1' },
+      { requirement_code: '4.1', parent_code: '', title_short: 'x', clause_group: '11', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1', retired: 'false' },
+      { requirement_code: '4.1', parent_code: '', title_short: 'x', clause_group: '4', is_hs_common: 'yes', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1', retired: 'false' },
+      { requirement_code: '4.1', parent_code: '', title_short: 'x', clause_group: '4', is_hs_common: 'true', documented_info_mandatory: 'false', applicability_assessable: 'false', default_frequency_code: '', evidence_example: '', sort_order: '1', retired: '' },
     ],
   },
 );
@@ -93,11 +99,16 @@ export const CatalogueRow = named(
     default_frequency_code: csvOptional(20),
     evidence_example: csvOptional(),
     sort_order: csvInt(-INT_MAX, INT_MAX),
+    retired: csvBool,
   }),
-  'catalogue.csv row (ref.catalogue_item)',
+  'catalogue.csv row (ref.catalogue_item); requirement_code links the item to the clause it supports. A retired item stays in the pack and in ref (Milestone 2 E.1)',
   {
-    valid: [{ item_code: 'A.5.1', theme_code: 'A.5', title_short: 'Policies for information security', requirement_code: '', default_frequency_code: 'annual', evidence_example: '', sort_order: '1' }],
-    invalid: [{ item_code: '', theme_code: 'A.5', title_short: 'x', requirement_code: '', default_frequency_code: '', evidence_example: '', sort_order: '1' }, { item_code: 'A.5.1', theme_code: 'A.5', title_short: 'x', requirement_code: '', default_frequency_code: '', evidence_example: '', sort_order: 'one' }],
+    valid: [{ item_code: 'A.5.1', theme_code: 'A.5', title_short: 'Policies for information security', requirement_code: '', default_frequency_code: 'annual', evidence_example: '', sort_order: '1', retired: 'false' }],
+    invalid: [
+      { item_code: '', theme_code: 'A.5', title_short: 'x', requirement_code: '', default_frequency_code: '', evidence_example: '', sort_order: '1', retired: 'false' },
+      { item_code: 'A.5.1', theme_code: 'A.5', title_short: 'x', requirement_code: '', default_frequency_code: '', evidence_example: '', sort_order: 'one', retired: 'false' },
+      { item_code: 'A.5.1', theme_code: 'A.5', title_short: 'x', requirement_code: '', default_frequency_code: '', evidence_example: '', sort_order: '1' },
+    ],
   },
 );
 export type CatalogueRow = z.output<typeof CatalogueRow>;
@@ -169,22 +180,49 @@ export const FrequencyRow = named(
 );
 export type FrequencyRow = z.output<typeof FrequencyRow>;
 
+/**
+ * Derivation kinds of `cycle.derive` a pack may name in `cycle_requirements.csv`: the four of build plan E.2 and the
+ * kinds Milestone 2 D.4 adds. The database keeps the JSON without a CHECK; the pack format checks the kind.
+ */
+export const CYCLE_DERIVATION_KINDS = [
+  'management_review_closed', 'risk_assessment_current', 'internal_audit_done', 'exercise_performed',
+  'corrective_actions_closed', 'metrics_current', 'documents_reviewed_on_time', 'bia_approved', 'due_diligence_current',
+] as const;
+export type CycleDerivationKind = (typeof CYCLE_DERIVATION_KINDS)[number];
+
+/** `derivation` of a cycle requirement: a kind of `CYCLE_DERIVATION_KINDS`, `months` for a time window, other members kept. */
+export const CycleDerivation = named(
+  'CycleDerivation',
+  z.looseObject({ kind: z.enum(CYCLE_DERIVATION_KINDS), months: z.int().min(1).max(120).optional() }),
+  'cycle_requirements.csv derivation: the cycle.derive rule that decides the item (build plan E.2, Milestone 2 D.4)',
+  {
+    valid: [{ kind: 'management_review_closed' }, { kind: 'risk_assessment_current', months: 12 }, { kind: 'corrective_actions_closed' }],
+    invalid: [{}, { kind: 'audit_passed' }, { kind: 'risk_assessment_current', months: 0 }],
+  },
+);
+export type CycleDerivation = z.output<typeof CycleDerivation>;
+
 export const CycleRequirementRow = named(
   'CycleRequirementRow',
   z.strictObject({
     code: CODE_30,
     requirement_code: csvOptional(20),
     title: csvRequired(255),
-    derivation: csvJsonObject,
+    derivation: csvJsonObject.pipe(CycleDerivation.nullable()),
     sort_order: csvInt(-SMALLINT_MAX, SMALLINT_MAX),
   }),
-  'cycle_requirements.csv row (ref.cycle_requirement_def); derivation is a JSON object with a kind (E.2 cycle.derive), or empty',
+  'cycle_requirements.csv row (ref.cycle_requirement_def); derivation is a JSON object with a kind of CYCLE_DERIVATION_KINDS (cycle.derive), or empty',
   {
     valid: [
       { code: 'RISK_ASSESSMENT', requirement_code: '6.1.2', title: 'Risk assessment reviewed this cycle', derivation: '', sort_order: '1' },
       { code: 'MGMT_REVIEW', requirement_code: '9.3', title: 'Management review', derivation: '{"kind":"management_review_closed"}', sort_order: '2' },
+      { code: 'CORRECTIVE_ACTION', requirement_code: '10.2', title: 'Corrective actions closed', derivation: '{"kind":"corrective_actions_closed"}', sort_order: '3' },
     ],
-    invalid: [{ code: 'X', requirement_code: '', title: 'x', derivation: '[1]', sort_order: '1' }, { code: 'X', requirement_code: '', title: 'x', derivation: '{bad', sort_order: '1' }],
+    invalid: [
+      { code: 'X', requirement_code: '', title: 'x', derivation: '[1]', sort_order: '1' },
+      { code: 'X', requirement_code: '', title: 'x', derivation: '{bad', sort_order: '1' },
+      { code: 'X', requirement_code: '', title: 'x', derivation: '{"kind":"audit_passed"}', sort_order: '1' },
+    ],
   },
 );
 export type CycleRequirementRow = z.output<typeof CycleRequirementRow>;
@@ -208,11 +246,14 @@ export type PrepTaskRow = z.output<typeof PrepTaskRow>;
 
 export const ReviewInputRow = named(
   'ReviewInputRow',
-  z.strictObject({ code: CODE_30, title: csvRequired(255), mandatory: csvBool, sort_order: csvInt(-SMALLINT_MAX, SMALLINT_MAX) }),
-  'review_inputs.csv row (ref.review_input_def)',
+  z.strictObject({ code: CODE_30, title: csvRequired(255), mandatory: csvBool, sort_order: csvInt(-SMALLINT_MAX, SMALLINT_MAX), review_kind: ReviewKind }),
+  'review_inputs.csv row (ref.review_input_def); review_kind names the review that takes the input: management review, or the governing body review of ISO 37001 (Milestone 2 E.1)',
   {
-    valid: [{ code: 'MRI-01', title: 'Status of actions from previous management reviews', mandatory: 'true', sort_order: '1' }],
-    invalid: [{ code: 'MRI-01', title: 'x', mandatory: 'TRUE', sort_order: '1' }],
+    valid: [
+      { code: 'MRI-01', title: 'Status of actions from previous management reviews', mandatory: 'true', sort_order: '1', review_kind: 'management' },
+      { code: 'GBR-01', title: 'Results of the management review', mandatory: 'true', sort_order: '2', review_kind: 'governing_body' },
+    ],
+    invalid: [{ code: 'MRI-01', title: 'x', mandatory: 'TRUE', sort_order: '1', review_kind: 'management' }, { code: 'MRI-01', title: 'x', mandatory: 'true', sort_order: '1', review_kind: '' }],
   },
 );
 export type ReviewInputRow = z.output<typeof ReviewInputRow>;
@@ -230,27 +271,45 @@ export type FindingConditionRow = z.output<typeof FindingConditionRow>;
 
 export const DocumentTemplateRow = named(
   'DocumentTemplateRow',
-  z.strictObject({ code: CODE_30, title: csvRequired(255), doc_type: csvRequired(20) }),
-  'document_templates.csv row (ref.document_template)',
+  z.strictObject({ code: CODE_30, title: csvRequired(255), doc_type: csvRequired(20), requirement_code: csvOptional(20) }),
+  'document_templates.csv row (ref.document_template); requirement_code names the clause the document answers, or is empty (Milestone 2 E.1)',
   {
-    valid: [{ code: 'TPL-POL', title: 'Information security policy', doc_type: 'policy' }],
-    invalid: [{ code: 'TPL-POL', title: 'x', doc_type: '' }],
+    valid: [{ code: 'TPL-POL', title: 'Information security policy', doc_type: 'policy', requirement_code: '5.2' }, { code: 'SCO-01', title: 'Scope statement', doc_type: 'record', requirement_code: '' }],
+    invalid: [{ code: 'TPL-POL', title: 'x', doc_type: '', requirement_code: '' }, { code: 'TPL-POL', title: 'x', doc_type: 'policy' }],
   },
 );
 export type DocumentTemplateRow = z.output<typeof DocumentTemplateRow>;
 
-/**
- * Event types of `audit_activities.csv`: every audit event type except `internal_audit`, which the pack format accepts
- * only from pack engine 1.1.0 on, together with the ref migration that widens the CHECK of
- * `ref.audit_activity_template.event_type` (Milestone 2 D.3, M2-03).
- */
-const TemplateEventType = AuditEventType.exclude(['internal_audit']);
+export const DocumentedInfoRow = named(
+  'DocumentedInfoRow',
+  z.strictObject({
+    code: CODE_30,
+    requirement_code: CODE_20,
+    kind: DocumentedInfoKind,
+    title: csvRequired(255),
+    template_code: csvOptional(30),
+    sort_order: csvInt(-SMALLINT_MAX, SMALLINT_MAX),
+  }),
+  'documented_info.csv row (ref.documented_info): documented information the standard asks for, maintained (a document) or retained (a record), with the requirement that asks for it and the template that answers it (Milestone 2 E.1)',
+  {
+    valid: [
+      { code: 'DI-4.3', requirement_code: '4.3', kind: 'maintain', title: 'Scope of the management system', template_code: 'SCO-01', sort_order: '1' },
+      { code: 'DI-9.2', requirement_code: '9.2', kind: 'retain', title: 'Audit programme and audit results', template_code: '', sort_order: '2' },
+    ],
+    invalid: [
+      { code: 'DI-4.3', requirement_code: '4.3', kind: 'keep', title: 'x', template_code: '', sort_order: '1' },
+      { code: 'DI-4.3', requirement_code: '', kind: 'maintain', title: 'x', template_code: '', sort_order: '1' },
+    ],
+  },
+);
+export type DocumentedInfoRow = z.output<typeof DocumentedInfoRow>;
 
 export const AuditActivityRow = named(
   'AuditActivityRow',
   z.strictObject({
     code: CODE_30,
-    event_type: TemplateEventType,
+    // Every audit event type, internal audits included (ref 0002 widens the CHECK, Milestone 2 D.3).
+    event_type: AuditEventType,
     clause_ref: csvOptional(40),
     title: csvRequired(255),
     auditee_role: csvOptional(40),
@@ -260,10 +319,13 @@ export const AuditActivityRow = named(
   }),
   'audit_activities.csv row (ref.audit_activity_template)',
   {
-    valid: [{ code: 'AA-S1-01', event_type: 'stage1', clause_ref: '4.3', title: 'Review ISMS scope and context', auditee_role: 'ISMS Manager', key_questions: 'Are the scope, boundaries and interfaces documented?', evidence_to_request: 'Scope statement', sort_order: '1' }],
+    valid: [
+      { code: 'AA-S1-01', event_type: 'stage1', clause_ref: '4.3', title: 'Review ISMS scope and context', auditee_role: 'ISMS Manager', key_questions: 'Are the scope, boundaries and interfaces documented?', evidence_to_request: 'Scope statement', sort_order: '1' },
+      { code: 'AA-IA-01', event_type: 'internal_audit', clause_ref: '9.2', title: 'Check the audit programme', auditee_role: 'Internal Auditor', key_questions: '', evidence_to_request: 'Audit programme', sort_order: '2' },
+    ],
     invalid: [
       { code: 'AA-S1-01', event_type: 'stage3', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' },
-      { code: 'AA-IA-01', event_type: 'internal_audit', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' },
+      { code: 'AA-S1-01', event_type: 'Stage1', clause_ref: '', title: 'x', auditee_role: '', key_questions: '', evidence_to_request: '', sort_order: '1' },
     ],
   },
 );
@@ -389,18 +451,19 @@ export const RiskProfilesFile = named('RiskProfilesFile', z.array(RiskProfileDef
 // File table
 // ---------------------------------------------------------------------------------------------------------------
 
-/** CSV header row of every CSV dataset (E.8), in column order. */
+/** CSV header row of every CSV dataset (E.8 and Milestone 2 E.1), in column order. */
 export const PACK_CSV_HEADERS = {
-  'requirements.csv': ['requirement_code', 'parent_code', 'title_short', 'clause_group', 'is_hs_common', 'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code', 'evidence_example', 'sort_order'],
-  'catalogue.csv': ['item_code', 'theme_code', 'title_short', 'requirement_code', 'default_frequency_code', 'evidence_example', 'sort_order'],
+  'requirements.csv': ['requirement_code', 'parent_code', 'title_short', 'clause_group', 'is_hs_common', 'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code', 'evidence_example', 'sort_order', 'retired'],
+  'catalogue.csv': ['item_code', 'theme_code', 'title_short', 'requirement_code', 'default_frequency_code', 'evidence_example', 'sort_order', 'retired'],
   'chain.csv': ['stage_key', 'position', 'label_en', 'label_id', 'question_en', 'question_id', 'source', 'entity_type', 'risk_profile_code', 'is_mandatory', 'clause_at_risk', 'overview_clause', 'gate_type_label_en', 'gate_type_label_id'],
   'activities.csv': ['phase_no', 'phase_name_en', 'phase_name_id', 'is_gate_phase', 'activity_no', 'title', 'clause_ref', 'output_document_code', 'expected_outcome'],
   'frequencies.csv': ['code', 'label_en', 'label_id', 'period_days', 'sort_order'],
   'cycle_requirements.csv': ['code', 'requirement_code', 'title', 'derivation', 'sort_order'],
   'prep_tasks.csv': ['code', 'title', 'days_before_audit', 'skip_on_first_audit', 'sort_order'],
-  'review_inputs.csv': ['code', 'title', 'mandatory', 'sort_order'],
+  'review_inputs.csv': ['code', 'title', 'mandatory', 'sort_order', 'review_kind'],
   'finding_conditions.csv': ['code', 'classification', 'requirement_code', 'text'],
-  'document_templates.csv': ['code', 'title', 'doc_type'],
+  'document_templates.csv': ['code', 'title', 'doc_type', 'requirement_code'],
+  'documented_info.csv': ['code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'],
   'audit_activities.csv': ['code', 'event_type', 'clause_ref', 'title', 'auditee_role', 'key_questions', 'evidence_to_request', 'sort_order'],
   'lookups.csv': ['domain', 'code', 'label_en', 'label_id', 'sort_order'],
 } as const;
@@ -421,6 +484,7 @@ export const PACK_CSV_ROW_SCHEMAS = {
   'review_inputs.csv': ReviewInputRow,
   'finding_conditions.csv': FindingConditionRow,
   'document_templates.csv': DocumentTemplateRow,
+  'documented_info.csv': DocumentedInfoRow,
   'audit_activities.csv': AuditActivityRow,
   'lookups.csv': LookupRow,
 } as const satisfies Record<PackCsvFile, z.ZodType>;

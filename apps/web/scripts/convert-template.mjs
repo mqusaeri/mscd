@@ -80,6 +80,41 @@ const PATCHES = [
   ['>Management system</th>', '>{{ t.c_msName }}</th>'],
   ['>GATE</span>', '>{{ t.gateTag }}</span>', 2],
   ['>PDF, XLSX, DOCX, PNG, max 50 MB, SHA-256 computed on upload<', '>{{ t.uploadHint }}<'],
+
+  // ---- Milestone 2 host slots (MILESTONE-2 C.1, M2-01) ----
+  // Each slot renders a React node that the controller builds (src/screens/host.tsx); an empty slot renders nothing.
+  // hostScreen: the body of a host screen, inside the padded and animated main column, after the built-in screens.
+  ['  </div>\n  </sc-if>\n</main>', '<sc-if value="{{ hostScreen }}">{{ hostScreen }}</sc-if>\n  </div>\n  </sc-if>\n</main>'],
+  // hostLayer: the element host modals and drawers portal into, at the .mscd root (token and theme scope) and
+  // outside the animated column, whose transform would otherwise anchor fixed layers to it.
+  ['<sc-if value="{{ toast }}">', '<sc-if value="{{ hostLayer }}">{{ hostLayer }}</sc-if>\n<sc-if value="{{ toast }}">'],
+  // hostDetail: detail extensions (C.5) below the generated fields of the drawer, the page detail and the inline row.
+  ['</sc-for></div>\n    </div>\n  </div>\n</sc-if>\n\n<!-- ===== Modals ===== -->',
+   '</sc-for></div>\n      <sc-if value="{{ hostDetail }}">{{ hostDetail }}</sc-if>\n    </div>\n  </div>\n</sc-if>\n\n<!-- ===== Modals ===== -->'],
+  ['</sc-for></div>\n            </div>\n          </div>\n        </div>\n      </sc-if>',
+   '</sc-for></div>\n            </div>\n          </div>\n          <sc-if value="{{ hostDetail }}"><div style="padding:0 calc(var(--pad) * 1.5) calc(var(--pad) * 1.5)">{{ hostDetail }}</div></sc-if>\n        </div>\n      </sc-if>'],
+  ['</sc-for></div>\n                      </div>\n                    </div>\n                  </td></tr>',
+   '</sc-for></div>\n                      </div>\n                    </div>\n                    <sc-if value="{{ row.det.hostExt }}"><div style="padding:0 calc(var(--pad) + 26px) var(--pad)">{{ row.det.hostExt }}</div></sc-if>\n                  </td></tr>'],
+  // Detail extensions of the certification timeline: the selected audit event, each preparation task and each
+  // cycle item. The extension of a row sits inside its title cell, so the row grid keeps its columns.
+  ['<li>{{ p }}</li></sc-for></ul></div></sc-if>', '<li>{{ p }}</li></sc-for></ul></div></sc-if><sc-if value="{{ tl.evt.ext }}">{{ tl.evt.ext }}</sc-if>'],
+  // The extension of a preparation task renders an atomic inline box, so the line-through of a done task stays on its title.
+  ['<span style="text-decoration:{{ p.deco }}">{{ p.title }}</span>', '<span style="text-decoration:{{ p.deco }}">{{ p.title }}<sc-if value="{{ p.ext }}">{{ p.ext }}</sc-if></span>'],
+  [', {{ c.note }}</sc-if></span></span>', ', {{ c.note }}</sc-if></span><sc-if value="{{ c.ext }}">{{ c.ext }}</sc-if></span>'],
+  // hostTopbar: entries of host packages in the top bar (notification bell, My account), before the role menu.
+  ['      <div style="position:relative">\n        <button onClick="{{ toggleRoleMenu }}"',
+   '      <sc-if value="{{ hostTopbar }}">{{ hostTopbar }}</sc-if>\n      <div style="position:relative">\n        <button onClick="{{ toggleRoleMenu }}"'],
+  // The management system switcher shows only when the user holds a role in a system (no-system path, C.3).
+  ['box-sizing:border-box">\n    <div style="position:relative">\n      <button onClick="{{ toggleMsMenu }}"',
+   'box-sizing:border-box">\n    <sc-if value="{{ msSwitch }}"><div style="position:relative">\n      <button onClick="{{ toggleMsMenu }}"'],
+  ['      </sc-if>\n    </div>\n    \n    <div style="margin-left:auto;flex:none', '      </sc-if>\n    </div></sc-if>\n    \n    <div style="margin-left:auto;flex:none'],
+  // Readiness block (D2-11, D.6, H.2): "Internal progress score" with its one-line method, in both languages.
+  ['<span style="font-weight:600">{{ t.maturity }}</span>',
+   '<span style="min-width:0"><span style="display:block;font-weight:600">{{ ov.scoreTitle }}</span><span style="display:block;font-size:12px;color:var(--tx3)">{{ ov.scoreMethod }}</span></span>'],
+  // A clause readiness value that readiness.recompute has not computed yet reads "Not computed yet", never 0 (D.3).
+  ['{{ c.pct }}%</span>', '{{ c.pctText }}</span>'],
+  ['<div style="font-size:12px;color:var(--tx3);font-family:var(--ffm);margin-top:2px">{{ c.n }}, {{ c.pct }}</div>',
+   '<div title="{{ c.pctText }}" style="font-size:12px;color:var(--tx3);font-family:var(--ffm);margin-top:2px">{{ c.n }}, {{ c.pctShort }}</div>'],
 ];
 for (const [from, to, times = 1] of PATCHES) {
   const n = html.split(from).length - 1;

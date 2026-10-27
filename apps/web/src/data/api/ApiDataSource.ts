@@ -12,12 +12,12 @@ import type {
 } from '@mscd/shared';
 import type {
   CommandResult, DataSource, Evidence, IsoDate, MsId, PageAction, Pair, PersonId, PickerFileChoice, PickerListing,
-  RecordKey, RepositoryAction, Snapshot, UiRole,
+  RecordKey, RepositoryAction, Snapshot, StagedUpload, UiRole,
 } from '../types';
 import { ApiClient, toApiError } from './ApiClient';
 import type { ApiError, ApiResult, Lang } from './ApiClient';
 import {
-  API_ROUTES, NOT_APPLICABLE, NOT_FOUND, assembleSnapshot, findRef, localError, mergeReload, parseKey, systemsOf, toCommandResult,
+  API_ROUTES, NOT_APPLICABLE, NOT_FOUND, assembleSnapshot, emptySnapshot, findRef, localError, mergeReload, parseKey, systemsOf, toCommandResult,
 } from './wire';
 import type { ApiRouteName, ApiSnapshot } from './wire';
 
@@ -183,6 +183,8 @@ export class ApiDataSource implements DataSource {
   async reload(snapshot: Snapshot, msIds: MsId[]): Promise<Snapshot> {
     const prev = (snapshot as ApiSnapshot).refs ? (snapshot as ApiSnapshot) : this.current;
     if (!prev) throw SNAPSHOT_MISSING;
+    // No organisation (Me.org null): nothing of an organisation to read again (C.3).
+    if (!(prev.me as unknown as Me).org) return prev;
     const org = await this.read<UiOrgSnapshot>('uiOrg');
     const systems = systemsOf(prev.me as unknown as Me, org);
     const wanted = [...new Set(msIds)].filter((id) => systems.includes(id));
@@ -199,6 +201,12 @@ export class ApiDataSource implements DataSource {
 
   private async fetchAll(me: Me): Promise<ApiSnapshot> {
     this.me = me;
+    // A platform operator without a membership has no organisation: /ui/org, /ui/ms and /tasks need one (C.3).
+    if (!me.org) {
+      const snap = emptySnapshot(me);
+      this.current = snap;
+      return snap;
+    }
     const org = await this.read<UiOrgSnapshot>('uiOrg');
     const systems = systemsOf(me, org);
     const [ms, tasks] = await Promise.all([
@@ -338,12 +346,21 @@ export class ApiDataSource implements DataSource {
   async listPickerFiles(key: RecordKey): Promise<PickerListing> {
     const found = this.resolve(key, ['ev', 'doc']);
     if ('error' in found) throw new ApiLoadError({ status: found.error.error!.status, message: found.error.error!.message });
-    const ms = this.current?.MS.find((m) => m.id === found.k.ms);
+    return this.listFiles(found.k.ms, found.k.kind === 'ev' ? 'evidence' : 'document', found.ref.id);
+  }
+
+  /**
+   * Files of the system's repository for a record by its uuid (`ctx.openPicker` of the host screens, MILESTONE-2 C.4),
+   * with the folder fallback of `listPickerFiles`.
+   */
+  async listFiles(msId: MsId, objectKind: 'evidence' | 'document', recordId: string): Promise<PickerListing> {
+    const ms = this.current?.MS.find((m) => m.id === msId);
     if (!ms) throw new ApiLoadError({ status: 404, message: NOT_FOUND });
-    const query = { ms: ms.id, kind: found.k.kind === 'ev' ? 'evidence' : 'document', recordId: found.ref.id };
+    const kind = objectKind === 'evidence' ? 'ev' : 'doc';
+    const query = { ms: ms.id, kind: objectKind, recordId };
     const today = this.current?.today;
-    const folders: (string | undefined)[] = [pickerFolder(found.k.kind, today)];
-    const previous = found.k.kind === 'ev' ? previousPickerFolder(today) : undefined;
+    const folders: (string | undefined)[] = [pickerFolder(kind, today)];
+    const previous = kind === 'ev' ? previousPickerFolder(today) : undefined;
     if (previous) folders.push(previous);
     folders.push(undefined); // the system root
     let first: WirePickerListing | undefined;
@@ -378,6 +395,21 @@ export class ApiDataSource implements DataSource {
       params: { ms: k.ms, id: ref.id },
       body: { source: 'link', repository: repositoryId, externalItemId, producedAt: this.current?.today, mode: this.fileMode(k.ms, k.id) },
     });
+  }
+
+  /**
+   * Upload intent and content of a file for a record by its uuid, without attaching it (`ctx.openPicker` with the
+   * Managed Vault, MILESTONE-2 C.4): the host screen then attaches the intent with its own route.
+   */
+  async stageUpload(msId: MsId, objectKind: 'evidence' | 'document', recordId: string, file: File): Promise<StagedUpload> {
+    if (!file) return { ok: false, error: { status: 422, message: NO_FILE } };
+    const intentRes = await this.send<UploadIntent>('uploadIntent', { body: { ms: msId, kind: objectKind, recordId, fileName: file.name, size: file.size } });
+    if (!intentRes.ok) return { ok: false, error: toCommandResult(intentRes).error! };
+    const intent = intentRes.data;
+    if (!intent.contentUrl) return { ok: false, error: { status: 422, message: NO_CONTENT_URL } };
+    const put = await this.putContent(intent.contentUrl, file);
+    if (!put.ok) return { ok: false, error: toCommandResult(put).error! };
+    return { ok: true, intentId: intent.intentId, fileName: file.name };
   }
 
   /** Upload intent, the content to `contentUrl`, then the evidence file or document version with `source: 'upload'`. */

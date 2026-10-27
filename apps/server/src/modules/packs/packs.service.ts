@@ -14,12 +14,13 @@ import {
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
-import { ConflictError, DependencyUnavailableError, PayloadTooLargeError, ProblemError, ValidationError } from '../../common/problems';
+import { BusinessRuleError, ConflictError, DependencyUnavailableError, PayloadTooLargeError, ProblemError, ValidationError } from '../../common/problems';
 import type { StreamedIdempotency } from '../../common/route-state';
 import { AUDIT_WRITER, type AuditWriter, type Principal, type Trx } from '../../common/tokens';
 import { MscdConfig } from '../../config/mscd-config';
 import { TenantScope } from '../tenancy/tenant-scope';
 import { PackBundleStore } from './pack-bundle-store';
+import { loadEditionRows, removedRows, rowRemovedError } from './pack-content-diff';
 import { PackInstallService } from './pack-installer.service';
 import { PackRejectedError } from './pack-verification';
 import { rejectionAuditEntry } from './pack-installer';
@@ -88,11 +89,26 @@ async function readCapped(response: Response, max: number): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/** The problem a rejected pack answers with (D.3: 400 bad signature or checksum, 422 engine version or downgrade). */
+/**
+ * The problem a rejected pack answers with (D.3: 400 bad signature or checksum, 422 engine version or downgrade;
+ * Milestone 2 E.1: 422 rule `PACK-ROW-REMOVED` for a version that drops installed rows).
+ */
 export function packProblem(error: PackRejectedError): ProblemError {
   if (error.status === 400) {
     const errors = [{ path: 'body.bundle', message: error.message }, ...error.issues.slice(0, 50).map((message) => ({ path: 'body.bundle', message }))];
     return new ValidationError(errors, `The pack was rejected (${error.code}): ${error.message}`);
+  }
+  if (error.code === 'row_removed') {
+    const codes = error.issues.map((issue) => /^\w+\.csv: (\S+) /.exec(issue)?.[1]).filter((code): code is string => code !== undefined);
+    return new BusinessRuleError(
+      'PACK-ROW-REMOVED',
+      {
+        en: `${error.message}. A pack version keeps every requirement and control of the installed version and marks the ones that left the standard as retired.`,
+        id: `Versi paket ini menghilangkan baris yang terpasang tanpa menandainya sebagai tidak berlaku lagi: ${codes.slice(0, 20).join(', ')}. Versi paket menyimpan setiap persyaratan dan kontrol dari versi yang terpasang dan menandai yang sudah keluar dari standar.`,
+      },
+      undefined,
+      { messageKey: 'pack.row_removed', affected: codes.slice(0, 100) },
+    );
   }
   return new ProblemError('business-rule', {
     messageKey: `pack.${error.code}`,
@@ -166,8 +182,8 @@ export class PacksService {
    * for it and a worker in another process), reads the multipart form (one file field `bundle`, at most 50 MiB),
    * claims the idempotency key with the SHA-256 of the bundle and the form fields, verifies the bundle (E.8 steps 1
    * to 4, at most 16 MiB decompressed, checked off the event loop: 400 for archive, signature, checksum or content
-   * problems, 422 for the engine version or a downgrade), stores it and queues `pack.install`. The same version as
-   * the installed one changes nothing.
+   * problems, 422 for the engine version, a downgrade or an update that drops installed rows, rule
+   * `PACK-ROW-REMOVED`), stores it and queues `pack.install`. The same version as the installed one changes nothing.
    */
   async import(request: FastifyRequest, principal: Principal, idempotency: StreamedIdempotency): Promise<CommandResult> {
     // 503 before the body is read when the worker could never read the stored bundle (no Managed Vault for it).
@@ -210,6 +226,16 @@ export class PacksService {
           message: [`${manifest.pack_id} ${manifest.pack_version} is already installed`, `${manifest.pack_id} ${manifest.pack_version} sudah terpasang`],
           data: { packId: manifest.pack_id, version: manifest.pack_version, status: 'unchanged' },
         };
+      }
+      // An update keeps every requirement and catalogue code of the installed edition (E.1); the worker checks again.
+      const refusal = await this.read(principal, async (trx) => {
+        const version = await trx.selectFrom('ref.framework_version').select('id').where('pack_id', '=', manifest.pack_id).executeTakeFirst();
+        if (!version) return null;
+        return rowRemovedError({ packId: manifest.pack_id, version: manifest.pack_version }, removedRows(await loadEditionRows(trx, version.id), verified.datasets));
+      });
+      if (refusal) {
+        await this.auditRejection(refusal, actor, orgId, installId);
+        throw packProblem(refusal);
       }
     }
 

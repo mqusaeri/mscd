@@ -1,8 +1,15 @@
-// The controller in API mode (BUILD-PLAN H.5 steps 5, 6, 8, 9, 10, 12, 13, 14) over the API source and a fake fetch.
+// The controller in API mode (BUILD-PLAN H.5 steps 5, 6, 8, 9, 10, 12, 13, 14) over the API source and a fake fetch,
+// and the screen host of Milestone 2 (MILESTONE-2 C.3 to C.5, M2-01) in both modes.
 // MscdApp is used as a plain object (no DOM): setState merges at once, and renderVals() builds the view model of
 // every screen, which is what AppView renders.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MscdApp from '../../src/MscdApp.jsx';
+import { createSampleDataSource } from '../../src/data/SampleDataSource.js';
+import { HOST_SCREENS } from '../../src/screens/registry';
+import { BUILTIN_SCREEN_IDS } from '../../src/screens/types';
+import { BUSINESS_ROLE_LABELS } from '../../src/screens/roles';
+import { NOT_COMPUTED } from '../../src/data/api/wire';
+import { clauseFixture } from '../fixtures/screens/clauses';
 import { json, meOf, readRoutes, sourceWith, uuidOf, wireOf } from './fixtures';
 import type { Routes } from './fixtures';
 import { problem } from '../auth/helpers';
@@ -10,7 +17,8 @@ import { problem } from '../auth/helpers';
 // Test data of many shapes (wire snapshots, view models) is read field by field.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
-const SCREENS = ['portfolio', 'm1overview', 'controls', 'phases', 'docs', 'audit', 'chain', 'gt', 'timeline', 'fresh', 'cal', 'mytasks', 'fw', 'storage'];
+// Every screen: the 14 built-in screens and every host screen of the registry (MILESTONE-2 C.7).
+const SCREENS = [...BUILTIN_SCREEN_IDS, ...HOST_SCREENS.map((d) => d.id)];
 
 function mount(ds: unknown, props: AnyRecord = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the controller is a JavaScript class
@@ -182,6 +190,8 @@ describe('controller in API mode', () => {
 
   it('remind, remindAll and runCheck use the source and the counts of the result', async () => {
     const fx = await wireOf();
+    // Send reminder shows with reminder.send in the system (MILESTONE-2 C.5).
+    fx.org.permissions.ms.isms.push('reminder.send');
     const routes = { ...readRoutes(fx, meOf()), 'POST /api/v1/reminders/bulk': json({ ok: true, changed: [], count: 8 }), 'POST /api/v1/ms/isms/link-health/run': json({ ok: true, changed: [], count: 77 }, 202) };
     const { app, calls } = await start(routes);
     app.state = { ...app.state, screen: 'chain' };
@@ -303,5 +313,364 @@ describe('controller in API mode', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(app.state.org).toBe('rmn');
     expect(app.state.toast).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Screen host (MILESTONE-2 C.3 to C.6, M2-01)
+// ---------------------------------------------------------------------------------------------------------------
+
+async function sampleApp(props: AnyRecord = {}) {
+  const ds = createSampleDataSource();
+  const app = mount(ds, props);
+  app.firstLoad();
+  await vi.waitFor(() => expect(app.state.D).toBeTruthy());
+  return app;
+}
+
+/** A `Me` of a person with a role or administration rights only, in the organisation `org`. */
+function personMe(options: { handle: string; rolesByMs?: Record<string, string[]>; uiRoleByMs?: Record<string, string>; adminRoles?: string[]; platformRoles?: string[]; org?: AnyRecord | null; orgs?: AnyRecord[]; perms: { org: string[]; ms: Record<string, string[]> } }) {
+  const base = meOf({ handle: options.handle, uiRoleByMs: options.uiRoleByMs ?? {} });
+  return {
+    ...base,
+    org: options.org === undefined ? base.org : options.org,
+    orgs: options.orgs ?? base.orgs,
+    rolesByMs: options.rolesByMs ?? {},
+    uiRoleByMs: options.uiRoleByMs ?? {},
+    adminRoles: options.adminRoles ?? [],
+    platformRoles: options.platformRoles ?? [],
+    permissions: options.perms,
+  };
+}
+
+describe('screen host in sample mode', () => {
+  beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('every screen, host screens included, renders for every persona in both languages', async () => {
+    const app = await sampleApp();
+    for (const role of ['manager', 'owner', 'auditor', 'top']) {
+      app.state = { ...app.state, role };
+      renderAll(app);
+    }
+  });
+
+  it('the Licence screen: title, breadcrumb, page action, Tera help, body slot and its sidebar entry', async () => {
+    const app = await sampleApp();
+    app.state = { ...app.state, screen: 'license' };
+    const v = app.renderVals();
+    expect([v.title, v.crumb1, v.crumb2]).toEqual(['Licence', 'Administration', 'Licence']);
+    expect(v.pageActions.map((a: AnyRecord) => a.label)).toEqual(['Install licence']);
+    expect(v.tera.how).toHaveLength(3);
+    expect(v.hostScreen).toBeTruthy();
+    expect(v.hostLayer).toBeTruthy();
+    expect([v.isPortfolio, v.isDrill, v.isFw, v.showList]).toEqual([false, false, false, false]);
+    const admin = v.nav.find((g: AnyRecord) => g.label === 'Administration');
+    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Framework library', 'Storage repositories', 'Licence']);
+    expect(admin.items[2].fw).toBe(600);
+    v.pageActions[0].go();
+    expect(app.state.screen).toBe('license');
+    expect(app.state.params.install).toEqual(expect.any(Number));
+    app.state = { ...app.state, lang: 'id' };
+    expect(app.renderVals().title).toBe('Lisensi');
+    // Personas without the screen: the owner never sees it; Top Management does (license.read).
+    app.state = { ...app.state, lang: 'en', role: 'owner' };
+    expect(app.renderVals().nav.flatMap((g: AnyRecord) => g.items.map((i: AnyRecord) => i.label))).not.toContain('Licence');
+    app.state = { ...app.state, role: 'top' };
+    expect(app.renderVals().nav.flatMap((g: AnyRecord) => g.items.map((i: AnyRecord) => i.label))).toContain('Licence');
+  });
+
+  it('?screen= opens a screen at start and switches to its first persona when needed (C.2)', async () => {
+    const app = await sampleApp();
+    app._start = { screen: 'license', persona: null };
+    app.state = { ...app.state, role: 'owner' };
+    await app.afterFirstLoad();
+    await vi.waitFor(() => expect(app.state.screen).toBe('license'));
+    expect(app.state.role).toBe('manager');
+    app._start = { screen: 'controls', persona: 'auditor' };
+    app.afterFirstLoad();
+    expect(app.state.screen).toBe('controls');
+    app._start = { screen: 'nothing', persona: null };
+    app.state = { ...app.state, screen: 'portfolio' };
+    app.afterFirstLoad();
+    expect(app.state.screen).toBe('portfolio');
+  });
+
+  it('a persona switch away from a host screen the new persona cannot open lands on its own screen', async () => {
+    const app = await sampleApp();
+    app.state = { ...app.state, screen: 'license' };
+    app.setRole('owner', 'license', false);
+    await vi.waitFor(() => expect(app.state.role).toBe('owner'));
+    expect(app.state.screen).toBe('mytasks');
+    app.setRole('top', 'portfolio', false);
+    await vi.waitFor(() => expect(app.state.role).toBe('top'));
+    app.go('license');
+    app.setRole('manager', 'license', false);
+    await vi.waitFor(() => expect(app.state.role).toBe('manager'));
+    expect(app.state.screen).toBe('license');
+  });
+
+  it('Controls: clause entries come first, in the group Clauses 4 to 10, labelled Cl. <code> (D2-09)', async () => {
+    const app = await sampleApp();
+    const bundle = app.state.D.bundles.isms;
+    bundle.reqs = [...clauseFixture(), ...bundle.reqs];
+    app.state = { ...app.state, screen: 'controls', chip: { controls: 'all' } };
+    const scr = app.controlsScreen(app.data());
+    expect(scr.rows[0]).toMatchObject({ isGroup: true, label: 'Clauses 4 to 10', n: 3 });
+    expect(scr.rows.slice(1, 4).map((r: AnyRecord) => r.cells[0].v)).toEqual(['Cl. 4.1', 'Cl. 4.2', 'Cl. 5.1']);
+    expect(scr.rows[4]).toMatchObject({ isGroup: true, label: 'Annex A controls', n: 93 });
+    expect(app.reqDetail(clauseFixture()[2], app.data()).id).toBe('Cl. 5.1');
+    app.state = { ...app.state, lang: 'id' };
+    expect(app.controlsScreen(app.data()).rows[0].label).toBe('Klausul 4 sampai 10');
+    // Without clause entries the list is as before: no group rows.
+    bundle.reqs = bundle.reqs.slice(3);
+    expect(app.controlsScreen(app.data()).rows.some((r: AnyRecord) => r.isGroup)).toBe(false);
+    const v = app.renderVals();
+    expect(v.rows[0].isRow).toBe(true);
+  });
+
+  it('toast-only actions keep their toast when no package claims them (C.5)', async () => {
+    const app = await sampleApp();
+    app.state = { ...app.state, screen: 'controls' };
+    app.renderVals().pageActions.find((a: AnyRecord) => a.label === 'Add control').go();
+    expect(app.state.toast).toBe('New custom control form opened');
+    app.state = { ...app.state, screen: 'timeline' };
+    app.renderVals().pageActions.find((a: AnyRecord) => a.label === 'Add audit event').go();
+    expect(app.state.toast).toBe(app.t('toastEvent'));
+  });
+
+  it('detail objects carry the record kind, key and record for detail extensions (C.5)', async () => {
+    const app = await sampleApp();
+    const d = app.data();
+    expect(app.reqDetail(d.reqs[0], d).ext).toMatchObject({ kind: 'req', ms: 'isms', key: 'isms:req:' + d.reqs[0].id });
+    expect(app.docDetail(d.docs[0], d).ext.kind).toBe('doc');
+    expect(app.evDetail(d.evs[0], d).ext.kind).toBe('ev');
+    const item = app.chain(d).items.find((i: AnyRecord) => i.kind === 'x');
+    expect(app.itemDetail(item, d).ext).toMatchObject({ kind: 'item', key: item.key });
+    const act = d.phases[0].acts[0];
+    expect(app.actDetail(act, d.phases[0], d).ext).toMatchObject({ kind: 'activity', key: act.key });
+    // No package adds an extension yet, so every slot stays empty.
+    app.state = { ...app.state, screen: 'controls', sel: 'isms:req:' + d.reqs[0].id };
+    app.renderVals();
+    app.state = { ...app.state, sel: null };
+    expect(app.renderVals().hostDetail).toBeNull();
+  });
+
+  it('the readiness block is the Internal progress score with its method (D2-11, H.2)', async () => {
+    const app = await sampleApp();
+    app.state = { ...app.state, screen: 'm1overview' };
+    const ov = app.renderVals().ov;
+    expect(ov.scoreTitle).toBe('Internal progress score');
+    expect(ov.scoreMethod).toBe('Average of documents in place, entries implemented, evidence fresh and metrics current per clause');
+    app.state = { ...app.state, lang: 'id' };
+    expect(app.renderVals().ov.scoreTitle).toBe('Skor progres internal');
+  });
+});
+
+describe('sample source changes for sample adapters (C.6)', () => {
+  it('mutate changes a record and insert adds one; the reload shows both on the built-in screens', async () => {
+    const ds = createSampleDataSource() as AnyRecord;
+    const snap = await ds.load();
+    const before = snap.bundles.isms.reqs[0];
+    expect(await ds.mutate('isms', 'req', before.id, { title: 'Changed title' })).toEqual({ ok: true, changed: ['isms'] });
+    expect(await ds.insert('isms', 'doc', { id: 'POL-99', title: 'New policy', tier: 'Policy', ver: '0.1', st: 'draft', appr: '', rev: '2027-10-01', owner: 'rina', shared: false, ms: 'isms' })).toMatchObject({ ok: true });
+    expect(await ds.insert('isms', 'event', { t: ['Internal audit', 'Audit internal'], d: '2026-12-01', days: 2 })).toMatchObject({ ok: true });
+    const prep = snap.PREP.isms[0];
+    expect(await ds.mutate('isms', 'prep', prep[0], { 3: 'done' })).toMatchObject({ ok: true });
+    expect(await ds.insert('isms', 'x:risk', { id: 'R-900', t: 'New risk', act: 'Assess', h: 'rina', due: '2026-11-30' })).toMatchObject({ ok: true });
+    const next = await ds.reload(snap, ['isms']);
+    expect(next.bundles.isms.reqs[0].title).toBe('Changed title');
+    expect(next.bundles.isms.docs.find((x: AnyRecord) => x.id === 'POL-99')).toMatchObject({ title: 'New policy', st: 'draft' });
+    expect(next.EVENTS.isms.at(-1)).toMatchObject({ d: '2026-12-01' });
+    expect(next.PREP.isms[0][3]).toBe('done');
+    expect(next.bundles.isms.chain.items.some((i: AnyRecord) => i.id === 'R-900')).toBe(true);
+    // Unchanged systems keep their bundles; evidence still comes from the pack's controls only.
+    expect(next.bundles.qms).toBe(snap.bundles.qms);
+    expect(next.bundles.isms.evs.length).toBe(snap.bundles.isms.evs.length);
+  });
+
+  it('refuses unknown records, kinds, systems and duplicate ids', async () => {
+    const ds = createSampleDataSource({ org: 'rmn' }) as AnyRecord;
+    await ds.load();
+    expect((await ds.mutate('isms', 'req', 'A.99.99', { title: 'x' })).error.status).toBe(404);
+    expect((await ds.mutate('qms', 'req', 'Cl. 4.1', { title: 'x' })).error.status).toBe(404);
+    expect((await ds.mutate('isms', 'policy', 'x', {})).error.status).toBe(422);
+    expect((await ds.insert('isms', 'req', { title: 'no id' })).error.status).toBe(422);
+    expect((await ds.insert('isms', 'req', { id: 'A.5.1', title: 'duplicate' })).error.status).toBe(409);
+  });
+});
+
+describe('screen host in API mode', () => {
+  beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('the top bar shows the label of the role the person holds: one distinct label per business role', async () => {
+    const fx = await wireOf();
+    const ui: Record<string, string> = { ms_manager: 'manager', programme_owner: 'manager', domain_owner: 'owner', risk_owner: 'owner', internal_auditor: 'auditor', top_management: 'top', external_auditor: 'auditor', compliance_investigator: 'owner' };
+    const shown = new Set<string>();
+    for (const [role, label] of Object.entries(BUSINESS_ROLE_LABELS)) {
+      const me = personMe({ handle: 'rina', rolesByMs: { isms: [role] }, uiRoleByMs: { isms: ui[role] }, orgs: [{ id: 'ndt', name: 'PT Nusantara Digital Teknologi', ms: ['isms'], deploy: 'saas', sites: 3 }], perms: { org: [], ms: { isms: ['ms.read'] } } });
+      const { app } = await start(readRoutes(fx, me));
+      const v = app.renderVals();
+      expect(v.me.role, role).toBe(`${label[0]}, ${app.personOf('rina')[1]}`);
+      expect(v.roleOptions[0].label, role).toBe(label[0]);
+      shown.add(v.me.role.split(',')[0]);
+      app.state = { ...app.state, lang: 'id' };
+      expect(app.renderVals().me.role.startsWith(label[1])).toBe(true);
+    }
+    expect(shown.size).toBe(8);
+  });
+
+  it('no-system path: a Tenant Admin without a business role lands on Licence with the Administration group', async () => {
+    const fx = await wireOf();
+    const me = personMe({ handle: 'tenant.admin', adminRoles: ['tenant_admin'], org: { id: uuidOf('org:ndt'), slug: 'ndt', name: 'PT Nusantara Digital Teknologi' }, orgs: [{ id: 'ndt', name: 'PT Nusantara Digital Teknologi', ms: [], deploy: 'saas', sites: 3 }], perms: { org: ['license.read', 'license.manage', 'storage.repository.read', 'pack.read', 'ms.admin'], ms: {} } });
+    const org = { ...fx.org, orgs: me.orgs, permissions: me.permissions };
+    const { app, calls } = await start({ ...readRoutes(fx, me), 'GET /api/v1/ui/org': json(org) });
+    expect(app.MSL).toEqual([]);
+    expect(calls.filter((c) => c.path.startsWith('/api/v1/ui/ms/'))).toHaveLength(0);
+    app.afterFirstLoad();
+    expect(app.state.screen).toBe('license');
+    expect(app.shellWithoutSystem()).toBe(true);
+    const v = app.renderVals();
+    expect(v.msSwitch).toBe(false);
+    expect(v.nav.map((g: AnyRecord) => [g.label, g.items.map((i: AnyRecord) => i.label)])).toEqual([['Administration', ['Framework library', 'Storage repositories', 'Licence']]]);
+    expect(v.title).toBe('Licence');
+    expect(v.me.role).toMatch(/^Tenant Admin, /);
+    expect(v.pack).toBe('-');
+    // The built-in Administration screens render without a system; the others show the notice in the shell.
+    for (const screen of ['fw', 'storage']) {
+      app.state = { ...app.state, screen };
+      const w = app.renderVals();
+      expect(w.hostScreen, screen).toBeNull();
+      expect(w.pageActions.length, screen).toBeGreaterThan(0);
+    }
+    app.state = { ...app.state, screen: 'storage' };
+    expect(app.renderVals().st.repos.length).toBe(fx.org.REPOS.length);
+    app.state = { ...app.state, screen: 'controls' };
+    const n = app.renderVals();
+    expect(n.hostScreen).toBeTruthy();
+    expect(n.pageActions).toEqual([]);
+    expect(n.isDrill).toBe(false);
+    renderAll(app);
+  });
+
+  it('a platform operator without a membership: no organisation snapshot is read and the no-system message stays', async () => {
+    const me = personMe({ handle: 'ops', org: null, orgs: [], platformRoles: ['platform_operator'], perms: { org: ['ops.read', 'ops.tenants.manage'], ms: {} } });
+    const { app, calls } = await start({ 'GET /api/v1/me': json(me) });
+    expect(app.state.loadError).toBeNull();
+    expect(calls).toEqual([]);
+    expect(app.D.MS).toEqual([]);
+    expect(app.org.name).toBe('Platform operations');
+    expect(app.MSL).toEqual([]);
+    const platform = HOST_SCREENS.some((d) => d.scope === 'platform');
+    expect(app.shellWithoutSystem()).toBe(platform);
+    expect(() => app.renderVals()).not.toThrow();
+    expect(app.renderVals().me.role).toMatch(/^Platform Operator/);
+  });
+
+  it('a null readiness shows Not computed yet on the portfolio and the overview, never 0 (D.3)', async () => {
+    const fx = await wireOf();
+    fx.org.MS[0] = { ...fx.org.MS[0], clauses: [null, null, null, null, null, null, null] };
+    const { app } = await start(readRoutes(fx, meOf()));
+    const ms = app.D.MS[0];
+    expect(ms.clauseLabels).toEqual(Array(7).fill(NOT_COMPUTED));
+    expect(app.D.MS[1].clauseLabels[0]).toBe(`${app.D.MS[1].clauses[0]}%`);
+    app.state = { ...app.state, screen: 'portfolio' };
+    const card = app.renderVals().pf.find((c: AnyRecord) => c.id === ms.id);
+    expect(card.cl.map((c: AnyRecord) => [c.pctText, c.pctShort, c.pct])).toEqual(Array(7).fill(['Not computed yet', '-', 0]));
+    app.state = { ...app.state, screen: 'm1overview', ms: ms.id };
+    const ov = app.renderVals().ov;
+    expect(ov.clauses.map((c: AnyRecord) => [c.level, c.levelLabel])).toEqual(Array(7).fill(['-', 'Not computed yet']));
+    expect(ov.clauses[0].cells[0].title).toBe('Documented: Not computed yet');
+    expect(ov.scoreMethod).toMatch(/^Not computed yet/);
+    app.state = { ...app.state, lang: 'id' };
+    expect(app.renderVals().ov.clauses[0].levelLabel).toBe('Belum dihitung');
+    app.state = { ...app.state, screen: 'portfolio' };
+    expect(app.renderVals().pf.find((c: AnyRecord) => c.id === ms.id).cl[0].pctText).toBe('Belum dihitung');
+  });
+
+  it('stored readiness dimensions replace the offset formula of Milestone 1 (D.6)', async () => {
+    const fx = await wireOf();
+    const groups = Array.from({ length: 7 }, (_, i) => ({ documented: 100, implemented: 50, evidenced: i === 0 ? null : 75, measured: null }));
+    fx.org.MS[0] = { ...fx.org.MS[0], clauses: [75, 75, 75, 75, 75, 75, 75], readiness: { computedAt: '2026-10-28T02:30:00Z', groups } };
+    const { app } = await start(readRoutes(fx, meOf()));
+    app.state = { ...app.state, screen: 'm1overview', ms: fx.org.MS[0].id };
+    const ov = app.renderVals().ov;
+    expect(ov.clauses[0].cells.map((c: AnyRecord) => c.title)).toEqual(['Documented: 4 / 4', 'Implemented: 2 / 4', 'Evidenced: No records of this kind', 'Measured: No records of this kind']);
+    expect(ov.clauses[0].level).toBe('3.0');
+    expect(ov.clauses[1].level).toBe('3.0');
+  });
+
+  it('Reassign, Change due date and Send reminder show only with record.assign and reminder.send (C.5)', async () => {
+    const { routes } = await acme();
+    const { app } = await start(routes);
+    const d = app.data(app.MSL.find((m: AnyRecord) => m.id === 'isms'));
+    const labels = (det: AnyRecord) => det.actions.map((a: AnyRecord) => a.label);
+    const req = d.reqs.find((c: AnyRecord) => !c.gate);
+    expect(labels(app.reqDetail(req, d))).not.toContain(app.t('remind'));
+    expect(labels(app.reqDetail(req, d))).not.toContain(app.t('reassign'));
+    const item = app.chain(d).items[0];
+    const itemLabels = labels(app.itemDetail({ ...item, kind: 'x', ref: undefined }, d));
+    expect(itemLabels).not.toContain(app.t('changeDue'));
+    expect(itemLabels).toContain(app.t('trace'));
+    // With the permissions the buttons are back.
+    app.state.D.permissions.ms.isms.push('record.assign', 'reminder.send');
+    expect(labels(app.reqDetail(req, d))).toEqual(expect.arrayContaining([app.t('remind'), app.t('reassign')]));
+    expect(labels(app.itemDetail({ ...item, kind: 'x', ref: undefined }, d))).toEqual(expect.arrayContaining([app.t('remind'), app.t('reassign'), app.t('changeDue')]));
+  });
+
+  it('ctx.openPicker resolves the chosen file without attaching it, and null when cancelled (C.4)', async () => {
+    const fx = await wireOf();
+    const listing = { path: 'Compliance / ISMS / Documents', files: [['Policy.docx', '28 Sep 2026', 'v3.0', 'quickXorHash', 'Rina Kusuma']], refs: [{ repositoryId: 'sp', externalItemId: 'item-1', externalVersionId: '3.0' }] };
+    const routes = { ...readRoutes(fx, meOf()), 'GET /api/v1/storage/repositories/:slug/browse': json(listing) };
+    const { app, calls } = await start(routes);
+    const ms = app.MSL.find((m: AnyRecord) => app.D.LOC[m.loc][1] !== 'vault');
+    const recordId = uuidOf('doc-1');
+    const chosen = app.hostCtx().openPicker({ ms: ms.id, kind: 'document', recordId });
+    await vi.waitFor(() => expect(app.state.modal?.type).toBe('picker'));
+    expect(calls[0]).toMatchObject({ method: 'GET', path: `/api/v1/storage/repositories/${ms.loc}/browse` });
+    expect(calls[0].url).toContain(`recordId=${recordId}`);
+    expect(app.modalVals().title).toBe('Select document file from repository');
+    app.modalOk();
+    expect(await chosen).toEqual({ source: 'link', repository: 'sp', externalItemId: 'item-1', externalVersionId: '3.0', fileName: 'Policy.docx' });
+    expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+    expect(app.state.modal).toBeNull();
+    const cancelled = app.hostCtx().openPicker({ ms: ms.id, kind: 'evidence', recordId });
+    await vi.waitFor(() => expect(app.state.modal?.type).toBe('picker'));
+    app.renderVals().closeModal();
+    expect(await cancelled).toBeNull();
+  });
+
+  it('ctx.openPicker with the Managed Vault uploads the chosen file and resolves the upload intent', async () => {
+    const fx = await wireOf();
+    const routes = {
+      ...readRoutes(fx, meOf()),
+      'POST /api/v1/storage/upload-intents': json({ intentId: uuidOf('intent'), mode: 'stored', repository: { slug: 'vault', name: 'Managed Vault', adapter: 'managed_vault' }, contentUrl: `/api/v1/storage/upload-intents/${uuidOf('intent')}/content`, maxBytes: 1000, expiresAt: '2026-09-29T07:00:00Z', correlationCode: 'c', folderPath: 'x' }),
+      'PUT /api/v1/storage/upload-intents/:id/content': json({ storageObjectId: uuidOf('obj'), hashAlgorithm: 'sha256', hashValue: 'a', sizeBytes: 1, versionLabel: 'v1' }),
+    } as Routes;
+    const { app, calls } = await start(routes);
+    const vault = app.MSL.find((m: AnyRecord) => app.D.LOC[m.loc][1] === 'vault');
+    const chosen = app.hostCtx().openPicker({ ms: vault.id, kind: 'evidence', recordId: uuidOf('ev-1') });
+    await vi.waitFor(() => expect(app.state.modal?.type).toBe('upload'));
+    const input = { accept: '', value: 'x', click: vi.fn() };
+    app._file = input;
+    app.modalOk();
+    expect(input.click).toHaveBeenCalledTimes(1);
+    app.onFileChosen({ target: { files: [new File(['x'], 'Log.pdf')] } });
+    expect(await chosen).toEqual({ source: 'upload', uploadIntentId: uuidOf('intent'), fileName: 'Log.pdf' });
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/v1/storage/upload-intents', `PUT /api/v1/storage/upload-intents/${uuidOf('intent')}/content`]);
+    expect(calls[0].body).toMatchObject({ ms: vault.id, kind: 'evidence', recordId: uuidOf('ev-1'), fileName: 'Log.pdf' });
+  });
+});
+
+describe('preferences of the boot (C.3)', () => {
+  it('apply language, theme and density unless the address sets them', async () => {
+    const { withPreferences } = await import('../../src/auth/boot');
+    const settings = { drillPattern: 'panel', density: 'comfortable', overviewLayout: 'cards', font: 'plex', lang: 'en', theme: 'light', deploy: 'saas' } as const;
+    expect(withPreferences(settings, { language: 'id', theme: 'dark', density: 'dense' }, '')).toMatchObject({ lang: 'id', theme: 'dark', density: 'dense' });
+    expect(withPreferences(settings, { lang: 'id', theme: 'dark' }, '?theme=light&lang=en')).toMatchObject({ lang: 'en', theme: 'light' });
+    // An invalid address value does not count as set; an unknown preference is ignored.
+    expect(withPreferences(settings, { theme: 'dark', density: 'huge' }, '?theme=neon')).toMatchObject({ theme: 'dark', density: 'comfortable' });
+    expect(withPreferences(settings, null, '')).toEqual(settings);
   });
 });

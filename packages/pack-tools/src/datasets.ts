@@ -1,15 +1,18 @@
-// Dataset validation for pack sources and pack archives (E.8): every file of the dataset set, the exact CSV
-// headers, every row and JSON document against the schemas of `@mscd/shared`, and the references between
-// datasets that a pack can check on its own (codes unique, catalogue and finding conditions to requirements,
-// frequencies, labels in both languages, lookups, risk profiles, phases). References to tables outside the pack
-// (chain entity types, engine version, installed versions) are checked by the server's pack installer.
+// Dataset validation for pack sources and pack archives (E.8, Milestone 2 E.1): every file of the dataset set, the
+// exact CSV headers, every row and JSON document against the schemas of `@mscd/shared`, and the references between
+// datasets that a pack can check on its own (codes unique, catalogue items, documented information, templates and
+// finding conditions to requirements, retired rows, frequencies, labels in both languages, lookups, risk profiles,
+// phases, and the content references of E.1: cycle requirement codes, chain `clause_at_risk` values, activity output
+// documents and documented information templates). References to tables outside the pack (chain entity types, engine
+// version, installed versions, rows an update drops) are checked by the server's pack installer.
 import type { z } from 'zod';
 import {
   MAPPING_CSV_HEADER, MAPPING_FILE_RE, MappingRow, PACK_CSV_HEADERS, PACK_CSV_ROW_SCHEMAS, PACK_DATASET_FILES, PACK_JSON_SCHEMAS,
   REQUIRED_LOOKUP_DOMAINS,
   type ActivityRow, type AuditActivityRow, type CatalogueRow, type ChainRow, type CycleRequirementRow, type DocumentTemplateRow,
-  type DriftRuleDef, type FindingConditionRow, type FrequencyRow, type LookupRow, type PackCsvFile, type PackJsonFile, type PackLabels,
-  type PackSourceManifest, type PrepTaskRow, type RequirementRow, type ReviewInputRow, type RiskProfileDef, type RuleActivation,
+  type DocumentedInfoRow, type DriftRuleDef, type FindingConditionRow, type FrequencyRow, type LookupRow, type PackCsvFile,
+  type PackJsonFile, type PackLabels, type PackSourceManifest, type PrepTaskRow, type RequirementRow, type ReviewInputRow,
+  type RiskProfileDef, type RuleActivation,
 } from '@mscd/shared';
 import { decodeDatasetText, parseCsvRecords } from './csv.js';
 import { PackError } from './errors.js';
@@ -28,6 +31,7 @@ export interface PackDatasets {
   readonly reviewInputs: readonly ReviewInputRow[];
   readonly findingConditions: readonly FindingConditionRow[];
   readonly documentTemplates: readonly DocumentTemplateRow[];
+  readonly documentedInfo: readonly DocumentedInfoRow[];
   readonly auditActivities: readonly AuditActivityRow[];
   readonly lookups: readonly LookupRow[];
   readonly rules: readonly RuleActivation[];
@@ -39,6 +43,13 @@ export interface PackDatasets {
 /** The manifest fields the dataset checks need (a source manifest or a built manifest). */
 export type DatasetManifestFields = Pick<PackSourceManifest, 'pack_id' | 'edition' | 'catalogue' | 'applicability_target' | 'supersedes'>;
 
+/** Datasets and the warnings of a parse (`parsePackDatasetsWithWarnings`). */
+export interface ParsedPackDatasets {
+  readonly datasets: PackDatasets;
+  /** Content references that do not resolve in a pack without documented information (`contentReferencesStrict`). */
+  readonly warnings: readonly string[];
+}
+
 const ISSUE_LIMIT = 500;
 
 class Issues {
@@ -47,6 +58,33 @@ class Issues {
   add(where: string, message: string): void {
     if (this.list.length < ISSUE_LIMIT) this.list.push(`${where}: ${message}`);
   }
+}
+
+/**
+ * One `clause_at_risk` reference: a requirement code, optionally followed by a list item (`6.1.3 d)`). A value holds
+ * one or more references separated by ` / ` (`8.1 / 9.1`).
+ */
+const CLAUSE_REFERENCE_RE = /^(\d+(?:\.\d+)*)(?: [a-z]\))?$/;
+
+/** The requirement codes a `clause_at_risk` value names, or null when it is not a list of clause references. */
+export function clauseAtRiskCodes(value: string): string[] | null {
+  const codes: string[] = [];
+  for (const part of value.split(' / ')) {
+    const match = CLAUSE_REFERENCE_RE.exec(part);
+    if (!match) return null;
+    codes.push(match[1] as string);
+  }
+  return codes;
+}
+
+/**
+ * Whether the content references of Milestone 2 E.1 (cycle requirement codes, chain `clause_at_risk` values, activity
+ * output documents, documented information templates) must resolve. They must in a pack that lists its documented
+ * information (the content format of E.2); in a pack without that list, written before it, an unresolved reference is
+ * a warning, so the Milestone 1 content still builds and installs.
+ */
+export function contentReferencesStrict(d: Pick<PackDatasets, 'documentedInfo'>): boolean {
+  return d.documentedInfo.length > 0;
 }
 
 function zodIssues(error: z.ZodError): string[] {
@@ -138,14 +176,20 @@ function unique(issues: Issues, where: string, label: string, values: Iterable<s
   if (repeated.size > 0) issues.add(where, `duplicate ${label}: ${[...repeated].slice(0, 10).join(', ')}`);
 }
 
-function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issues: Issues): void {
+function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issues: Issues, warnings: Issues): void {
   const requirementCodes = new Set(d.requirements.map((r) => r.requirement_code));
+  const retiredCodes = new Set(d.requirements.filter((r) => r.retired).map((r) => r.requirement_code));
   const frequencyCodes = new Set(d.frequencies.map((f) => f.code));
+  /** Problem text of a reference to a requirement that is missing or retired, or null when it resolves. */
+  const liveRequirement = (code: string): string | null =>
+    !requirementCodes.has(code) ? 'is not in requirements.csv' : retiredCodes.has(code) ? 'names a retired requirement' : null;
 
   unique(issues, 'requirements.csv', 'requirement_code', d.requirements.map((r) => r.requirement_code));
   d.requirements.forEach((r) => {
     if (r.parent_code !== null && (r.parent_code === r.requirement_code || !requirementCodes.has(r.parent_code))) {
       issues.add('requirements.csv', `requirement ${r.requirement_code}: parent_code ${r.parent_code} is not another requirement of the pack`);
+    } else if (r.parent_code !== null && !r.retired && retiredCodes.has(r.parent_code)) {
+      issues.add('requirements.csv', `requirement ${r.requirement_code}: its parent ${r.parent_code} is retired, so it must be retired too`);
     }
     if (r.default_frequency_code !== null && !frequencyCodes.has(r.default_frequency_code)) {
       issues.add('requirements.csv', `requirement ${r.requirement_code}: default_frequency_code ${r.default_frequency_code} is not in frequencies.csv`);
@@ -154,9 +198,8 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
 
   unique(issues, 'catalogue.csv', 'item_code', d.catalogue.map((c) => c.item_code));
   for (const c of d.catalogue) {
-    if (c.requirement_code !== null && !requirementCodes.has(c.requirement_code)) {
-      issues.add('catalogue.csv', `item ${c.item_code}: requirement_code ${c.requirement_code} is not in requirements.csv`);
-    }
+    const problem = c.requirement_code === null ? null : liveRequirement(c.requirement_code);
+    if (problem !== null) issues.add('catalogue.csv', `item ${c.item_code}: requirement_code ${c.requirement_code} ${problem}`);
     if (c.default_frequency_code !== null && !frequencyCodes.has(c.default_frequency_code)) {
       issues.add('catalogue.csv', `item ${c.item_code}: default_frequency_code ${c.default_frequency_code} is not in frequencies.csv`);
     }
@@ -196,6 +239,50 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
   unique(issues, 'document_templates.csv', 'code', d.documentTemplates.map((t) => t.code));
   for (const t of d.documentTemplates) {
     if (!domains.get('doc_type')?.has(t.doc_type)) issues.add('document_templates.csv', `template ${t.code}: doc_type ${t.doc_type} is not a doc_type in lookups.csv`);
+    const problem = t.requirement_code === null ? null : liveRequirement(t.requirement_code);
+    if (problem !== null) issues.add('document_templates.csv', `template ${t.code}: requirement_code ${t.requirement_code} ${problem}`);
+  }
+
+  // Documented information (E.1): requirements that ask for it, unique codes.
+  unique(issues, 'documented_info.csv', 'code', d.documentedInfo.map((i) => i.code));
+  for (const i of d.documentedInfo) {
+    const problem = liveRequirement(i.requirement_code);
+    if (problem !== null) issues.add('documented_info.csv', `${i.code}: requirement_code ${i.requirement_code} ${problem}`);
+  }
+
+  // Content references of E.1: errors in a pack with documented information, warnings before it.
+  const content = contentReferencesStrict(d) ? issues : warnings;
+  const templateCodes = new Set(d.documentTemplates.map((t) => t.code));
+  for (const i of d.documentedInfo) {
+    if (i.template_code !== null && !templateCodes.has(i.template_code)) {
+      content.add('documented_info.csv', `${i.code}: template_code ${i.template_code} is not in document_templates.csv`);
+    }
+  }
+  for (const c of d.cycleRequirements) {
+    const problem = c.requirement_code === null ? null : liveRequirement(c.requirement_code);
+    if (problem !== null) content.add('cycle_requirements.csv', `${c.code}: requirement_code ${c.requirement_code} ${problem}`);
+  }
+  for (const s of d.chain) {
+    if (s.clause_at_risk === null) continue;
+    const codes = clauseAtRiskCodes(s.clause_at_risk);
+    if (codes === null) {
+      content.add('chain.csv', `stage ${s.stage_key}: clause_at_risk "${s.clause_at_risk}" is not a clause reference such as 6.1.3, 6.1.3 d) or 8.1 / 9.1`);
+      continue;
+    }
+    for (const code of codes) {
+      const problem = liveRequirement(code);
+      if (problem !== null) content.add('chain.csv', `stage ${s.stage_key}: clause_at_risk ${code} ${problem}`);
+    }
+  }
+  const missingOutputs = new Map<string, string[]>();
+  for (const a of d.activities) {
+    if (a.output_document_code === null || templateCodes.has(a.output_document_code)) continue;
+    const at = missingOutputs.get(a.output_document_code) ?? [];
+    at.push(`${a.phase_no}.${a.activity_no}`);
+    missingOutputs.set(a.output_document_code, at);
+  }
+  for (const [code, activities] of missingOutputs) {
+    content.add('activities.csv', `output_document_code ${code} (activity ${activities.join(', ')}) is not in document_templates.csv`);
   }
 
   // Chain: unique stage keys and positions, risk profiles of risk stages.
@@ -224,6 +311,9 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
   unique(issues, 'cycle_requirements.csv', 'code', d.cycleRequirements.map((c) => c.code));
   unique(issues, 'prep_tasks.csv', 'code', d.prepTasks.map((p) => p.code));
   unique(issues, 'review_inputs.csv', 'code', d.reviewInputs.map((r) => r.code));
+  if (d.reviewInputs.length > 0 && !d.reviewInputs.some((r) => r.review_kind === 'management')) {
+    issues.add('review_inputs.csv', 'has no input of review_kind management');
+  }
   unique(issues, 'finding_conditions.csv', 'code', d.findingConditions.map((f) => f.code));
   for (const f of d.findingConditions) {
     if (f.requirement_code !== null && !requirementCodes.has(f.requirement_code)) {
@@ -248,9 +338,14 @@ function checkReferences(d: PackDatasets, manifest: DatasetManifestFields, issue
 /**
  * Validates the dataset files of a pack (every file except `manifest.json` and `signature`) and returns the typed
  * rows. Throws `PackError` with code `dataset` listing every problem: a missing or unknown dataset file, a header
- * that differs from E.8, a row or document that breaks its schema, or a broken reference between datasets.
+ * that differs from E.8 and E.1, a row or document that breaks its schema, or a broken reference between datasets.
  */
 export function parsePackDatasets(files: ReadonlyMap<string, Buffer>, manifest: DatasetManifestFields): PackDatasets {
+  return parsePackDatasetsWithWarnings(files, manifest).datasets;
+}
+
+/** `parsePackDatasets`, also returning the content references that a pack without documented information leaves open. */
+export function parsePackDatasetsWithWarnings(files: ReadonlyMap<string, Buffer>, manifest: DatasetManifestFields): ParsedPackDatasets {
   const issues = new Issues();
   const known = new Set<string>(PACK_DATASET_FILES);
   for (const name of PACK_DATASET_FILES) if (!files.has(name)) issues.add(name, 'is missing');
@@ -278,6 +373,7 @@ export function parsePackDatasets(files: ReadonlyMap<string, Buffer>, manifest: 
     reviewInputs: csvFile(files, 'review_inputs.csv', issues),
     findingConditions: csvFile(files, 'finding_conditions.csv', issues),
     documentTemplates: csvFile(files, 'document_templates.csv', issues),
+    documentedInfo: csvFile(files, 'documented_info.csv', issues),
     auditActivities: csvFile(files, 'audit_activities.csv', issues),
     lookups: csvFile(files, 'lookups.csv', issues),
     rules: jsonFile(files, 'rules.json', issues) ?? [],
@@ -285,11 +381,12 @@ export function parsePackDatasets(files: ReadonlyMap<string, Buffer>, manifest: 
     mappings,
   };
   // Reference checks only make sense on data that parsed; with schema problems they would add noise.
-  if (issues.list.length === 0) checkReferences(datasets, manifest, issues);
+  const warnings = new Issues();
+  if (issues.list.length === 0) checkReferences(datasets, manifest, issues, warnings);
   if (issues.list.length > 0) {
     throw new PackError('dataset', `pack ${manifest.pack_id} has invalid datasets`, issues.list);
   }
-  return datasets;
+  return { datasets, warnings: warnings.list };
 }
 
 /** Row counts of every dataset (for CLI output and install summaries). */
@@ -307,6 +404,7 @@ export function datasetCounts(d: PackDatasets): Record<string, number> {
     review_inputs: d.reviewInputs.length,
     finding_conditions: d.findingConditions.length,
     document_templates: d.documentTemplates.length,
+    documented_info: d.documentedInfo.length,
     audit_activities: d.auditActivities.length,
     lookups: d.lookups.length,
     rules: d.rules.length,

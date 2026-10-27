@@ -9,7 +9,10 @@ export default function Overview({ v }) {
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1fr)", gap: "var(--pad)" }}>
         <div style={{ background: "var(--sur)", border: "1px solid var(--bd)", borderRadius: "var(--r)", boxShadow: "var(--sh)" }}>
           <div style={{ padding: "12px var(--pad)", borderBottom: "1px solid var(--bd)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
-            <span style={{ fontWeight: "600" }}>{txt(v.t?.maturity)}</span>
+            <span style={{ minWidth: "0" }}>
+              <span style={{ display: "block", fontWeight: "600" }}>{txt(v.ov?.scoreTitle)}</span>
+              <span style={{ display: "block", fontSize: "12px", color: "var(--tx3)" }}>{txt(v.ov?.scoreMethod)}</span>
+            </span>
             <span style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--tx3)", alignItems: "center" }}>
               {list(v.ov?.legend).map((lg, $i60) => (<Fragment key={$i60}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>

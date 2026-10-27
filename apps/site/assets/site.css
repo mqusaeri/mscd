@@ -354,6 +354,23 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .route__ways{grid-template-columns:minmax(0,1fr);gap:20px}
 }
 @keyframes pipeY{from{transform:translateY(-100%)}to{transform:translateY(260%)}}
+@media (max-width:760px){
+  /* Six labels in one row leave less space between two labels than inside one ("04 Document"): three per row. */
+  .chain__list{flex-wrap:wrap;row-gap:18px}
+  .chain li{flex:0 0 33.33%}
+  .chain__track{display:none}
+  .chain li::before{box-shadow:none}
+  /* At these widths the thread of the full film crosses the text. The film becomes a band right
+     above the chain instead: twice the stage width, so its flat left part shows. */
+  .hero{height:auto;min-height:calc(100svh - 2 * var(--inset));max-height:none}
+  .hero .stage__film{top:auto;bottom:calc(183.6px - 22.5vw);left:0;width:200%;height:auto;aspect-ratio:16/9;object-position:0 0;-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 80%,transparent 100%);mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 80%,transparent 100%)}
+  .hero .stage__scrim{background:linear-gradient(180deg,rgba(14,13,11,.35) 0%,rgba(14,13,11,0) 30%)}
+  .chain{padding-top:150px}
+}
+@media (min-width:641px) and (max-width:760px){
+  /* Taller viewports give the chain more bottom padding: the band moves up 20px to stay clear of the first row. */
+  .hero .stage__film{bottom:calc(203.6px - 22.5vw)}
+}
 @media (max-width:640px){
   :root{--inset:8px}
   .stage{border-radius:22px}
@@ -361,7 +378,6 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .nav__chip{height:36px;padding:0 12px}
   .nav__chip img{height:21px}
   .nav__end .btn--acc{display:none}
-  .hero{height:auto;min-height:calc(100svh - 2 * var(--inset));max-height:none}
   .hero__inner{padding-top:104px}
   .eyebrow{letter-spacing:.04em}
   .hero h1{margin-top:18px;font-size:clamp(32px,10.8vw,56px);line-height:1.02}
@@ -370,14 +386,6 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
   .hero__sub{margin-top:18px}
   .hero__cta{margin-top:26px}
   .hero__cta .btn{flex:1 1 auto}
-  /* The film becomes a band right above the chain: twice the stage width, so its flat left part shows. */
-  .hero .stage__film{top:auto;bottom:calc(183.6px - 22.5vw);left:0;width:200%;height:auto;aspect-ratio:16/9;object-position:0 0;-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 80%,transparent 100%);mask-image:linear-gradient(180deg,transparent 0%,#000 30%,#000 80%,transparent 100%)}
-  .hero .stage__scrim{background:linear-gradient(180deg,rgba(14,13,11,.35) 0%,rgba(14,13,11,0) 30%)}
-  .chain{padding-top:150px}
-  .chain__list{flex-wrap:wrap;row-gap:18px}
-  .chain li{flex:0 0 33.33%}
-  .chain__track{display:none}
-  .chain li::before{box-shadow:none}
   .facts{grid-template-columns:minmax(0,1fr)}
   .fact,.fact:nth-child(2n){padding:28px 0;border-left:0}
   .viewer__bar i{display:none}
@@ -402,13 +410,15 @@ h2{margin-top:16px;font-weight:400;font-size:clamp(32px,3.7vw,52px);line-height:
 @media (max-width:480px){
   .hs__std{grid-template-columns:minmax(0,1fr)}
 }
-@media (max-width:359px){
-  /* Three labels such as "04 Document" no longer fit in a row: two per row. */
+@media (max-width:380px){
+  /* Three labels such as "04 Document" in a row leave less space between two labels than inside one: two per row. */
   .chain li{flex-basis:50%}
-  /* The viewer tag moves under the title. */
-  .viewer__tag{margin-left:0}
   /* One more row of links: the film band moves up by one row (64.6px) to stay clear of them. */
   .hero .stage__film{bottom:calc(248.2px - 22.5vw)}
+}
+@media (max-width:359px){
+  /* The viewer tag moves under the title. */
+  .viewer__tag{margin-left:0}
 }
 @media (max-height:720px) and (min-width:641px){
   .hero h1{font-size:clamp(44px,5.4vw,76px)}

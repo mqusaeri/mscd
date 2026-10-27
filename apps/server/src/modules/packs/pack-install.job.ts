@@ -1,8 +1,11 @@
 // `pack.install` (E.2): installs a bundle imported through `POST /admin/packs/import` with role
 // `mscd_pack_installer` (D-17). No retries: a failed install is final and recorded; the administrator re-imports.
+// An installation that updates an installed edition queues `applicability.sync` for the organisations with a
+// system on it (Milestone 2 E.3).
 import { Injectable, Logger } from '@nestjs/common';
 import { JobHandler, type JobHandlerInstance } from '../../common/jobs/job-handler';
 import type { JobRun } from '../../common/jobs/job-queue';
+import { ApplicabilitySyncService } from './applicability-sync.service';
 import { PackBundleStore } from './pack-bundle-store';
 import { PackInstallFailedError, type PackInstallRequest } from './pack-installer';
 import { PackInstallService } from './pack-installer.service';
@@ -16,6 +19,7 @@ export class PackInstallJob implements JobHandlerInstance<'pack.install'> {
   constructor(
     private readonly installer: PackInstallService,
     private readonly bundles: PackBundleStore,
+    private readonly sync: ApplicabilitySyncService,
   ) {}
 
   async handle(job: JobRun<'pack.install'>): Promise<void> {
@@ -39,6 +43,12 @@ export class PackInstallJob implements JobHandlerInstance<'pack.install'> {
     try {
       const outcome = await this.installer.get().install(bytes, request);
       this.logger.log({ ...log, status: outcome.status, packId: outcome.packId, version: outcome.version }, 'pack.install done');
+      if (outcome.status === 'installed' && outcome.updatedEdition) {
+        // The installation is committed; a failed queueing is caught up by the daily packs.lifecycle.
+        await this.sync
+          .queuePending({ frameworkVersionIds: [outcome.frameworkVersionId], packInstallId: outcome.installId, requestId: job.env.requestId })
+          .catch((error: unknown) => this.logger.warn({ ...log, error: (error as Error).message }, 'applicability.sync could not be queued'));
+      }
     } catch (error) {
       if (error instanceof PackRejectedError || error instanceof PackInstallFailedError) {
         // Recorded by the installer (`pack.rejected`, or a failed install with `pack.install_failed`).

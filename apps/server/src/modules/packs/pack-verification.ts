@@ -3,7 +3,7 @@
 // need the server: the engine version and the chain entity types of C.10.
 import { promisify } from 'node:util';
 import { gunzip } from 'node:zlib';
-import { SEMVER_RE, compareSemver } from '@mscd/shared';
+import { engineVersionSatisfies } from '@mscd/shared';
 import { PackError, verifyPack, type PackLimits, type VerifiedPack } from '@mscd/pack-tools';
 import type { TrustAnchors } from '../license/trust-anchors';
 
@@ -16,11 +16,14 @@ export const CHAIN_ENTITY_TYPES: ReadonlySet<string> = new Set([
 /** Why a pack is refused before anything is written, and the HTTP status of the refusal (D.3). */
 export type PackRejectionCode =
   | 'archive' | 'manifest' | 'signature' | 'untrusted_key' | 'rejected_key' | 'checksum' | 'dataset'
-  | 'reference' | 'engine_version' | 'downgrade' | 'incompatible';
+  | 'reference' | 'engine_version' | 'downgrade' | 'incompatible'
+  /** The version drops a requirement or catalogue code of the installed version instead of marking it retired (Milestone 2 E.1). */
+  | 'row_removed';
 
 /**
  * A pack refused in E.8 steps 1 to 4. `status` is 400 for a bad archive, signature, checksum or content, 422 for an
- * engine version the server does not meet, a downgrade, or an edition update the installed data cannot take.
+ * engine version the server does not meet, a downgrade, an edition update the installed data cannot take, or an
+ * update that drops installed rows (rule `PACK-ROW-REMOVED`).
  */
 export class PackRejectedError extends Error {
   readonly status: 400 | 422;
@@ -33,7 +36,7 @@ export class PackRejectedError extends Error {
   ) {
     super(message);
     this.name = 'PackRejectedError';
-    this.status = code === 'engine_version' || code === 'downgrade' || code === 'incompatible' ? 422 : 400;
+    this.status = code === 'engine_version' || code === 'downgrade' || code === 'incompatible' || code === 'row_removed' ? 422 : 400;
   }
 }
 
@@ -85,8 +88,9 @@ export function verifyPackForServer(bytes: Buffer, trust: TrustAnchors, serverVe
   }
   const manifest = verified.manifest;
   const pack = { packId: manifest.pack_id, version: manifest.pack_version };
-  // A server version that is not semantic (a development build stamped with a revision) cannot be compared: no check.
-  if (SEMVER_RE.test(serverVersion.replace(/\+.*$/, '')) && compareSemver(serverVersion.replace(/\+.*$/, ''), manifest.engine_min_version) < 0) {
+  // A pre-release of the server reads the format of its release; a version that is not semantic (an image tag such as
+  // `smoke`, a development build) cannot be compared and is not checked (`engineVersionSatisfies`).
+  if (!engineVersionSatisfies(serverVersion, manifest.engine_min_version)) {
     throw new PackRejectedError(
       'engine_version',
       `pack ${manifest.pack_id} ${manifest.pack_version} needs server version ${manifest.engine_min_version} or later; this server is ${serverVersion}`,

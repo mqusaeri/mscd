@@ -11,7 +11,7 @@ import { createThreadEngine, ENGINE, GLOW, loomOf, maskAlpha } from '../../src/a
 import type { Layout, MotionEnv } from '../../src/auth/motion/engine';
 import {
   CHAIN_ARC, CHAIN_PATH, CHAIN_POINTS, EVIDENCE, KEEP, LOOM, MOTES, NODE_FRACTIONS, QUIET, SIGNAL, THREAD_COUNT, makeThreads,
-  motesAt, nodeGlow, parseCubicPath, pinch, pointAt, quietFactor, signalHead, signalOpacity, threadLight, threadY,
+  motesAt, nodeGlow, parseCubicPath, pinch, pointAt, quietFactor, sampleArc, signalHead, signalOpacity, threadLight, threadY,
 } from '../../src/auth/motion/threads';
 import type { Zone } from '../../src/auth/motion/threads';
 import { AuthLayout, BrandPanel, brandFacts } from '../../src/auth/ui';
@@ -29,8 +29,8 @@ const FORBIDDEN = /[\u2014\u00b7]/;
 const CHAIN = { x: 48, y: 252, scale: 1 };
 const small = (x: number, y: number, w: number, h: number): Zone => ({ x, y, w, h, keep: KEEP.small });
 const LABELS: Zone[] = [
-  small(51, 377, 36, 16), small(154, 299, 28, 16), small(244, 261, 50, 16),
-  small(340, 347, 58, 16), small(440, 377, 58, 16), small(524, 261, 50, 16),
+  small(51, 377, 36, 16), small(146, 283, 28, 16), small(244, 261, 50, 16),
+  small(330, 361, 58, 16), small(440, 377, 58, 16), small(524, 261, 50, 16),
 ];
 const LAYOUT: Layout = {
   width: 754,
@@ -526,6 +526,33 @@ describe('brand panel markup', () => {
       expect(html).toContain(`aria-label="${labels.map((k) => li(TEXT[k], lang)).join(', ')}"`);
       for (const key of [...labels, 'headline', 'factFrameworks', 'factChain', 'factFiles'] as const) expect(html).toContain(li(TEXT[key], lang));
       expect(html).not.toMatch(FORBIDDEN);
+    }
+  });
+
+  it('keeps every chain label clear of the chain line and the nodes at every hero width, in both languages (L-3)', () => {
+    // auth.css sets the label size to max(12px, 32.8px - 4cqw) in viewBox units: 12 when the hero is 520px wide, about
+    // 17.8 at 376px (the narrowest hero, a 901px window). Each label is modelled as a monospace box with an allowance:
+    // 0.62em per character, 1.05em above the baseline and 0.35em below it. The widest stroke on the chain is the
+    // signal glow (4.5 units); a node is a circle of radius 7 with a 2.5 unit stroke.
+    const line = sampleArc(parseCubicPath(CHAIN_PATH), 400).points;
+    const gapTo = (b: { x0: number; x1: number; y0: number; y1: number }, p: { x: number; y: number }) =>
+      Math.hypot(Math.max(b.x0 - p.x, 0, p.x - b.x1), Math.max(b.y0 - p.y, 0, p.y - b.y1));
+    for (const lang of ['en', 'id'] as const) {
+      const html = renderToStaticMarkup(<BrandPanel lang={lang} facts={[]} />);
+      const labels = [...html.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle">([^<]+)<\/text>/g)]
+        .map((m) => ({ x: Number(m[1]), y: Number(m[2]), text: m[3] }));
+      expect(labels.map((l) => l.text)).toEqual(['chainIssue', 'chainRisk', 'chainControl', 'chainDocument', 'chainEvidence', 'chainFinding'].map((k) => li(TEXT[k as keyof typeof TEXT], lang)));
+      for (let hero = 376; hero <= 520; hero += 4) {
+        const size = Math.max(12, 32.8 - 0.04 * hero);
+        for (const l of labels) {
+          const half = (0.62 * size * l.text.length) / 2;
+          const box = { x0: l.x - half, x1: l.x + half, y0: l.y - 1.05 * size, y1: l.y + 0.35 * size };
+          const toLine = Math.min(...line.map((p) => gapTo(box, p))) - 4.5 / 2;
+          const toNode = Math.min(...CHAIN_POINTS.map(([x, y]) => gapTo(box, { x, y }))) - (7 + 2.5 / 2);
+          expect(toLine, `${l.text} to the line, hero ${hero}px`).toBeGreaterThanOrEqual(3);
+          expect(toNode, `${l.text} to a node, hero ${hero}px`).toBeGreaterThan(0);
+        }
+      }
     }
   });
 

@@ -1,4 +1,5 @@
-// Kysely row types of the reference tables (migrations/ref/0001_framework_content.sql, build plan C.5).
+// Kysely row types of the reference tables (migrations/ref/0001_framework_content.sql, build plan C.5, and
+// migrations/ref/0002_milestone2.sql, Milestone 2 D.3).
 // Hand-maintained (C.7): a migration that adds or changes these tables updates this file in the same change;
 // test/int/db/schema-types.test.ts compares TABLE_COLUMNS with the migrated database and fails on any difference.
 // Conventions: columns with a database default are Generated<T>, columns only a trigger writes are
@@ -46,6 +47,8 @@ export interface RequirementTable {
   default_frequency_code: string | null;
   evidence_example: string | null;
   sort_order: number;
+  /** No longer in the standard (Milestone 2 E.1): kept for the entries that point to it, hidden by readers. */
+  retired: Generated<boolean>;
 }
 
 /** `ref.catalogue_item` */
@@ -60,16 +63,19 @@ export interface CatalogueItemTable {
   default_frequency_code: string | null;
   evidence_example: string | null;
   sort_order: number;
+  /** No longer in the standard (Milestone 2 E.1). */
+  retired: Generated<boolean>;
 }
 
-/** `ref.requirement_mapping` */
+/** `ref.requirement_mapping`: exactly one of the two sources is set (ref 0002). */
 export interface RequirementMappingTable {
   id: Generated<string>;
-  source_requirement_id: string;
+  source_requirement_id: string | null;
   target_requirement_id: string;
   mapping_type: 'equivalent' | 'partial' | 'related' | 'split' | 'merged' | 'changed' | 'new' | 'removed';
   evidence_reusable: Generated<boolean>;
   note: string | null;
+  source_catalogue_item_id: string | null;
 }
 
 /** `ref.traceability_chain_def` */
@@ -172,6 +178,7 @@ export interface ReviewInputDefTable {
   title: string;
   mandatory: Generated<boolean>;
   sort_order: Generated<number>;
+  review_kind: Generated<'management' | 'governing_body'>;
 }
 
 /** `ref.finding_condition` */
@@ -191,6 +198,19 @@ export interface DocumentTemplateTable {
   code: string;
   title: string;
   doc_type: string;
+  requirement_code: string | null;
+}
+
+/** `ref.documented_info` (ref 0002): documented information a requirement asks for. */
+export interface DocumentedInfoTable {
+  id: Generated<string>;
+  framework_version_id: string;
+  code: string;
+  requirement_code: string;
+  kind: 'maintain' | 'retain';
+  title: string;
+  template_code: string | null;
+  sort_order: Generated<number>;
 }
 
 /** `ref.audit_activity_template` */
@@ -198,7 +218,7 @@ export interface AuditActivityTemplateTable {
   id: Generated<string>;
   framework_version_id: string;
   code: string;
-  event_type: 'stage1' | 'stage2' | 'surveillance' | 'recertification' | 'transition' | 'special';
+  event_type: 'stage1' | 'stage2' | 'surveillance' | 'recertification' | 'transition' | 'special' | 'internal_audit';
   clause_ref: string | null;
   title: string;
   auditee_role: string | null;
@@ -252,6 +272,7 @@ export interface RefTables {
   'ref.review_input_def': ReviewInputDefTable;
   'ref.finding_condition': FindingConditionTable;
   'ref.document_template': DocumentTemplateTable;
+  'ref.documented_info': DocumentedInfoTable;
   'ref.audit_activity_template': AuditActivityTemplateTable;
   'ref.lookup_value': LookupValueTable;
   'ref.rule_activation': RuleActivationTable;
@@ -273,13 +294,15 @@ export const TABLE_COLUMNS = tableColumns<RefTables>()({
   'ref.requirement': [
     'id', 'framework_version_id', 'requirement_code', 'parent_id', 'title_short', 'clause_group', 'is_hs_common',
     'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code', 'evidence_example', 'sort_order',
+    'retired',
   ],
   'ref.catalogue_item': [
     'id', 'framework_version_id', 'item_code', 'theme_code', 'title_short', 'requirement_id', 'flags',
-    'default_frequency_code', 'evidence_example', 'sort_order',
+    'default_frequency_code', 'evidence_example', 'sort_order', 'retired',
   ],
   'ref.requirement_mapping': [
     'id', 'source_requirement_id', 'target_requirement_id', 'mapping_type', 'evidence_reusable', 'note',
+    'source_catalogue_item_id',
   ],
   'ref.traceability_chain_def': [
     'id', 'framework_version_id', 'stage_key', 'position', 'label_en', 'label_id', 'auditor_question_en',
@@ -304,9 +327,10 @@ export const TABLE_COLUMNS = tableColumns<RefTables>()({
   'ref.prep_task_template': [
     'id', 'framework_version_id', 'code', 'title', 'days_before_audit', 'skip_on_first_audit', 'sort_order',
   ],
-  'ref.review_input_def': ['id', 'framework_version_id', 'code', 'title', 'mandatory', 'sort_order'],
+  'ref.review_input_def': ['id', 'framework_version_id', 'code', 'title', 'mandatory', 'sort_order', 'review_kind'],
   'ref.finding_condition': ['id', 'framework_version_id', 'code', 'classification', 'requirement_code', 'text'],
-  'ref.document_template': ['id', 'framework_version_id', 'code', 'title', 'doc_type'],
+  'ref.document_template': ['id', 'framework_version_id', 'code', 'title', 'doc_type', 'requirement_code'],
+  'ref.documented_info': ['id', 'framework_version_id', 'code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'],
   'ref.audit_activity_template': [
     'id', 'framework_version_id', 'code', 'event_type', 'clause_ref', 'title', 'auditee_role', 'key_questions',
     'evidence_to_request', 'sort_order',

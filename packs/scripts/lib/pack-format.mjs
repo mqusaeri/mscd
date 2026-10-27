@@ -1,6 +1,6 @@
-// Pack source file format (BUILD-PLAN E.8): the dataset files of a pack source folder,
-// their CSV headers, and the CSV and JSON encoding rules shared by extract-from-sample.mjs
-// and validate-sources.mjs.
+// Pack source file format (BUILD-PLAN E.8, MILESTONE-2 E.1): the dataset files of a pack
+// source folder, their CSV headers, and the CSV and JSON encoding rules shared by
+// extract-from-sample.mjs and validate-sources.mjs.
 //
 // Encoding: UTF-8 without a byte order mark, LF line endings, a final newline.
 // CSV: a header row, then one row per record; fields are quoted per RFC 4180 when they hold
@@ -12,11 +12,11 @@ export const CSV_HEADERS = Object.freeze({
   'requirements.csv': [
     'requirement_code', 'parent_code', 'title_short', 'clause_group', 'is_hs_common',
     'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code',
-    'evidence_example', 'sort_order',
+    'evidence_example', 'sort_order', 'retired',
   ],
   'catalogue.csv': [
     'item_code', 'theme_code', 'title_short', 'requirement_code', 'default_frequency_code',
-    'evidence_example', 'sort_order',
+    'evidence_example', 'sort_order', 'retired',
   ],
   'chain.csv': [
     'stage_key', 'position', 'label_en', 'label_id', 'question_en', 'question_id', 'source',
@@ -30,9 +30,10 @@ export const CSV_HEADERS = Object.freeze({
   'frequencies.csv': ['code', 'label_en', 'label_id', 'period_days', 'sort_order'],
   'cycle_requirements.csv': ['code', 'requirement_code', 'title', 'derivation', 'sort_order'],
   'prep_tasks.csv': ['code', 'title', 'days_before_audit', 'skip_on_first_audit', 'sort_order'],
-  'review_inputs.csv': ['code', 'title', 'mandatory', 'sort_order'],
+  'review_inputs.csv': ['code', 'title', 'mandatory', 'sort_order', 'review_kind'],
   'finding_conditions.csv': ['code', 'classification', 'requirement_code', 'text'],
-  'document_templates.csv': ['code', 'title', 'doc_type'],
+  'document_templates.csv': ['code', 'title', 'doc_type', 'requirement_code'],
+  'documented_info.csv': ['code', 'requirement_code', 'kind', 'title', 'template_code', 'sort_order'],
   'audit_activities.csv': [
     'code', 'event_type', 'clause_ref', 'title', 'auditee_role', 'key_questions',
     'evidence_to_request', 'sort_order',
@@ -67,6 +68,7 @@ export const REQUIRED_FILES = Object.freeze([
   'review_inputs.csv',
   'finding_conditions.csv',
   'document_templates.csv',
+  'documented_info.csv',
   'audit_activities.csv',
   'lookups.csv',
   'rules.json',
@@ -92,13 +94,63 @@ export const ALLOWED = Object.freeze({
   ],
   driftSeverity: ['crit', 'risk', 'warn'],
   driftSourceKind: ['manual', 'stale_risk', 'dd_expired', 'metric', 'exercise', 'unverif', 'nohash'],
-  auditEventType: ['stage1', 'stage2', 'surveillance', 'recertification', 'transition', 'special'],
+  auditEventType: ['stage1', 'stage2', 'surveillance', 'recertification', 'transition', 'special', 'internal_audit'],
+  documentedInfoKind: ['maintain', 'retain'],
+  reviewKind: ['management', 'governing_body'],
+  // Derivation kinds of cycle.derive (E.2 and MILESTONE-2 D.4).
+  derivationKind: [
+    'management_review_closed', 'risk_assessment_current', 'internal_audit_done', 'exercise_performed',
+    'corrective_actions_closed', 'metrics_current', 'documents_reviewed_on_time', 'bia_approved',
+    'due_diligence_current',
+  ],
   findingClassification: ['major', 'minor', 'ofi', 'signal', 'not_a_finding'],
   mappingType: ['equivalent', 'partial', 'related', 'split', 'merged', 'changed', 'new', 'removed'],
   clauseGroup: ['4', '5', '6', '7', '8', '9', '10'],
   // Lookup domains every pack must carry (E.8).
   requiredLookupDomains: ['doc_type', 'treatment_option'],
 });
+
+/**
+ * Engine version of this pack format (MILESTONE-2 E.1): every pack names it as
+ * `engine_min_version`, so a server older than 1.1.0 refuses the new datasets and columns.
+ */
+export const ENGINE_MIN_VERSION = '1.1.0';
+
+/**
+ * Key of a row of each CSV dataset: how `packs/content` rows replace extracted rows and how
+ * `removed.csv` names a row. Activities are keyed `<phase_no>.<activity_no>`, lookups
+ * `<domain>/<code>`, mapping rows `<source_code> <target_code>`.
+ */
+export const ROW_KEYS = Object.freeze({
+  'requirements.csv': (r) => r.requirement_code,
+  'catalogue.csv': (r) => r.item_code,
+  'chain.csv': (r) => r.stage_key,
+  'activities.csv': (r) => `${r.phase_no}.${r.activity_no}`,
+  'frequencies.csv': (r) => r.code,
+  'cycle_requirements.csv': (r) => r.code,
+  'prep_tasks.csv': (r) => r.code,
+  'review_inputs.csv': (r) => r.code,
+  'finding_conditions.csv': (r) => r.code,
+  'document_templates.csv': (r) => r.code,
+  'documented_info.csv': (r) => r.code,
+  'audit_activities.csv': (r) => r.code,
+  'lookups.csv': (r) => `${r.domain}/${r.code}`,
+  mapping: (r) => `${r.source_code} ${r.target_code}`,
+});
+
+/** One clause reference of `clause_at_risk`: a code with an optional list item (`6.1.3 d)`). */
+export const CLAUSE_REFERENCE_RE = /^(\d+(?:\.\d+)*)(?: [a-z]\))?$/;
+
+/** The requirement codes a `clause_at_risk` value names (` / ` between references), or null. */
+export function clauseAtRiskCodes(value) {
+  const codes = [];
+  for (const part of value.split(' / ')) {
+    const match = CLAUSE_REFERENCE_RE.exec(part);
+    if (!match) return null;
+    codes.push(match[1]);
+  }
+  return codes;
+}
 
 export const LOOKUP_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/;
 export const RULE_ID_RE = /^BR-[0-9]{2}$/;

@@ -22,7 +22,7 @@ The site is plain static files. There is no build step and no package of its own
 
 ## How the page works
 
-The hero is a dark stage with a film behind the headline: one amber thread of three braided strands that drifts through a dark space, with a light pulse that travels along it once every 12 seconds. Under the headline, the six links of the chain (Issue, Risk, Control, Document, Evidence, Finding) sit on a hairline. When the pulse in the film passes above a link, that link glows. On phones the links wrap into two rows and glow one after another.
+The hero is a dark stage with a film behind the headline: one amber thread of three braided strands that drifts through a dark space, with a light pulse that travels along it once every 12 seconds. Under the headline, the six links of the chain (Issue, Risk, Control, Document, Evidence, Finding) sit on a hairline. When the pulse in the film passes above a link, that link glows. At 760px and narrower the links wrap into rows (three per row, two per row at 380px and narrower) and glow one after another, and the film becomes a band right above them, so its thread never crosses the text.
 
 The same rules as the rest of the motion track apply (Milestone 2 plan, section L):
 
@@ -52,12 +52,13 @@ node apps/site/check.mjs --only en       # one language
 node apps/site/check.mjs --out /tmp/shots
 ```
 
-The script serves `apps/site` on a free local port and opens both pages at 1440x900, 390x844 and 320x640 (the WCAG reflow width and the narrowest phone in use), in light and in dark, with the Chromium of Playwright (`@playwright/test` from the root `node_modules`, browsers from `/opt/pw-browsers` when that folder exists). It saves full-page and first-screen screenshots in the output folder (by default `mscd-site-check` in the system temporary folder) and fails on:
+The script serves `apps/site` on a free local port and opens both pages at 1440x900, 740x360 (a phone held sideways), 390x844, 360x800 (the most common Android width) and 320x640 (the WCAG reflow width and the narrowest phone in use), in light and in dark, with the Chromium of Playwright (`@playwright/test` from the root `node_modules`, browsers from `/opt/pw-browsers` when that folder exists). It saves full-page and first-screen screenshots in the output folder (by default `mscd-site-check` in the system temporary folder) and fails on:
 
 - a request to another origin;
 - horizontal overflow, or an element that sticks out of the viewport;
 - text cut off by a box that hides its overflow or by the page edge (text that ends in an ellipsis on purpose is allowed), and text that runs into other text;
 - text under 12px;
+- labels of the hero chain or of the Harmonized Structure chain set too close in a row: the space between two labels must be at least 1.5 times the space inside one label ("04" and "Document") and at least 12px. This is checked at the five sizes and, in one extra run per language, at every width from 320 to 1440px in steps of 4px;
 - text with a contrast ratio under 4.5:1. The background is sampled at the position of each text from a screenshot with all text hidden. Text over the hero film is also measured over eight frames of the film. The navigation is measured over the page as well, and the phone menu is measured open;
 - a missing `<title>`, a missing meta description or a wrong `lang`;
 - console errors, failed requests, broken images, a film that does not load or a poster that does not load;
@@ -89,7 +90,7 @@ node apps/site/check.mjs
 
 ## Changing the text
 
-Both pages are hand-written HTML with the same structure. Change the English and the Indonesian page together, and keep the writing rules of `CLAUDE.md`: plain English, no em dash, no centre dot. Only state what the platform does. Customer names, numbers and certifications are not used on the page; the traceability viewer shows sample records and says so.
+Both pages are hand-written HTML with the same structure. Change the English and the Indonesian page together, and keep the writing rules of `CLAUDE.md`: plain English, no em dash, no centre dot. Only state what the platform does. Customer names, numbers and certifications are not used on the page; the traceability viewer shows sample records and says so. The editions in the Harmonized Structure panel follow the packs in `packs/sources` that a system can be created on: a withdrawn edition (`"status": "withdrawn"`, such as ISO 37001:2016, which the platform refuses) is not listed, and a pre-release pack (`"pre_release": true`) is marked "in beta" ("versi beta").
 
 ## Swapping the film
 
@@ -108,6 +109,7 @@ To use other footage instead:
 2. Replace the three files in `apps/site/assets/media` (or change the `src` and `poster` attributes in both pages).
 3. Set `data-start` on the `<video>` to the time of the poster frame, so the switch from poster to playback does not show.
 4. The chain glow follows the pulse of the rendered film (`site.js`, the block that starts with "The chain under the hero answers the film"). With other footage, remove `data-chain` from the chain in both pages to switch the glow off, or adjust its formula.
+   At 760px and narrower the film shows as a band whose `bottom` values in `site.css` (`.hero .stage__film`, three media queries) place the rendered thread right above the chain. With other footage, adjust them and look at the screenshots at 740x360, 390x844 and 320x640.
 5. Run `node apps/site/check.mjs`. It measures text contrast over eight frames of the new film.
 
 ## How it will be served (follow-up for M2-S02)

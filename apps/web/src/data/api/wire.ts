@@ -11,7 +11,7 @@ import type {
 // @ts-expect-error untyped JavaScript module
 import { LOC_VISUALS } from '../static.js';
 import type {
-  Activity, ChainItem, CommandResult, Document, Evidence, MeView, MsBundle, MsId, Pair, RecordKey, Requirement, Snapshot,
+  Activity, ChainItem, CommandResult, Document, Evidence, ManagementSystem, MeView, MsBundle, MsId, Pair, RecordKey, Requirement, Snapshot, Text,
 } from '../types';
 import { API_PREFIX, CONNECTION_LOST } from './ApiClient';
 import type { ApiError, ApiResult, HttpMethod } from './ApiClient';
@@ -255,6 +255,60 @@ export function systemsOf(me: Me, org: UiOrgSnapshot): MsId[] {
 
 const PER_SYSTEM_KEYS = ['X', 'EVENTS', 'FOCUS', 'PREP', 'PAST', 'CYCLE_ITEMS', 'DRIFT'] as const;
 
+/** A clause readiness value that `readiness.recompute` has not computed yet (Milestone 2 D.3): never shown as 0. */
+export const NOT_COMPUTED: Pair = ['Not computed yet', 'Belum dihitung'];
+
+/**
+ * A management system of `/ui/org` in the controller's form: the clause values as they came (null stays null) and
+ * `clauseLabels`, the text each value is shown with ('72%', or "Not computed yet" for null, D.3).
+ */
+export function withClauseLabels(ms: ManagementSystem): ManagementSystem {
+  const clauses = (ms.clauses ?? []) as (number | null)[];
+  const clauseLabels: Text[] = clauses.map((p) => (p === null || p === undefined ? NOT_COMPUTED : `${p}%`));
+  return { ...ms, clauses: [...clauses], clauseLabels };
+}
+
+/** Today's date in this browser (YYYY-MM-DD), for a snapshot without an organisation (no `/ui/org`). */
+export function localToday(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * The snapshot of a session without an organisation (a platform operator without a membership, Me.org null): no
+ * `/ui/org` or `/ui/ms` is read (C.3), so it holds the session user, the permissions and empty lists only.
+ */
+export function emptySnapshot(me: Me, today = localToday()): ApiSnapshot {
+  return {
+    today,
+    generatedAt: `${today}T00:00:00.000Z`,
+    orgs: me.orgs.map((o) => ({ ...o, ms: [...o.ms] })),
+    MS: [],
+    PEOPLE: { none: ['Unassigned', '-'] },
+    ROLES: {},
+    LOC: {},
+    FREQ: {},
+    FREQ_ORDER: [],
+    STAGES: {},
+    CHAINS: {},
+    TITLES: {},
+    CLAUSE_AT_RISK: {},
+    EXAMPLES: {},
+    PACKS: {},
+    LICENCE: null,
+    REPOS: [],
+    ROUTING: [],
+    X: {}, EVENTS: {}, FOCUS: {}, PREP: {}, PAST: {}, CYCLE_ITEMS: {}, DRIFT: {},
+    bundles: {},
+    me: me as unknown as MeView,
+    permissions: me.permissions,
+    refs: {},
+    tasks: [],
+    systems: [],
+    demo: Boolean(me.personas && Object.keys(me.personas).length),
+  } as unknown as ApiSnapshot;
+}
+
 /** Stored tasks of `GET /tasks` (kind `task`): the chain items are already in the bundles (D-29). */
 export function storedTasks(list: TaskList | null | undefined): StoredTask[] {
   return (list?.items ?? []).filter((t): t is StoredTask => t.kind === 'task').map((t) => ({ ...t }));
@@ -279,7 +333,7 @@ export function assembleSnapshot(me: Me, org: UiOrgSnapshot, systems: UiMsSnapsh
     today: org.today,
     generatedAt: org.generatedAt,
     orgs: org.orgs.map((o) => ({ ...o, ms: [...o.ms] })),
-    MS: org.MS.map((m) => ({ ...m })),
+    MS: org.MS.map((m) => withClauseLabels(m as unknown as ManagementSystem)),
     PEOPLE: { none: ['Unassigned', '-'], ...org.PEOPLE },
     ROLES: { ...(org.ROLES as Record<string, { who: string; label: Pair }>) },
     LOC: withLocVisuals(org.LOC),

@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test as base, expect } from '@playwright/test';
 
 // Every test fails if the browser logs an error, a React warning, or a request fails.
@@ -12,6 +15,9 @@ export const test = base.extend({
       const { prepareApiTest } = await import('../e2e-api/fixtures.js');
       await prepareApiTest(page, { baseURL, handle: apiSession });
     }
+    // The screens of the sidebar for this test: the host screens the session's persona (sample) or permissions (api)
+    // open, after the 14 built-in screens (MILESTONE-2 C.7).
+    await refreshScreens(page, dataSource, dataSource === 'api' && apiSession ? baseURL : null);
     const problems = [];
     page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
     page.on('console', (m) => {
@@ -31,16 +37,111 @@ export const test = base.extend({
 });
 export { expect };
 
-export const SCREENS = [
+// The 14 screens of the generated views, in sidebar order.
+export const BUILTIN_IDS = ['portfolio', 'm1overview', 'controls', 'phases', 'docs', 'audit', 'chain', 'gt', 'timeline', 'fresh', 'cal', 'mytasks', 'fw', 'storage'];
+export const BUILTIN_SCREENS = [
   'Portfolio Overview', 'Overview', 'Controls & requirements', 'Phase board', 'Document register',
   'Audit readiness', 'Chain stages', 'Golden Thread Viewer', 'Certification timeline',
   'Evidence freshness', 'Review calendar', 'My Tasks', 'Framework library', 'Storage repositories',
 ];
-export const SCREENS_ID = [
+export const BUILTIN_SCREENS_ID = [
   'Ikhtisar Portofolio', 'Ikhtisar', 'Kontrol & persyaratan', 'Papan fase', 'Register dokumen',
   'Kesiapan audit', 'Tahap rantai', 'Golden Thread Viewer', 'Linimasa sertifikasi',
   'Kesegaran bukti', 'Kalender review', 'Tugas Saya', 'Pustaka framework', 'Repositori penyimpanan',
 ];
+// Built-in screens each sample persona opens (visFor of the controller); null means all of them.
+const BUILTIN_VIS = {
+  manager: null,
+  owner: ['mytasks', 'm1overview', 'controls', 'docs', 'fresh'],
+  auditor: ['portfolio', 'audit', 'chain', 'gt', 'docs', 'controls', 'fresh', 'timeline', 'mytasks'],
+  top: ['portfolio', 'm1overview', 'timeline', 'audit', 'chain', 'mytasks'],
+};
+
+// ---- host screens (MILESTONE-2 C.2, C.7): src/screens/<folder>/meta.json ----
+const SCREENS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/screens');
+const GROUP_ORDER = ['top', 'impl', 'audit', 'surv', 'tasks', 'admin', 'ops'];
+/** Every host screen's meta.json, sorted by sidebar group and order. */
+export const HOST_METAS = readdirSync(SCREENS_DIR, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(path.join(SCREENS_DIR, d.name, 'meta.json')))
+  .map((d) => JSON.parse(readFileSync(path.join(SCREENS_DIR, d.name, 'meta.json'), 'utf8')))
+  .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.order - b.order || a.id.localeCompare(b.id));
+export const metaById = (id) => HOST_METAS.find((m) => m.id === id);
+const anyOf = (perm, held) => (Array.isArray(perm) ? perm : [perm]).some((p) => (held || []).includes(p));
+
+/** Host screens in the sidebar of a sample persona. */
+function sampleHostNav(role) {
+  return HOST_METAS.filter((m) => m.nav !== false && m.roles.includes(role));
+}
+/** Host screens in the sidebar of an api session, from its `Me` (the permissions of the screen's scope). */
+function apiHostNav(me) {
+  if (!me) return [];
+  const org = me.org ? (me.orgs || []).find((o) => o.id === me.org.slug) : null;
+  const first = ((org && org.ms) || []).find((id) => me.uiRoleByMs && me.uiRoleByMs[id]);
+  return HOST_METAS.filter((m) => {
+    if (m.nav === false) return false;
+    if (m.scope === 'ms') return Boolean(first) && anyOf(m.perm, (me.permissions.ms || {})[first]);
+    return anyOf(m.perm, me.permissions.org);
+  });
+}
+async function apiMe(page, baseURL) {
+  const res = await page.request.get((baseURL || '') + '/api/v1/me', { failOnStatusCode: false });
+  return res.ok() ? res.json() : null;
+}
+const dataSourceOf = () => base.info().project.use.dataSource || 'sample';
+
+/**
+ * The screens a test walks through the sidebar: the 14 built-in screens, then the host screens of the session's
+ * sidebar (sample: the manager persona; api: the permissions of the minted session). Refreshed before every test.
+ */
+export const SCREENS = [...BUILTIN_SCREENS];
+export const SCREENS_ID = [...BUILTIN_SCREENS_ID];
+async function refreshScreens(page, dataSource, baseURL) {
+  const hosts = dataSource === 'api' ? (baseURL ? apiHostNav(await apiMe(page, baseURL)) : []) : sampleHostNav('manager');
+  SCREENS.splice(0, SCREENS.length, ...BUILTIN_SCREENS, ...hosts.map((m) => m.label[0]));
+  SCREENS_ID.splice(0, SCREENS_ID.length, ...BUILTIN_SCREENS_ID, ...hosts.map((m) => m.label[1]));
+}
+
+/**
+ * Number of sidebar entries of a persona: its built-in screens (without the portfolio in a single-system
+ * organisation) and its host screens. In the API project it reads the session's `Me`, so call it after the switch.
+ */
+export async function navFor(page, role, { single = false } = {}) {
+  const vis = BUILTIN_VIS[role] || BUILTIN_IDS;
+  let builtin = vis.filter((id) => !(single && id === 'portfolio'));
+  let hosts;
+  if (dataSourceOf() === 'api') {
+    const me = await apiMe(page, new URL(page.url()).origin);
+    hosts = apiHostNav(me);
+    // Tenant Admins and Storage Admins see the Administration entries whatever their business role (C.3).
+    if (me && (me.adminRoles || []).length) builtin = [...new Set([...builtin, 'fw', 'storage'])];
+  } else hosts = sampleHostNav(role);
+  return builtin.length + hosts.length;
+}
+
+/** The labels of every host screen in one language (0 English, 1 Indonesian). */
+export const hostLabels = (lang = 0) => HOST_METAS.map((m) => m.label[lang]);
+/** The sidebar entries of the generated navigation only (the host screens of later packages are left out). */
+export function builtinNav(page) {
+  const labels = [...hostLabels(0), ...hostLabels(1)];
+  const nav = page.locator('aside nav button');
+  return labels.length ? nav.filter({ hasNotText: new RegExp('^\\s*(' + labels.map(esc).join('|') + ')\\s*\\d*\\s*$') }) : nav;
+}
+
+/**
+ * Opens a host screen the way its meta.json says (C.2): from the sidebar (`open: nav`, as the manager persona) or
+ * through `?screen=<id>&persona=<sampleRole>` of the sample build (`open: query` or another persona).
+ */
+export async function openScreen(page, meta, query = '') {
+  const lang = /(^|&)lang=id(&|$)/.test(query) ? 1 : 0;
+  const label = meta.label[lang];
+  if (meta.open === 'nav' && meta.sampleRole === 'manager') {
+    await openApp(page, query ? '?' + query : '');
+    await go(page, label);
+  } else {
+    await page.goto(`/?screen=${encodeURIComponent(meta.id)}&persona=${encodeURIComponent(meta.sampleRole)}${query ? '&' + query : ''}`);
+    await expect(page.locator('main h1')).toHaveText(label);
+  }
+}
 // Screens with a filterable list and row details (the drill-down screens).
 export const DRILL_SCREENS = ['Controls & requirements', 'Document register', 'Chain stages', 'Evidence freshness', 'Review calendar', 'Storage repositories'];
 
@@ -215,4 +316,21 @@ export async function contrastProblems(page, min = 3, scope = SCOPE) {
 }
 export async function expectReadableText(page, min = 3) {
   expect(await contrastProblems(page, min), `text below ${min}:1 contrast`).toEqual([]);
+}
+
+// The open host modal or drawer (and the generated ones): every text at 4.5:1 and at least 12px (MILESTONE-2 C.7).
+const OVERLAY = 'div[style*="z-index: 41"] *, div[style*="z-index: 51"] *';
+export async function expectOverlayReadable(page) {
+  await expect(page.locator('div[style*="z-index: 41"], div[style*="z-index: 51"]').first()).toBeVisible();
+  expect(await contrastProblems(page, 4.5, OVERLAY), 'overlay text below 4.5:1 contrast').toEqual([]);
+  const small = await page.evaluate((scope) => {
+    const out = [];
+    for (const el of document.querySelectorAll(scope)) {
+      if (el.closest('svg') || !el.getClientRects().length) continue;
+      const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim();
+      if (own && parseFloat(getComputedStyle(el).fontSize) < 11.95) out.push(`${getComputedStyle(el).fontSize} "${own.slice(0, 40)}"`);
+    }
+    return out;
+  }, OVERLAY);
+  expect(small, 'overlay text under 12px').toEqual([]);
 }

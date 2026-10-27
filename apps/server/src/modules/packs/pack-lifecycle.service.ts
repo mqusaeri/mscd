@@ -212,8 +212,8 @@ export class PackLifecycleService {
   }
 }
 
-/** Active MS Managers of a system (E.6 recipients of `edition_withdrawn`). */
-async function msManagers(trx: Trx, msId: string): Promise<string[]> {
+/** Active MS Managers of a system (E.6 recipients of `edition_withdrawn` and `pack_content_updated`). */
+export async function msManagers(trx: Trx, msId: string): Promise<string[]> {
   const rows = await trx
     .selectFrom('user_ms_role')
     .select('user_id')

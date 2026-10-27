@@ -1,6 +1,6 @@
 {
   "name": "@mscd/server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "MSCD server: run modes api, worker, storage-gateway and migrate, plus admin commands (mscd-server)",
   "type": "commonjs",
@@ -64,9 +64,9 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "tar": "7.5.22",
-    "undici": "7.30.0",
+    "undici": "7.30.1",
     "yaml": "2.9.1",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@mscd/mock-providers": "*",

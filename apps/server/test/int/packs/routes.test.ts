@@ -79,7 +79,7 @@ describe('pack routes with tenancy.mode single (D.3)', () => {
       ['ISO9001-2015', 'installed'],
       ['ISO9001-2026', 'installed'],
     ]);
-    expect(list.json()[0]).toMatchObject({ version: '1.2.0', frameworkCode: 'ISO27001', edition: '2022', preRelease: false, checksum: devPack('ISO27001-2022').sha256 });
+    expect(list.json()[0]).toMatchObject({ version: '1.2.1', frameworkCode: 'ISO27001', edition: '2022', preRelease: false, checksum: devPack('ISO27001-2022').sha256 });
     expect((await app.app.inject({ method: 'GET', url: '/api/v1/admin/packs', headers: as('mm@ndt') })).statusCode).toBe(200);
     expect((await app.app.inject({ method: 'GET', url: '/api/v1/admin/packs', headers: as('do@ndt') })).statusCode).toBe(403);
   });
@@ -89,12 +89,12 @@ describe('pack routes with tenancy.mode single (D.3)', () => {
     const first = await postImport(app, 'ta@ndt', bundle, { key: 'import-0001' });
     expect(first.statusCode).toBe(202);
     const body = first.json();
-    expect(body).toMatchObject({ ok: true, changed: [], data: { packId: 'ISO22301-2019', version: '1.0.0', status: 'queued' } });
+    expect(body).toMatchObject({ ok: true, changed: [], data: { packId: 'ISO22301-2019', version: '1.0.1', status: 'queued' } });
     await app.runJobs();
     const installed = await sql<{ id: string; status: string; installed_by: string | null }>`
       select id, status, installed_by from platform.pack_install where pack_id = 'ISO22301-2019'`.execute(db.migrator);
     expect(installed.rows).toEqual([{ id: body.taskId, status: 'installed', installed_by: expect.any(String) }]);
-    const audited = (await auditRows(db, 'pack.installed')).filter((r) => r.entity_code === 'ISO22301-2019 1.0.0');
+    const audited = (await auditRows(db, 'pack.installed')).filter((r) => r.entity_code === 'ISO22301-2019 1.0.1');
     expect(audited).toEqual([expect.objectContaining({ entity_id: body.taskId, organization_id: tenant.id, actor_kind: 'user' })]);
 
     const again = await postImport(app, 'ta@ndt', bundle, { key: 'import-0001' });
@@ -175,7 +175,7 @@ describe('pack routes with tenancy.mode single (D.3)', () => {
           .insertInto('platform.pack_catalog')
           .values([
             { pack_id: 'ISO27001-2022', pack_version: '1.3.0', channel: 'managed', note_en: 'Titles reviewed', note_id: 'Judul ditinjau', published_at: '2026-09-25' },
-            { pack_id: 'ISO22301-2019', pack_version: '1.0.0', channel: 'managed', note_en: 'Installed', note_id: 'Terpasang', published_at: null },
+            { pack_id: 'ISO22301-2019', pack_version: '1.0.1', channel: 'managed', note_en: 'Installed', note_id: 'Terpasang', published_at: null },
           ])
           .execute();
       });
@@ -209,7 +209,7 @@ describe('pack routes with tenancy.mode single (D.3)', () => {
         catalogueBody = JSON.stringify({
           packs: [
             { pack_id: 'ISO9001-2026', pack_version: '1.0.0', note_en: 'Published edition', note_id: 'Edisi terbit', published_at: '2026-09-30' },
-            { pack_id: 'ISO9001-2015', pack_version: '1.4.2', note_en: 'Same', note_id: 'Sama' },
+            { pack_id: 'ISO9001-2015', pack_version: '1.4.3', note_en: 'Same', note_id: 'Sama' },
           ],
         });
         const response = await online.app.inject({ method: 'POST', url: '/api/v1/admin/packs/check-updates', headers: as('ta@ndt') });
@@ -342,7 +342,7 @@ describe('edition lifecycle (packs.lifecycle and edition.withdrawn-alerts, TS 6.
     const version = await db.migrator.selectFrom('ref.framework_version').select('status').where('pack_id', '=', 'ISO9001-2015').executeTakeFirstOrThrow();
     expect(version.status).toBe('withdrawn');
     const audited = await auditRows(db, 'pack.edition_withdrawn');
-    expect(audited).toEqual([expect.objectContaining({ entity_code: 'ISO9001-2015 1.4.2', organization_id: null, actor_kind: 'system' })]);
+    expect(audited).toEqual([expect.objectContaining({ entity_code: 'ISO9001-2015 1.4.3', organization_id: null, actor_kind: 'system' })]);
     for (const tenant of tenants) {
       const alerts = await alertsOf(tenant);
       expect(alerts).toEqual([

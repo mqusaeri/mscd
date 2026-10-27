@@ -35,6 +35,8 @@ export default function AppView({ v }) {
             <Overview v={v} />
             <MyTasks v={v} />
             <FrameworkLibrary v={v} />
+            {v.hostScreen ? (<>{txt(v.hostScreen)}
+            </>) : null}
           </div>
         </>) : null}
       </main>
@@ -99,6 +101,8 @@ export default function AppView({ v }) {
           </svg>
         </button>
       </div>
+      {v.hostLayer ? (<>{txt(v.hostLayer)}
+      </>) : null}
       {v.toast ? (<>
         <div style={{ position: "fixed", left: "50%", bottom: "28px", transform: "translateX(-50%)", background: "#1c1a17", color: "#f2eee7", padding: "10px 16px", borderRadius: "10px", zIndex: "60", fontFamily: "var(--ff)", fontSize: "13px", animation: "toastIn .25s ease", maxWidth: "640px" }}>{txt(v.toast)}</div>
       </>) : null}

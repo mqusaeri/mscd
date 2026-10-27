@@ -97,7 +97,7 @@ export default function Portfolio({ v }) {
                         <span style={{ color: "var(--tx2)", minWidth: "0", overflowWrap: "anywhere" }}>
                           <span style={{ fontFamily: "var(--ffm)", fontWeight: "600", color: "var(--tx)", marginRight: "6px" }}>{txt(c?.n)}</span>{txt(c?.title)}
                         </span>
-                        <span style={{ fontFamily: "var(--ffm)", fontWeight: "600", flex: "none", color: c?.ink }}>{txt(c?.pct)}{"%"}</span>
+                        <span style={{ fontFamily: "var(--ffm)", fontWeight: "600", flex: "none", color: c?.ink }}>{txt(c?.pctText)}</span>
                       </div>
                     </Fragment>))}
                   </div>
@@ -151,7 +151,7 @@ export default function Portfolio({ v }) {
                           <div style={{ height: "6px", borderRadius: "3px", background: "var(--bd)", overflow: "hidden" }}>
                             <div style={{ height: "100%", width: `${c?.pct ?? ''}%`, background: c?.color }}></div>
                           </div>
-                          <div style={{ fontSize: "12px", color: "var(--tx3)", fontFamily: "var(--ffm)", marginTop: "2px" }}>{txt(c?.n)}{", "}{txt(c?.pct)}</div>
+                          <div title={c?.pctText} style={{ fontSize: "12px", color: "var(--tx3)", fontFamily: "var(--ffm)", marginTop: "2px" }}>{txt(c?.n)}{", "}{txt(c?.pctShort)}</div>
                         </div>
                       </Fragment>))}
                     </div>

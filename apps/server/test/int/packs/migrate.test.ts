@@ -78,14 +78,14 @@ describe('migrate step 5 and packs install (C.3, D-17)', () => {
       await db.destroy();
     }
     const text = out.join('');
-    expect(text).toContain('migrate: packs: ISO27001-2022 1.0.0: skipped (older than the installed version 1.2.0)');
+    expect(text).toContain('migrate: packs: ISO27001-2022 1.0.0: skipped (older than the installed version 1.2.1)');
     expect(text).toContain('migrate: packs 0 installed, 6 already installed, 1 older than installed, 0 rejected, 0 failed');
     expect(text).not.toContain('not installed');
   });
 
   it('reports a pack it refuses and exits 1, after installing the others', async () => {
     const newer = changedPack('ISO37001-2016', (s) => {
-      s.manifest.pack_version = '1.0.1';
+      s.manifest.pack_version = '1.0.2';
     });
     const tampered = archiveOf(archiveEntries(newer.bytes).map((e) => (e.path === 'chain.csv' ? { ...e, data: Buffer.concat([e.data!, Buffer.from('x')]) } : e)));
     await writeFile(path.join(dir, 'AAA-tampered.pack'), tampered);
@@ -98,8 +98,8 @@ describe('migrate step 5 and packs install (C.3, D-17)', () => {
       await rm(path.join(dir, newer.fileName));
     }
     const text = out.join('');
-    expect(text).toMatch(/migrate: packs: AAA-tampered\.pack: rejected \(pack ISO37001-2016 1\.0\.1: datasets do not match their checksums/);
-    expect(text).toContain('migrate: packs: ISO37001-2016 1.0.1: installed');
+    expect(text).toMatch(/migrate: packs: AAA-tampered\.pack: rejected \(pack ISO37001-2016 1\.0\.2: datasets do not match their checksums/);
+    expect(text).toContain('migrate: packs: ISO37001-2016 1.0.2: installed');
     expect(text).toContain('migrate: packs 1 installed, 6 already installed, 0 older than installed, 1 rejected, 0 failed');
     expect(text).toContain('migrate: 1 pack(s) not installed: AAA-tampered.pack');
   });
@@ -115,7 +115,7 @@ describe('migrate step 5 and packs install (C.3, D-17)', () => {
 
   it('installs one pack file with `packs install` and refuses a tampered one', async () => {
     const newer = changedPack('ISO22301-2019', (s) => {
-      s.manifest.pack_version = '1.0.1';
+      s.manifest.pack_version = '1.0.2';
     });
     const file = path.join(dir, 'newer', newer.fileName);
     await rm(path.dirname(file), { recursive: true, force: true });
@@ -123,9 +123,9 @@ describe('migrate step 5 and packs install (C.3, D-17)', () => {
     await writeFile(file, newer.bytes);
     const config = configFor();
     const out: string[] = [];
-    expect(await packsInstall(config, file, (t) => out.push(t))).toMatchObject({ status: 'installed', packId: 'ISO22301-2019', version: '1.0.1' });
+    expect(await packsInstall(config, file, (t) => out.push(t))).toMatchObject({ status: 'installed', packId: 'ISO22301-2019', version: '1.0.2' });
     expect(await packsInstall(config, file, (t) => out.push(t))).toMatchObject({ status: 'unchanged' });
-    expect(out).toEqual(['packs install: ISO22301-2019 1.0.1: installed\n', 'packs install: ISO22301-2019 1.0.1: unchanged\n']);
+    expect(out).toEqual(['packs install: ISO22301-2019 1.0.2: installed\n', 'packs install: ISO22301-2019 1.0.2: unchanged\n']);
 
     const tampered = path.join(dir, 'newer', 'tampered.pack');
     await writeFile(
@@ -145,7 +145,7 @@ describe('migrate step 5 and packs install (C.3, D-17)', () => {
     try {
       await expect(buildProgram().parseAsync(['node', 'mscd-server', 'packs', 'install', tampered])).rejects.toThrow('exit 1');
       await buildProgram().parseAsync(['node', 'mscd-server', 'packs', 'install', file]);
-      expect(write).toHaveBeenCalledWith('packs install: ISO22301-2019 1.0.1: unchanged\n');
+      expect(write).toHaveBeenCalledWith('packs install: ISO22301-2019 1.0.2: unchanged\n');
     } finally {
       exit.mockRestore();
       write.mockRestore();

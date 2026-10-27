@@ -82,6 +82,8 @@ export default function Drawer({ v }) {
               </button>
             </Fragment>))}
           </div>
+          {v.hostDetail ? (<>{txt(v.hostDetail)}
+          </>) : null}
         </div>
       </div>
     </>) : null}</>

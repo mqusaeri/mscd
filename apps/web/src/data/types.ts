@@ -47,7 +47,9 @@ export type Permission =
   | 'storage.repository.read' | 'storage.repository.manage' | 'storage.repository.test' | 'storage.routing.manage'
   | 'storage.object.metadata.read' | 'pack.read' | 'pack.activate' | 'pack.install' | 'license.read' | 'license.manage'
   | 'user.manage' | 'idp.manage' | 'org.settings.manage' | 'ms.admin' | 'audit_trail.metadata.read'
-  | 'ops.read' | 'ops.jobs.run' | 'ops.users.manage';
+  | 'ops.read' | 'ops.jobs.run' | 'ops.users.manage'
+  // Milestone 2 (D.3)
+  | 'internal_audit.manage' | 'ops.tenants.manage' | 'ops.entitlements.manage';
 
 // ---------- entities (UI section 1) ----------
 
@@ -60,13 +62,25 @@ export interface ManagementSystem {
   id: MsId; code: string; ed: string; short: string; name: Pair; mgr: PersonId; mgrRole: string; color: string;
   scope: string; certifier: string; lead: Text; cert: Text; stage: Pair;
   audit: AuditRef | null;
-  clauses: number[]; findings: { open: number; major: number };
+  /** Readiness of clause groups 4 to 10; null until `readiness.recompute` computes it (Milestone 2 D.3). */
+  clauses: (number | null)[]; findings: { open: number; major: number };
+  /** Stored readiness dimensions per clause group (Milestone 2 D.6); absent in the sample. */
+  readiness?: ClauseReadiness;
+  /**
+   * Text of each clause value as the screens show it: `'72%'`, or "Not computed yet" for a null value. Set by the API
+   * source (data/api/wire.ts); the controller formats the value itself when it is absent.
+   */
+  clauseLabels?: Text[];
   banner?: { tone: 'info' | 'warn' | 'bad'; text: Pair; kind?: 'connector' | 'transition' | 'beta' };
   loc: string; locMode: string; pack: string; phase: Pair; unit: 'ctrl' | 'req'; theme?: Record<number, string>;
   gateName?: Text; gtSuggestions?: string[];
   /** Document approver of the system (sample only; the API sends `Document.approver`). */
   approver?: PersonId;
 }
+
+/** Stored readiness of one clause group (Milestone 2 D.6); a null dimension is not computed or has no rows. */
+export interface ClauseReadinessGroup { documented: number | null; implemented: number | null; evidenced: number | null; measured: number | null }
+export interface ClauseReadiness { computedAt: string | null; groups: ClauseReadinessGroup[] }
 
 export interface Requirement {
   id: string; key: string; title: string; theme: string; st: ReqStatus; owner: PersonId;
@@ -145,7 +159,8 @@ export interface DriftRule { id: string; l: Pair; rows?: [string, string, Person
 /** Session user as returned by GET /me (D.2 `Me`); present in API mode. */
 export interface MeView {
   user: { id: string; handle: PersonId; email: string; displayName: string; jobTitle: string | null };
-  org: { id: string; slug: string; name: string };
+  /** Null only for a platform operator without a membership (no organisation snapshot is loaded then). */
+  org: { id: string; slug: string; name: string } | null;
   orgs: Organisation[];
   rolesByMs: Record<MsId, string[]>;
   uiRoleByMs: Record<MsId, UiRole>;
@@ -181,6 +196,8 @@ export interface Snapshot {
   LICENCE: Licence | null;                          // null without license.read (A.4)
   REPOS: Repository[];
   ROUTING: [string, string, string, Text][];
+  /** API mode: the systems of the organisation where the user holds a role (empty on the no-system path, C.3). */
+  systems?: MsId[];
   /** Sample mode only: the picker listings of UI 1.15. */
   PICKER_FILES?: Record<string, { path: string; files: [string, string, string, string, string][] }>;
   bundles: Record<MsId, MsBundle>;                  // every system of the selected organisation
@@ -253,4 +270,24 @@ export interface DataSource {
   switchOrg(orgId: string): Promise<Snapshot>;      // api: PUT /me/org then load; 409 reauth-required goes to login
   logout(): Promise<void>;                          // sample: no-op
   onUnauthenticated(listener: () => void): () => void;   // api: any 401; returns the unsubscribe function
+
+  // ---------- Milestone 2 (MILESTONE-2 C.4, C.6) ----------
+  /** Sample only: merges `patch` into a record of a system (kind `req`, `doc`, `ev`, `act` or a per-system list). */
+  mutate?(ms: MsId, kind: SampleKind, id: string, patch: Record<string, unknown>): Promise<CommandResult>;
+  /** Sample only: adds a row to a record list of a system. */
+  insert?(ms: MsId, kind: SampleKind, row: Record<string, unknown>): Promise<CommandResult>;
+  /** API only: the files of the system's repository for a record (the picker of `ctx.openPicker`). */
+  listFiles?(ms: MsId, kind: 'evidence' | 'document', recordId: string): Promise<PickerListing>;
+  /** API only: uploads a file to the system's repository through an upload intent; nothing is attached yet. */
+  stageUpload?(ms: MsId, kind: 'evidence' | 'document', recordId: string, file: File): Promise<StagedUpload>;
 }
+
+/**
+ * Record kinds the sample source can change for sample adapters (C.6): the bundle records (`req`, `doc`, `ev`), the
+ * explicit chain records of a stage (`x:<stage>`) and the per-system lists of the timeline (`event`, `prep`, `cycle`,
+ * `past`).
+ */
+export type SampleKind = 'req' | 'doc' | 'ev' | 'event' | 'prep' | 'cycle' | 'past' | `x:${string}`;
+
+/** An upload of `stageUpload`: the intent to attach, or the error of the api. */
+export type StagedUpload = { ok: true; intentId: string; fileName: string } | { ok: false; error: NonNullable<CommandResult['error']> };

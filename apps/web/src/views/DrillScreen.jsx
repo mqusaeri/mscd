@@ -297,6 +297,9 @@ export default function DrillScreen({ v }) {
                             </div>
                           </div>
                         </div>
+                        {row?.det?.hostExt ? (<>
+                          <div style={{ padding: "0 calc(var(--pad) + 26px) var(--pad)" }}>{txt(row?.det?.hostExt)}</div>
+                        </>) : null}
                       </td>
                     </tr>
                   </>) : null}

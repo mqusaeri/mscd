@@ -1,9 +1,10 @@
-import { test, expect, SCREENS, openApp, go, ui, expectToast, expectNoHorizontalOverflow } from './helpers.js';
+import { test, expect, SCREENS, HOST_METAS, openApp, go, ui, expectToast, expectNoHorizontalOverflow, navFor } from './helpers.js';
 
 test.describe('App shell', () => {
   test('every screen opens from the sidebar with no layout overflow', async ({ page }) => {
     await openApp(page);
-    await expect(page.locator('aside nav button')).toHaveCount(SCREENS.length);
+    await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
+    expect(SCREENS).toHaveLength(await navFor(page, 'manager'));
     for (const label of SCREENS) {
       await go(page, label);
       await expect(page.locator('aside nav button[title="' + label + '"]')).toHaveCSS('font-weight', '600');
@@ -12,6 +13,8 @@ test.describe('App shell', () => {
   });
 
   // Golden Thread Viewer and My Tasks have no page actions in the design; every other screen has at least one.
+  // Host screens list their page actions in meta.json (MILESTONE-2 C.2); they open forms, so only their labels count.
+  const HOST_ACTIONS = Object.fromEntries(HOST_METAS.map((m) => [m.label[0], m.pageActions.map((p) => p[0])]));
   const PAGE_ACTIONS = {
     'Portfolio Overview': { 'Export board': 'Board exported as PDF' },
     'Overview': { 'Readiness report': 'Readiness report queued' },
@@ -34,6 +37,10 @@ test.describe('App shell', () => {
     for (const label of SCREENS) {
       await go(page, label);
       const actions = page.locator('main > div > div:first-child button[title]');
+      if (HOST_ACTIONS[label]) {
+        await expect(actions, label + ' page actions').toHaveText(HOST_ACTIONS[label]);
+        continue;
+      }
       const expected = PAGE_ACTIONS[label];
       await expect(actions, label + ' page actions').toHaveCount(Object.keys(expected).length);
       for (const [action, message] of Object.entries(expected)) {
@@ -127,15 +134,15 @@ test.describe('App shell', () => {
     await expect(roleBtn).toBeVisible();
     await pick('Domain Owner');
     await expect(ui.title(page)).toHaveText('My Tasks');
-    await expect(page.locator('aside nav button')).toHaveCount(5);
+    await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'owner'));
     await pick('Auditor');
-    await expect(page.locator('aside nav button')).toHaveCount(9);
+    await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'auditor'));
     await expect(page.locator('aside nav button[title="Framework library"]')).toHaveCount(0);
     await pick('Top management');
     await expect(ui.title(page)).toHaveText('Portfolio Overview');
-    await expect(page.locator('aside nav button')).toHaveCount(6);
+    await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'top'));
     await pick('MS Manager');
-    await expect(page.locator('aside nav button')).toHaveCount(14);
+    await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
   });
 
   test('Tera explains every screen and can be dismissed', async ({ page }) => {

@@ -16,7 +16,8 @@
 // No worker runs: jobs stay queued, and the suite asserts command results, not job effects. The addresses of the
 // run (Mailpit API, database) are written to node_modules/.cache/mscd/e2e-api-stack.json for the specs. On SIGTERM,
 // SIGINT, a failed start, the end of a child process or the end of the process that started the stack, everything is
-// stopped and every container is removed; containers of an earlier stack that was killed are removed at start.
+// stopped and every container is removed. At start, containers of an earlier stack that was killed are removed once
+// their mscd.test.expires label has passed (3 hours) and their name carries the same container prefix.
 //
 // Environment: MSCD_TEST_CONTAINER_PREFIX names the containers <prefix>e2e-<service>-<random> (default "mscd-");
 // MSCD_TEST_PG_IMAGE replaces postgres:16.15-alpine; E2E_STACK_SKIP_BUILD=1 skips step 1 apart from ensure-built.
@@ -209,39 +210,32 @@ function pgUrl(port, database, user = 'postgres', password) {
   return `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@127.0.0.1:${port}/${database}`;
 }
 
-/** True while process `pid` of this host exists (a signal 0 to a process of another user also proves it exists). */
-function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === 'EPERM';
-  }
-}
-
 /**
- * Containers of an earlier API E2E stack that was killed before it could remove them. A container is a leftover when
- * its `mscd.test.expires` time has passed or the stack process named by `mscd.e2e.pid` no longer exists; containers
- * of a stack that is still running (for example in its build and seed phase) are kept.
+ * Containers of an earlier API E2E stack that was killed before it could remove them (R-06). A container is a
+ * leftover only when its `mscd.test.expires` time has passed and its name carries this run's
+ * MSCD_TEST_CONTAINER_PREFIX. A stack that is still running, in this session or in another one on the same Docker
+ * host (its process may live in another PID namespace), keeps its containers until they expire.
  */
-function removeLeftovers() {
-  let rows = '';
-  try {
-    rows = docker(['ps', '-a', '--filter', 'label=mscd.e2e.run', '--format', '{{.ID}}\t{{.Label "mscd.test.expires"}}\t{{.Label "mscd.e2e.pid"}}']);
-  } catch {
-    return;
-  }
-  const now = Date.now();
-  const list = rows
+function leftoverIds(rows, now = Date.now(), prefix = PREFIX) {
+  return rows
     .split('\n')
     .filter(Boolean)
     .map((row) => row.split('\t'))
-    .filter(([, expires, pid]) => !(Number(expires) > now) || !alive(Number(pid)))
+    .filter(([, name, expires]) => String(name || '').replace(/^\//, '').startsWith(prefix) && Number(expires) > 0 && Number(expires) <= now)
     .map(([id]) => id);
+}
+
+function removeLeftovers() {
+  let rows = '';
+  try {
+    rows = docker(['ps', '-a', '--filter', 'label=mscd.e2e.run', '--format', '{{.ID}}\t{{.Names}}\t{{.Label "mscd.test.expires"}}']);
+  } catch {
+    return;
+  }
+  const list = leftoverIds(rows);
   if (list.length === 0) return;
   docker(['rm', '-f', '-v', ...list]);
-  log(`removed ${list.length} container(s) left over by an earlier run`);
+  log(`removed ${list.length} expired container(s) left over by an earlier run`);
 }
 
 async function main() {

@@ -10,6 +10,8 @@
 // - Signing out shows the sign-in page with "You have signed out."
 // - Display settings in the address (`drill`, `density`, `layout`, `font`, `lang`, `theme`) keep working on every
 //   page; `deploy` stays a demo override (only when the profile says demo mode is on).
+// - The user's saved preferences (`Me.preferences`: `language`, `theme`, `density`) apply before the application's
+//   first render, unless the address sets the same setting (MILESTONE-2 C.3).
 import React, { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { GuestStartResponse, Me, SystemProfile } from '@mscd/shared';
@@ -120,6 +122,30 @@ function FailedPanel({ lang, theme, message, detail, onRetry, onSignOut }: {
 
 const CANNOT_LOAD: Pair = ['The application could not load its data.', 'Aplikasi tidak dapat memuat datanya.'];
 
+const LANGS = ['en', 'id'] as const;
+const THEMES = ['light', 'dark'] as const;
+const DENSITIES = ['dense', 'comfortable', 'airy'] as const;
+
+/**
+ * The display settings of the application with the user's saved preferences applied (MILESTONE-2 C.3): `language`
+ * (or `lang`), `theme` and `density` of `Me.preferences`. A valid value in the address wins, so a link with `?lang=id`
+ * still opens in Indonesian; an unknown preference value is ignored.
+ */
+export function withPreferences(settings: DisplaySettings, preferences: Record<string, unknown> | null | undefined, search: string): DisplaySettings {
+  const query = new URLSearchParams(search);
+  const fromAddress = (key: string, valid: readonly string[]) => valid.includes(query.get(key) ?? '');
+  const pick = <T extends string>(value: unknown, valid: readonly T[]): T | null => (typeof value === 'string' && (valid as readonly string[]).includes(value) ? (value as T) : null);
+  const prefs = preferences ?? {};
+  const out = { ...settings };
+  const lang = pick(prefs.language ?? prefs.lang, LANGS);
+  if (lang && !fromAddress('lang', LANGS)) out.lang = lang;
+  const theme = pick(prefs.theme, THEMES);
+  if (theme && !fromAddress('theme', THEMES)) out.theme = theme;
+  const density = pick(prefs.density, DENSITIES);
+  if (density && !fromAddress('density', DENSITIES)) out.density = density;
+  return out;
+}
+
 export interface ApiRootProps extends Omit<BootOptions, 'container'> {
   api: AuthApi;
   store: StorageLike | null;
@@ -139,6 +165,8 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
   const [enrolReplacing, setEnrolReplacing] = useState(false);
   const [guestStep, setGuestStep] = useState(false);
   const [appKey, setAppKey] = useState(0);
+  // The settings the application renders with: the address, then the user's saved preferences (withPreferences).
+  const [appSettings, setAppSettings] = useState<DisplaySettings>(settings);
   // The `?error=` code is shown once, on the first sign-in page.
   const [errorCode, setErrorCode] = useState<string | null>(initial.errorCode);
   const modeRef = useRef<Mode>(mode);
@@ -165,8 +193,10 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
   const openApp = useCallback((me: Me, prof: SystemProfile, url: string | null) => {
     meRef.current = me;
     client.rememberMe(me);
-    client.setLanguage(settings.lang);
     if (url !== null) window.history.replaceState(null, '', url);
+    const shown = withPreferences(settings, me.preferences, window.location.search);
+    setAppSettings(shown);
+    client.setLanguage(shown.lang);
     setMode({ kind: 'app', ds: null });
     setAppKey((k) => k + 1);
     const generation = ++appGeneration.current;
@@ -180,7 +210,7 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
         if (current()) setMode({ kind: 'failed', message: CANNOT_LOAD, detail: e instanceof Error ? e.message : String(e), canSignOut: true });
       },
     );
-  }, [client, createDataSource, settings.lang, setMode]);
+  }, [client, createDataSource, settings, setMode]);
 
   const start = useCallback(async () => {
     setMode({ kind: 'loading' });
@@ -330,9 +360,9 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
     );
   }
   if (mode.kind === 'app') {
-    if (!mode.ds) return <LoadingPanel lang={settings.lang} theme={theme} />;
+    if (!mode.ds) return <LoadingPanel lang={appSettings.lang} theme={appSettings.theme} />;
     const deploy = deployOverride ?? profile?.deploy ?? settings.deploy;
-    return <App key={appKey} {...settings} deploy={deploy} dataSource={mode.ds} />;
+    return <App key={appKey} {...appSettings} deploy={deploy} dataSource={mode.ds} />;
   }
   return (
     <AuthRouter

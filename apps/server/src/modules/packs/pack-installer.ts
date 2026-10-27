@@ -4,20 +4,31 @@
 //
 // Steps 1 to 3 are `verifyPackForServer` (archive rules, signature with the compiled pack keys, checksums, datasets,
 // engine version, chain entity types). Step 4 refuses a lower `pack_version` than the installed one of the same pack
-// (or, for C.3 step 5, skips it without an audit entry) and treats the same version as a no-op. Step 5 writes everything in one transaction: the framework, the framework
-// version (a newer version of an installed edition updates titles, labels, lookups and templates in place and adds
-// rows; it never deletes a row, and tenant activity copies are never touched, D-30), the child rows, the superseded
-// edition moved to `transition`, `platform.pack_install` and `pack.installed` in the platform audit log. A failure in
-// step 5 rolls everything back and records a `failed` install with `pack.install_failed` in a separate transaction.
+// (or, for C.3 step 5, skips it without an audit entry) and treats the same version as a no-op. Step 5 writes
+// everything in one transaction: the framework, the framework version (a newer version of an installed edition
+// updates titles, labels, lookups and templates in place and adds rows; it never deletes a row, refuses a version that
+// drops a requirement or catalogue code instead of marking it retired (rule PACK-ROW-REMOVED, Milestone 2 E.1), and
+// tenant activity copies are never touched, D-30), the child rows, the mappings (the ones whose target pack is not
+// installed are recorded and retried when that pack is installed), the superseded edition moved to `transition`,
+// `platform.pack_install` and `pack.installed` in the platform audit log with the change summary of an update (E.3).
+// A failure in step 5 rolls everything back and records a `failed` install with `pack.install_failed` in a separate
+// transaction.
 import { randomUUID } from 'node:crypto';
-import { compareSemver, type ActorKind } from '@mscd/shared';
+import { compareSemver, type ActorKind, type MappingRow } from '@mscd/shared';
 import type { VerifiedPack } from '@mscd/pack-tools';
 import { sql, type Kysely, type RawBuilder } from 'kysely';
 import type { AuditEntryInput, AuditWriter, Trx } from '../../common/tokens';
 import { SYSTEM_USER_ID } from '../../common/tokens';
 import type { DB } from '../../db/types';
 import type { TrustAnchors } from '../license/trust-anchors';
+import { contentChanges, loadEditionRows, removedRows, rowRemovedError, type PackContentChanges } from './pack-content-diff';
 import { PackRejectedError, verifyPackForServer } from './pack-verification';
+
+/** Largest number of skipped mapping rows kept in the audit entry for a later retry. */
+export const MAX_RECORDED_SKIPPED_MAPPINGS = 5000;
+
+/** A mapping row whose source or target was not installed, as the `pack.installed` audit entry keeps it. */
+export type SkippedMapping = Pick<MappingRow, 'source_code' | 'target_pack_id' | 'target_code' | 'mapping_type' | 'evidence_reusable' | 'note'>;
 
 type FrameworkVersionStatus = 'current' | 'transition' | 'withdrawn';
 const STATUS_ORDER: Readonly<Record<FrameworkVersionStatus, number>> = { current: 0, transition: 1, withdrawn: 2 };
@@ -61,6 +72,12 @@ export type PackInstallOutcome =
       rows: PackRowCounts;
       /** Mapping rows whose source or target requirement is not installed (skipped, not an error). */
       skippedMappings: number;
+      /** Mapping rows of other installed packs that target this pack and were skipped before (written now). */
+      mappingsRetried: number;
+      /** What an update changed (null for the first installation of the edition). */
+      changes: PackContentChanges | null;
+      /** Content references the pack leaves open (warnings of `verifyPack`). */
+      warnings: readonly string[];
       archiveSha256: string;
     }
   | { status: 'unchanged'; installId: string | null; packId: string; version: string; archiveSha256: string }
@@ -140,6 +157,54 @@ function highestVersion(versions: readonly string[]): string | null {
   let best: string | null = null;
   for (const version of versions) if (best === null || compareSemver(version, best) > 0) best = version;
   return best;
+}
+
+type MappingSource = { column: 'source_requirement_id' | 'source_catalogue_item_id'; id: string };
+
+/** The requirement or catalogue item a mapping row starts from (requirements first: a code names both only in theory). */
+function sourceOf(code: string, requirements: ReadonlyMap<string, string>, catalogue: ReadonlyMap<string, string>): MappingSource | null {
+  const requirement = requirements.get(code);
+  if (requirement) return { column: 'source_requirement_id', id: requirement };
+  const item = catalogue.get(code);
+  return item ? { column: 'source_catalogue_item_id', id: item } : null;
+}
+
+/** The members of a mapping row the audit entry keeps (a row read back from it is normalised the same way). */
+function skippedMapping(row: SkippedMapping): SkippedMapping {
+  return {
+    source_code: String(row.source_code),
+    target_pack_id: String(row.target_pack_id),
+    target_code: String(row.target_code),
+    mapping_type: row.mapping_type,
+    evidence_reusable: row.evidence_reusable === true,
+    note: typeof row.note === 'string' ? row.note : null,
+  };
+}
+
+/** Writes one mapping, or updates the flags of the same source, target and type. */
+async function upsertMapping(trx: Trx, source: MappingSource, targetId: string, row: SkippedMapping): Promise<void> {
+  const exists = await trx
+    .selectFrom('ref.requirement_mapping')
+    .select('id')
+    .where(source.column, '=', source.id)
+    .where('target_requirement_id', '=', targetId)
+    .where('mapping_type', '=', row.mapping_type)
+    .executeTakeFirst();
+  if (exists) {
+    await trx.updateTable('ref.requirement_mapping').set({ evidence_reusable: row.evidence_reusable, note: row.note }).where('id', '=', exists.id).execute();
+    return;
+  }
+  await trx
+    .insertInto('ref.requirement_mapping')
+    .values({
+      source_requirement_id: source.column === 'source_requirement_id' ? source.id : null,
+      source_catalogue_item_id: source.column === 'source_catalogue_item_id' ? source.id : null,
+      target_requirement_id: targetId,
+      mapping_type: row.mapping_type,
+      evidence_reusable: row.evidence_reusable,
+      note: row.note,
+    })
+    .execute();
 }
 
 export class PackInstaller {
@@ -243,6 +308,16 @@ export class PackInstaller {
       .where('edition', '=', manifest.edition)
       .executeTakeFirst();
 
+    // An update keeps every requirement and catalogue code of the installed edition (E.1); its change summary is
+    // computed before anything is written.
+    let changes: PackContentChanges | null = null;
+    if (existing && existing.pack_id === manifest.pack_id) {
+      const installedRows = await loadEditionRows(trx, existing.id);
+      const refusal = rowRemovedError({ packId: manifest.pack_id, version: manifest.pack_version }, removedRows(installedRows, datasets));
+      if (refusal) throw refusal;
+      changes = contentChanges(installedRows, datasets);
+    }
+
     let versionId: string;
     let status: FrameworkVersionStatus = manifest.status;
     if (existing) {
@@ -313,11 +388,12 @@ export class PackInstaller {
             default_frequency_code: r.default_frequency_code,
             evidence_example: r.evidence_example,
             sort_order: r.sort_order,
+            retired: r.retired,
           })),
         )
         .onConflict((oc) =>
           oc.columns(['framework_version_id', 'requirement_code']).doUpdateSet(
-            excluded(['title_short', 'clause_group', 'is_hs_common', 'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code', 'evidence_example', 'sort_order']) as never,
+            excluded(['title_short', 'clause_group', 'is_hs_common', 'documented_info_mandatory', 'applicability_assessable', 'default_frequency_code', 'evidence_example', 'sort_order', 'retired']) as never,
           ),
         )
         .returning(['id', 'requirement_code'])
@@ -335,8 +411,9 @@ export class PackInstaller {
     }
     rows.requirements = datasets.requirements.length;
 
+    const catalogueIds = new Map<string, string>();
     if (datasets.catalogue.length > 0) {
-      await trx
+      const written = await trx
         .insertInto('ref.catalogue_item')
         .values(
           datasets.catalogue.map((c) => ({
@@ -348,14 +425,17 @@ export class PackInstaller {
             default_frequency_code: c.default_frequency_code,
             evidence_example: c.evidence_example,
             sort_order: c.sort_order,
+            retired: c.retired,
           })),
         )
         .onConflict((oc) =>
           oc.columns(['framework_version_id', 'item_code']).doUpdateSet(
-            excluded(['theme_code', 'title_short', 'requirement_id', 'default_frequency_code', 'evidence_example', 'sort_order']) as never,
+            excluded(['theme_code', 'title_short', 'requirement_id', 'default_frequency_code', 'evidence_example', 'sort_order', 'retired']) as never,
           ),
         )
+        .returning(['id', 'item_code'])
         .execute();
+      for (const row of written) catalogueIds.set(row.item_code, row.id);
     }
     rows.catalogue = datasets.catalogue.length;
 
@@ -500,7 +580,7 @@ export class PackInstaller {
       await trx
         .insertInto('ref.review_input_def')
         .values(datasets.reviewInputs.map((r) => ({ framework_version_id: versionId, ...r })))
-        .onConflict((oc) => oc.columns(['framework_version_id', 'code']).doUpdateSet(excluded(['title', 'mandatory', 'sort_order']) as never))
+        .onConflict((oc) => oc.columns(['framework_version_id', 'code']).doUpdateSet(excluded(['title', 'mandatory', 'sort_order', 'review_kind']) as never))
         .execute();
     }
     rows.reviewInputs = datasets.reviewInputs.length;
@@ -518,10 +598,21 @@ export class PackInstaller {
       await trx
         .insertInto('ref.document_template')
         .values(datasets.documentTemplates.map((d) => ({ framework_version_id: versionId, ...d })))
-        .onConflict((oc) => oc.columns(['framework_version_id', 'code']).doUpdateSet(excluded(['title', 'doc_type']) as never))
+        .onConflict((oc) => oc.columns(['framework_version_id', 'code']).doUpdateSet(excluded(['title', 'doc_type', 'requirement_code']) as never))
         .execute();
     }
     rows.documentTemplates = datasets.documentTemplates.length;
+
+    if (datasets.documentedInfo.length > 0) {
+      await trx
+        .insertInto('ref.documented_info')
+        .values(datasets.documentedInfo.map((d) => ({ framework_version_id: versionId, ...d })))
+        .onConflict((oc) =>
+          oc.columns(['framework_version_id', 'code']).doUpdateSet(excluded(['requirement_code', 'kind', 'title', 'template_code', 'sort_order']) as never),
+        )
+        .execute();
+    }
+    rows.documentedInfo = datasets.documentedInfo.length;
 
     if (datasets.auditActivities.length > 0) {
       await trx
@@ -563,8 +654,14 @@ export class PackInstaller {
     }
     rows.riskProfiles = datasets.riskProfiles.length;
 
-    const { added, skipped } = await this.writeMappings(trx, verified, requirementIds);
+    const { added, skipped } = await this.writeMappings(trx, verified, { requirements: requirementIds, catalogue: catalogueIds });
     rows.mappings = added;
+    const mappingsRetried = await this.retrySkippedMappings(trx, manifest.pack_id, requirementIds);
+    if (skipped.length > MAX_RECORDED_SKIPPED_MAPPINGS) {
+      this.deps.logger?.warn(
+        `Pack ${manifest.pack_id} ${manifest.pack_version} skips ${skipped.length} mapping rows; only the first ${MAX_RECORDED_SKIPPED_MAPPINGS} are kept for a retry`,
+      );
+    }
 
     // platform.pack_install: older installed versions of the same pack are superseded by this one.
     await trx
@@ -609,10 +706,19 @@ export class PackInstaller {
         archive_sha256: verified.sha256,
         signature_key_id: verified.keyId,
         rows,
+        ...(changes ? { changes } : {}),
+        ...(skipped.length > 0 ? { skipped_mappings: skipped.slice(0, MAX_RECORDED_SKIPPED_MAPPINGS) } : {}),
+        ...(mappingsRetried > 0 ? { mappings_retried: mappingsRetried } : {}),
+        ...(verified.warnings.length > 0 ? { content_warnings: verified.warnings.length } : {}),
       },
       edition: `${manifest.pack_id} ${manifest.pack_version}`,
       requestId: request.requestId,
     });
+    if (changes && (changes.activitiesDropped.length > 0 || changes.prepTasksDropped.length > 0)) {
+      this.deps.logger?.warn(
+        `Pack ${manifest.pack_id} ${manifest.pack_version} no longer lists activity templates ${changes.activitiesDropped.join(', ') || 'none'} and preparation task templates ${changes.prepTasksDropped.join(', ') || 'none'}; they stay installed, and activities created from them are unchanged`,
+      );
+    }
 
     return {
       status: 'installed',
@@ -623,7 +729,10 @@ export class PackInstaller {
       updatedEdition: existing !== undefined,
       previousVersion: previous,
       rows,
-      skippedMappings: skipped,
+      skippedMappings: skipped.length,
+      mappingsRetried,
+      changes,
+      warnings: verified.warnings,
       archiveSha256: verified.sha256,
     };
   }
@@ -687,53 +796,92 @@ export class PackInstaller {
     }
   }
 
-  /** `mappings/*.csv` into `ref.requirement_mapping`; rows whose requirements are not installed are skipped. */
-  private async writeMappings(trx: Trx, verified: VerifiedPack, requirementIds: ReadonlyMap<string, string>): Promise<{ added: number; skipped: number }> {
+  /**
+   * `mappings/*.csv` into `ref.requirement_mapping`. The source is a requirement or (ref 0002) a catalogue item of this
+   * pack; the target a requirement of the target pack. Rows whose target pack or code is not installed are skipped and
+   * returned, so the `pack.installed` entry keeps them for `retrySkippedMappings`.
+   */
+  private async writeMappings(
+    trx: Trx,
+    verified: VerifiedPack,
+    sources: { requirements: ReadonlyMap<string, string>; catalogue: ReadonlyMap<string, string> },
+  ): Promise<{ added: number; skipped: SkippedMapping[] }> {
     let added = 0;
-    let skipped = 0;
+    const skipped: SkippedMapping[] = [];
     const targets = new Map<string, Map<string, string>>();
     for (const rows of Object.values(verified.datasets.mappings)) {
       for (const row of rows) {
-        let target = targets.get(row.target_pack_id);
-        if (!target) {
-          const found = await trx
-            .selectFrom('ref.requirement as r')
-            .innerJoin('ref.framework_version as v', 'v.id', 'r.framework_version_id')
-            .select(['r.id', 'r.requirement_code'])
-            .where('v.pack_id', '=', row.target_pack_id)
-            .execute();
-          target = new Map(found.map((r) => [r.requirement_code, r.id]));
-          targets.set(row.target_pack_id, target);
-        }
-        const sourceId = requirementIds.get(row.source_code);
+        const target = await this.targetRequirements(trx, targets, row.target_pack_id);
+        const source = sourceOf(row.source_code, sources.requirements, sources.catalogue);
         const targetId = target.get(row.target_code);
-        if (!sourceId || !targetId) {
-          skipped += 1;
+        if (!source || !targetId) {
+          skipped.push(skippedMapping(row));
           continue;
         }
-        const exists = await trx
-          .selectFrom('ref.requirement_mapping')
-          .select('id')
-          .where('source_requirement_id', '=', sourceId)
-          .where('target_requirement_id', '=', targetId)
-          .where('mapping_type', '=', row.mapping_type)
-          .executeTakeFirst();
-        if (exists) {
-          await trx
-            .updateTable('ref.requirement_mapping')
-            .set({ evidence_reusable: row.evidence_reusable, note: row.note })
-            .where('id', '=', exists.id)
-            .execute();
-        } else {
-          await trx
-            .insertInto('ref.requirement_mapping')
-            .values({ source_requirement_id: sourceId, target_requirement_id: targetId, mapping_type: row.mapping_type, evidence_reusable: row.evidence_reusable, note: row.note })
-            .execute();
-        }
+        await upsertMapping(trx, source, targetId, row);
         added += 1;
       }
     }
     return { added, skipped };
+  }
+
+  /** Requirement ids by code of an installed pack (cached per installation). */
+  private async targetRequirements(trx: Trx, cache: Map<string, Map<string, string>>, packId: string): Promise<Map<string, string>> {
+    let target = cache.get(packId);
+    if (!target) {
+      const found = await trx
+        .selectFrom('ref.requirement as r')
+        .innerJoin('ref.framework_version as v', 'v.id', 'r.framework_version_id')
+        .select(['r.id', 'r.requirement_code'])
+        .where('v.pack_id', '=', packId)
+        .execute();
+      target = new Map(found.map((r) => [r.requirement_code, r.id]));
+      cache.set(packId, target);
+    }
+    return target;
+  }
+
+  /**
+   * Retries the mapping rows of other installed packs that target `packId` and were skipped because it was not
+   * installed (Milestone 2 E.1): each installed pack's `pack.installed` entry keeps its skipped rows. Returns the rows
+   * written now; rows that still do not resolve stay skipped.
+   */
+  private async retrySkippedMappings(trx: Trx, packId: string, targetIds: ReadonlyMap<string, string>): Promise<number> {
+    const installs = await trx
+      .selectFrom('platform.pack_install')
+      .select(['id', 'pack_id', 'framework_version_id'])
+      .where('status', '=', 'installed')
+      .where('pack_id', '<>', packId)
+      .where('framework_version_id', 'is not', null)
+      .execute();
+    if (installs.length === 0) return 0;
+    const entries = await sql<{ entity_id: string; skipped: unknown }>`
+      select entity_id, after_data -> 'skipped_mappings' as skipped
+        from platform.audit_log
+       where action = 'pack.installed' and entity_id = any(${installs.map((i) => i.id)}::uuid[])
+         and after_data ? 'skipped_mappings'`.execute(trx);
+    let written = 0;
+    for (const entry of entries.rows) {
+      const install = installs.find((i) => i.id === entry.entity_id);
+      const rows = Array.isArray(entry.skipped) ? (entry.skipped as SkippedMapping[]).filter((r) => r?.target_pack_id === packId) : [];
+      if (!install?.framework_version_id || rows.length === 0) continue;
+      const requirements = new Map(
+        (await trx.selectFrom('ref.requirement').select(['id', 'requirement_code']).where('framework_version_id', '=', install.framework_version_id).execute())
+          .map((r) => [r.requirement_code, r.id]),
+      );
+      const catalogue = new Map(
+        (await trx.selectFrom('ref.catalogue_item').select(['id', 'item_code']).where('framework_version_id', '=', install.framework_version_id).execute())
+          .map((c) => [c.item_code, c.id]),
+      );
+      for (const row of rows) {
+        const source = sourceOf(String(row.source_code), requirements, catalogue);
+        const targetId = targetIds.get(String(row.target_code));
+        if (!source || !targetId) continue;
+        await upsertMapping(trx, source, targetId, skippedMapping(row));
+        written += 1;
+      }
+    }
+    return written;
   }
 
   /** A transaction of the installer role with platform scope (D-31: `platform.audit_log`) and the request settings. */

@@ -95,7 +95,10 @@ export default function Timeline({ v }) {
               {list(v.tl?.evt?.prep).map((p, $i40) => (<Fragment key={$i40}>
                 <div style={{ display: "grid", gridTemplateColumns: "20px 1fr 170px 110px", gap: "10px", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--bd)" }}>
                   <span style={{ width: "16px", height: "16px", borderRadius: "4px", border: `1.5px solid ${p?.bd ?? ''}`, background: p?.bg, color: p?.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "700" }}>{txt(p?.mark)}</span>
-                  <span style={{ textDecoration: p?.deco }}>{txt(p?.title)}</span>
+                  <span style={{ textDecoration: p?.deco }}>{txt(p?.title)}
+                    {p?.ext ? (<>{txt(p?.ext)}
+                    </>) : null}
+                  </span>
                   <span style={{ fontSize: "12.5px", color: "var(--tx2)" }}>{txt(p?.owner)}</span>
                   <span style={{ fontSize: "12.5px", textAlign: "right", color: p?.dueFg }}>{txt(p?.due)}</span>
                 </div>
@@ -129,6 +132,8 @@ export default function Timeline({ v }) {
               </ul>
             </div>
           </>) : null}
+          {v.tl?.evt?.ext ? (<>{txt(v.tl?.evt?.ext)}
+          </>) : null}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--pad)" }}>
           <div style={{ background: "var(--sur)", border: "1px solid var(--bd)", borderRadius: "var(--r)", boxShadow: "var(--sh)" }}>
@@ -150,6 +155,8 @@ export default function Timeline({ v }) {
                     {c?.note ? (<>{", "}{txt(c?.note)}
                     </>) : null}
                   </span>
+                  {c?.ext ? (<>{txt(c?.ext)}
+                  </>) : null}
                 </span>
                 <span style={{ fontSize: "12.5px", color: c?.stFg, whiteSpace: "nowrap", textAlign: "right" }}>{txt(c?.st)}
                   <br />

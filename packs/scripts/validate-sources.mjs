@@ -1,26 +1,40 @@
 #!/usr/bin/env node
-// Validates the pack source folders under packs/sources (BUILD-PLAN E.8): every file
-// exists and is UTF-8 with LF line endings, CSV headers match E.8, JSON is pretty-printed,
-// values fit the ref columns of C.5, codes are unique, and references resolve (catalogue
-// and finding conditions to requirement codes, chain entity types to the record tables of
-// C.10, risk profiles, frequencies, lookups, contiguous phase and activity numbers).
-// Prints the dataset counts per pack and exits 1 on any error.
+// Validates the pack source folders under packs/sources (BUILD-PLAN E.8, MILESTONE-2 E.1):
+// every file exists and is UTF-8 with LF line endings, CSV headers match the format, JSON is
+// pretty-printed, values fit the ref columns of C.5 and ref 0002, codes are unique, retired
+// rows are consistent, and references resolve (catalogue items, documented information,
+// templates and finding conditions to requirement codes, chain entity types to the record
+// tables of C.10, risk profiles, frequencies, lookups, contiguous phase and activity numbers,
+// and the content references of E.1: cycle requirement codes, chain clause_at_risk values,
+// activity output documents and documented information templates). Prints the dataset counts
+// per pack, or with --json the counts as JSON, and exits 1 on any error.
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ALLOWED, CSV_HEADERS, ISO_DATE_RE, JSON_FILES, LOOKUP_CODE_RE, MAPPING_HEADER, REQUIRED_FILES,
-  REQUIRED_LABEL_KEYS, RULE_ID_RE, SEMVER_RE, parseCsv, toJson,
+  REQUIRED_LABEL_KEYS, RULE_ID_RE, SEMVER_RE, clauseAtRiskCodes, parseCsv, toJson,
 } from './lib/pack-format.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEFAULT_DIR = path.join(ROOT, 'packs', 'sources');
 
-const USAGE = `Usage: node packs/scripts/validate-sources.mjs [--dir <sources dir>]
+const USAGE = `Usage: node packs/scripts/validate-sources.mjs [--dir <sources dir>] [--json] [--verbose]
 
 Validates every pack source folder under packs/sources (or <sources dir>) against the
 pack file format and prints the dataset counts per pack. Exits 1 on any error.
+
+  --json   print the counts per pack as one JSON object on stdout (problems go to stderr):
+           requirements (rows not retired), retired, catalogue, catalogueLinked,
+           documentedInfo, documentTemplates, reviewInputs, evidenceExamples,
+           clauseEvidenceMissing (leaf clause rows without an evidence example),
+           unresolvedReferences and the other dataset counts
+  --verbose  list every warning instead of a count per pack
+
+Content references (cycle requirement codes, chain clause_at_risk values, activity output
+documents, documented information templates) must resolve in a pack that lists documented
+information; in a pack without documented information they are warnings.
 `;
 
 const SNAKE_RE = /^[a-z][a-z0-9_]*$/;
@@ -41,10 +55,15 @@ const DRIFT_EXTRA_SOURCES = ['management_review'];
 class Report {
   constructor() {
     this.errors = [];
+    this.warnings = [];
   }
 
   error(where, message) {
     this.errors.push(`${where}: ${message}`);
+  }
+
+  warn(where, message) {
+    this.warnings.push(`${where}: ${message}`);
   }
 }
 
@@ -284,14 +303,20 @@ function validatePack(report, sourcesDir, packId) {
   }
   counts.lookups = lookupRows.length;
 
-  // Requirements.
+  // Requirements: retired rows stay in the pack (E.1); a row under a retired parent is retired too.
   const reqRows = csv('requirements.csv');
   const reqCodes = new Set(reqRows.map((r) => r.obj.requirement_code).filter(Boolean));
+  const retiredCodes = new Set(reqRows.filter((r) => r.obj.retired === 'true').map((r) => r.obj.requirement_code));
+  /** Problem text of a reference to a missing or retired requirement, or null. */
+  const liveRequirement = (code) =>
+    !reqCodes.has(code) ? 'is not in requirements.csv' : retiredCodes.has(code) ? 'names a retired requirement' : null;
   for (const r of reqRows) {
     const x = row('requirements.csv', r);
     const code = x.text('requirement_code', { required: true, max: 20, re: CLAUSE_CODE_RE });
     const parent = x.text('parent_code', { max: 20 });
+    const retired = x.bool('retired');
     if (parent && (parent === code || !reqCodes.has(parent))) x.fail('parent_code', `"${parent}" is not another requirement of the pack`);
+    else if (parent && retired === false && retiredCodes.has(parent)) x.fail('retired', `the parent ${parent} is retired, so ${code} must be retired too`);
     x.text('title_short', { required: true, max: 255 });
     const group = x.oneOf('clause_group', ALLOWED.clauseGroup);
     if (code && group && code.split('.')[0] !== group) x.fail('clause_group', `${group} does not match requirement ${code}`);
@@ -305,7 +330,13 @@ function validatePack(report, sourcesDir, packId) {
   }
   unique(report, at('requirements.csv'), 'requirement_code', reqRows.map((r) => r.obj.requirement_code));
   unique(report, at('requirements.csv'), 'sort_order', reqRows.map((r) => r.obj.sort_order));
-  counts.requirements = reqRows.length;
+  const liveReqRows = reqRows.filter((r) => r.obj.retired !== 'true');
+  counts.requirements = liveReqRows.length;
+  counts.retired = reqRows.length - liveReqRows.length;
+  // Leaf clause rows: rows in the standard without a child row that is still in the standard.
+  const parentsOfLive = new Set(liveReqRows.map((r) => r.obj.parent_code).filter(Boolean));
+  const leafRows = liveReqRows.filter((r) => !parentsOfLive.has(r.obj.requirement_code));
+  counts.clauseEvidenceMissing = leafRows.filter((r) => r.obj.evidence_example === '').length;
 
   // Labels, both languages with the same keys.
   const labelsEn = json('labels.en.json');
@@ -345,15 +376,21 @@ function validatePack(report, sourcesDir, packId) {
     }
     x.text('title_short', { required: true, max: 255 });
     const req = x.text('requirement_code', { max: 20 });
-    if (req && !reqCodes.has(req)) x.fail('requirement_code', `"${req}" is not in requirements.csv`);
+    const problem = req ? liveRequirement(req) : null;
+    if (problem) x.fail('requirement_code', `"${req}" ${problem}`);
     const freq = x.text('default_frequency_code', { max: 20 });
     if (freq && !freqCodes.has(freq)) x.fail('default_frequency_code', `"${freq}" is not in frequencies.csv`);
     x.text('evidence_example');
     x.int('sort_order', { min: 1 });
+    x.bool('retired');
   }
   unique(report, at('catalogue.csv'), 'item_code', catRows.map((r) => r.obj.item_code));
   unique(report, at('catalogue.csv'), 'sort_order', catRows.map((r) => r.obj.sort_order));
-  counts.catalogue = catRows.length;
+  const liveCatRows = catRows.filter((r) => r.obj.retired !== 'true');
+  counts.catalogue = liveCatRows.length;
+  counts.catalogueRetired = catRows.length - liveCatRows.length;
+  counts.catalogueLinked = liveCatRows.filter((r) => r.obj.requirement_code !== '').length;
+  counts.evidenceExamples = [...liveReqRows, ...liveCatRows].filter((r) => r.obj.evidence_example !== '').length;
 
   // Risk profiles (referenced by risk stages of the chain).
   const profiles = json('risk_profiles.json');
@@ -374,6 +411,9 @@ function validatePack(report, sourcesDir, packId) {
     }
   }
   counts.risk_profiles = Array.isArray(profiles) ? profiles.length : 0;
+
+  // Content references of E.1, resolved once every dataset is read (see the end of this function).
+  const contentRefs = [];
 
   // Chain: sources, entity types of C.10, risk profiles, contiguous positions.
   const chainRows = csv('chain.csv');
@@ -398,7 +438,8 @@ function validatePack(report, sourcesDir, packId) {
     if (profile && entity !== 'risk') x.fail('risk_profile_code', 'is only allowed on a risk stage');
     if (profile && !profileCodes.has(profile)) x.fail('risk_profile_code', `"${profile}" is not in risk_profiles.json`);
     x.bool('is_mandatory');
-    x.text('clause_at_risk', { max: 20 });
+    const clauseAtRisk = x.text('clause_at_risk', { max: 20 });
+    if (clauseAtRisk) contentRefs.push({ file: 'chain.csv', line: r.line, kind: 'clause_at_risk', value: clauseAtRisk, owner: `stage ${key}` });
     x.int('overview_clause', { min: 4, max: 10 });
     const gEn = x.text('gate_type_label_en', { max: 40 });
     const gId = x.text('gate_type_label_id', { max: 40 });
@@ -424,7 +465,8 @@ function validatePack(report, sourcesDir, packId) {
     const act = x.int('activity_no', { min: 1, max: SMALLINT_MAX });
     x.text('title', { required: true, max: 255 });
     x.text('clause_ref', { max: 20 });
-    x.text('output_document_code', { max: 30 });
+    const output = x.text('output_document_code', { max: 30 });
+    if (output) contentRefs.push({ file: 'activities.csv', line: r.line, kind: 'output_document_code', value: output, owner: `activity ${r.obj.phase_no}.${r.obj.activity_no}` });
     x.text('expected_outcome');
     if (no === null) continue;
     if (!phases.has(no)) phases.set(no, { nameEn, nameId, gate, acts: [] });
@@ -441,18 +483,22 @@ function validatePack(report, sourcesDir, packId) {
   counts.phases = phases.size;
   counts.activities = actRows.length;
 
-  // Cycle requirements (requirement codes may name subclauses, so they are not resolved).
+  // Cycle requirements: requirement codes are content references; derivations name a kind of
+  // cycle.derive (E.2, MILESTONE-2 D.4).
   const cycleRows = csv('cycle_requirements.csv');
   for (const r of cycleRows) {
     const x = row('cycle_requirements.csv', r);
-    x.text('code', { required: true, max: 30 });
-    x.text('requirement_code', { max: 20 });
+    const code = x.text('code', { required: true, max: 30 });
+    const req = x.text('requirement_code', { max: 20 });
+    if (req) contentRefs.push({ file: 'cycle_requirements.csv', line: r.line, kind: 'requirement_code', value: req, owner: code });
     x.text('title', { required: true, max: 255 });
     const derivation = x.text('derivation');
     if (derivation) {
       try {
         const d = JSON.parse(derivation);
         if (!isPlainObject(d) || typeof d.kind !== 'string') x.fail('derivation', 'is not a JSON object with a kind');
+        else if (!ALLOWED.derivationKind.includes(d.kind)) x.fail('derivation', `kind "${d.kind}" is not one of ${ALLOWED.derivationKind.join(', ')}`);
+        else if (d.months !== undefined && !(Number.isInteger(d.months) && d.months >= 1 && d.months <= 120)) x.fail('derivation', 'months is not a whole number from 1 to 120');
       } catch {
         x.fail('derivation', 'is not valid JSON');
       }
@@ -509,7 +555,7 @@ function validatePack(report, sourcesDir, packId) {
   unique(report, at('prep_tasks.csv'), 'code', prepRows.map((r) => r.obj.code));
   counts.prep_tasks = prepRows.length;
 
-  // Management review inputs.
+  // Management review inputs, per review kind (the governing body review of ISO 37001).
   const reviewRows = csv('review_inputs.csv');
   for (const r of reviewRows) {
     const x = row('review_inputs.csv', r);
@@ -517,8 +563,10 @@ function validatePack(report, sourcesDir, packId) {
     x.text('title', { required: true, max: 255 });
     x.bool('mandatory');
     x.int('sort_order', { max: SMALLINT_MAX });
+    x.oneOf('review_kind', ALLOWED.reviewKind);
   }
   unique(report, at('review_inputs.csv'), 'code', reviewRows.map((r) => r.obj.code));
+  if (reviewRows.length > 0 && !reviewRows.some((r) => r.obj.review_kind === 'management')) report.error(at('review_inputs.csv'), 'has no input of review_kind management');
   counts.review_inputs = reviewRows.length;
 
   // Finding conditions: requirement codes resolve.
@@ -534,7 +582,7 @@ function validatePack(report, sourcesDir, packId) {
   unique(report, at('finding_conditions.csv'), 'code', findingRows.map((r) => r.obj.code));
   counts.finding_conditions = findingRows.length;
 
-  // Document templates: doc_type from the doc_type lookup.
+  // Document templates: doc_type from the doc_type lookup, the clause the document answers.
   const templateRows = csv('document_templates.csv');
   for (const r of templateRows) {
     const x = row('document_templates.csv', r);
@@ -542,9 +590,30 @@ function validatePack(report, sourcesDir, packId) {
     x.text('title', { required: true, max: 255 });
     const type = x.text('doc_type', { required: true, max: 20 });
     if (type && !(lookups.get('doc_type') ?? new Set()).has(type)) x.fail('doc_type', `"${type}" is not a doc_type in lookups.csv`);
+    const req = x.text('requirement_code', { max: 20 });
+    const problem = req ? liveRequirement(req) : null;
+    if (problem) x.fail('requirement_code', `"${req}" ${problem}`);
   }
   unique(report, at('document_templates.csv'), 'code', templateRows.map((r) => r.obj.code));
+  const templateCodes = new Set(templateRows.map((r) => r.obj.code));
   counts.document_templates = templateRows.length;
+
+  // Documented information (E.1): the requirement that asks for it, maintain or retain, the template.
+  const infoRows = csv('documented_info.csv');
+  for (const r of infoRows) {
+    const x = row('documented_info.csv', r);
+    const code = x.text('code', { required: true, max: 30 });
+    const req = x.text('requirement_code', { required: true, max: 20 });
+    const problem = req ? liveRequirement(req) : null;
+    if (problem) x.fail('requirement_code', `"${req}" ${problem}`);
+    x.oneOf('kind', ALLOWED.documentedInfoKind);
+    x.text('title', { required: true, max: 255 });
+    const template = x.text('template_code', { max: 30 });
+    if (template) contentRefs.push({ file: 'documented_info.csv', line: r.line, kind: 'template_code', value: template, owner: code });
+    x.int('sort_order', { max: SMALLINT_MAX });
+  }
+  unique(report, at('documented_info.csv'), 'code', infoRows.map((r) => r.obj.code));
+  counts.documented_info = infoRows.length;
 
   // Audit activity templates.
   const auditRows = csv('audit_activities.csv');
@@ -600,6 +669,31 @@ function validatePack(report, sourcesDir, packId) {
   }
   counts.mappings = mappingCount;
 
+  // Content references of E.1: errors in a pack that lists documented information, warnings
+  // before it (the Milestone 1 content names subclauses and documents the pack does not hold).
+  const strict = infoRows.length > 0;
+  let unresolved = 0;
+  for (const ref of contentRefs) {
+    let problems = [];
+    if (ref.kind === 'clause_at_risk') {
+      const codes = clauseAtRiskCodes(ref.value);
+      if (codes === null) problems = [`"${ref.value}" is not a clause reference such as 6.1.3, 6.1.3 d) or 8.1 / 9.1`];
+      else problems = codes.map((c) => (liveRequirement(c) ? `${c} ${liveRequirement(c)}` : null)).filter(Boolean);
+    } else if (ref.kind === 'requirement_code') {
+      const problem = liveRequirement(ref.value);
+      if (problem) problems = [`"${ref.value}" ${problem}`];
+    } else if (!templateCodes.has(ref.value)) {
+      problems = [`"${ref.value}" is not in document_templates.csv`];
+    }
+    for (const problem of problems) {
+      unresolved += 1;
+      const message = `${ref.owner}: ${ref.kind} ${problem}`;
+      if (strict) report.error(at(ref.file, ref.line), message);
+      else report.warn(at(ref.file, ref.line), message);
+    }
+  }
+  counts.unresolvedReferences = unresolved;
+
   // Manifest last: it is checked against the datasets.
   const m = json('manifest.json');
   if (m !== undefined) validateManifest(report, at('manifest.json'), packId, m, catRows.length);
@@ -654,12 +748,44 @@ function validateManifest(report, where, packId, m, catalogueRows) {
 // ---------------------------------------------------------------------------------------
 
 const COUNT_COLUMNS = [
-  ['requirements', 'req'], ['catalogue', 'cat'], ['chain', 'chain'], ['phases', 'phases'],
+  ['requirements', 'req'], ['retired', 'ret'], ['catalogue', 'cat'], ['chain', 'chain'], ['phases', 'phases'],
   ['activities', 'acts'], ['frequencies', 'freq'], ['labels', 'labels'], ['cycle_requirements', 'cycle'],
   ['drift_rules', 'drift'], ['prep_tasks', 'prep'], ['review_inputs', 'review'],
-  ['finding_conditions', 'findc'], ['document_templates', 'doctpl'], ['audit_activities', 'audit'],
-  ['lookups', 'lookups'], ['rules', 'rules'], ['risk_profiles', 'riskp'], ['mappings', 'maps'],
+  ['finding_conditions', 'findc'], ['document_templates', 'doctpl'], ['documented_info', 'docinf'],
+  ['audit_activities', 'audit'], ['lookups', 'lookups'], ['rules', 'rules'], ['risk_profiles', 'riskp'],
+  ['mappings', 'maps'],
 ];
+
+/** The counts of one pack as `--json` prints them (MILESTONE-2 E.1). */
+function jsonCounts(c) {
+  return {
+    requirements: c.requirements ?? 0,
+    retired: c.retired ?? 0,
+    catalogue: c.catalogue ?? 0,
+    catalogueRetired: c.catalogueRetired ?? 0,
+    catalogueLinked: c.catalogueLinked ?? 0,
+    documentedInfo: c.documented_info ?? 0,
+    documentTemplates: c.document_templates ?? 0,
+    reviewInputs: c.review_inputs ?? 0,
+    evidenceExamples: c.evidenceExamples ?? 0,
+    clauseEvidenceMissing: c.clauseEvidenceMissing ?? 0,
+    unresolvedReferences: c.unresolvedReferences ?? 0,
+    chain: c.chain ?? 0,
+    phases: c.phases ?? 0,
+    activities: c.activities ?? 0,
+    frequencies: c.frequencies ?? 0,
+    labels: c.labels ?? 0,
+    cycleRequirements: c.cycle_requirements ?? 0,
+    driftRules: c.drift_rules ?? 0,
+    prepTasks: c.prep_tasks ?? 0,
+    findingConditions: c.finding_conditions ?? 0,
+    auditActivities: c.audit_activities ?? 0,
+    lookups: c.lookups ?? 0,
+    rules: c.rules ?? 0,
+    riskProfiles: c.risk_profiles ?? 0,
+    mappings: c.mappings ?? 0,
+  };
+}
 
 function printCounts(results) {
   const width = Math.max(4, ...results.map(([id]) => id.length));
@@ -672,11 +798,21 @@ function printCounts(results) {
 
 function main(argv) {
   let dir = DEFAULT_DIR;
+  let asJson = false;
+  let verbose = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
       process.stdout.write(USAGE);
       return 0;
+    }
+    if (arg === '--json') {
+      asJson = true;
+      continue;
+    }
+    if (arg === '--verbose') {
+      verbose = true;
+      continue;
     }
     if (arg === '--dir') {
       if (!argv[i + 1]) {
@@ -705,13 +841,27 @@ function main(argv) {
     results.push([id, validatePack(report, dir, id)]);
   }
   if (!results.length) report.error(path.basename(dir), 'holds no pack folder');
-  printCounts(results);
+  // With --json, stdout holds only the JSON document; warnings and errors go to stderr.
+  const note = asJson ? (line) => console.error(line) : (line) => console.log(line);
+  if (asJson) process.stdout.write(JSON.stringify(Object.fromEntries(results.map(([id, c]) => [id, jsonCounts(c)])), null, 2) + '\n');
+  else printCounts(results);
+  if (report.warnings.length) {
+    note(`\n${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'}: content references that do not resolve yet (errors once a pack lists its documented information)`);
+    if (verbose) {
+      for (const w of report.warnings) note('  ' + w);
+    } else {
+      for (const [id] of results) {
+        const n = report.warnings.filter((w) => w.startsWith(`${id}/`)).length;
+        if (n) note(`  ${id}: ${n} (--verbose lists them)`);
+      }
+    }
+  }
   if (report.errors.length) {
     console.error(`\n${report.errors.length} error${report.errors.length === 1 ? '' : 's'}:`);
     for (const e of report.errors) console.error('  ' + e);
     return 1;
   }
-  console.log(`\n${results.length} pack source folders valid`);
+  note(`\n${results.length} pack source folders valid`);
   return 0;
 }
 

@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, inlineDetails, chip, search, tab, activeTab, switchMs, switchOrg, switchRole,
-  expectShown,
+  expectShown, navFor, builtinNav,
 } from './helpers.js';
 
 const isActiveChip = (l) => expect(l).toHaveAttribute('style', /background: var\(--tx\)/);
@@ -126,7 +126,7 @@ test.describe('Organisation switching', () => {
     await switchOrg(page, 'RS Medika Nusantara');
     await expect(ui.title(page)).toHaveText('Overview');
     await expect(ui.nav(page, 'Portfolio Overview')).toHaveCount(0);
-    await expect(ui.navItems(page)).toHaveCount(13);
+    await expect(ui.navItems(page)).toHaveCount(await navFor(page, 'manager', { single: true }));
     await expect(ui.msSwitch(page).locator('svg')).toHaveCount(0);
     await ui.msSwitch(page).click();
     await expect(page.locator('header div[style*="width: 420px"]')).toHaveCount(0);
@@ -150,7 +150,7 @@ test.describe('Organisation switching', () => {
     await switchOrg(page, 'PT Nusantara Digital Teknologi');
     await expect(ui.title(page)).toHaveText('Portfolio Overview');
     await expect(page.locator('main svg[viewBox="0 0 120 120"]')).toHaveCount(4);
-    await expect(ui.navItems(page)).toHaveCount(14);
+    await expect(ui.navItems(page)).toHaveCount(await navFor(page, 'manager'));
   });
 });
 
@@ -172,7 +172,8 @@ test.describe('Roles and navigation', () => {
   test('a domain owner sees only their own controls and documents', async ({ page }) => {
     await openApp(page);
     await switchRole(page, 'Domain Owner');
-    await expect(ui.navItems(page)).toHaveText([/Overview/, /Controls & requirements/, /Document register/, /Evidence freshness/, /My Tasks/]);
+    await expect(builtinNav(page)).toHaveText([/Overview/, /Controls & requirements/, /Document register/, /Evidence freshness/, /My Tasks/]);
+    await expect(ui.navItems(page)).toHaveCount(await navFor(page, 'owner'));
     await go(page, 'Controls & requirements');
     await chip(page, 'All').click();
     await expect(listRows(page).locator('td:nth-child(5)')).toHaveText(Array(await listRows(page).count()).fill(/Bagus Prasetyo/));
@@ -187,7 +188,7 @@ test.describe('Roles and navigation', () => {
     await go(page, 'Chain stages');
     await switchOrg(page, 'RS Medika Nusantara');
     await expect(ui.title(page)).toHaveText('Audit readiness');
-    await expect(ui.navItems(page)).toHaveCount(8);
+    await expect(ui.navItems(page)).toHaveCount(await navFor(page, 'auditor', { single: true }));
   });
 
   test('sidebar badges count gate items, chain problems, critical evidence and tasks', async ({ page }) => {

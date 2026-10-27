@@ -12,7 +12,10 @@ export {
   DEFAULT_PACK_LIMITS, MANIFEST_FILE, SIGNATURE_FILE, normaliseEntryPath, readPack, resolvePackLimits, type PackArchive,
   type PackLimits,
 } from './archive.js';
-export { datasetCounts, parsePackDatasets, type DatasetManifestFields, type PackDatasets } from './datasets.js';
+export {
+  clauseAtRiskCodes, contentReferencesStrict, datasetCounts, parsePackDatasets, parsePackDatasetsWithWarnings, type DatasetManifestFields,
+  type PackDatasets, type ParsedPackDatasets,
+} from './datasets.js';
 export {
   PACK_MTIME, buildPack, buildPackFromSource, formatSignatureFile, packFileName, parseSignatureFile, readPackSource, sha256Hex,
   verifyPack, type BuildPackOptions, type BuiltPack, type PackSource, type VerifiedPack, type VerifyPackOptions,

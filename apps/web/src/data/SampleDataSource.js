@@ -1,4 +1,4 @@
-// Sample data source (BUILD-PLAN H.3, UI 4.4): serves the fictional sample organisations from mscd-data.js through
+// Sample data source (BUILD-PLAN H.3, UI 4.4; MILESTONE-2 C.6 adds `mutate` and `insert`): serves the fictional sample organisations from mscd-data.js through
 // the DataSource interface of types.ts. It owns the override store that the controller kept in `state.ov` until
 // WP-07: every command applies exactly the patch the controller applied (UI 3.2 to 3.6) and returns
 // {ok: true, changed: [msId]}, and snapshots carry the bundles that sample-derive.js computes over that store.
@@ -15,6 +15,11 @@ import { data as deriveData, chain as deriveChain, deriveBundle } from './sample
 const PER_SYSTEM = ['STAGES', 'X', 'CHAINS', 'EVENTS', 'FOCUS', 'PREP', 'PAST', 'CYCLE_ITEMS', 'DRIFT', 'PACKS'];
 const PAGE_ACTIONS = ['exportBoard', 'exportReadiness', 'exportSoa', 'exportDocs', 'evidencePack', 'auditorAccess', 'runCheck', 'calendarFeed', 'checkUpdates', 'importBundle', 'verifyPhase'];
 const RECORD_KINDS = ['req', 'soa', 'doc', 'ev', 'act', 'x', 'prep', 'cycle', 'drift'];
+
+// Record kinds sample adapters of the host screens change (MILESTONE-2 C.6): bundle records by id or code, and the
+// per-system lists of the snapshot. A tuple row (prep, cycle, past) is found by its first element.
+const BUNDLE_KINDS = { req: 'id', doc: 'id', ev: 'code' };
+const LIST_KINDS = { event: 'EVENTS', prep: 'PREP', cycle: 'CYCLE_ITEMS', past: 'PAST' };
 
 const NOT_FOUND = ['Record not found', 'Rekaman tidak ditemukan'];
 const NOT_APPLICABLE = ['This action does not apply to this record', 'Tindakan ini tidak berlaku untuk rekaman ini'];
@@ -34,6 +39,8 @@ export function createSampleDataSource(options) {
 export class SampleDataSource {
   #data; #orgs; #org; #persona;
   #ov = {};
+  // Changes of sample adapters (MILESTONE-2 C.6): patches by `<ms>:<kind>:<id>` and added rows by `<ms>:<kind>`.
+  #mut = {}; #ins = {}; #viewCache = null;
 
   constructor({ data = SAMPLE, orgs = ORGS, org, persona = 'manager' } = {}) {
     this.#data = data;
@@ -58,15 +65,54 @@ export class SampleDataSource {
     });
   }
 
-  /** The snapshot with the bundles of `msIds` recomputed from the override store. */
+  /** The snapshot with the bundles and per-system lists of `msIds` recomputed from the override store. */
   reload(snapshot, msIds) {
     return settle(() => {
+      const view = this.#view();
       const bundles = { ...snapshot.bundles };
+      const next = { ...snapshot, bundles };
       for (const id of new Set(msIds)) {
         const ms = snapshot.MS.find((m) => m.id === id);
-        if (ms && bundles[id]) bundles[id] = deriveBundle(this.#data, this.#ov, this.#system(id));
+        if (!ms || !bundles[id]) continue;
+        bundles[id] = deriveBundle(view, this.#ov, this.#system(id));
+        for (const k of PER_SYSTEM) if (snapshot[k] && id in view[k]) next[k] = { ...next[k], [id]: view[k][id] };
       }
-      return { ...snapshot, bundles };
+      return next;
+    });
+  }
+
+  // ---------- sample adapters of the host screens (MILESTONE-2 C.6) ----------
+
+  /**
+   * Merges `patch` into a record of a system: `req`, `doc` and `ev` by id or code, `event` by index, `prep`, `cycle` and
+   * `past` by their first element (a tuple patch is keyed by position, `{3: 'done'}`), `x:<stage>` by id. The built-in
+   * screens show the change after the reload of `changed`.
+   */
+  mutate(msId, kind, id, patch) {
+    return settle(() => {
+      if (!this.#inOrg(msId)) return fail(404, NOT_FOUND);
+      if (!patch || typeof patch !== 'object') return fail(422, NOT_APPLICABLE);
+      if (!this.#knownKind(kind)) return fail(422, NOT_APPLICABLE);
+      if (!this.#find(msId, kind, String(id))) return fail(404, NOT_FOUND);
+      const key = msId + ':' + kind + ':' + id;
+      this.#mut[key] = { ...(this.#mut[key] || {}), ...patch };
+      this.#viewCache = null;
+      return ok([msId]);
+    });
+  }
+
+  /** Adds a row to a record list of a system (same kinds as `mutate`); a bundle record needs its id or code. */
+  insert(msId, kind, row) {
+    return settle(() => {
+      if (!this.#inOrg(msId)) return fail(404, NOT_FOUND);
+      if (!this.#knownKind(kind) || !row || typeof row !== 'object') return fail(422, NOT_APPLICABLE);
+      const idField = BUNDLE_KINDS[kind];
+      if (idField && !row[idField]) return fail(422, NOT_APPLICABLE);
+      if (idField && this.#find(msId, kind, String(row[idField]))) return fail(409, ['A record with this id already exists', 'Rekaman dengan id ini sudah ada']);
+      const key = msId + ':' + kind;
+      this.#ins[key] = [...(this.#ins[key] || []), Array.isArray(row) ? [...row] : { ...row }];
+      this.#viewCache = null;
+      return ok([msId]);
     });
   }
 
@@ -109,8 +155,8 @@ export class SampleDataSource {
   remindAll(msId) {
     return settle(() => {
       if (!this.#inOrg(msId)) return fail(404, NOT_FOUND);
-      const d = deriveData(this.#data, this.#ov, this.#system(msId));
-      const holders = new Set(deriveChain(this.#data, this.#ov, d).items.map((i) => i.h).filter((h) => h !== 'none'));
+      const d = deriveData(this.#view(), this.#ov, this.#system(msId));
+      const holders = new Set(deriveChain(this.#view(), this.#ov, d).items.map((i) => i.h).filter((h) => h !== 'none'));
       return ok([], { count: holders.size });
     });
   }
@@ -158,7 +204,7 @@ export class SampleDataSource {
       if (!repo) return fail(404, NOT_FOUND);
       if (!(repo.actions || ['test']).includes(action)) return fail(422, NOT_APPLICABLE);
       if (action !== 'test') return ok([]);
-      const count = this.#org.ms.reduce((n, id) => n + deriveData(this.#data, this.#ov, this.#system(id)).evs.filter((e) => e.loc === repoId).length, 0);
+      const count = this.#org.ms.reduce((n, id) => n + deriveData(this.#view(), this.#ov, this.#system(id)).evs.filter((e) => e.loc === repoId).length, 0);
       return ok([], { count });
     });
   }
@@ -169,7 +215,7 @@ export class SampleDataSource {
       if (!PAGE_ACTIONS.includes(action)) return fail(422, NOT_APPLICABLE);
       if (action === 'exportBoard' || action === 'checkUpdates' || action === 'importBundle') return ok([]);
       if (!this.#inOrg(msId)) return fail(404, NOT_FOUND);
-      if (action === 'runCheck') return ok([], { count: deriveData(this.#data, this.#ov, this.#system(msId)).evs.length });
+      if (action === 'runCheck') return ok([], { count: deriveData(this.#view(), this.#ov, this.#system(msId)).evs.length });
       return ok([]);
     });
   }
@@ -201,6 +247,52 @@ export class SampleDataSource {
   // ---------- internals ----------
 
   #findOrg(id) { return this.#orgs.find((o) => o.id === id) || null; }
+  #knownKind(kind) { return kind in BUNDLE_KINDS || kind in LIST_KINDS || (typeof kind === 'string' && /^x:[a-z][a-z0-9_]*$/.test(kind)); }
+
+  // The record of a kind in the current view (with earlier changes), or undefined.
+  #find(msId, kind, id) {
+    const view = this.#view();
+    const system = this.#system(msId);
+    if (kind === 'req') return view.buildReqs(system).find((r) => r.id === id);
+    if (kind === 'doc') return view.buildDocs(system).find((d) => d.id === id);
+    if (kind === 'ev') return deriveData(view, this.#ov, system).evs.find((e) => e.code === id);
+    if (kind === 'event') return (view.EVENTS[msId] || [])[Number(id)];
+    if (kind in LIST_KINDS) return (view[LIST_KINDS[kind]][msId] || []).find((r) => String(r[0]) === id);
+    return ((view.X[msId] || {})[kind.slice(2)] || []).find((x) => x.id === id);
+  }
+
+  // The sample module with the changes of the sample adapters applied (the original module when there are none).
+  #view() {
+    if (this.#viewCache) return this.#viewCache;
+    const base = this.#data;
+    if (!Object.keys(this.#mut).length && !Object.keys(this.#ins).length) return (this.#viewCache = base);
+    const mut = this.#mut, ins = this.#ins;
+    const merge = (row, patch) => (Array.isArray(row) ? row.map((v, i) => (String(i) in patch ? patch[i] : v)) : { ...row, ...patch });
+    const apply = (msId, kind, rows, idOf) => [...rows, ...(ins[msId + ':' + kind] || [])].map((r, i) => {
+      const patch = mut[msId + ':' + kind + ':' + idOf(r, i)];
+      return patch ? merge(r, patch) : r;
+    });
+    const added = (msId, kind) => new Set((ins[msId + ':' + kind] || []).map((r) => r[BUNDLE_KINDS[kind]]));
+    const perSystem = (k, kind, idOf) => Object.fromEntries(Object.entries(base[k]).map(([msId, rows]) => [msId, apply(msId, kind, rows || [], idOf)]));
+    const X = Object.fromEntries(Object.keys({ ...base.X, ...Object.fromEntries(this.#orgs.flatMap((o) => o.ms).map((m) => [m, 1])) }).map((msId) => {
+      const stages = { ...(base.X[msId] || {}) };
+      for (const key of Object.keys(ins)) if (key.startsWith(msId + ':x:')) stages[key.slice(msId.length + 3)] ||= [];
+      return [msId, Object.fromEntries(Object.entries(stages).map(([stage, rows]) => [stage, apply(msId, 'x:' + stage, rows || [], (r) => r.id)]))];
+    }));
+    const view = {
+      ...base,
+      buildReqs: (ms) => apply(ms.id, 'req', base.buildReqs(ms), (r) => r.id),
+      buildDocs: (ms) => apply(ms.id, 'doc', base.buildDocs(ms), (r) => r.id),
+      // Evidence is generated from the pack's controls only; rows of sample adapters are added as they are.
+      buildEvidence: (ms, reqs) => { const extra = added(ms.id, 'req'); return apply(ms.id, 'ev', base.buildEvidence(ms, reqs.filter((r) => !extra.has(r.id))), (e) => e.code); },
+      EVENTS: perSystem('EVENTS', 'event', (r, i) => i),
+      PREP: perSystem('PREP', 'prep', (r) => r[0]),
+      CYCLE_ITEMS: perSystem('CYCLE_ITEMS', 'cycle', (r) => r[0]),
+      PAST: perSystem('PAST', 'past', (r) => r[0]),
+      X,
+    };
+    return (this.#viewCache = view);
+  }
   #inOrg(msId) { return this.#org.ms.includes(msId); }
   #me() { return this.#data.ROLES[this.#persona].who; }
   #system(id) { return { ...this.#data.MS.find((m) => m.id === id) }; }
@@ -215,7 +307,7 @@ export class SampleDataSource {
 
   // Current document or evidence behind a key.
   #record(k) {
-    const d = deriveData(this.#data, this.#ov, this.#system(k.ms));
+    const d = deriveData(this.#view(), this.#ov, this.#system(k.ms));
     return k.kind === 'doc' ? d.docs.find((x) => x.id === k.id) : k.kind === 'ev' ? d.evs.find((x) => x.code === k.id) : null;
   }
 
@@ -246,7 +338,7 @@ export class SampleDataSource {
   }
 
   #snapshot(org) {
-    const S = this.#data;
+    const S = this.#view();
     const MS = S.MS.filter((m) => org.ms.includes(m.id)).map((m) => ({ ...m }));
     const shorts = MS.map((m) => m.short);
     const pick = (map) => Object.fromEntries(MS.filter((m) => m.id in map).map((m) => [m.id, map[m.id]]));

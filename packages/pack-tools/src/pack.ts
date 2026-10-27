@@ -10,7 +10,7 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { PackManifest, PackSourceManifest } from '@mscd/shared';
 import { MANIFEST_FILE, SIGNATURE_FILE, readPack, type PackLimits } from './archive.js';
-import { parsePackDatasets, type PackDatasets } from './datasets.js';
+import { parsePackDatasetsWithWarnings, type PackDatasets } from './datasets.js';
 import { PackError } from './errors.js';
 import { loadSigningKey, trustedKeysById, type SigningKeyInput, type TrustedKeyInput } from './keys.js';
 import { writeTar } from './tar.js';
@@ -121,6 +121,8 @@ export interface BuiltPack {
   readonly bytes: Buffer;
   readonly manifest: PackManifest;
   readonly datasets: PackDatasets;
+  /** Content references left open by a pack without documented information (`parsePackDatasetsWithWarnings`). */
+  readonly warnings: readonly string[];
   /** Key id of the signing key. */
   readonly keyId: string;
   /** SHA-256 of the archive bytes, hexadecimal. */
@@ -150,7 +152,7 @@ export function buildPackFromSource(source: PackSource, signingKey: SigningKeyIn
   if (new Set(options.rejectKeyIds ?? []).has(key.keyId)) {
     throw new PackError('signing_key', `pack signing key ${key.keyId} is a development key; a release build never signs with it`);
   }
-  const datasets = parsePackDatasets(source.datasets, source.manifest);
+  const { datasets, warnings } = parsePackDatasetsWithWarnings(source.datasets, source.manifest);
   const names = [...source.datasets.keys()].sort(byName);
   const checksums: Record<string, string> = {};
   for (const name of names) checksums[name] = `sha256:${sha256Hex(source.datasets.get(name) as Buffer)}`;
@@ -167,7 +169,7 @@ export function buildPackFromSource(source: PackSource, signingKey: SigningKeyIn
   const bytes = gzipSync(writeTar(entries, { mtime: PACK_MTIME }), { level: 9 });
   // The archive must pass the same checks as any pack the server installs.
   verifyPack(bytes, [key.publicKey]);
-  return { fileName: packFileName(manifest), bytes, manifest, datasets, keyId: key.keyId, sha256: sha256Hex(bytes) };
+  return { fileName: packFileName(manifest), bytes, manifest, datasets, warnings, keyId: key.keyId, sha256: sha256Hex(bytes) };
 }
 
 /**
@@ -195,6 +197,8 @@ export interface VerifiedPack {
   /** Exact bytes of `manifest.json`. */
   readonly manifestBytes: Buffer;
   readonly datasets: PackDatasets;
+  /** Content references left open by a pack without documented information (`parsePackDatasetsWithWarnings`). */
+  readonly warnings: readonly string[];
   /** Dataset files by name, exactly as in the archive. */
   readonly files: ReadonlyMap<string, Buffer>;
   /** Key id of the key that signed the pack. */
@@ -236,6 +240,6 @@ export function verifyPack(buffer: Buffer, trustedKeys: Iterable<TrustedKeyInput
   if (mismatched.length > 0) {
     throw new PackError('checksum', `pack ${manifest.pack_id} ${manifest.pack_version}: datasets do not match their checksums`, mismatched);
   }
-  const datasets = parsePackDatasets(files, manifest);
-  return { manifest, manifestBytes: archive.manifestBytes, datasets, files, keyId, sha256: sha256Hex(buffer) };
+  const { datasets, warnings } = parsePackDatasetsWithWarnings(files, manifest);
+  return { manifest, manifestBytes: archive.manifestBytes, datasets, warnings, files, keyId, sha256: sha256Hex(buffer) };
 }

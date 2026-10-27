@@ -75,6 +75,24 @@ CI=1 npm run test:e2e -w @mscd/web -- -g "Golden Thread"       # tests whose tit
 
 Failures leave screenshots and traces in `apps/web/test-results/` and an HTML report in `apps/web/e2e-report/` (open it with `npx playwright show-report apps/web/e2e-report`). Both folders are git-ignored.
 
+### API end-to-end project
+
+`npm run test:e2e:api` runs the same specs against a seeded api (`apps/web/playwright.api.config.js`). Its web server is `apps/web/e2e-api/stack.mjs`, which needs Docker and the ports 4174 (web), 3174 (api), 4310 (mock providers) and 4311 (storage gateway). It builds the server and the mock providers, starts PostgreSQL, SeaweedFS and Mailpit containers, migrates and seeds the demo data into a template database, starts the api, the gateway and the mock providers, and serves a `VITE_DATA_SOURCE=api` build of the web app on port 4174. Playwright stops the stack when the run ends, and the stack removes its containers.
+
+```bash
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web                                  # whole suite
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/license.spec.js  # one spec file
+```
+
+- The lock keeps two stacks on one host from fighting over the fixed ports. Wrap every run in it on a shared machine.
+- `MSCD_TEST_CONTAINER_PREFIX` names the containers `<prefix>e2e-<service>-<random>` (default `mscd-`). At start the stack removes containers of an earlier, killed run only when their `mscd.test.expires` label has passed (3 hours after they started) and their name has the same prefix. A stack still running in another session keeps its containers.
+- `E2E_STACK_SKIP_BUILD=1` skips the server and mock provider builds; `MSCD_TEST_PG_IMAGE` replaces the PostgreSQL image.
+- Every test starts from the seed state: the api recreates its database from the template and a session of `rina` is minted (`e2e-api/fixtures.js`). A spec picks another demo user with `test.use({ apiSession: 'maya' })`, or `null` for no session.
+- Tests whose title carries `@sample-only` are skipped in this project; specs in `e2e/api-only` carry `@api-only` and run only here. One worker runs the tests one after another.
+- Failures leave traces in `apps/web/test-results/api/` and the report in `apps/web/e2e-report/api/`.
+
+The data source of a build is set by `VITE_DATA_SOURCE` when it is built. `npm run dev`, `npm run build` and the sample E2E suite use the sample data when it is unset. The `mscd-web` image and release bundles build with `api`, which is the default of `deploy/docker/web.Dockerfile`.
+
 ## Generated views
 
 The screen components in `apps/web/src/views/*.jsx` and the hover rules in `apps/web/src/hover.css` are generated from `project/MSCD Mockup.dc.html` by `apps/web/scripts/convert-template.mjs`. Never edit them by hand. The one exception is `apps/web/src/views/util.js`, which holds hand-written helpers the views import.
@@ -92,6 +110,41 @@ npm run gen:views:check -w @mscd/web
 ```
 
 The converter also takes `--out <dir>` to write the views to `<dir>/views/` and the hover rules to `<dir>/hover.css` instead of `apps/web/src`.
+
+## Adding a screen
+
+New screens live in their own folder under `apps/web/src/screens/<id>/` and never change the generated views or a shared file: the screen host finds every `./*/index.tsx` with `import.meta.glob` (MILESTONE-2 C.1 and C.2). The Licence screen (`screens/license`) is the reference.
+
+| File | Content |
+|---|---|
+| `index.tsx` | The default export is the `ScreenDef` (`screens/types.ts`): `id`, `path` ending with the id, `group` (`top`, `impl`, `audit`, `surv`, `tasks`, `admin`, `ops`), `order` inside the group, `label` as `[English, Indonesian]`, `icon` (a 24 by 24 stroke path), `scope` (`org`, `ms`, `platform`), `perm`, `roles` (sample personas that see it), `nav`, `Component` (lazy), `pageActions(ctx)`, `count(ctx)` and `tera` help |
+| `meta.json` | The same `id`, `label`, `group`, `order`, `scope`, `perm`, `roles` and `nav`, plus `pageActions` (labels for the manager persona), `sampleRole` (the persona the E2E helpers open it as) and `open` (`nav` from the sidebar, `query` through `?screen=`). The E2E helpers read it; `test/screens/registry.test.tsx` checks that it matches `index.tsx` |
+| `Screen.tsx` | The page body. It gets `{ ctx }` with the host context of C.4: `lang`, `li(pair)`, `fill(pair, values)`, `theme`, `D`, `msObj`, `org`, `me`, `mode`, `client`, `can(ms, perm)`, `orgCan(perm)`, `platformCan(perm)`, `toast`, `go(screen, { ms, params })`, `params`, `track`, `reload`, `command`, `openPicker` and `layer()` |
+| `routes.ts` | `[method, path]` constants for every route the screen calls and `ROUTE_IDS`, compared with `routeById` of `@mscd/shared` in the screen's unit test |
+| `api.ts`, `sample.ts` | Two adapters with one interface: `api.ts` calls `call(ctx.client, ROUTES.x, { params, query, body, ifMatch, idempotencyKey })` of `screens/api.ts`; `sample.ts` works on the sample snapshot (`ctx.ds.mutate` and `ctx.ds.insert` change it, so built-in screens show the result). `ctx.mode` picks one |
+| `text.ts` | Every text as an `[English, Indonesian]` pair |
+| `actions.ts` (optional) | Hooks into the built-in screens, below |
+
+Rules for screen code:
+
+- Build the page from the UI kit in `screens/ui` (`Card`, `Facts`, `Table`, `Badge`, `Button`, `Alert`, `EmptyState`, `Tabs`, `Field` with its inputs, `Modal`, `Drawer`, `ConfirmDialog`). Styles come from the `.mx-` classes of `screens/ui/screens.css` over the colour tokens of `src/styles.css`. No text under 12px, and every text and control meets WCAG AA in both themes. A disabled `Button` takes a `disabledReason`, shown as text.
+- Call the api only through `ctx.client` and `screens/api.ts`. Import only types from `@mscd/shared`.
+- Field errors of a refused command go next to the field: `fieldErrors(error)` maps `errors[].path` to messages.
+- `EmptyState` takes an `illustration` node for a scene of the illustration library.
+
+`actions.ts` exports any of:
+
+- `claims`: handlers for the ids in `ACTION_IDS` of `screens/actions.ts` (for example `controls.add`, `docs.new`, `storage.connect`). Without a claim the built-in action keeps its toast. One package claims each id.
+- `extraPageActions`: page actions added to a built-in screen, for example `{ screen: 'fw', id, label, icon, visible(ctx), run(ctx) }`.
+- `detailExtensions`: components shown at the end of a detail drawer or an inline detail, by record kind (`req`, `doc`, `ev`, `item`, `activity`, `event`, `prep`, `cycle`), in `order`.
+- `topbarItems` and `layerItems`: components shown in the top bar or in the host layer of every screen.
+
+Tests of a screen:
+
+- Unit tests in `apps/web/test/screens/<id>.test.tsx` render with `renderToStaticMarkup` in the Node environment; `test/screens/license.test.tsx` shows the pattern, with the route contract test.
+- E2E specs in `apps/web/e2e/screens/<id>.spec.js` carry `@sample-only` and open the screen with `openScreen(page, metaById('<id>'))` of `e2e/helpers.js`. Call `expectOverlayReadable(page)` after opening each form. `e2e/screens/probe.spec.js` checks every host screen's title, breadcrumb, page actions and help. API behaviour goes to `e2e/api-only/<id>.spec.js` with `@api-only`.
+- The sample build opens a screen directly with `?screen=<id>&persona=<manager|owner|auditor|top>`, for example `http://localhost:5173/?screen=license&persona=top`. API builds ignore both parameters.
+- `npm test -w @mscd/web -- test/screens` checks every screen folder: ids, both languages, Indonesian that differs from English, no em dash or centre dot in any text, an icon and a matching `meta.json`.
 
 ## Developer infrastructure stack
 
@@ -277,4 +330,4 @@ curl -fsS http://localhost:8080/healthz
 docker rm -f mscd-web-dev
 ```
 
-The build argument `VITE_DATA_SOURCE` selects the data source compiled into the app: `sample` (the default) or `api`. The build argument `APK_UPGRADE` controls the Alpine updates of the runtime stage: `auto` (the default) applies them when `apk update` succeeds and otherwise prints a warning and keeps the base image packages, `true` fails the build when `apk update` fails (a mirror that cannot be reached or is blocked by a proxy, or a TLS certificate that is not trusted because `MSCD_BUILD_CA` is missing or wrong), and `false` skips the step. Read the `apk` messages above the warning to tell the two causes apart. Release bundles always pass `true` (or `false` with `--no-os-updates`). The `.dockerignore` at the repository root keeps `node_modules`, build and test output, `deploy/dist` and the design uploads out of the build context. Release bundles are built with `deploy/scripts/build-bundle.sh`, which takes the CA file as `--build-ca <file>` ([deploy/README.md](../deploy/README.md)).
+The build argument `VITE_DATA_SOURCE` selects the data source compiled into the app: `api` (the default) or `sample`. The build argument `APK_UPGRADE` controls the Alpine updates of the runtime stage: `auto` (the default) applies them when `apk update` succeeds and otherwise prints a warning and keeps the base image packages, `true` fails the build when `apk update` fails (a mirror that cannot be reached or is blocked by a proxy, or a TLS certificate that is not trusted because `MSCD_BUILD_CA` is missing or wrong), and `false` skips the step. Read the `apk` messages above the warning to tell the two causes apart. Release bundles always pass `true` (or `false` with `--no-os-updates`). The `.dockerignore` at the repository root keeps `node_modules`, build and test output, `deploy/dist` and the design uploads out of the build context. Release bundles are built with `deploy/scripts/build-bundle.sh`, which takes the CA file as `--build-ca <file>` ([deploy/README.md](../deploy/README.md)).

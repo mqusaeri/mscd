@@ -1,5 +1,5 @@
 import {
-  test, expect, SCREENS, SCREENS_ID, openApp, go, ui, list, listRows, groupRows, tabs, switchMs, closeDrawer,
+  test, expect, SCREENS, SCREENS_ID, HOST_METAS, openApp, openScreen, go, ui, list, listRows, groupRows, tabs, switchMs, closeDrawer,
 } from './helpers.js';
 import * as D from '../src/data/mscd-data.js';
 
@@ -87,6 +87,24 @@ async function walk(page, query, ms, labels) {
   return states;
 }
 
+// One host screen in one language: its labels, then the labels of each dialog its page actions open.
+async function walkHost(page, meta, query) {
+  const states = new Map();
+  const snap = async (key) => states.set(key, new Set(await page.evaluate(collectLabels)));
+  const lang = query.includes('lang=id') ? 1 : 0;
+  await openScreen(page, meta, query);
+  await snap(meta.id);
+  for (const action of meta.pageActions) {
+    await page.locator(`main button[title="${action[lang]}"]`).first().click();
+    const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
+    if (!(await layer.count())) continue;
+    await snap(`${meta.id}, ${action[0]}`);
+    await page.keyboard.press('Escape');
+    await expect(layer).toHaveCount(0);
+  }
+  return states;
+}
+
 test.describe('Indonesian interface', () => {
   for (const ms of SYSTEMS) {
     test(`no ${ms} interface label stays in English`, async ({ page }) => {
@@ -100,6 +118,20 @@ test.describe('Indonesian interface', () => {
       expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
     });
   }
+
+  // Host screens (MILESTONE-2 C.2, C.7) as the persona of their meta.json, with the dialogs of their page actions.
+  test('no host screen label stays in English', { tag: '@sample-only' }, async ({ page }) => {
+    const untranslated = [];
+    for (const meta of HOST_METAS) {
+      const en = await walkHost(page, meta, '');
+      const id = await walkHost(page, meta, 'lang=id');
+      expect([...id.keys()]).toEqual([...en.keys()]);
+      for (const [state, labels] of id) {
+        for (const s of labels) if (en.get(state).has(s) && !allowed(s)) untranslated.push(`${state}: ${s}`);
+      }
+    }
+    expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
+  });
 
   test('generated sentences, dates and plurals follow the language', async ({ page }) => {
     await openApp(page, '?lang=id');

@@ -49,7 +49,9 @@ describe('mscd-pack', () => {
     const out = tempDir();
     const one = run('build', path.join(SOURCES_DIR, 'ISO27001-2022'), '--sign-key-file', devPackKey, '--out', out);
     expect(one.code).toBe(0);
-    expect(one.out).toMatch(/ISO27001-2022-1\.2\.0\.pack sha256 [0-9a-f]{64} key [0-9a-f]{16} \(development key\)/);
+    expect(one.out).toMatch(/ISO27001-2022-1\.2\.1\.pack sha256 [0-9a-f]{64} key [0-9a-f]{16} \(development key\)/);
+    // The Milestone 1 content leaves content references open: a warning on stderr, never a failure.
+    expect(one.err).toMatch(/^warning: ISO27001-2022 has \d+ content references that do not resolve yet/);
     const all = run('build-all', '--sign-key-file', devPackKey, '--out', out);
     expect(all.code).toBe(0);
     expect(all.out).toContain('6 packs signed with key');
@@ -60,7 +62,7 @@ describe('mscd-pack', () => {
       expect(result.code, result.err).toBe(0);
       expect(result.out).toMatch(/^OK .* signed with key [0-9a-f]{16} \(development key\)\n {2}requirements \d+/);
     }
-    const iso = path.join(out, 'ISO27001-2022-1.2.0.pack');
+    const iso = path.join(out, 'ISO27001-2022-1.2.1.pack');
     expect(run('verify', iso, '--trusted', devLicencePub, devPackPub).code).toBe(0);
     const wrong = run('verify', iso, '--trusted', devLicencePub);
     expect(wrong.code).toBe(1);
@@ -83,7 +85,7 @@ describe('mscd-pack', () => {
     const built = run('build-all', '--sign-key-file', path.join(keys, 'pack-release.key'), '--out', out, '--reject-dev-keys', '--sources', SOURCES_DIR);
     expect(built.code, built.err).toBe(0);
     const pub = readFileSync(path.join(keys, 'pack-release.pub'));
-    const pack = verifyPack(readFileSync(path.join(out, 'ISO22301-2019-1.0.0.pack')), [pub], { rejectKeyIds: DEV_KEY_IDS });
+    const pack = verifyPack(readFileSync(path.join(out, 'ISO22301-2019-1.0.1.pack')), [pub], { rejectKeyIds: DEV_KEY_IDS });
     expect(pack.keyId).toBe(keyId(pub));
   });
 

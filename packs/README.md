@@ -1,38 +1,67 @@
 # Framework pack sources
 
-This folder holds the source datasets of the framework packs that MSCD installs. `packages/pack-tools` builds and signs each source folder into `packs/dist/<pack_id>-<version>.pack` (git-ignored), and the server installs those archives into the `ref` schema (build plan E.8).
+This folder holds the source datasets of the framework packs that MSCD installs. `packages/pack-tools` builds and signs each source folder into `packs/dist/<pack_id>-<version>.pack` (git-ignored), and the server installs those archives into the `ref` schema (build plan E.8, Milestone 2 E.1).
 
 | Path | Content |
 |---|---|
-| `sources/<pack_id>/` | One folder per pack, generated from the web sample data. Never edit these files by hand |
-| `scripts/extract-from-sample.mjs` | Writes `sources/` from `apps/web/src/data/mscd-data.js` and the tables at the top of the script |
-| `scripts/validate-sources.mjs` | Checks every source folder and prints the dataset counts |
-| `scripts/lib/pack-format.mjs` | The file list, CSV headers and encoding rules shared by both scripts |
+| `sources/<pack_id>/` | One folder per pack, generated from the web sample data and the hand-written content. Never edit these files by hand |
+| `content/<pack_id>/` | Hand-written pack content, merged over the sample extract: CSV rows, `removed.csv` and `manifest.json` with the pack version (see "Hand-written content") |
+| `scripts/extract-from-sample.mjs` | Writes `sources/` from `apps/web/src/data/mscd-data.js`, the tables at the top of the script and `content/` |
+| `scripts/validate-sources.mjs` | Checks every source folder and prints the dataset counts, or with `--json` the counts as JSON |
+| `scripts/lib/pack-format.mjs` | The file list, CSV headers, row keys, engine version and encoding rules shared by both scripts |
 
 ## Commands
 
 Plain Node 22 scripts with no dependencies, run from the repository root:
 
 ```bash
-node packs/scripts/extract-from-sample.mjs           # rewrite packs/sources from the sample
+node packs/scripts/extract-from-sample.mjs           # rewrite packs/sources from the sample and packs/content
 node packs/scripts/extract-from-sample.mjs --check   # exit 1 when packs/sources is out of date
 node packs/scripts/validate-sources.mjs              # format and reference checks, dataset counts
+node packs/scripts/validate-sources.mjs --verbose    # the same, listing every warning
+node packs/scripts/validate-sources.mjs --json       # the counts per pack as JSON on stdout
 ```
 
-The extractor owns `sources/`: it rewrites every file and removes files it does not produce. It never follows a symbolic link: a link or any other entry that is not a regular file or folder under `sources/` stops both modes before anything is written or removed, and every removal is checked to stay inside `sources/`. To change a pack, change the sample data or the tables in `extract-from-sample.mjs`, run the extractor, then the validator. `--check` regenerates in memory and lists every file that differs, is missing or is not produced by the script, so CI catches drift between the sample and the packs.
+The extractor owns `sources/`: it rewrites every file and removes files it does not produce. It never follows a symbolic link: a link or any other entry that is not a regular file or folder under `sources/` or `content/` stops both modes before anything is written or removed, and every removal is checked to stay inside `sources/`. To change a pack, change the hand-written content in `content/<pack_id>/` (or the sample data, or the tables in `extract-from-sample.mjs`), run the extractor, then the validator. `--check` regenerates in memory and lists every file that differs, is missing or is not produced by the script, so CI catches drift between the sample, the content and the packs.
+
+## Hand-written content
+
+`content/<pack_id>/` holds what the sample does not: customer pack content written for the packs (Milestone 2 E.2). The extractor merges it over the sample extract of the same pack. A folder may hold:
+
+| File | Rule |
+|---|---|
+| Any CSV dataset of the pack (`requirements.csv`, `documented_info.csv`, ...) | Same header as the dataset. Each row replaces the extracted row with the same key in place, or is added at the end. Keys: `requirement_code`, `item_code`, `stage_key`, `<phase_no>.<activity_no>` for activities, `<domain>/<code>` for lookups, `code` elsewhere. Requirements are then sorted by clause code and activities by phase and number; requirements and catalogue items are numbered from 1, so their `sort_order` in a content file is not used |
+| `mappings/<target>.csv` | Mapping rows to another pack, keyed by source and target code |
+| `removed.csv` | Columns `dataset`, `code`, `reason`. Drops a row that the sample keeps (for example an activity `9.1`). The row must be in the sample extract and must not be added again by a content file. Requirements and catalogue items are never removed: a row that leaves the standard stays with `retired` true |
+| `manifest.json` | Only `pack_version`. The released version of the pack; it may not be lower than the version the sample shows. Every version change of a pack goes here |
+
+Anything else in a content folder, or a folder for a pack the extractor does not build, stops the run.
+
+## Pack versions and the upgrade path
+
+A newer version of an installed edition updates rows in place and adds rows; the installer never deletes a row. A version that drops a requirement or catalogue code of the installed version is refused (422 `business-rule`, rule `PACK-ROW-REMOVED`): the row stays with `retired` true, and readers hide it from pickers, from the seeder of new systems and from readiness. A version may drop an activity template or a preparation task template; the template stays installed and activities created from it stay as they are. After an update, the worker adds the entries of new catalogue items and leaf requirements, and the cycle items of new cycle requirements, to every system on the edition (`applicability.sync`), and tells the MS Managers.
+
+| Pack | Version | Step |
+|---|---|---|
+| `ISO27001-2022` | 1.2.1 | Milestone 2 format, patch step (E.3) |
+| `ISO9001-2015` | 1.4.3 | Milestone 2 format, patch step |
+| `ISO9001-2026` | 0.9.1 | Milestone 2 format, patch step |
+| `ISO22301-2019` | 1.0.1 | Milestone 2 format, patch step |
+| `ISO37001-2016` | 1.0.1 | Milestone 2 format, patch step |
+| `ISO37001-2025` | 0.6.1 | Milestone 2 format, patch step |
 
 ## Packs
 
-| Pack | Version | Framework | Edition status | Built from | Notes |
-|---|---|---|---|---|---|
-| `ISO27001-2022` | 1.2.0 | ISO/IEC 27001 | current | `isms` | Catalogue of the 93 Annex A controls; applicability target `catalogue_item` |
-| `ISO9001-2026` | 0.9.0 | ISO 9001 | current | `qms` | Supersedes edition 2015, transition ends 2029-09-15 |
-| `ISO9001-2015` | 1.4.2 | ISO 9001 | current | `qms` | The installer moves it to `transition` when 2026 is installed |
-| `ISO22301-2019` | 1.0.0 | ISO 22301 | current | `bcms` | |
-| `ISO37001-2025` | 0.6.0 | ISO 37001 | current | `abms` | Pre-release (shown as beta) |
-| `ISO37001-2016` | 1.0.0 | ISO 37001 | withdrawn | `abms` | |
+| Pack | Version | Sample version | Framework | Edition status | Built from | Notes |
+|---|---|---|---|---|---|---|
+| `ISO27001-2022` | 1.2.1 | 1.2.0 | ISO/IEC 27001 | current | `isms` | Catalogue of the 93 Annex A controls; applicability target `catalogue_item` |
+| `ISO9001-2026` | 0.9.1 | 0.9.0 | ISO 9001 | current | `qms` | Supersedes edition 2015, transition ends 2029-09-15 |
+| `ISO9001-2015` | 1.4.3 | 1.4.2 | ISO 9001 | current | `qms` | The installer moves it to `transition` when 2026 is installed |
+| `ISO22301-2019` | 1.0.1 | 1.0.0 | ISO 22301 | current | `bcms` | |
+| `ISO37001-2025` | 0.6.1 | 0.6.0 | ISO 37001 | current | `abms` | Pre-release (shown as beta) |
+| `ISO37001-2016` | 1.0.1 | 1.0.0 | ISO 37001 | withdrawn | `abms` | |
 
-Every manifest has `engine_min_version` 1.0.0 and an empty `modules` list (the framework workbenches are deferred). The two ISO 9001 packs share their datasets, and so do the two ISO 37001 packs, because the sample has one system for each framework.
+The version comes from `content/<pack_id>/manifest.json`; the sample version is the one the demo screens show (`PACKS`), which the extractor checks against the sample. Every manifest has `engine_min_version` 1.1.0 (the pack format of Milestone 2 E.1; `ENGINE_MIN_VERSION` in `scripts/lib/pack-format.mjs`) and an empty `modules` list (the framework workbenches are deferred). A server refuses a pack whose engine version is newer than its own release; a release candidate such as 1.1.0-rc.1 reads the format of 1.1.0, and a server version that is not a version number (an image tag such as `smoke`) is not compared. The two ISO 9001 packs share their datasets, and so do the two ISO 37001 packs, because the sample has one system for each framework.
 
 ## Content rule: short titles only
 
@@ -70,19 +99,20 @@ ISO 27001 finding conditions (`finding_conditions.csv`):
 | File | Columns or shape | Source in the sample |
 |---|---|---|
 | `manifest.json` | `pack_id`, `pack_version`, `framework_code`, `framework_name`, `edition`, `status`, `pre_release`, `supersedes?`, `engine_min_version`, `modules`, `applicability_target`, `catalogue` | `MS[].code` (framework name), `MS[].unit`; versions as in the build plan (D-14), checked against `PACKS` |
-| `requirements.csv` | `requirement_code, parent_code, title_short, clause_group, is_hs_common, documented_info_mandatory, applicability_assessable, default_frequency_code, evidence_example, sort_order` | `buildReqs()` of the system; ISO 27001 uses the Harmonized Structure entries of the QMS list (clauses 4 to 7, 9 and 10) plus its clause 8 entries 8.1, 8.2 and 8.3 |
-| `catalogue.csv` | `item_code, theme_code, title_short, requirement_code, default_frequency_code, evidence_example, sort_order` | `buildReqs(isms)`: code, title, theme `A.5` to `A.8`, frequency; examples from `EXAMPLES` |
+| `requirements.csv` | `requirement_code, parent_code, title_short, clause_group, is_hs_common, documented_info_mandatory, applicability_assessable, default_frequency_code, evidence_example, sort_order, retired` | `buildReqs()` of the system; ISO 27001 uses the Harmonized Structure entries of the QMS list (clauses 4 to 7, 9 and 10) plus its clause 8 entries 8.1, 8.2 and 8.3. `retired` is false for every sample row |
+| `catalogue.csv` | `item_code, theme_code, title_short, requirement_code, default_frequency_code, evidence_example, sort_order, retired` | `buildReqs(isms)`: code, title, theme `A.5` to `A.8`, frequency; examples from `EXAMPLES`. `requirement_code` links an item to the clause it supports |
 | `chain.csv` | `stage_key, position, label_en, label_id, question_en, question_id, source, entity_type, risk_profile_code, is_mandatory, clause_at_risk, overview_clause, gate_type_label_en, gate_type_label_id` | `STAGES`, `CLAUSE_AT_RISK` |
 | `activities.csv` | `phase_no, phase_name_en, phase_name_id, is_gate_phase, activity_no, title, clause_ref, output_document_code, expected_outcome` | `PHASES`, `OUTPUT_MAP` |
 | `frequencies.csv` | `code, label_en, label_id, period_days, sort_order` | `FREQ`, `FREQ_ORDER` |
 | `labels.en.json`, `labels.id.json` | Flat key to text: `ms.name`, `ms.long_name`, `ms.manager_role`, `gate.name`, `applicability.artefact_name`, `risk.object_name`, `catalogue.theme.<n>` | `MS[].short`, `name`, `mgrRole`, `theme`; gate names of the controller |
-| `cycle_requirements.csv` | `code, requirement_code, title, derivation, sort_order` | `CYCLE_ITEMS` |
+| `cycle_requirements.csv` | `code, requirement_code, title, derivation, sort_order` | `CYCLE_ITEMS`. `derivation` is empty or a JSON object whose `kind` is one of `management_review_closed`, `risk_assessment_current` (with `months`), `internal_audit_done`, `exercise_performed`, `corrective_actions_closed`, `metrics_current`, `documents_reviewed_on_time`, `bia_approved`, `due_diligence_current` |
 | `drift_rules.json` | Array of `{code, label_en, label_id, severity, source_stage, source_kind, predicate, message, sort_order}` | `DRIFT` |
 | `prep_tasks.csv` | `code, title, days_before_audit, skip_on_first_audit, sort_order` | `PREP`, `MS[].audit.date` |
-| `review_inputs.csv` | `code, title, mandatory, sort_order` | Header row only |
+| `review_inputs.csv` | `code, title, mandatory, sort_order, review_kind` | Header row only. `review_kind` is `management`, or `governing_body` for the governing body review of ISO 37001 |
 | `finding_conditions.csv` | `code, classification, requirement_code, text` | ISO 27001 only, written for this build |
-| `document_templates.csv` | `code, title, doc_type` | Header row only |
-| `audit_activities.csv` | `code, event_type, clause_ref, title, auditee_role, key_questions, evidence_to_request, sort_order` | ISO 27001 only, written for this build |
+| `document_templates.csv` | `code, title, doc_type, requirement_code` | Header row only. `requirement_code` names the clause the document answers |
+| `documented_info.csv` | `code, requirement_code, kind, title, template_code, sort_order` | Header row only. The documented information a clause asks for: `maintain` (a document) or `retain` (a record), with the template that answers it |
+| `audit_activities.csv` | `code, event_type, clause_ref, title, auditee_role, key_questions, evidence_to_request, sort_order` | ISO 27001 only, written for this build. `event_type` may also be `internal_audit` |
 | `lookups.csv` | `domain, code, label_en, label_id, sort_order` | Document tiers of `DOCS` and `SHARED`, plus fixed lists |
 | `rules.json` | Array of `{rule_id, active, params}` | Fixed list |
 | `risk_profiles.json` | Array of `{code, definition}` | One profile per risk stage of the chain |
@@ -102,4 +132,8 @@ ISO 27001 finding conditions (`finding_conditions.csv`):
 
 ## Validation
 
-`validate-sources.mjs` checks, per pack folder: every file of the list above exists and nothing else does (apart from `mappings/*.csv`); UTF-8, LF and the final newline; CSV headers and field counts; JSON formatting; manifest fields, semantic versions, `pack_id` equal to the folder name and to `<framework_code>-<edition>`, `catalogue` consistent with `catalogue.csv`, no `datasets`; value types and the lengths of the `ref` columns; unique codes; references (catalogue and finding conditions to requirement codes where given, requirement and catalogue frequencies, chain entity types in the record tables of C.10, risk profiles of risk stages, document template types in `doc_type`, drift rule stages); contiguous chain positions, phase numbers and activity numbers; the lookup domains `doc_type` and `treatment_option`; the same label keys in both languages, including a theme label for every catalogue theme. It prints the dataset counts per pack and exits 1 on any error.
+`validate-sources.mjs` checks, per pack folder: every file of the list above exists and nothing else does (apart from `mappings/*.csv`); UTF-8, LF and the final newline; CSV headers and field counts; JSON formatting; manifest fields, semantic versions, `pack_id` equal to the folder name and to `<framework_code>-<edition>`, `catalogue` consistent with `catalogue.csv`, no `datasets`; value types and the lengths of the `ref` columns; unique codes; retired rows (a row under a retired parent is retired too); references (catalogue items, documented information and document templates to requirements that are not retired, finding conditions to requirement codes where given, requirement and catalogue frequencies, chain entity types in the record tables of C.10, risk profiles of risk stages, document template types in `doc_type`, drift rule stages, derivation kinds); contiguous chain positions, phase numbers and activity numbers; the lookup domains `doc_type` and `treatment_option`; a `management` review input when a pack has review inputs; the same label keys in both languages, including a theme label for every catalogue theme. It prints the dataset counts per pack and exits 1 on any error.
+
+Content references must resolve as well: cycle requirement codes and chain `clause_at_risk` values name requirements of the pack (`clause_at_risk` is one or more clause codes joined by ` / `, each optionally followed by a list item such as `d)`), and activity `output_document_code` and documented information `template_code` values name document templates of the pack. In a pack that lists documented information they are errors, in the validator, in `mscd-pack build` and in the server's installer. The Milestone 1 content lists none and names subclauses and documents the packs do not hold yet, so for those packs they are warnings: the validator prints a count per pack (`--verbose` lists them) and `mscd-pack` prints them on stderr.
+
+`--json` prints, per pack: `requirements` (rows that are not retired), `retired`, `catalogue`, `catalogueRetired`, `catalogueLinked` (items with a clause), `documentedInfo`, `documentTemplates`, `reviewInputs`, `evidenceExamples` (rows in the standard with an example), `clauseEvidenceMissing` (leaf clause rows without an evidence example; a leaf row has no child row that is still in the standard), `unresolvedReferences` and the other dataset counts.

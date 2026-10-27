@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Quality check of the landing site (MOT-01). Serves apps/site on a free local port, opens both
-// languages at 1440x900, 390x844 and 320x640 in light and dark, saves screenshots, and fails on:
+// languages at 1440x900, 740x360, 390x844, 360x800 and 320x640 in light and dark, saves
+// screenshots, and fails on:
 //   a request to another origin, horizontal overflow, text cut off by a clipping box, text under
 //   12px, text contrast under 4.5:1 (background sampled at the text position, over several frames
 //   of the hero film), a missing <title> or meta description, console errors, broken media (the
 //   H.264 file is checked on disk, because Playwright's Chromium cannot decode it), links that
-//   differ from site.config.mjs, and, with reduced motion, any running animation, loop or video.
+//   differ from site.config.mjs, labels of the chain rows set closer to each other than the space
+//   inside one label (at the five sizes and at every width from 320 to 1440 px), and, with reduced
+//   motion, any running animation, loop or video.
 //
 //   node apps/site/check.mjs [--out <folder for screenshots>] [--only en|id]
 // The functions passed to page.evaluate run in the browser, so they use its globals.
@@ -40,11 +43,22 @@ const PAGES = [
 ].filter((p) => onlyArg < 0 || p.name === args[onlyArg + 1]);
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
+  // A phone held sideways: the shortest hero, and the 641 to 760 px layout (film band, chain in rows).
+  { name: 'landscape', width: 740, height: 360, isMobile: true, hasTouch: true },
   { name: 'mobile', width: 390, height: 844, isMobile: true, hasTouch: true },
+  // 360 CSS px is the most common Android width.
+  { name: 'small', width: 360, height: 800, isMobile: true, hasTouch: true },
   // 320 CSS px is the WCAG reflow width and the narrowest phone in use.
   { name: 'narrow', width: 320, height: 640, isMobile: true, hasTouch: true },
 ];
 const SCHEMES = ['light', 'dark'];
+// Rows of short labels with no box around each label. The space between two labels must be
+// clearly larger than the space inside one label ("04" and "Document"), or a row such as
+// "04 Document 05 Evidence" reads as "04 Document05 Evidence".
+const LABEL_ROWS = ['.chain__list', '.hs__chain'];
+const LABEL_GAP_FACTOR = 1.5;
+const MIN_LABEL_GAP = 12;
+const SWEEP = { from: 320, to: 1440, step: 4 };
 
 const failures = [];
 const fail = (where, message) => failures.push(`[${where}] ${message}`);
@@ -284,6 +298,46 @@ const PAGE_HELPERS = () => {
     }
     return results;
   };
+  /**
+   * Labels of the rows matched by `selectors` that sit too close to the next label in the same
+   * row: the gap between their text must be at least `factor` times the largest gap between the
+   * text runs inside either label, and at least `minGap` pixels.
+   */
+  window.__labelGaps = (selectors, factor, minGap) => {
+    const out = [];
+    for (const list of document.querySelectorAll(selectors.join(','))) {
+      const items = [];
+      for (const li of list.children) {
+        const boxes = [];
+        const words = [];
+        const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!n.nodeValue.trim() || getComputedStyle(n.parentElement).visibility !== 'visible') continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          const rects = [...range.getClientRects()].filter((r) => r.width > 1 && r.height > 1);
+          if (!rects.length) continue;
+          words.push(n.nodeValue.trim());
+          boxes.push(...rects);
+        }
+        if (!boxes.length) continue;
+        const top = Math.min(...boxes.map((b) => b.top));
+        const line = boxes.filter((b) => b.top - top < 2).sort((a, b) => a.left - b.left);
+        let inner = 0;
+        for (let i = 1; i < line.length; i += 1) inner = Math.max(inner, line[i].left - line[i - 1].right);
+        items.push({ text: words.join(' '), left: line[0].left, right: line[line.length - 1].right, top, inner });
+      }
+      for (let i = 1; i < items.length; i += 1) {
+        const a = items[i - 1]; const b = items[i];
+        if (Math.abs(a.top - b.top) > 2) continue; // the next label starts a new row
+        const gap = b.left - a.right;
+        const inner = Math.max(a.inner, b.inner);
+        const need = Math.max(minGap, factor * inner);
+        if (gap < need) out.push({ a: a.text, b: b.text, gap: Math.round(gap), inner: Math.round(inner), need: Math.round(need) });
+      }
+    }
+    return out;
+  };
   // Counts animation frames requested after the page settles (reduced-motion check).
   window.__raf = 0;
   const raf = window.requestAnimationFrame.bind(window);
@@ -474,6 +528,43 @@ async function checkLayout(page, where) {
   issues.slice(0, 20).forEach((i) => fail(where, i));
 }
 
+const labelGapProblem = (i, at = '') => `labels "${i.a}" and "${i.b}" are ${i.gap}px apart${at}, closer than ${i.need}px (${i.inner ? `${LABEL_GAP_FACTOR} times the ${i.inner}px inside one label` : 'the minimum'})`;
+
+async function checkLabelSpacing(page, where) {
+  const issues = await page.evaluate(([sel, factor, min]) => window.__labelGaps(sel, factor, min), [LABEL_ROWS, LABEL_GAP_FACTOR, MIN_LABEL_GAP]);
+  issues.forEach((i) => fail(where, labelGapProblem(i)));
+}
+
+// The label spacing check at every width of SWEEP, so a layout between the five sizes cannot set
+// two labels too close either. Reduced motion, so every label is at rest.
+async function sweepLabelSpacing(browser, pageDef) {
+  const vp = { name: 'width sweep', width: SWEEP.to, height: 900 };
+  const { context, page, where } = await openPage(browser, pageDef, vp, 'dark', { reducedMotion: 'reduce' });
+  try {
+    await page.evaluate(() => document.fonts.ready);
+    const found = new Map();
+    let widths = 0;
+    for (let w = SWEEP.from; w <= SWEEP.to; w += SWEEP.step) {
+      await page.setViewportSize({ width: w, height: vp.height });
+      widths += 1;
+      const issues = await page.evaluate(([sel, factor, min]) => window.__labelGaps(sel, factor, min), [LABEL_ROWS, LABEL_GAP_FACTOR, MIN_LABEL_GAP]);
+      for (const i of issues) {
+        const key = `${i.a}|${i.b}`;
+        const seen = found.get(key);
+        if (!seen) { found.set(key, { ...i, ranges: [[w, w]] }); continue; }
+        const last = seen.ranges[seen.ranges.length - 1];
+        if (w - last[1] === SWEEP.step) last[1] = w; else seen.ranges.push([w, w]);
+        if (i.gap < seen.gap) Object.assign(seen, { gap: i.gap, inner: i.inner, need: i.need });
+      }
+    }
+    const span = ([a, b]) => (a === b ? `${a}` : `${a} to ${b}`);
+    for (const i of found.values()) fail(where, labelGapProblem(i, ` at widths ${i.ranges.map(span).join(', ')}px`));
+    log(`${found.size ? 'FAIL' : 'ok  '} ${where}: ${widths} widths from ${SWEEP.from} to ${SWEEP.to}px`);
+  } finally {
+    await context.close();
+  }
+}
+
 async function checkMedia(page, where) {
   const media = await page.evaluate(async () => {
     const imgs = [...document.images].map((img) => ({ src: img.currentSrc || img.src, ok: img.complete && img.naturalWidth > 0 }));
@@ -608,6 +699,7 @@ async function runNormal(browser, pageDef, vp, scheme) {
     if (scheme === 'dark') await checkPlayback(page, where);
     await finishAnimations(page);
     await checkLayout(page, where);
+    await checkLabelSpacing(page, where);
     await page.screenshot({ path: join(OUT, `${pageDef.name}-${vp.name}-${scheme}.png`), fullPage: true });
     const n = await measureFullPage(page, where);
     // The navigation over the paper part of the page.
@@ -692,6 +784,7 @@ try {
       for (const scheme of SCHEMES) await runNormal(browser, pageDef, vp, scheme);
       await runReduced(browser, pageDef, vp);
     }
+    await sweepLabelSpacing(browser, pageDef);
     await runNoScript(browser, pageDef);
   }
 } finally {

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ApplicabilitySyncJob } from './applicability-sync.job';
+import { ApplicabilitySyncService } from './applicability-sync.service';
 import { EditionWithdrawnAlertsJob } from './edition-withdrawn-alerts.job';
 import { PackBundleStore } from './pack-bundle-store';
 import { PackInstallJob } from './pack-install.job';
@@ -10,14 +11,15 @@ import { PacksLifecycleJob } from './packs-lifecycle.job';
 import { PacksService } from './packs.service';
 
 /**
- * Framework packs (E.8, D-16, D-17, TS 6.3): the installer on a lazily opened `mscd_pack_installer` pool with the
- * compiled trust anchors (from the licence module), `GET /admin/packs`, `POST /admin/packs/import`,
- * `POST /admin/packs/check-updates`, and the jobs `pack.install`, `packs.lifecycle` and `edition.withdrawn-alerts`.
+ * Framework packs (E.8, D-16, D-17, TS 6.3, Milestone 2 E.1 and E.3): the installer on a lazily opened
+ * `mscd_pack_installer` pool with the compiled trust anchors (from the licence module), `GET /admin/packs`,
+ * `POST /admin/packs/import`, `POST /admin/packs/check-updates`, and the jobs `pack.install`, `packs.lifecycle`,
+ * `edition.withdrawn-alerts` and `applicability.sync`.
  */
 @Module({
   controllers: [PacksController],
   providers: [
-    // Milestone 2 J.3 job stub (M2-02); M2-03 fills it.
+    ApplicabilitySyncService,
     ApplicabilitySyncJob,
     PackInstallerDatabase,
     PackInstallService,
@@ -28,6 +30,6 @@ import { PacksService } from './packs.service';
     PacksLifecycleJob,
     EditionWithdrawnAlertsJob,
   ],
-  exports: [PackInstallService, PackLifecycleService],
+  exports: [PackInstallService, PackLifecycleService, ApplicabilitySyncService],
 })
 export class PacksModule {}

@@ -42,6 +42,19 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
+/**
+ * Whether a server of version `serverVersion` may install a pack that names `engineMinVersion` (E.8 step 3). Build
+ * metadata (`+...`) is ignored. A pre-release of the server (`1.1.0-rc.1`) counts as its release (`1.1.0`): release
+ * candidates read the pack format of the release they lead to. A server version that is not semantic (an image tag
+ * such as `smoke`, or a development build) cannot be compared and accepts every pack.
+ */
+export function engineVersionSatisfies(serverVersion: string, engineMinVersion: string): boolean {
+  const server = serverVersion.replace(/\+.*$/, '');
+  if (!SEMVER_RE.test(server)) return true;
+  const release = server.replace(/-.*$/, '');
+  return compareSemver(release, engineMinVersion) >= 0;
+}
+
 export const FrameworkCode = named('FrameworkCode', z.string().regex(/^[A-Z][A-Z0-9]{1,19}$/), 'Framework code (ref.framework.code), for example ISO27001', {
   valid: ['ISO27001', 'ISO9001'],
   invalid: ['iso27001', 'ISO 27001', 'I'],
@@ -60,11 +73,14 @@ export const PackEdition = named('PackEdition', z.string().regex(/^[A-Za-z0-9.]{
 });
 export type PackEdition = z.infer<typeof PackEdition>;
 
-/** Every dataset file of a pack besides `manifest.json` (E.8), in E.8 order; `mappings/*.csv` files are optional. */
+/**
+ * Every dataset file of a pack besides `manifest.json`, in E.8 order with `documented_info.csv` of Milestone 2 E.1 after
+ * the document templates; `mappings/*.csv` files are optional.
+ */
 export const PACK_DATASET_FILES = [
   'requirements.csv', 'catalogue.csv', 'chain.csv', 'activities.csv', 'frequencies.csv', 'labels.en.json', 'labels.id.json',
   'cycle_requirements.csv', 'drift_rules.json', 'prep_tasks.csv', 'review_inputs.csv', 'finding_conditions.csv',
-  'document_templates.csv', 'audit_activities.csv', 'lookups.csv', 'rules.json', 'risk_profiles.json',
+  'document_templates.csv', 'documented_info.csv', 'audit_activities.csv', 'lookups.csv', 'rules.json', 'risk_profiles.json',
 ] as const;
 export type PackDatasetFile = (typeof PACK_DATASET_FILES)[number];
 
@@ -92,8 +108,8 @@ function packIdMatches(m: { pack_id: string; framework_code: string; edition: st
 const PACK_ID_MESSAGE = { message: 'pack_id must equal <framework_code>-<edition>', path: ['pack_id'] };
 
 const EXAMPLE_SOURCE_MANIFEST = {
-  pack_id: 'ISO9001-2026', pack_version: '0.9.0', framework_code: 'ISO9001', framework_name: 'ISO 9001', edition: '2026',
-  status: 'current', pre_release: false, supersedes: { edition: '2015', transition_ends: '2029-09-15' }, engine_min_version: '1.0.0',
+  pack_id: 'ISO9001-2026', pack_version: '0.9.1', framework_code: 'ISO9001', framework_name: 'ISO 9001', edition: '2026',
+  status: 'current', pre_release: false, supersedes: { edition: '2015', transition_ends: '2029-09-15' }, engine_min_version: '1.1.0',
   modules: [], applicability_target: 'requirement', catalogue: false,
 } as const;
 

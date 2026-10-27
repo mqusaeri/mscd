@@ -1,4 +1,4 @@
-import { test, expect, SCREENS, openApp, go } from './helpers.js';
+import { test, expect, SCREENS, HOST_METAS, openApp, go, openScreen } from './helpers.js';
 
 // WCAG 2.1 AA: 4.5:1 for normal text, 3:1 for large text (24px, or 18.66px bold).
 // Every visible text element is measured against the first opaque background behind it. Text is also at least 12px
@@ -55,6 +55,31 @@ for (const theme of ['light', 'dark']) {
       await page.waitForTimeout(1200); // let entry animations finish
       const bad = await lowContrast(page);
       if (bad.length) failures[label] = bad;
+    }
+    expect(failures).toEqual({});
+  });
+
+  // Host screens (MILESTONE-2 C.2, C.7): each one as the persona of its meta.json, opened the way it says (the sidebar
+  // or the ?screen= opener of the sample build, which also reaches screens without a sidebar entry), with each page
+  // action that opens a dialog. The sample build only: the API project walks the host screens of its sidebar above.
+  test(`host screens and their dialogs meet WCAG AA with text of at least 12px, ${theme} theme`, { tag: '@sample-only' }, async ({ page }) => {
+    test.setTimeout(240_000);
+    const failures = {};
+    for (const meta of HOST_METAS) {
+      await openScreen(page, meta, `theme=${theme}`);
+      await page.waitForTimeout(1200);
+      const bad = await lowContrast(page);
+      if (bad.length) failures[meta.id] = bad;
+      for (const [label] of meta.pageActions) {
+        await page.locator(`main button[title="${label}"]`).first().click();
+        const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
+        if (!(await layer.count())) continue;
+        await page.waitForTimeout(400);
+        const inDialog = await lowContrast(page);
+        if (inDialog.length) failures[`${meta.id}, ${label}`] = inDialog;
+        await page.keyboard.press('Escape');
+        await expect(layer).toHaveCount(0);
+      }
     }
     expect(failures).toEqual({});
   });

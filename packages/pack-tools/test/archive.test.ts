@@ -36,8 +36,8 @@ describe('readPack', () => {
     const { pack } = testPack();
     const archived = readPack(pack.bytes);
     expect([...archived.files.keys()].at(-1)).toBe('signature');
-    expect(archived.datasetNames).toHaveLength(17);
-    expect(archived.files.size).toBe(19);
+    expect(archived.datasetNames).toHaveLength(18);
+    expect(archived.files.size).toBe(20);
     expect(JSON.parse(archived.manifestBytes.toString()).pack_id).toBe('ISO27001-2022');
   });
 
@@ -152,8 +152,8 @@ describe('readPack', () => {
 
   it('refuses more entries than allowed', () => {
     const { files } = testPack();
-    const many = Array.from({ length: 482 }, (_, i) => [`extra-${i}.csv`, Buffer.from('x')] as const);
-    // 19 pack files + 482 = 501 entries
+    const many = Array.from({ length: 481 }, (_, i) => [`extra-${i}.csv`, Buffer.from('x')] as const);
+    // 20 pack files + 481 = 501 entries
     expectArchiveError(() => readPack(archiveOf([...files, ...many])), /more than 500 entries/);
     expectArchiveError(() => readPack(archiveOf(files), { maxEntries: 18 }), /more than 18 entries/);
   });

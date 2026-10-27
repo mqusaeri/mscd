@@ -83,6 +83,9 @@ export default function PageDetail({ v }) {
             </div>
           </div>
         </div>
+        {v.hostDetail ? (<>
+          <div style={{ padding: "0 calc(var(--pad) * 1.5) calc(var(--pad) * 1.5)" }}>{txt(v.hostDetail)}</div>
+        </>) : null}
       </div>
     </>) : null}</>
   );

@@ -54,6 +54,17 @@ function readTrustedKeys(files: readonly string[]) {
   });
 }
 
+/** Largest number of warnings printed per pack; the count is always printed. */
+const WARNINGS_LISTED = 20;
+
+/** Writes the open content references of a pack to stderr (warnings never change the exit code). */
+function printWarnings(io: CliIo, packId: string, warnings: readonly string[]): void {
+  if (warnings.length === 0) return;
+  const listed = warnings.slice(0, WARNINGS_LISTED).map((w) => `  - ${w}\n`).join('');
+  const more = warnings.length > WARNINGS_LISTED ? `  - and ${warnings.length - WARNINGS_LISTED} more\n` : '';
+  io.stderr(`warning: ${packId} has ${warnings.length} content reference${warnings.length === 1 ? '' : 's'} that do not resolve yet (they become errors once the pack lists its documented information):\n${listed}${more}`);
+}
+
 function devMark(keyId: string): string {
   return DEV_KEY_IDS.includes(keyId) ? ' (development key)' : '';
 }
@@ -111,6 +122,7 @@ function buildProgram(io: CliIo): Command {
       const file = path.join(opts.out, pack.fileName);
       writeFileAtomic(file, pack.bytes);
       io.stdout(`${file} sha256 ${pack.sha256} key ${pack.keyId}${devMark(pack.keyId)}\n`);
+      printWarnings(io, pack.manifest.pack_id, pack.warnings);
     });
 
   program
@@ -123,7 +135,10 @@ function buildProgram(io: CliIo): Command {
     .action((opts: { signKeyFile: string; out: string; sources: string; rejectDevKeys?: boolean }) => {
       const key = readSigningKey(opts.signKeyFile);
       const result = buildAllPacks(opts.sources, key.privateKey, opts.out, { rejectKeyIds: rejectedIds(opts.rejectDevKeys) });
-      for (const pack of result.packs) io.stdout(`${pack.file} sha256 ${pack.sha256}\n`);
+      for (const pack of result.packs) {
+        io.stdout(`${pack.file} sha256 ${pack.sha256}\n`);
+        printWarnings(io, pack.manifest.pack_id, pack.warnings);
+      }
       for (const file of result.removed) io.stdout(`removed ${file}\n`);
       io.stdout(`${result.packs.length} packs signed with key ${key.keyId}${devMark(key.keyId)}\n`);
     });
@@ -141,6 +156,7 @@ function buildProgram(io: CliIo): Command {
       const flags = [m.status, ...(m.pre_release ? ['pre-release'] : [])].join(', ');
       const counts = Object.entries(datasetCounts(pack.datasets)).map(([name, n]) => `${name} ${n}`).join(', ');
       io.stdout(`OK ${file}: ${m.pack_id} ${m.pack_version} (${flags}) signed with key ${pack.keyId}${devMark(pack.keyId)}\n  ${counts}\n`);
+      printWarnings(io, m.pack_id, pack.warnings);
     });
 
   const licence = program.command('licence').description('Sign and verify licence documents');
