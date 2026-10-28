@@ -1,0 +1,13 @@
+{
+  "id": "identity-providers",
+  "label": ["Company sign-in", "Masuk perusahaan"],
+  "group": "admin",
+  "order": 46,
+  "scope": "org",
+  "perm": "idp.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Add OIDC provider", "Tambah penyedia OIDC"], ["Add SAML provider", "Tambah penyedia SAML"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

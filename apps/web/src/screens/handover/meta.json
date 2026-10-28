@@ -1,0 +1,13 @@
+{
+  "id": "handover",
+  "label": ["Handover", "Serah terima"],
+  "group": "audit",
+  "order": 80,
+  "scope": "ms",
+  "perm": "record.assign",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

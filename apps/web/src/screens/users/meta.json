@@ -1,0 +1,13 @@
+{
+  "id": "users",
+  "label": ["People and roles", "Orang dan peran"],
+  "group": "admin",
+  "order": 40,
+  "scope": "org",
+  "perm": "user.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Invite person", "Undang orang"], ["Export roles and responsibilities", "Ekspor peran dan tanggung jawab"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}
