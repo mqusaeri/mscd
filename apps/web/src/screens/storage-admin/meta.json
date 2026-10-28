@@ -1,0 +1,13 @@
+{
+  "id": "storage-admin",
+  "label": ["Repository administration", "Administrasi repositori"],
+  "group": "admin",
+  "order": 38,
+  "scope": "org",
+  "perm": "storage.repository.manage",
+  "roles": ["manager"],
+  "nav": false,
+  "pageActions": [["Connect repository", "Hubungkan repositori"]],
+  "sampleRole": "manager",
+  "open": "query"
+}

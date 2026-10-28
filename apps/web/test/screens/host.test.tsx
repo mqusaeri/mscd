@@ -79,7 +79,7 @@ describe('visibility of host screens', () => {
   it('the sidebar inserts host screens into their group by order and drops empty groups', () => {
     const nav = hostNav(NAV, ctxOf(), 'manager');
     const admin = nav.find((g) => g.id === 'admin')!;
-    expect(admin.items.map((i) => i.id)).toEqual(['fw', 'storage', 'license']);
+    expect(admin.items.map((i) => i.id)).toEqual(['fw', 'storage', 'license', 'systems', 'routing']);
     expect(admin.items[2]).toMatchObject({ host: true, label: 'Licence', order: 30 });
     expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'admin']);
     // A persona without the Administration group gets it when a host screen of the group is visible.

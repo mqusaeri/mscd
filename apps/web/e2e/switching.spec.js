@@ -205,6 +205,8 @@ test.describe('Roles and navigation', () => {
 
   test('opening another screen starts at the top of the page', async ({ page }) => {
     await openApp(page);
+    // Over the page body: once the sidebar is taller than the window it scrolls on its own (M2-09).
+    await page.mouse.move(800, 500);
     await page.mouse.wheel(0, 900);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
     await page.locator('aside nav button[title="Chain stages"]').click();

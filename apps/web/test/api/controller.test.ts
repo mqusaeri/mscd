@@ -412,7 +412,7 @@ describe('screen host in sample mode', () => {
     expect(v.hostLayer).toBeTruthy();
     expect([v.isPortfolio, v.isDrill, v.isFw, v.showList]).toEqual([false, false, false, false]);
     const admin = v.nav.find((g: AnyRecord) => g.label === 'Administration');
-    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Framework library', 'Storage repositories', 'Licence']);
+    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Framework library', 'Storage repositories', 'Licence', 'Management systems', 'Routing rules']);
     expect(admin.items[2].fw).toBe(600);
     v.pageActions[0].go();
     expect(app.state.screen).toBe('license');
@@ -617,7 +617,7 @@ describe('screen host in API mode', () => {
     expect(app.shellWithoutSystem()).toBe(true);
     const v = app.renderVals();
     expect(v.msSwitch).toBe(false);
-    expect(v.nav.map((g: AnyRecord) => [g.label, g.items.map((i: AnyRecord) => i.label)])).toEqual([['Administration', ['Framework library', 'Storage repositories', 'Licence']]]);
+    expect(v.nav.map((g: AnyRecord) => [g.label, g.items.map((i: AnyRecord) => i.label)])).toEqual([['Administration', ['Framework library', 'Storage repositories', 'Licence', 'Management systems', 'Routing rules']]]);
     expect(v.title).toBe('Licence');
     expect(v.me.role).toMatch(/^Tenant Admin, /);
     expect(v.pack).toBe('-');

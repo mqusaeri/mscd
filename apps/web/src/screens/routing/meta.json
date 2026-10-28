@@ -1,0 +1,13 @@
+{
+  "id": "routing",
+  "label": ["Routing rules", "Aturan routing"],
+  "group": "admin",
+  "order": 34,
+  "scope": "org",
+  "perm": "storage.repository.read",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Add rule", "Tambah aturan"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

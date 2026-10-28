@@ -136,12 +136,15 @@ test.describe('App shell', () => {
     await expect(ui.title(page)).toHaveText('My Tasks');
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'owner'));
     await pick('Auditor');
+    // Wait for the switch to end before navFor reads the session (API project, M2-09).
+    await expect(page.locator('aside nav button[title="Audit readiness"]')).toBeVisible();
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'auditor'));
     await expect(page.locator('aside nav button[title="Framework library"]')).toHaveCount(0);
     await pick('Top management');
     await expect(ui.title(page)).toHaveText('Portfolio Overview');
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'top'));
     await pick('MS Manager');
+    await expect(page.locator('aside nav button[title="Phase board"]')).toBeVisible();
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
   });
 

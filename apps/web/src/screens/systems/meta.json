@@ -1,0 +1,13 @@
+{
+  "id": "systems",
+  "label": ["Management systems", "Sistem manajemen"],
+  "group": "admin",
+  "order": 32,
+  "scope": "org",
+  "perm": "ms.admin",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["New management system", "Sistem manajemen baru"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}
