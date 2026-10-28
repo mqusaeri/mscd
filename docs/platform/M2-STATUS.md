@@ -5,11 +5,12 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 ## How to continue
 
 1. Read `CLAUDE.md`, then the wave table in section G.1 of the plan and the motion track in section L.
-2. New machine: install Docker, Node 22 and npm 10, run `npm ci`, and check that `docker info` works. On macOS install `flock` (`brew install flock`); the workflows use it so packages do not block each other. Keep about 10 GB of free disk: the Managed Vault (SeaweedFS) refuses to write below 1% free, which fails the vault tests and the smoke test.
+2. New machine: install Docker, Node 22 and npm 10, run `npm ci`, and check that `docker info` works. On macOS install `flock` (`brew install flock`); the workflows use it so packages do not block each other. Run the tests with `TZ=UTC` on a host whose time zone is not UTC (as CI does): `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` fail otherwise. Keep about 10 GB of free disk: the Managed Vault (SeaweedFS) refuses to write below 1% free, which fails the vault tests and the smoke test.
 3. Start the next packages with `.claude/workflows/mscd-m2-wp.js`, args `{wp: "<id>", notes: "<anything from the Notes column>"}`. Run at most four at once (rule R-02); a machine with more cores may run more, as long as no two running packages own the same file.
-4. When a package's workflow ends with open findings, or was stopped part way, continue it with `.claude/workflows/mscd-m2-followup.js`, args `{wp, notes, review: {acceptancePassed, problems}, interrupted}` (the `review` is the `final` object of the ended run). Name in `notes` any path outside the package's Owns list that you assign for the fix.
-5. When a package ends with `acceptancePassed: true`, apply cheap minor findings, apply the patches it leaves for files outside its Owns list, record decisions in its handoff note under "Orchestrator decisions", commit, push to `main`, and update this file.
-6. After every wave, run the full suites once (`npm run test:int -w @mscd/server`, `CI=1 npm run test:e2e -w @mscd/web`, `npm run test:e2e:api -w @mscd/web`, and `npm run test:smoke` when deploy or Compose files changed) and send any failure back to the package that caused it.
+4. When a session ends while a package is still being built, start `.claude/workflows/mscd-m2-wp.js` again with `interrupted: true` and, if you have it, `previousTranscript` (the stopped implementer's transcript): the new implementer finishes the work in the tree instead of starting over.
+5. When a package's workflow ends with open findings, or was stopped part way, continue it with `.claude/workflows/mscd-m2-followup.js`, args `{wp, notes, review: {acceptancePassed, problems}, interrupted}` (the `review` is the `final` object of the ended run). Name in `notes` any path outside the package's Owns list that you assign for the fix.
+6. When a package ends with `acceptancePassed: true`, apply cheap minor findings, apply the patches it leaves for files outside its Owns list, record decisions in its handoff note under "Orchestrator decisions", commit, push to `main`, and update this file.
+7. After every wave, run the full suites once (`npm run test:int -w @mscd/server`, `CI=1 npm run test:e2e -w @mscd/web`, `npm run test:e2e:api -w @mscd/web`, and `npm run test:smoke` when deploy or Compose files changed) and send any failure back to the package that caused it.
 
 ## Packages
 
@@ -28,11 +29,12 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-07 Document control and register server additions | 2a | Done | APPL-ASSESS also applies on create (plan D.2 updated). Holdings include self-assessment gaps, audit activities and business associate relationship owners |
 | M2-06 Onboarding, accounts and operator server | 2a | Done | Daily jobs run from a ledger, `platform.daily_job_run` (one row per organisation, job and local date; orchestrator decision): over 600,000 simulated ticks, 0 doubles, 0 misses. Every new daily job must go through the ledger and read its date from the payload (`localDate`). The organisation PATCH checks If-Match |
 | M2-04 Pack content | 2a | Done | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. Evidence examples and the clause at risk are keyed per system. H.6 still open |
-| MOT-03 In-app illustration library | L2 | Next | Can run with M2-S07 and M2-S10 (no shared files) |
+| MOT-03 In-app illustration library | L2 | Done | Eight scenes (`getting-started`, `no-systems`, `no-documents`, `no-evidence`, `no-findings`, `all-done`, `error`, `offline`) through `<Illustration scene=... />` from `apps/web/src/illustrations`, passed to the EmptyState `illustration` prop. The handoff note says which scene goes where. Gallery at `?screen=illustrations` in the sample build only (the orchestrator assigned `apps/web/src/screens/illustrations/**`) |
 | M2-S08 Monitoring and alerts | 2b | Done | Real Grafana image test assigned to M2-S13 |
 | M2-S05 Deploy script and deploy workflow | 2b | Done | The deploy rehearsal passed 78 checks. Deploys run only through `.github/workflows/deploy-prod.yml` with the owner's approval |
-| M2-S07 Backups and restore test, M2-S10 Per-organisation entitlements | 2b | Next | M2-S10: write `platform.entitlement` only in platform scope (see its brief); its daily `entitlement.expiry` job goes through the run ledger of M2-06 and reads `localDate` from the payload. M2-S07: the backup values come from `deploy-prod.yml` of M2-S05 |
-| M2-S09, M2-08, M2-09, M2-10 | 3a | After wave 2 | |
+| M2-S07 Backups and restore test, M2-S10 Per-organisation entitlements | 2b | Running | M2-S10: write `platform.entitlement` only in platform scope (see its brief); its daily `entitlement.expiry` job goes through the run ledger of M2-06 and reads `localDate` from the payload. M2-S07: the backup values come from `deploy-prod.yml` of M2-S05 |
+| M2-08 Bulk import, M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28): they share no file with the open packages of 2b |
+| M2-S09, M2-10 | 3a | Next | Start when M2-S10 is committed: M2-S09 calls its `applyPreset` and change notice and shares two files with it; M2-10's invitations meet the user limits M2-S10 changes |
 | M2-S11, M2-16, M2-11, M2-12 | 3b | After 3a | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
 | M2-S12, M2-13, M2-14, M2-15 | 3c | After 3b | |
 | M2-17 Terminology | 4 | Waits for the owner's approval of H.1 | |
@@ -42,6 +44,11 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 ## Open orchestrator items
 
 - Between waves 2b and 3a: make `mscd_queue_oldest_age_seconds` count from the start time of due jobs (`stats()` in `apps/server/src/modules/jobs/pgboss-job-queue.ts` and `bullmq-job-queue.ts`), then set `JobQueueStuck` in `deploy/ops/prometheus/rules/jobs.yml` and its promtool tests back to 900 seconds (M2-S08 deviation 9).
+- Running now: make `mscd_queue_oldest_age_seconds` count from the start time of due jobs and set `JobQueueStuck` back to 900 seconds (the first item above).
+- After M2-S07: run the M2-S05 rehearsal once more with the default overlays (`repo`), so it deploys the backup overlay too (M2-S05 handoff, follow-ups).
+- After M2-09: add the Administration entries `systems` and `routing` to the expectations of the shared tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` (owned by M2-01; MOT-03 found them).
+- After M2-S10: add `entitlements` to the expected `license` sub-commands in `apps/server/test/unit/cli/program.test.ts`.
+- Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 - Owner: H.1 (terminology, gates M2-17) and H.6 (ISO 9001:2026 and ISO 37001:2025 trees) are still open.
 

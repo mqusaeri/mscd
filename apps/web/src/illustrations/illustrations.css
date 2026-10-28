@@ -1,0 +1,64 @@
+/* Illustration library (MILESTONE-2 MOT-03, section L). Colours come only from the tokens of src/styles.css, so a
+   scene follows the light and the dark theme of its .mscd root. The scenes hold no text. Motion: one short entrance
+   per element, every step over within 1.2 seconds, never a loop; reduced motion and .il-still show the final frame
+   at once. Every keyframe ends at the element's resting style, and the fill mode is backwards: an element is held at
+   its start only while it waits for its own animation, and once the animation ends nothing of it stays applied, so
+   the frame after the entrance is exactly the still frame. */
+
+.il{display:block;max-width:100%;height:auto;overflow:visible;fill:none;stroke:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+/* Colour roles */
+.il .il-ink{stroke:var(--tx3)}
+.il .il-field{stroke:var(--field)}
+.il .il-fieldf{fill:var(--field)}
+.il .il-slot{stroke:var(--field);stroke-dasharray:4 3.5}
+.il .il-line{stroke:var(--tx3);opacity:.45}
+.il .il-paper{fill:var(--sur)}
+.il .il-paper2{fill:var(--sur2)}
+.il .il-shade{fill:var(--bd)}
+.il .il-dot{fill:var(--tx3)}
+.il .il-thread{stroke:var(--acc);stroke-width:2.5}
+.il .il-acc{stroke:var(--acc)}
+.il .il-accf{fill:var(--acc)}
+.il .il-wash{fill:var(--accbg)}
+.il .il-on{stroke:var(--onacc)}
+.il .il-ring{stroke:var(--sur);stroke-width:2}
+.il .il-ok{stroke:var(--ok)}
+.il .il-okbg{fill:var(--okbg)}
+.il .il-bad{stroke:var(--bad)}
+.il .il-badf{fill:var(--bad)}
+.il .il-badbg{fill:var(--badbg)}
+.il .il-warn{stroke:var(--warn)}
+.il .il-warnf{fill:var(--warn)}
+.il .il-warnbg{fill:var(--warnbg)}
+.il .il-thin{stroke-width:1.25}
+.il .il-bold{stroke-width:2.25}
+.il .il-heavy{stroke-width:3}
+.il .il-ghost{opacity:.6}
+.il .il-plate{opacity:.5}
+.mscd[data-theme="dark"] .il .il-plate{opacity:.32}
+
+/* Entrance */
+.il .il-fade,.il .il-rise,.il .il-drop,.il .il-pop,.il .il-draw,.il .il-slide,.il .il-slide-l,.il .il-slide-r{animation-fill-mode:backwards;animation-iteration-count:1;animation-timing-function:cubic-bezier(.22,1,.36,1)}
+.il .il-fade{animation-name:il-fade}
+.il .il-rise{animation-name:il-rise}
+.il .il-drop{animation-name:il-drop}
+.il .il-pop{animation-name:il-pop;animation-timing-function:cubic-bezier(.34,1.56,.64,1);transform-box:fill-box;transform-origin:center}
+.il .il-draw{animation-name:il-draw}
+.il .il-slide{animation-name:il-slide}
+.il .il-slide-l{animation-name:il-slide-l}
+.il .il-slide-r{animation-name:il-slide-r}
+@keyframes il-fade{from{opacity:0}}
+@keyframes il-rise{from{opacity:0;transform:translateY(6px)}}
+@keyframes il-drop{from{opacity:0;transform:translateY(-12px)}}
+@keyframes il-pop{from{opacity:0;transform:scale(.55)}}
+@keyframes il-slide{from{opacity:0;transform:translate(10px,6px)}}
+@keyframes il-slide-l{from{transform:translateX(7px)}}
+@keyframes il-slide-r{from{transform:translateX(-7px)}}
+/* A drawn line (pathLength 1) waits with its one dash just before the start and the next dash just after the end, so
+   no zero-length dash, and so no round cap dot, sits on the path before the line draws in. */
+@keyframes il-draw{from{stroke-dasharray:1 1.02;stroke-dashoffset:1.01}to{stroke-dasharray:1 1;stroke-dashoffset:0}}
+
+/* The final frame at once: on request, and for everyone who asks the system for reduced motion (L-2) */
+.il.il-still *{animation:none!important}
+@media (prefers-reduced-motion:reduce){.il *{animation:none!important}}

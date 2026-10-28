@@ -1,0 +1,16 @@
+/* The illustration gallery (MILESTONE-2 MOT-03): layout only, over the tokens of src/styles.css. Text at 12px or
+   more in --tx and --tx2, which reach 4.5:1 on --sur in both themes. */
+.ilg-intro{display:flex;flex-direction:column;gap:12px}
+.ilg-text{margin:0;color:var(--tx);max-width:720px;line-height:1.5}
+.ilg-note{margin:0;font-size:12px;color:var(--tx2)}
+.ilg-rounds{display:flex;flex-direction:column;gap:var(--pad);min-width:0}
+.ilg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:var(--pad)}
+.ilg-card{display:flex;flex-direction:column}
+.ilg-card>.mx-card-body{display:flex;flex-direction:column;gap:12px;flex:1}
+.ilg-stage{display:flex;justify-content:center;align-items:center;min-height:136px;padding:4px 0}
+.ilg-meta{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:12px;row-gap:6px;margin:0;font-size:12px;border-top:1px solid var(--bd);padding-top:10px}
+.ilg-meta dt{color:var(--tx2)}
+.ilg-meta dd{margin:0;color:var(--tx);overflow-wrap:anywhere}
+.ilg-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-around;gap:24px}
+.ilg-figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0;max-width:100%}
+.ilg-figure figcaption{font-size:12px;color:var(--tx2);text-align:center}

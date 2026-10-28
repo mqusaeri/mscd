@@ -46,8 +46,14 @@ const REVIEW = {
   required: ['acceptancePassed', 'problems'],
 }
 
+// args.interrupted: an earlier implementer was stopped part way (for example the session ended). The new implementer
+// finishes the work in the tree; args.previousTranscript may name the stopped agent's transcript (JSON lines).
+const RESUME = args.interrupted
+  ? `\nRESUMING: an earlier implementer of ${WP} was stopped part way. Its work is in the working tree, uncommitted (git status shows it; only your owned and assigned paths are yours).${args.previousTranscript ? ` Its transcript (JSON lines) is at ${args.previousTranscript}; read its last part for its plan and progress.` : ''} Check what is done, keep what is right, finish the rest, and do not start over.\n`
+  : ''
+
 phase('Implement')
-const built = await agent(`${CTX}
+const built = await agent(`${CTX}${RESUME}
 TASK: Implement ${WP} completely and to production quality, following the plan exactly. Then run every acceptance command of ${WP} (and the common acceptance that applies at this point of the build) and iterate until they all pass. Report each command with pass/fail.`, { label: `implement:${WP}`, phase: 'Implement', schema: REPORT })
 
 const verifyPrompt = (round, prior) => `${CTX}

@@ -1,0 +1,13 @@
+{
+  "id": "illustrations",
+  "label": ["Illustrations", "Ilustrasi"],
+  "group": "admin",
+  "order": 900,
+  "scope": "org",
+  "perm": "sample-build-only",
+  "roles": ["manager", "top", "auditor", "owner"],
+  "nav": false,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "query"
+}
