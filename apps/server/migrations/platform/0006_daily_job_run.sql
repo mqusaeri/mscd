@@ -6,9 +6,10 @@
 -- job in the same transaction, and the job works on the date of its row (the payload's `localDate`), so each daily
 -- job runs once per local date of the organisation whatever the time zone does between the tick and the job's start.
 -- `scheduled_for` is the instant the run is due (its local time in the zone the tick read); `enqueued_at` is the
--- tick's clock. The tick deletes rows older than 14 days.
+-- tick's clock. The tick deletes rows older than 14 days. The rows are derived data of their organisation and go with
+-- it (`seed demo --reset` removes demo organisations).
 CREATE TABLE platform.daily_job_run (
-  organization_id uuid NOT NULL REFERENCES platform.organization(id),
+  organization_id uuid NOT NULL REFERENCES platform.organization(id) ON DELETE CASCADE,
   job text NOT NULL CHECK (job ~ '^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$'),
   local_date date NOT NULL,
   scheduled_for timestamptz NOT NULL,

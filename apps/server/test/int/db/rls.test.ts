@@ -449,6 +449,8 @@ describe('tenant isolation and privileges (J.5)', () => {
         // Milestone 2 platform 0005 (M2-02).
         organization_status_event: ['SELECT', 'INSERT'],
         entitlement: ['SELECT', 'INSERT', 'UPDATE'],
+        // Milestone 2 platform 0006 (orchestrator decision between waves 2a and 2b): the run ledger of the daily jobs.
+        daily_job_run: ['SELECT', 'INSERT', 'DELETE'],
       };
       const packExpected: Record<string, string[]> = {
         pack_install: ['SELECT', 'INSERT', 'UPDATE'],
@@ -490,7 +492,7 @@ describe('tenant isolation and privileges (J.5)', () => {
       expect(rows.map((r) => r.relname)).toEqual(
         [
           'audit_log', 'identity_provider', 'idempotency_key', 'invitation', 'licence', 'org_membership', 'session', 'tenant_key', 'verified_domain',
-          'organization_status_event', 'entitlement',
+          'organization_status_event', 'entitlement', 'daily_job_run',
         ].sort(),
       );
     });

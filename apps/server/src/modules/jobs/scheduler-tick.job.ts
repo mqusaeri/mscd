@@ -17,10 +17,19 @@
 // Atomicity: the ledger rows and the jobs are written in one database transaction. The pg-boss driver sends through
 // that transaction (`db: fromKysely(trx)`, pg-boss 12.35), the BullMQ driver writes its outbox row in it, and the
 // in-memory driver queues the job after the commit. A failure rolls back both the rows and the jobs, and the retried
-// tick (E.2 retries 3) or the next tick plans them again, so a run is neither lost nor created twice. A send that the
-// queue drops because a job with the same singleton key is already waiting (E.1) counts as that run: for a key with a
-// date that job is this run, and for a key `<prefix>:<org>:all` it is a recompute of the same job that runs soon on the
-// current date. The planner never enqueues two runs of one job at once (see daily-run-planner.ts).
+// tick (E.2 retries 3) or the next tick plans them again, so a run is neither lost nor created twice.
+//
+// Singleton keys (E.1: at most one waiting or active job per key): the planner enqueues no run of a job while an
+// earlier run of it may still be queued (daily-run-planner.ts). When the queue still drops a send (`send` resolves to
+// null, which pg-boss reports inside the transaction), the job that holds the key decides:
+// - a key with a date (`<prefix>:<org>:<date>`): that job is this run (sent before the ledger existed), so the row
+//   stays and the run counts as queued;
+// - a key `<prefix>:<org>:all` (readiness.recompute, drift.evaluate, cycle.derive): that job is a run of another date
+//   that is still waiting or working (a queue delay of more than `RECENT_RUN_SECONDS`), or a recompute that a command
+//   queued. The tick deletes the row it inserted, in the same transaction, and a later tick plans the run again once
+//   the key is free. The ledger still keeps the run to one per date.
+// The BullMQ driver decides at relay time and cannot report a drop to the tick; there the planner's rule alone keeps
+// the sends apart, which holds while a queued daily job starts and ends within `RECENT_RUN_SECONDS`.
 //
 // Ordering: the tick first moves the clock high-water mark (`platform.clock_mark`, a single row). Its row lock is held
 // to the commit, so a second tick running at the same time waits there and then reads the ledger rows of the first.
@@ -39,10 +48,24 @@ import { TenantScope } from '../tenancy/tenant-scope';
 import { planDailyRuns, type LedgerRun, type PlannedRun } from './daily-run-planner';
 import { DAILY_JOBS, type DailyJob } from './schedules';
 
+export interface TickRun {
+  orgId: string;
+  name: JobName;
+  singletonKey: string;
+  startAfterSeconds: number;
+  localDate: string;
+  path: PlannedRun['path'];
+}
+
 export interface TickResult {
   highWater: string;
   organisations: number;
-  enqueued: { orgId: string; name: JobName; singletonKey: string; startAfterSeconds: number; localDate: string; path: PlannedRun['path'] }[];
+  /** Runs whose ledger row this tick inserted and whose job it sent. */
+  enqueued: TickRun[];
+  /** Runs whose send the queue dropped for a key `<prefix>:<org>:all` held by another job: no row, a later tick retries. */
+  deferred: TickRun[];
+  /** Runs whose send the queue dropped for a key with their date: the job holding it is this run, the row stays. */
+  alreadyQueued: TickRun[];
   /** Ledger rows deleted because they are older than `LEDGER_RETENTION_DAYS`. */
   ledgerRowsDeleted: number;
 }
@@ -77,6 +100,8 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
         organisations: result.organisations,
         enqueued: result.enqueued.length,
         caughtUp: result.enqueued.filter((e) => e.path === 'catch-up').length,
+        deferred: result.deferred.length,
+        alreadyQueued: result.alreadyQueued.length,
         ledgerRowsDeleted: result.ledgerRowsDeleted,
         highWater: result.highWater,
       },
@@ -113,12 +138,12 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
         const ledger = new Map<string, LedgerRun[]>();
         const recent = await trx
           .selectFrom('platform.daily_job_run')
-          .select(['organization_id', 'job', 'local_date', 'scheduled_for'])
+          .select(['organization_id', 'job', 'local_date', 'scheduled_for', 'enqueued_at'])
           .where('local_date', '>=', addDays(utcDate, -LEDGER_READ_DAYS))
           .execute();
         for (const row of recent) {
           const runs = ledger.get(row.organization_id) ?? [];
-          runs.push({ job: row.job, localDate: row.local_date, scheduledFor: new Date(row.scheduled_for) });
+          runs.push({ job: row.job, localDate: row.local_date, scheduledFor: new Date(row.scheduled_for), enqueuedAt: new Date(row.enqueued_at) });
           ledger.set(row.organization_id, runs);
         }
         const firsts = await trx
@@ -128,7 +153,9 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
           .execute();
         const firstLocalDate = new Map(firsts.map((f) => [f.organization_id, f.first]));
 
-        const enqueued: TickResult['enqueued'] = [];
+        const enqueued: TickRun[] = [];
+        const deferred: TickRun[] = [];
+        const alreadyQueued: TickRun[] = [];
         for (const org of orgs) {
           const runs = planDailyRuns({
             orgId: org.id,
@@ -148,26 +175,51 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
               .returning('job')
               .executeTakeFirst();
             if (!inserted) continue;
-            await this.jobs.send(
+            const jobId = await this.jobs.send(
               run.job.name,
               { orgId: org.id, requestId, payload: { localDate: run.localDate } },
               { singletonKey: run.singletonKey, retryLimit: run.job.retryLimit, ...(run.startAfterSeconds > 0 ? { startAfterSeconds: run.startAfterSeconds } : {}) },
               trx,
             );
-            enqueued.push({
+            const entry: TickRun = {
               orgId: org.id,
               name: run.job.name,
               singletonKey: run.singletonKey,
               startAfterSeconds: run.startAfterSeconds,
               localDate: run.localDate,
               path: run.path,
-            });
+            };
+            if (jobId !== null) {
+              enqueued.push(entry);
+            } else if (run.job.allSystems) {
+              // Another job holds the key `<prefix>:<org>:all`: no run now, a later tick plans it again (see above).
+              await trx
+                .deleteFrom('platform.daily_job_run')
+                .where('organization_id', '=', org.id)
+                .where('job', '=', run.job.name)
+                .where('local_date', '=', run.localDate)
+                .execute();
+              deferred.push(entry);
+            } else {
+              alreadyQueued.push(entry);
+            }
           }
+        }
+        if (deferred.length > 0 || alreadyQueued.length > 0) {
+          this.logger.warn(
+            {
+              deferred: deferred.map((d) => `${d.orgId} ${d.name}@${d.localDate}`),
+              alreadyQueued: alreadyQueued.map((d) => `${d.orgId} ${d.name}@${d.localDate}`),
+            },
+            'scheduler.tick: the queue dropped sends of daily runs because jobs with their singleton keys are queued',
+          );
         }
         return {
           highWater: (mark?.high_water ?? now).toISOString(),
           organisations: orgs.length,
           enqueued,
+          deferred,
+          alreadyQueued,
           ledgerRowsDeleted: Number(deleted.numDeletedRows),
         };
       },

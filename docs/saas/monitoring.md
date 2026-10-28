@@ -6,10 +6,10 @@ On the production and staging servers nobody types these commands by hand in nor
 
 ## How it works in short
 
-1. **Prometheus** collects numbers ("metrics") every 30 seconds from the MSCD processes, the database, the server itself, Caddy and a probe of the public address, and keeps them for 30 days.
+1. **Prometheus** collects numbers ("metrics") every 30 seconds from the MSCD processes, the database, the server itself and a probe of the public address, and keeps them for 30 days.
 2. Every 30 seconds Prometheus checks the **alert rules** of `deploy/ops/prometheus/rules/`. When a rule is true for long enough, the alert fires.
 3. **Alertmanager** sends firing alerts by **email** to the alert address, and by **Telegram** when a bot is set up. It sends a second message when the problem is gone ("Resolved").
-4. One alert, the **Watchdog**, always fires. Alertmanager sends it every minute to an outside **heartbeat** service. When those pings stop, because the server, Prometheus or Alertmanager is down or mail cannot leave the server, the heartbeat service alerts you by its own email. A server that is fully down cannot send an alert itself, so this outside check is the only way to hear about it.
+4. One alert, the **Watchdog**, always fires. Alertmanager sends it every minute to an outside **heartbeat** service. The pings stop when the server, Prometheus or Alertmanager is down, and also when alert emails cannot be sent: then Alertmanager mutes the Watchdog on purpose ([AlertDeliveryFailing](#alertdeliveryfailing)). Either way the heartbeat service alerts you by its own email. A server that is fully down, or that cannot send email, cannot tell you itself, so this outside check is the only way to hear about it.
 5. A separate outside **uptime check** opens `https://<domain>/healthz` from the internet every few minutes, the way a customer would.
 
 ## What runs
@@ -24,11 +24,11 @@ The monitoring overlay `deploy/compose/docker-compose.ops.yml` adds these servic
 | `node-exporter` | `prom/node-exporter:v1.12.1` | The server: processor, memory, disks, and the files of `/opt/mscd/metrics` | mscd | 64 MB |
 | `postgres-exporter` | `prometheuscommunity/postgres-exporter:v0.20.1` | The database, signed in as `mscd_monitor` | mscd | 64 MB |
 | `blackbox-exporter` | `prom/blackbox-exporter:v0.29.0` | Opens `https://<domain>/healthz` and reads the certificate's expiry date | mscd, egress | 64 MB |
-| `grafana` | `grafana/grafana:13.2.4` | Optional dashboards at `ops.<domain>` (profile `grafana`) | mscd | 384 MB |
+| `grafana` | `grafana/grafana:13.2.4` | Optional dashboards at `ops.<domain>` (profile `grafana`) | mscd, ops-web | 384 MB |
 
 Together they use about 1.5 GB of memory at most. Every image is pinned by version and digest. The services run with a read-only file system, without extra privileges, and with all Linux capabilities dropped (`ops-init` keeps three: reading the secret files of other users and handing its output files to the user of the service that reads them).
 
-`mscd` is the internal network of the stack: it has no route out of the server. Only Alertmanager (mail, Telegram, heartbeat) and the probe (the public address) are also on `egress`. Caddy joins `mscd` so that Prometheus can read Caddy's own metrics on port 9180 (`deploy/compose/config/caddy/conf.d/ops.caddy`); that port answers only addresses of the `mscd` network, and Caddy's admin endpoint stays inside its container.
+`mscd` is the internal network of the stack: it has no route out of the server. Only Alertmanager (mail, Telegram, heartbeat) and the probe (the public address) are also on `egress`. Caddy, the only container that faces the internet, stays off `mscd`, so it has no way to the database, the object store or the storage gateway. It reaches Grafana over `ops-web`, a second internal network that holds only Caddy and Grafana. Prometheus does not read Caddy's own metrics; the probe of the public address checks Caddy from outside, and Caddy's admin endpoint stays inside its container.
 
 What Prometheus reads:
 
@@ -37,9 +37,10 @@ What Prometheus reads:
 | `api`, `worker`, `storage-gateway` | port 9464 of each | Requests and errors, job runs and failures, queue age, licence days left, audit chain state, refused requests, second-factor lockouts |
 | `node` | `node-exporter:9100` | Processor, memory, disks; `reboot.prom` of the reboot marker (M2-S03) and `backup.prom` of the backup script (M2-S07) |
 | `postgres` | `postgres-exporter:9187` | Database up, connections, size, locks (no per-table numbers, which would grow with every organisation) |
-| `caddy` | `caddy:9180` | Health of the web container as Caddy sees it, Caddy's own process |
 | `public-url` | through `blackbox-exporter:9115` | `https://<domain>/healthz` answers 200, certificate expiry |
 | `prometheus`, `alertmanager`, `blackbox` | their own ports | The monitoring itself, including failed alert deliveries |
+
+Each target also carries the label `service`: the Compose service to look at when it does not answer. It differs from the target name for `node` (`node-exporter`), `postgres` (`postgres-exporter`), `blackbox` and `public-url` (both `blackbox-exporter`).
 
 ## Settings
 
@@ -104,10 +105,11 @@ Use an uptime service in a region near Indonesia (for example Singapore) to open
 
 ### Test alert
 
-After the first deploy with monitoring, send a test alert and write down when it arrived (GL-33). On the server, in the folder `deploy/compose` of the running release ([deploy.md](deploy.md)):
+After the first deploy with monitoring, send a test alert and write down when it arrived (GL-33). On the server, as the admin account, in `/opt/mscd/deploy/compose`, the folder of the running release ([deploy.md](deploy.md#commands-on-the-server)). Compose reads `.env` there, which names every Compose file of the deploy and the project, so the commands work on the same services as the deploy:
 
 ```bash
-C="docker compose -f docker-compose.yml -f docker-compose.saas.yml -f docker-compose.ops.yml --env-file .env"
+cd /opt/mscd/deploy/compose
+C="sudo docker compose"
 $C exec alertmanager amtool alert add MscdTestAlert severity=warning \
   --annotation=summary="Test alert, please ignore" --annotation=action="Nothing to do." \
   --alertmanager.url=http://127.0.0.1:9093
@@ -125,11 +127,11 @@ Every alert email has the subject `[MSCD <domain>] Alert: <name>` and gives, for
 | [PublicUrlDown](#publicurldown) | `https://<domain>/healthz` has failed for 2 minutes | critical |
 | [DatabaseDown](#databasedown) | PostgreSQL has not been reachable for 2 minutes | critical |
 | [HttpErrorRateHigh](#httperrorratehigh) | More than 2 percent of requests end in a server error, for 10 minutes | critical |
-| [AlertDeliveryFailing](#alertdeliveryfailing) | An email or Telegram alert could not be sent in the last 30 minutes | warning |
+| [AlertDeliveryFailing](#alertdeliveryfailing) | An email or Telegram alert could not be sent in the last 30 minutes; for email it also mutes the Watchdog | warning |
 | [AuditChainBroken](#auditchainbroken) | An audit chain is broken or does not match its signed anchor | critical |
 | [LicenceExpiringSoon](#licenceexpiringsoon) | An organisation's licence ends in less than 30 days | warning |
 | [JobFailuresRising](#jobfailuresrising) | One job failed 3 times or more in 30 minutes | warning |
-| [JobQueueStuck](#jobqueuestuck) | A job has waited more than 15 minutes, for 5 minutes | warning |
+| [JobQueueStuck](#jobqueuestuck) | A job has waited more than 55 minutes, for 5 minutes | warning |
 | [JobOutboxStuck](#joboutboxstuck) | Job outbox rows have been stuck for 15 minutes | warning |
 | [MfaLockSpike](#mfalockspike) | 3 or more second-factor lockouts in 15 minutes | warning, security |
 | [AccessDeniedSpike](#accessdeniedspike) | More than 50 refused requests in 10 minutes | warning, security |
@@ -150,7 +152,7 @@ $C exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets       # every 
 
 ### TargetDown
 
-**What it means.** Prometheus could not read the numbers of one service for 2 minutes. The email names the service (`job`). For `api`, `worker` or `storage-gateway` the app is probably affected; for an exporter only the monitoring is.
+**What it means.** Prometheus could not read the numbers of one service for 2 minutes. The email names the target (`job`) and, in the first step, the Compose service to look at (for example `node-exporter` for the target `node`). For `api`, `worker` or `storage-gateway` the app is probably affected; for an exporter only the monitoring is.
 
 **First step.** `$C ps` shows the state of every container. Read the last lines of the service's log: `$C logs --tail 100 <service>`. A container that restarts again and again often ran out of memory (`docker inspect <container> --format '{{.State.OOMKilled}}'`). Start it again with `$C up -d <service>`.
 
@@ -174,7 +176,7 @@ $C exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets       # every 
 
 ### AlertDeliveryFailing
 
-**What it means.** Alertmanager could not send an alert by email (or Telegram). Other alerts may not reach you either.
+**What it means.** Alertmanager could not send an alert by email (or Telegram). Other alerts may not reach you either. When email fails, this alert itself may not reach you by email, so Alertmanager also mutes the [Watchdog](#watchdog) while it lasts (until 30 minutes after the last failed send): the heartbeat pings stop and the heartbeat service warns you by its own email. A failure of Telegram alone does not mute the Watchdog, because the email reports it.
 
 **First step.** `$C logs --tail 50 alertmanager` names the error. Check the mail provider's account (quota, a changed password), the sending domain records (SPF, DKIM, DMARC; GL-08) and, for Telegram, that the bot is still in the group.
 
@@ -192,13 +194,13 @@ $C exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets       # every 
 
 ### JobFailuresRising
 
-**What it means.** A background job (for example sending emails, building an export, checking file links) failed 3 times or more within 30 minutes. Failed jobs are retried, so single failures are normal; repeated ones are not.
+**What it means.** A background job (for example sending emails, building an export, checking file links) failed 3 times or more within 30 minutes. Failed jobs are retried, so single failures are normal; repeated ones are not. The count includes the first failure of a job since the worker started.
 
 **First step.** `$C logs --since 1h worker | grep '"job":"<job name>"'` shows the error. Errors that name a provider (mail, Microsoft 365, Google Drive) usually mean that provider is down or a credential has expired.
 
 ### JobQueueStuck
 
-**What it means.** A job has waited more than 15 minutes to run. Emails, reminders or exports are delayed.
+**What it means.** The oldest job of a queue has waited more than 55 minutes. The server counts the wait from the moment a job was queued, and the hourly scheduler queues the daily jobs of each organisation up to 54 minutes before their start time (for example at 02:05 for a job at 02:45). Those jobs wait as planned, so the alert allows for that. Above 55 minutes, a job that should have run is still waiting: emails, reminders or exports are delayed.
 
 **First step.** Check that the worker runs and is healthy: `$C ps worker` and `$C logs --tail 100 worker`. Restart it with `$C restart worker` when it hangs.
 
@@ -224,7 +226,7 @@ Many lockouts from one address or against one organisation: open an incident log
 
 ### AccessDeniedSpike
 
-**What it means.** More than 50 requests were refused by the permission check within 10 minutes. Someone may be probing for data of other organisations or roles. This is an early sign of a possible breach.
+**What it means.** More than 50 requests were refused by the permission check within 10 minutes. Someone may be probing for data of other organisations or roles. This is an early sign of a possible breach. The count includes the first refusal on each address of the app since the api started.
 
 **First step.** Find the accounts and addresses behind the refused requests in the api log: `$C logs --since 1h api | grep '"statusCode":403'` (each line has the user and organisation id and the address). Each refusal is also in the audit trail of its organisation as `authz.denied`. One user clicking an old link is harmless; one account or address trying many records or organisations is not: open an incident log as for MfaLockSpike.
 
@@ -266,9 +268,9 @@ Many lockouts from one address or against one organisation: open an incident log
 
 ### Watchdog
 
-**What it means.** Nothing is wrong. This alert always fires so that the heartbeat service gets a ping about every minute. It never sends an email.
+**What it means.** Nothing is wrong. This alert always fires so that the heartbeat service gets a ping about every minute. It never sends an email. While alert emails fail ([AlertDeliveryFailing](#alertdeliveryfailing)), Alertmanager mutes it, so the heartbeat service warns you.
 
-**First step.** None. If the heartbeat service reports that the `watchdog` pings stopped, check in this order: the server answers (uptime check, SSH), `$C ps alertmanager prometheus`, and `$C logs --tail 50 alertmanager`.
+**First step.** None. If the heartbeat service reports that the `watchdog` pings stopped, check in this order: the server answers (uptime check, SSH), `$C ps alertmanager prometheus`, and `$C logs --tail 50 alertmanager` (an error about email means alert emails fail: see [AlertDeliveryFailing](#alertdeliveryfailing)).
 
 ## Planned work and silences
 
@@ -280,7 +282,7 @@ $C exec alertmanager amtool silence add alertname=~"PublicUrlDown|TargetDown|Htt
 $C exec alertmanager amtool silence query --alertmanager.url=http://127.0.0.1:9093
 ```
 
-A silence does not stop the Watchdog, so the heartbeat stays green. The outside uptime check still sees the maintenance; pause it there as well, or count the window as announced maintenance (D-S7).
+A silence of these alerts does not stop the Watchdog, so the heartbeat stays green. The outside uptime check still sees the maintenance; pause it there as well, or count the window as announced maintenance (D-S7).
 
 ## Dashboards (optional)
 
@@ -288,10 +290,10 @@ Grafana shows the dashboard "MSCD overview" (health, requests, jobs, licences, s
 
 1. Add a DNS A record (and AAAA when the app has one) for `ops.<domain>` pointing to the server.
 2. On your own computer, make the password hash: `docker run --rm -it caddy:2.11.7-alpine caddy hash-password` (type the password twice). Keep the password in the password manager.
-3. In the GitHub environment set the variables `OPS_DOMAIN` and `OPS_BASIC_AUTH_USER`, the secret `OPS_BASIC_AUTH_HASH`, and add `grafana` to `COMPOSE_PROFILES`.
-4. Deploy. Caddy reads the new site when it starts, so the first time restart it once after the deploy: `$C up -d --force-recreate caddy`.
+3. In the GitHub environment set the variable `OPS_DOMAIN`, the secret `OPS_BASIC_AUTH_HASH` and, when the user name should differ from `ops`, the variable `OPS_BASIC_AUTH_USER`. When `OPS_DOMAIN` is set, the deploy adds the `grafana` profile by itself, so Grafana starts.
+4. Deploy. `ops-init` writes the site of `ops.<domain>`, and the deploy then reloads Caddy so it reads the site. The dashboards work when the deploy ends; nothing needs a restart. When the deploy log warns "Caddy refused the configuration of the monitoring overlay", see [Troubleshooting](#troubleshooting).
 
-Grafana has no route out of the server, does not check for updates and keeps no administrator account: provisioning sets up the data source and the dashboard.
+Grafana has no route out of the server, does not check for updates and keeps no administrator account: provisioning sets up the data source and the dashboard. It sits on the internal networks `mscd` (to read Prometheus) and `ops-web` (where only Caddy reaches it); no port of Grafana is published.
 
 ## Retention of logs and monitoring data
 
@@ -329,11 +331,13 @@ The static checks fail when a rule has no test. The Alertmanager settings come f
 - `ops-init` creates `mscd_monitor` (it can sign in with its password and cannot write), writes the probe target and the Alertmanager settings, and runs again without changes;
 - the networks and ports are as described above, and every monitoring service has a memory limit and the hardening;
 - every Prometheus target is up (checked through the Prometheus API inside its container), the probe passes with the certificate, the text files of `/opt/mscd/metrics` are read, and every rule is loaded;
+- every target carries its Compose service, and the host's disks are listed without the container's own mounts;
 - the Watchdog reaches a heartbeat receiver, and a real alert (HostRebootNeeded from a test `reboot.prom`) and a test alert sent with `amtool` arrive as email in a Mailpit container that sits only on the `egress` network, outside `mscd`, which proves the way out;
-- Caddy's metrics site refuses the `edge` network;
-- with `MSCD_OPS_TEST_GRAFANA=true` (the default), the dashboards host through Caddy: no access without the password, the user signed in as a viewer, the dashboard listed, Prometheus reachable.
+- AlertDeliveryFailing for email mutes the Watchdog, the heartbeat pings stop, and they come back when it ends;
+- Caddy cannot reach the `mscd` network, and its admin endpoint answers only inside its container;
+- with `MSCD_OPS_TEST_GRAFANA=true` (the default), the dashboards host through Caddy: no access without the password, the user signed in as a viewer, the dashboard listed, Prometheus reachable. `MSCD_OPS_TEST_GRAFANA=stub` runs the same host with a small stand-in of Grafana, for a build machine without disk space for the Grafana image (about 2 GB): it checks Caddy, the password, the user name Caddy passes and the `ops-web` network, but not Grafana itself.
 
-Settings: `MSCD_OPS_TEST_PROJECT` (default `mscd-ops-test`), `MSCD_OPS_TEST_DIR` (default `/tmp/mscd-ops-test`), `MSCD_OPS_TEST_GRAFANA`, `MSCD_OPS_TEST_KEEP`, and those of `saas-stack.sh` (`MSCD_SAAS_TEST_SCAN`, `MSCD_BUILD_CA`). On a build machine that cannot reach the Alpine mirrors, use `MSCD_SAAS_TEST_SCAN=auto` as for `saas-stack.sh`.
+Settings: `MSCD_OPS_TEST_PROJECT` (default `mscd-ops-test`), `MSCD_OPS_TEST_DIR` (default `/tmp/mscd-ops-test`), `MSCD_OPS_TEST_GRAFANA` (`true`, `stub` or `false`), `MSCD_OPS_TEST_KEEP`, and those of `saas-stack.sh` (`MSCD_SAAS_TEST_SCAN`, `MSCD_BUILD_CA`). On a build machine that cannot reach the Alpine mirrors, use `MSCD_SAAS_TEST_SCAN=auto` as for `saas-stack.sh`.
 
 ## Troubleshooting
 
@@ -342,7 +346,7 @@ Settings: `MSCD_OPS_TEST_PROJECT` (default `mscd-ops-test`), `MSCD_OPS_TEST_DIR`
 | `ops-init` exits 1 with "ALERT_EMAIL_TO is missing or empty" | The variable `ALERT_EMAIL_TO` is not set in the GitHub environment. Set it and deploy again. The app keeps running; only the monitoring waits |
 | "bind source path does not exist: /opt/mscd/secrets/ops" | The deploy has not written the monitoring settings yet. Deploy with `deploy-prod.yml` |
 | `postgres-exporter` reports `pg_up 0` after a database restore | The restored database lacks the role `mscd_monitor`. Run `$C up -d ops-init` once; it creates the role again |
-| The heartbeat check is red but the server works | `HEARTBEAT_WATCHDOG_URL` is missing (ops-init warns "nobody notices") or wrong, or the server cannot reach the heartbeat service. `$C logs alertmanager \| grep webhook` |
+| The heartbeat check is red but the server works | Alert emails fail, so Alertmanager muted the Watchdog on purpose: see [AlertDeliveryFailing](#alertdeliveryfailing). Otherwise `HEARTBEAT_WATCHDOG_URL` is missing (ops-init warns "nobody notices") or wrong, or the server cannot reach the heartbeat service. `$C logs alertmanager \| grep -E 'email\|webhook'` |
 | PublicUrlDown fires while customers can work | The server cannot reach its own public address. Check DNS from the server (`getent hosts <domain>`) and the provider's network |
-| The dashboards host shows an error from Caddy | Grafana is not running (`grafana` missing from `COMPOSE_PROFILES`), or Caddy started before `ops-init` wrote the site: `$C up -d --force-recreate caddy` |
+| The dashboards host shows an error from Caddy | Grafana is not running: check `$C ps grafana` (the deploy starts it only when `OPS_DOMAIN` is set). Or Caddy did not read the site that `ops-init` wrote (the deploy log warns "Caddy refused the configuration of the monitoring overlay"): `$C exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile` shows the reason, and a refused configuration leaves the running one in place. When the reload passes and the host still fails, `$C up -d --force-recreate caddy` |
 | CertificateExpiringSoon right after the first deploy | The first deploy uses the Let's Encrypt staging CA, whose certificates the probe does not trust, so PublicUrlDown fires too. Switch `ACME_CA` to production as [stack.md](stack.md) describes |

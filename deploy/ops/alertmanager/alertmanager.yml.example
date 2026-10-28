@@ -32,6 +32,14 @@ route:
       receiver: owner
       repeat_interval: 1h
 
+# While alert emails fail (AlertDeliveryFailing for email), the Watchdog is muted: the
+# heartbeat pings stop and the heartbeat service alerts the owner by its own email. Without
+# this, a broken mail relay or password would silence every alert while the heartbeat stays
+# green. A failure of Telegram alone does not mute it: the email reports that one.
+inhibit_rules:
+  - source_matchers: ['alertname="AlertDeliveryFailing"', 'integration="email"']
+    target_matchers: ['alertname="Watchdog"']
+
 receivers:
   - name: owner
     email_configs:

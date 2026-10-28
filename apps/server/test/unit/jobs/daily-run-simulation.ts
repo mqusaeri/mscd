@@ -1,21 +1,30 @@
 // A randomised simulation of `scheduler.tick` and the daily jobs of one organisation (Milestone 2 D.2, risk table I),
 // on the pure planner of the run ledger (`planDailyRuns`). It models what the database and the queue do around it:
 // the ledger rows (`insert ... on conflict do nothing`), the E.1 singleton keys (a send is dropped while a job with
-// the same key waits), the delay of a job to its local minute, and a job that starts after its delay and works on the
-// date of its payload. Ticks come hourly at minute 5 with jitter (up to 5 minutes early, up to 40 minutes late), some
-// twice, some not at all (single misses and an outage of hours); the clock may be set back one hour; the organisation
-// changes its time zone once or twice, east or west, at any second (between minute 0 and 5 of an hour, late in the new
-// zone's day, while a delayed job waits, or anywhere), with moves of 17 hours or more.
+// the same key waits or works), the delay of a job to its local minute, and a job that starts after its delay and
+// works on the date of its payload. Ticks come hourly at minute 5 with jitter (up to 5 minutes early, up to 40 minutes
+// late), some twice, some not at all (single misses and an outage of hours); the clock may be set back one hour; the
+// organisation changes its time zone once or twice, east or west, at any second (between minute 0 and 5 of an hour,
+// late in the new zone's day, while a delayed job waits, or anywhere), with moves of 17 hours or more.
+//
+// Two queue models (`SimulationOptions.queue`):
+// - instant: a job starts at its due instant and is done at once;
+// - busy: a job starts up to 2 seconds after its due instant (3% of them up to 70 minutes late) and works up to
+//   3 minutes, holding its singleton key from its send to its end; 5% of the ticks are retried 1 to 900 seconds
+//   later, and 15% of the organisations also have an outage of 24 to 36 hours (two dates of a job to catch up).
+// Two drivers (`SimulationOptions.driver`): pg-boss, whose dropped send resolves to null in the tick's transaction
+// (the tick then deletes the row of a key `<prefix>:<org>:all`, scheduler-tick.job.ts), and the BullMQ outbox, whose
+// drop the tick never sees.
 //
 // Oracle, per (job, local date):
 // - double: worked on twice;
 // - miss: not worked on although a tick that ran saw its local time passed, in the zone that tick read and on a date
 //   that was the current or the previous local date at that tick (the catch-up window), and ticks went on after it;
 // - mismatch: the date worked on differs from the date of the run's ledger row, or a ledger row got no job (a send
-//   that a waiting job with the same singleton key dropped).
+//   that a queued job with the same singleton key dropped).
 import { addDays, instantOfLocal, localDate } from '../../../src/common/dates';
-import { planDailyRuns, type LedgerRun } from '../../../src/modules/jobs/daily-run-planner';
-import { DAILY_JOBS, localTimeOf, weekdayOfDate, type DailyJob } from '../../../src/modules/jobs/schedules';
+import { planDailyRuns, type LedgerRun, type PlannedRun } from '../../../src/modules/jobs/daily-run-planner';
+import { DAILY_JOBS, localTimeOf, weekdayOfDate } from '../../../src/modules/jobs/schedules';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -49,9 +58,33 @@ function generator(seed: number): () => number {
 
 const hhmm = (hour: number, minute: number) => `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 
+/**
+ * The local date of an instant, for the simulation's own bookkeeping: the zone's offset is looked up once per quarter
+ * hour (every offset change of the simulated zones falls on a quarter hour in UTC).
+ */
+const offsets = new Map<string, number>();
+function simWallClock(instant: number, zone: string): string {
+  const key = `${zone}|${Math.floor(instant / (15 * MINUTE))}`;
+  let offset = offsets.get(key);
+  if (offset === undefined) {
+    const at = Math.floor(instant / (15 * MINUTE)) * 15 * MINUTE;
+    const local = localTimeOf(new Date(at), zone);
+    offset = Date.UTC(Number(local.date.slice(0, 4)), Number(local.date.slice(5, 7)) - 1, Number(local.date.slice(8, 10)), local.hour, local.minute, local.second) - at;
+    if (offsets.size > 200_000) offsets.clear();
+    offsets.set(key, offset);
+  }
+  // `YYYY-MM-DDTHH:MM`
+  return new Date(instant + offset).toISOString().slice(0, 16);
+}
+const simLocalDate = (instant: number, zone: string) => simWallClock(instant, zone).slice(0, 10);
+
 export interface SimulationOptions {
   /** The date a job works on: its payload (the ledger design) or the local date at its start (the design it replaces). */
   workOn?: 'payload' | 'date-at-start';
+  /** How long jobs stay in the queue (see the file comment); instant by default. */
+  queue?: 'instant' | 'busy';
+  /** What the tick learns of a send the queue drops (see the file comment); pg-boss by default. */
+  driver?: 'pgboss' | 'outbox';
 }
 
 export interface SimulationResult {
@@ -67,18 +100,28 @@ export interface SimulationResult {
   mismatches: string[];
   /** Runs whose local date at their start differs from their payload date (what the payload date protects against). */
   startDateDiffers: number;
+  /** Sends the queue dropped (a queued job held the key); with pg-boss the tick deleted their rows. */
+  dropped: number;
+  /** Jobs that started up to 70 minutes after their due instant (busy queue). */
+  lateStarts: number;
+  /** Ticks retried within 15 minutes (busy queue). */
+  retriedTicks: number;
+  /** Whether an outage of 24 to 36 hours happened (busy queue). */
+  longOutage: boolean;
 }
 
-interface WaitingJob {
-  job: DailyJob;
-  localDate: string;
+interface QueuedJob {
   key: string;
-  startAt: number;
+  /** The instant the job is done and its singleton key is free. */
+  endAt: number;
 }
 
 /** One simulated organisation over five days. */
 export function simulate(seed: number, options: SimulationOptions = {}): SimulationResult {
   const random = generator(seed);
+  const busy = options.queue === 'busy';
+  // The busy queue draws from its own generator, so a seed gives the same organisation, zones and ticks in both models.
+  const busyRandom = generator(seed * 7919 + 17);
   const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
   const between = (from: number, to: number) => from + random() * (to - from);
 
@@ -136,17 +179,26 @@ export function simulate(seed: number, options: SimulationOptions = {}): Simulat
     return zone;
   };
 
-  // Ticks: hourly at minute 5 with jitter, single misses, an outage, second ticks in an hour.
+  // Ticks: hourly at minute 5 with jitter, single misses, an outage, second ticks in an hour; with the busy queue also
+  // retried ticks and a long outage.
   const ticks: number[] = [];
   const outage = random() < 0.3 ? { from: between(start + 6 * HOUR, end - 30 * HOUR), hours: 2 + random() * 8 } : null;
+  const longOutage = busy && busyRandom() < 0.15 ? { from: start + 6 * HOUR + busyRandom() * 36 * HOUR, hours: 24 + busyRandom() * 12 } : null;
+  let retriedTicks = 0;
   for (let k = 0; k < 5 * 24; k++) {
     const slot = start + k * HOUR + 5 * MINUTE;
     if (outage && slot >= outage.from && slot < outage.from + outage.hours * HOUR) continue;
     if (random() < 0.08) continue;
     const kind = random();
     const jitter = kind < 0.2 ? -random() * 5 * MINUTE : kind < 0.5 ? random() * 40 * MINUTE : (random() - 0.5) * MINUTE;
+    const second = random() < 0.08 ? slot + between(-5 * MINUTE, 55 * MINUTE) : null;
+    if (longOutage && slot >= longOutage.from && slot < longOutage.from + longOutage.hours * HOUR) continue;
     ticks.push(slot + jitter);
-    if (random() < 0.08) ticks.push(slot + between(-5 * MINUTE, 55 * MINUTE));
+    if (second !== null) ticks.push(second);
+    if (busy && busyRandom() < 0.05) {
+      ticks.push(slot + jitter + (1 + busyRandom() * 899) * 1000);
+      retriedTicks++;
+    }
   }
   ticks.sort((a, b) => a - b);
 
@@ -156,67 +208,101 @@ export function simulate(seed: number, options: SimulationOptions = {}): Simulat
 
   // The ledger holds the runs of the three days before the start (a system that has been running).
   const ledger = new Map<string, LedgerRun>();
+  let rows: LedgerRun[] = [];
+  // What the tick reads: the rows from three days before the UTC date of its clock (scheduler-tick.job.ts).
+  let recent: LedgerRun[] = [];
+  let recentFrom = '';
+  const add = (row: LedgerRun) => {
+    ledger.set(`${row.job}@${row.localDate}`, row);
+    rows.push(row);
+    if (row.localDate >= recentFrom) recent.push(row);
+  };
+  const remove = (row: LedgerRun) => {
+    ledger.delete(`${row.job}@${row.localDate}`);
+    rows = rows.filter((r) => r !== row);
+    recent = recent.filter((r) => r !== row);
+  };
   const firstDate = localDate(new Date(start), firstZone);
   for (let d = -3; d <= -1; d++) {
     const date = addDays(firstDate, d);
     for (const job of DAILY_JOBS) {
       if (job.weekday !== undefined && weekdayOfDate(date) !== job.weekday) continue;
-      ledger.set(`${job.name}@${date}`, { job: job.name, localDate: date, scheduledFor: instantOfLocal(date, job.at, firstZone) });
+      const scheduledFor = instantOfLocal(date, job.at, firstZone);
+      add({ job: job.name, localDate: date, scheduledFor, enqueuedAt: scheduledFor });
     }
   }
   const firstLocalDate = addDays(firstDate, -3);
 
-  const waiting: WaitingJob[] = [];
+  // Jobs in the queue (waiting or working) until their end; a job is played through when it is sent, because its
+  // start and end follow from the send.
+  let queued: QueuedJob[] = [];
   const worked = new Map<string, number>();
   const mismatches: string[] = [];
   const required = new Set<string>();
   let runs = 0;
   let startDateDiffers = 0;
+  let dropped = 0;
+  let lateStarts = 0;
 
-  const startJobsUntil = (instant: number) => {
-    waiting.sort((a, b) => a.startAt - b.startAt);
-    while (waiting.length > 0 && waiting[0]!.startAt <= instant) {
-      const job = waiting.shift()!;
-      runs++;
-      const dateAtStart = localDate(new Date(clock(job.startAt)), zoneAt(job.startAt));
-      if (dateAtStart !== job.localDate) startDateDiffers++;
-      const date = options.workOn === 'date-at-start' ? dateAtStart : job.localDate;
-      if (date !== job.localDate) mismatches.push(`${job.job.name} of ${job.localDate} worked on ${date}`);
-      const key = `${job.job.name}@${date}`;
-      worked.set(key, (worked.get(key) ?? 0) + 1);
+  const send = (run: PlannedRun, tick: number) => {
+    let startAt = tick + run.startAfterSeconds * 1000;
+    let endAt = startAt;
+    if (busy) {
+      startAt += busyRandom() * 2000;
+      if (busyRandom() < 0.03) {
+        startAt += busyRandom() * 70 * MINUTE;
+        lateStarts++;
+      }
+      endAt = startAt + busyRandom() * 3 * MINUTE;
     }
+    queued.push({ key: run.singletonKey, endAt });
+    runs++;
+    const dateAtStart = simLocalDate(clock(startAt), zoneAt(startAt));
+    if (dateAtStart !== run.localDate) startDateDiffers++;
+    const date = options.workOn === 'date-at-start' ? dateAtStart : run.localDate;
+    if (date !== run.localDate) mismatches.push(`${run.job.name} of ${run.localDate} worked on ${date}`);
+    const key = `${run.job.name}@${date}`;
+    worked.set(key, (worked.get(key) ?? 0) + 1);
   };
 
   for (const tick of ticks) {
-    startJobsUntil(tick);
+    queued = queued.filter((q) => q.endAt > tick);
     const now = new Date(clock(tick));
     const zone = zoneAt(tick);
-    const planned = planDailyRuns({ orgId: ORG, now, timeZone: zone, createdAt, ledger: [...ledger.values()], firstLocalDate, jobs: DAILY_JOBS });
+    const from = addDays(now.toISOString().slice(0, 10), -3);
+    if (from !== recentFrom) {
+      recentFrom = from;
+      recent = rows.filter((r) => r.localDate >= from);
+    }
+    const planned = planDailyRuns({ orgId: ORG, now, timeZone: zone, createdAt, ledger: recent, firstLocalDate, jobs: DAILY_JOBS });
     for (const run of planned) {
       const key = `${run.job.name}@${run.localDate}`;
       // The database keeps the first row (`on conflict do nothing`); the tick sends nothing for an existing row.
       if (ledger.has(key)) continue;
-      ledger.set(key, { job: run.job.name, localDate: run.localDate, scheduledFor: run.scheduledFor });
-      if (waiting.some((w) => w.key === run.singletonKey)) {
-        mismatches.push(`${key}: the send was dropped by a waiting job with the key ${run.singletonKey}`);
+      const row: LedgerRun = { job: run.job.name, localDate: run.localDate, scheduledFor: run.scheduledFor, enqueuedAt: now };
+      add(row);
+      if (queued.some((q) => q.key === run.singletonKey)) {
+        dropped++;
+        // pg-boss reports the drop: the tick deletes the row of a key `<prefix>:<org>:all`, and a later tick plans the
+        // run again. A row of a key with its date stays (the job holding the key would be this run).
+        if (options.driver !== 'outbox' && run.job.allSystems) remove(row);
+        else mismatches.push(`${key}: the send was dropped by a queued job with the key ${run.singletonKey}`);
         continue;
       }
-      waiting.push({ job: run.job, localDate: run.localDate, key: run.singletonKey, startAt: tick + run.startAfterSeconds * 1000 });
+      send(run, tick);
     }
     // The oracle counts the ticks that later ticks follow (the last half day only runs what is due).
     if (tick > end - 12 * HOUR) continue;
-    const local = localTimeOf(now, zone);
-    const time = hhmm(local.hour, local.minute);
-    for (const date of [addDays(local.date, -1), local.date]) {
+    const wall = simWallClock(now.getTime(), zone);
+    const [today, time] = [wall.slice(0, 10), wall.slice(11, 16)];
+    for (const date of [addDays(today, -1), today]) {
       if (date < firstDate) continue; // the runs before the start are in the ledger
       for (const job of DAILY_JOBS) {
         if (job.weekday !== undefined && weekdayOfDate(date) !== job.weekday) continue;
-        if (date < local.date || job.at <= time) required.add(`${job.name}@${date}`);
+        if (date < today || job.at <= time) required.add(`${job.name}@${date}`);
       }
     }
   }
-  startJobsUntil(Number.POSITIVE_INFINITY);
-
   return {
     seed,
     ticks: ticks.length,
@@ -227,5 +313,9 @@ export function simulate(seed: number, options: SimulationOptions = {}): Simulat
     misses: [...required].filter((key) => !worked.has(key)),
     mismatches,
     startDateDiffers,
+    dropped,
+    lateStarts,
+    retriedTicks,
+    longOutage: longOutage !== null,
   };
 }

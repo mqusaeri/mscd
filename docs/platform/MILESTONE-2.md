@@ -236,7 +236,7 @@ The last ten rows are the routes of the SaaS track (K), built by M2-S09, M2-S10 
 
 | Route | Change | Built by |
 |---|---|---|
-| `admin.organization.update` | body also takes `name` (1 to 200), `timeZone` (IANA, checked with `Intl`), `siteCount` (0 or more); slug stays permanent; after a time zone change the daily jobs of the current local day run once and not twice | M2-06 |
+| `admin.organization.update` | body also takes `name` (1 to 200), `timeZone` (IANA, checked with `Intl`), `siteCount` (0 or more); slug stays permanent; after a time zone change the daily jobs of the current local day run once and not twice. The run ledger `platform.daily_job_run` (platform migration 0006) holds one row per organisation, daily job and local date, and each job works on the date of its row. | M2-06 |
 | `admin.users.create` | an existing active account gets an email and a `membership_invited` notification; the admin still gets the same 202 (F.6) | M2-06 |
 | `me.get` | `Me` gains `pendingMemberships: [{org, name, invitedBy, invitedAt}]` | M2-06 |
 | `admin.ms.create` | creates the applicability entries of D2-09 in the same transaction (seeder of M2-03), owner unset, status `not_started` | M2-06 |
@@ -1248,7 +1248,7 @@ Each decision has a default that is built when no answer arrives in time.
 |---|---|---|
 | TLS front and certificate renewal | `caddy` (Caddy 2) | M2-S02 |
 | Metrics, alerts, probes | `prom/prometheus`, `prom/alertmanager`, `prom/node-exporter`, `prometheuscommunity/postgres-exporter`, `prom/blackbox-exporter` | M2-S08 |
-| Dashboards (optional profile `grafana`) | `grafana/grafana-oss` | M2-S08 |
+| Dashboards (optional profile `grafana`) | `grafana/grafana` (the open source edition; `grafana-oss` is no longer published separately, M2-S08 deviation 1) | M2-S08 |
 | Local registry for deploy rehearsals (tests only) | `registry` (Distribution 2 or 3) | M2-S05 |
 | Bootstrap dry run (tests only) | `ubuntu` 24.04, pinned to an exact dated tag (`ubuntu:noble-<yyyymmdd>`) at least two weeks old plus its digest, stored in `deploy/host/test/ubuntu-image` (S-5) | M2-S03 |
 | Backup tools | Built from `postgres:16.15-alpine` with `restic` and `rclone` from Alpine packages (`deploy/docker/backup.Dockerfile`) | M2-S07 |
@@ -1894,6 +1894,7 @@ Brief:
   - **`int-saas` on every push:** `test:int:saas`.
   - **`saas-smoke` on pushes to the default branch and nightly:** makes throwaway keys in the job, builds release-flavour images and runs `npm run saas -w @mscd/smoke`.
 - Go-live checklist: every `agent` row gets status `done` with its evidence (CI job name or command). `owner` rows stay open.
+- Orchestrator note from M2-S08: run `deploy/ops/test-ops.sh` once with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (the build host of Milestone 2 had too little disk for the Grafana image), before Grafana is turned on in production.
 
 Acceptance:
 

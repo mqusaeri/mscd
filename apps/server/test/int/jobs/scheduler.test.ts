@@ -4,7 +4,8 @@
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SchedulerTickJob } from '../../../src/modules/jobs/scheduler-tick.job';
-import { CRON_SCHEDULES, DAILY_JOBS, dueDailyJobs, localTimeOf } from '../../../src/modules/jobs/schedules';
+import { planDailyRuns } from '../../../src/modules/jobs/daily-run-planner';
+import { CRON_SCHEDULES, DAILY_JOBS, localTimeOf } from '../../../src/modules/jobs/schedules';
 import { WorkerRuntime } from '../../../src/worker/worker-runtime';
 import { createTenant } from '../../setup/global-db';
 import { useTestDatabase } from '../../setup/test-db';
@@ -45,7 +46,7 @@ describe('scheduler.tick (E.2)', () => {
     const keys = app.queue.waitingJobs().map((j) => j.name);
     expect(keys).not.toContain('freshness.sweep');
 
-    // A second tick in the same hour adds nothing (singleton keys with the local date).
+    // A second tick in the same hour adds nothing (the runs have their ledger rows, Milestone 2 D.2).
     await app.run('scheduler.tick', { orgId: null, payload: {} });
     expect(waiting()).toHaveLength(3);
 
@@ -57,23 +58,26 @@ describe('scheduler.tick (E.2)', () => {
   });
 
   it('uses keys with the local date and delays a job to its local minute', async () => {
-    const due = dueDailyJobs(jakarta, new Date('2030-01-15T17:05:00Z'), 'Asia/Jakarta');
-    expect(due.map((d) => [d.job.name, d.singletonKey, d.startAfterSeconds])).toEqual([
-      ['license.check', `lc:${jakarta}:2030-01-16`, 0],
-      ['tasks.overdue', `to:${jakarta}:2030-01-16`, 600],
-      ['audit-prep.generate', `ap:${jakarta}:2030-01-16`, 1500],
+    // The runs a tick plans in the local hour (`planDailyRuns`, path due). With an empty ledger it plans no catch-up,
+    // so these are the jobs of the hour alone (the Milestone 1 behaviour).
+    const due = (at: string, zone: string) =>
+      planDailyRuns({ orgId: jakarta, now: new Date(at), timeZone: zone, createdAt: new Date('2029-01-01T00:00:00Z'), ledger: [], firstLocalDate: null });
+    expect(due('2030-01-15T17:05:00Z', 'Asia/Jakarta').map((d) => [d.job.name, d.singletonKey, d.startAfterSeconds, d.path])).toEqual([
+      ['license.check', `lc:${jakarta}:2030-01-16`, 0, 'due'],
+      ['tasks.overdue', `to:${jakarta}:2030-01-16`, 600, 'due'],
+      ['audit-prep.generate', `ap:${jakarta}:2030-01-16`, 1500, 'due'],
     ]);
     // Half-hour zone: 17:05 UTC is 22:35 in Kolkata; nothing is due at that hour.
-    expect(dueDailyJobs(jakarta, new Date('2030-01-15T17:05:00Z'), 'Asia/Kolkata')).toEqual([]);
+    expect(due('2030-01-15T17:05:00Z', 'Asia/Kolkata')).toEqual([]);
     // 01:05 local: the sweep; Sunday 03:05 local: the weekly rehash, on other days not.
-    expect(dueDailyJobs(jakarta, new Date('2030-01-15T18:05:00Z'), 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['freshness.sweep']);
-    const sunday = new Date('2030-01-19T20:05:00Z'); // Sunday 03:05 in Jakarta
-    expect(localTimeOf(sunday, 'Asia/Jakarta')).toMatchObject({ date: '2030-01-20', hour: 3, weekday: 0 });
-    expect(dueDailyJobs(jakarta, sunday, 'Asia/Jakarta').map((d) => [d.job.name, d.singletonKey])).toEqual([
-      ['integrity.rehash', `ir:${jakarta}:2030-01-20`],
-      ['cycle.derive', `cd:${jakarta}:all`],
+    expect(due('2030-01-15T18:05:00Z', 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['freshness.sweep']);
+    const sunday = '2030-01-19T20:05:00Z'; // Sunday 03:05 in Jakarta
+    expect(localTimeOf(new Date(sunday), 'Asia/Jakarta')).toMatchObject({ date: '2030-01-20', hour: 3, weekday: 0 });
+    expect(due(sunday, 'Asia/Jakarta').map((d) => [d.job.name, d.singletonKey, d.path])).toEqual([
+      ['integrity.rehash', `ir:${jakarta}:2030-01-20`, 'due'],
+      ['cycle.derive', `cd:${jakarta}:all`, 'due'],
     ]);
-    expect(dueDailyJobs(jakarta, new Date('2030-01-20T20:05:00Z'), 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['cycle.derive']);
+    expect(due('2030-01-20T20:05:00Z', 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['cycle.derive']);
     // Milestone 2 J.3 (M2-05): readiness.recompute at 02:30 and certificate.expiry at 06:00.
     expect(DAILY_JOBS.map((d) => d.at)).toEqual(['00:05', '00:15', '00:30', '01:00', '02:00', '02:30', '02:30', '02:45', '03:00', '03:15', '06:00', '06:30', '07:00']);
   });
@@ -95,7 +99,8 @@ describe('scheduler.tick (E.2)', () => {
       app.setNow('2030-03-01T05:05:00Z'); // 00:05 in New York (UTC-5)
       const result = await app.moduleRef.get(SchedulerTickJob).tick();
       expect(result.organisations).toBe(1);
-      expect(result.enqueued).toEqual([]);
+      // Jakarta, active, catches up the runs it missed since the ticks of the earlier tests (Milestone 2 D.2).
+      expect(result.enqueued.filter((e) => e.orgId === newYork)).toEqual([]);
     } finally {
       await sql`UPDATE platform.organization SET status = 'active' WHERE id = ${newYork}`.execute(db.migrator);
     }

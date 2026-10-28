@@ -1,19 +1,22 @@
 // `seed demo` as a command (WP-14, G.1, G.3): demo mode required, the Keycloak provider with pre-registered subjects
 // when demo.keycloak is set, "already seeded" on a second run, `--reset` reseeding (here with data keys and sealed
-// credentials from a running storage gateway), an interrupted run refused, and the choice of the key service.
+// credentials from a running storage gateway, after a day of scheduler ticks wrote the run ledger of the daily jobs),
+// an interrupted run refused, and the choice of the key service.
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { MscdConfig } from '../../../src/config/mscd-config';
 import { openCredential } from '../../../src/gateway/crypto/credentials';
 import { DataKeyService } from '../../../src/gateway/crypto/data-keys';
 import { FileKeyProvider } from '../../../src/modules/keys/file-key-provider';
+import { SchedulerTickJob } from '../../../src/modules/jobs/scheduler-tick.job';
 import { HttpGatewayClient } from '../../../src/modules/storage/gateway-client';
 import { chooseKeyService, GatewayKeyService, LocalKeyService } from '../../../src/seed/key-service';
 import { SEED_MARKER_KEY, seedDemo, SeedError } from '../../../src/seed/seed-demo';
 import { startGateway, type RunningGateway } from '../gateway/helpers';
+import { createJobsApp } from '../jobs/helpers';
 import { TEST_STORAGE_KEY_FILE } from '../../setup/global-db';
 import { useTestDatabase } from '../../setup/test-db';
-import { inOrg, inPlatform, ORG_IDS } from './helpers';
+import { inOrg, inPlatform, ORG_IDS, ORG_SLUGS } from './helpers';
 
 const SECRETS = path.resolve(__dirname, '../../fixtures/secrets');
 const KEYCLOAK_ISSUER = 'http://localhost:18088/realms/mscd';
@@ -114,6 +117,26 @@ describe('seed demo command (G.1, G.3)', () => {
     '--reset removes the demo and seeds it again, here with keys and credentials from a running storage gateway',
     async () => {
       const usersBefore = await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.app_user').select(['id', 'handle']).where('is_demo', '=', true).execute());
+      // A running demo stack schedules scheduler.tick (demo.yaml), so the demo organisations have rows in the run
+      // ledger of the daily jobs (Milestone 2 D.2) after a day; the operator may also have set an entitlement.
+      const jobs = await createJobsApp(db, { queues: ['scheduler.tick'], env: { MSCD__DEMO__FIXED_TODAY: 'null' } });
+      try {
+        for (let hour = 0; hour < 24; hour++) {
+          jobs.setNow(new Date(Date.parse('2030-05-01T00:05:00Z') + hour * 3_600_000));
+          await jobs.moduleRef.get(SchedulerTickJob).tick();
+        }
+      } finally {
+        await jobs.close();
+      }
+      const ledgerOrgs = () =>
+        inPlatform(db.migrator, async (trx) => (await trx.selectFrom('platform.daily_job_run').select('organization_id').distinct().execute()).map((r) => r.organization_id).sort());
+      expect(await ledgerOrgs()).toEqual(ORG_SLUGS.map((slug) => ORG_IDS[slug]).sort());
+      await inPlatform(db.migrator, (trx) =>
+        trx
+          .insertInto('platform.entitlement')
+          .values({ organization_id: ORG_IDS.ndt, source: 'manual', max_users: 50, max_management_systems: 4, valid_from: '2030-01-01' })
+          .execute(),
+      );
       gateway = await startGateway(db.config({}, 'storage-gateway'));
       // demo.keycloak names a secret file this host does not have (the Compose path of demo.yaml): no provider.
       const missingSecret = path.join(SECRETS, 'no-such-keycloak-client.secret');
@@ -129,6 +152,8 @@ describe('seed demo command (G.1, G.3)', () => {
       expect(result.removed).toEqual({ organisations: expect.arrayContaining(['ndt', 'bsd', 'rmn', 'tst']), users: 90 });
       expect(lines).toEqual(expect.arrayContaining(['seed demo: removed organisation ndt and schema org_ndt', 'seed demo: removed 90 demo users']));
       expect(await counts()).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 90, memberships: 3 * 86 + 12, licences: 4, packs: 6 });
+      expect(await ledgerOrgs()).toEqual([]);
+      expect(await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.entitlement').select('organization_id').execute())).toEqual([]);
       const usersAfter = await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.app_user').select(['id', 'handle']).where('is_demo', '=', true).execute());
       expect(usersAfter.map((u) => u.handle).sort()).toEqual(usersBefore.map((u) => u.handle).sort());
       expect(usersAfter.some((u) => usersBefore.some((b) => b.id === u.id))).toBe(false);

@@ -15,24 +15,33 @@
 #   1. Lock the install folder, refuse anything of the demo stack (S-7), check Docker,
 #      memory and disk.
 #   2. Read digests.json of the release and the values on standard input; write the new
-#      .env from .env.saas.example of the release (installed in step 6).
+#      .env from .env.saas.example of the release (installed in step 7).
 #   3. Verify the cosign signature of both digests, pull them while the old containers keep
 #      running, and start the new server image once with --help.
-#   4. Key files from standard input (platform.key, storage.key, audit-anchor.key, and
+#   4. Check that PostgreSQL is healthy and that the pre-deploy dump fits on the disk.
+#   5. Key files from standard input (platform.key, storage.key, audit-anchor.key, and
 #      audit-anchor.pub derived from the private key): a missing file is written, an
 #      existing one must hold the same key. Then the generated secrets when missing,
 #      smtp.password, and the off-site backup and monitoring values as files.
-#   5. A pre-deploy pg_dump to <install>/backup/pre-deploy (last 3 kept), and an off-site
+#   6. A pre-deploy pg_dump to <install>/backup/pre-deploy (last 3 kept), and an off-site
 #      copy when the release has deploy/backup/backup.sh (M2-S07).
-#   6. Save the files in place (the rollback point), install the release's Compose files,
+#   7. Save the files in place (the rollback point), install the release's Compose files,
 #      configuration and .env, and run migrate alone while the old services keep running.
-#   7. Restart storage-gateway, api, worker, web and caddy one by one (--no-deps --wait),
+#   8. Restart storage-gateway, api, worker, web and caddy one by one (--no-deps --wait),
 #      check /readyz of the server services, and /healthz and the version through Caddy.
-#   8. Record the current and previous release in <install>/state and keep the images of
+#   9. Record the current and previous release in <install>/state and keep the images of
 #      the last 3 releases.
 # A failed migrate or check puts the saved files back and starts the previous digests
 # again. There is no down migration: restoring the database is a manual step, needed only
 # when a migration broke data (docs/saas/deploy.md).
+#
+# A run does not depend on its SSH connection. deploy-prod.yml runs it in the foreground of
+# that connection; when the connection ends (a cancelled workflow run, the job's time
+# limit, a lost runner), the run carries on to its end, finishes or rolls back, and writes
+# its whole output to <install>/logs. state/history.log gets a "started" line before the
+# first change and a line with the result at the end, and the next run prints the last
+# line. A run that is stopped hard (a restart of the server) can leave the files half
+# switched; the next run puts the saved copy back before it switches them (repair_switch).
 set -euo pipefail
 umask 027
 
@@ -109,6 +118,11 @@ ACTION='' TARGET='' OPT_INSTALL_DIR='' OPT_RELEASE_DIR='' OPT_DIGESTS='' OPT_VER
 TIMEOUT=300 VERIFY_TIMEOUT=180 MIN_DISK=10240 SKIP_BACKUP=false VERIFY_SIGNATURE=true OPT_COSIGN=''
 # Set by restart_services when an overlay service (monitoring, backups) needs attention.
 OVERLAY_PROBLEM=''
+# state/history.log: the action and version of a run that wrote its "started" line, and
+# the phase it is in (for the "stopped" line of a run that ends without a result).
+HISTORY_ACTION='' HISTORY_VERSION='' PHASE=''
+# True once the secret files may have been written; DUMP: a pre-deploy dump is taken.
+SECRETS_TOUCHED=false DUMP=false
 
 need_value() {
     if [[ $# -lt 2 || -z $2 || $2 == --* ]]; then die "Option $1 needs a value. See --help"; fi
@@ -159,19 +173,85 @@ parse_args() {
 lock_install() {
     command -v flock >/dev/null 2>&1 || die "flock is not installed (package util-linux)"
     exec 8<"$INSTALL_DIR"
-    flock -n 8 || die "Another deploy or rollback is running in $INSTALL_DIR. Wait for it to finish."
+    if flock -n 8; then return 0; fi
+    if [[ -s $STATE_DIR/history.log ]]; then
+        info "Last line of state/history.log: $(tail -n 1 -- "$STATE_DIR/history.log")"
+    fi
+    die "Another deploy or rollback is running in $INSTALL_DIR. Nothing was changed. A run whose workflow was cancelled or lost its connection keeps running on the server until it ends: wait for it, then start this run again (docs/saas/deploy.md, When a run is cut off)."
 }
 
 # start_log NAME: from here on, the output also goes to <install>/logs/NAME-<stamp>.log.
+# The output of the run reaches its caller through tee. With -p, tee carries on writing
+# the log file when the caller goes away (the SSH connection of the workflow ended), so
+# neither tee nor this script is stopped by SIGPIPE; main ignores SIGHUP.
 start_log() {
+    local -a tee_args=(-a)
     install -d -m 0750 "$LOG_DIR"
     LOG_FILE=$LOG_DIR/$1-$STAMP.log
     COMPOSE_LOG=$LOG_DIR/$1-$STAMP-compose.log
-    exec > >(tee -a "$LOG_FILE") 2>&1
+    if tee -p /dev/null </dev/null >/dev/null 2>&1; then tee_args=(-p -a); fi
+    exec > >(tee "${tee_args[@]}" "$LOG_FILE") 2>&1
     TEE_PID=$!
+    if [[ ${tee_args[0]} != -p ]]; then
+        warn "This tee has no option -p (GNU coreutils): the run stops when its SSH connection ends"
+    fi
+}
+
+# last_run_note: the last line of state/history.log, so the log of a run also shows how the
+# run before it ended (a run whose connection was cut off ends on the server alone).
+last_run_note() {
+    local line
+    [[ -s $STATE_DIR/history.log ]] || return 0
+    line=$(tail -n 1 -- "$STATE_DIR/history.log")
+    info "Last line of state/history.log: $line"
+    if [[ $(awk '{ print $3 }' <<<"$line") == started ]]; then
+        warn "That run recorded no result: it was stopped hard (for example by a restart of the server). This run checks the files in place before it switches them."
+    fi
+}
+
+# history_start ACTION VERSION DETAIL: the line "started" in state/history.log, written
+# just before a run changes anything. history_end RESULT DETAIL writes its result. A run
+# that ends without one (an error, a refusal after the start) gets the line "stopped" with
+# its exit code and phase from cleanup.
+history_start() {
+    HISTORY_ACTION=$1 HISTORY_VERSION=$2
+    saas_history "$1" started "$2" "${3:-}"
+}
+
+history_end() {
+    saas_history "$HISTORY_ACTION" "$1" "$HISTORY_VERSION" "${2:-}"
+    HISTORY_ACTION=''
+}
+
+# remove_stale_work: work folders that runs stopped hard left behind, the copies of the key
+# files among them. Called only while this run holds the lock.
+remove_stale_work() {
+    local dir
+    for dir in "$INSTALL_DIR"/secrets/.deploy.* "$STATE_DIR"/.deploy.*; do
+        if [[ -d $dir ]]; then rm -rf -- "$dir"; fi
+    done
+}
+
+# stop_if_failed: abort_if_failed of lib/common.sh for the steps after the "started"
+# line, where the secret files may already have been written.
+stop_if_failed() {
+    ((FAILURES > 0)) || return 0
+    if [[ $SECRETS_TOUCHED == true ]]; then
+        printf '\n%s%d check(s) failed.%s Fix the items above and run %s again. The running release, its settings and the database were not changed; only the secret files were brought up to date (docs/saas/deploy.md, What a deploy does).\n' \
+            "$C_RED" "$FAILURES" "$C_RESET" "$(basename "$0")"
+    else
+        printf '\n%s%d check(s) failed.%s Fix the items above and run %s again. Nothing was changed.\n' \
+            "$C_RED" "$FAILURES" "$C_RESET" "$(basename "$0")"
+    fi
+    exit 1
 }
 
 cleanup() {
+    local status=$?
+    if [[ -n ${HISTORY_ACTION:-} ]]; then
+        saas_history "$HISTORY_ACTION" stopped "$HISTORY_VERSION" "exit=$status phase=${PHASE:-checks}" 2>/dev/null || true
+        HISTORY_ACTION=''
+    fi
     if [[ -n ${WORK:-} && -d $WORK ]]; then rm -rf -- "$WORK"; fi
     if [[ -n ${KEY_WORK:-} && -d $KEY_WORK ]]; then rm -rf -- "$KEY_WORK"; fi
     # The caller sees the whole output before this script ends.
@@ -274,7 +354,9 @@ install_secrets() {
     KEY_WORK=$(mktemp -d "$dir/.deploy.XXXXXX")
     # shellcheck disable=SC2034  # read by ensure_certificates of lib/common.sh
     CERTS_CHANGED=false
+    # A key that does not match stops the run here, before any file is written.
     saas_install_keys "$dir" "$image" "$KEY_WORK" || return 1
+    SECRETS_TOUCHED=true
     ensure_database_secrets "$dir" || return 1
     ensure_key_secrets "$dir" || return 1
     ensure_certificates "$dir" || return 1
@@ -296,9 +378,12 @@ install_secrets() {
     rm -rf -- "$KEY_WORK"
 }
 
-# predeploy_backup FROM TO
-predeploy_backup() {
-    local from=$1 to=$2 pg dir file size free_kb err=$WORK/pg_dump.err
+# predeploy_check FROM: before anything is written, decides whether a pre-deploy dump is
+# taken (DUMP) and checks that it can be: PostgreSQL runs and is healthy, and the disk has
+# room for the database.
+predeploy_check() {
+    local from=$1 pg dir=$INSTALL_DIR/backup size free_kb note=''
+    DUMP=false
     if [[ $SKIP_BACKUP == true ]]; then
         warn "No pre-deploy database dump (--skip-backup)"
         return 0
@@ -310,22 +395,36 @@ predeploy_backup() {
             return 0
         fi
         fail "The PostgreSQL container of $MSCD_PROJECT is missing, so no pre-deploy dump can be taken" \
-            "Find out why (docker compose ps -a in $INSTALL_DIR), or deploy with skip_backup"
+            "Find out why (docker compose ps -a in $INSTALL_DIR/deploy/compose), or deploy with skip_backup"
         return 1
     fi
     if [[ $(container_state "$pg") != healthy ]]; then
         fail "PostgreSQL is $(container_state "$pg"), so no pre-deploy dump can be taken" \
-            "Find out why (docker compose logs postgres in $INSTALL_DIR), or deploy with skip_backup"
+            "Find out why (docker compose logs postgres in $INSTALL_DIR/deploy/compose), or deploy with skip_backup"
         return 1
     fi
-    dir=$INSTALL_DIR/backup/pre-deploy
-    install -d -m 0700 "$INSTALL_DIR/backup" "$dir"
+    [[ -d $dir ]] || dir=$INSTALL_DIR
     size=$(saas_compose exec -T postgres psql -U postgres -d mscd -Atc "select pg_database_size('mscd')" 2>/dev/null | tr -dc '0-9' || true)
     free_kb=$(df -Pk -- "$dir" | awk 'NR == 2 { print $4 }')
     if [[ -n $size && -n $free_kb ]] && ((size / 1024 > free_kb)); then
-        fail "The database holds $((size / 1048576)) MB but $dir has only $((free_kb / 1024)) MB free"
+        fail "The database holds $((size / 1048576)) MB but $dir has only $((free_kb / 1024)) MB free" \
+            "Free disk space on the server, or deploy with skip_backup"
         return 1
     fi
+    if [[ -n $size ]]; then note=" (database $((size / 1048576)) MB)"; fi
+    DUMP=true
+    pass "PostgreSQL is healthy$note and the pre-deploy dump fits on the disk"
+}
+
+# predeploy_backup FROM TO: the dump that predeploy_check allowed, and its off-site copy.
+predeploy_backup() {
+    local from=$1 to=$2 dir file err=$WORK/pg_dump.err
+    if [[ $DUMP != true ]]; then
+        info "No pre-deploy dump (see the database check above)"
+        return 0
+    fi
+    dir=$INSTALL_DIR/backup/pre-deploy
+    install -d -m 0700 "$INSTALL_DIR/backup" "$dir"
     file=$dir/$(saas_stamp)-${from:-none}-to-$to.dump
     if saas_compose exec -T postgres pg_dump -U postgres --format=custom --dbname=mscd >"$file.partial" 2>"$err" &&
         [[ $(head -c 5 -- "$file.partial") == PGDMP ]]; then
@@ -659,12 +758,64 @@ save_current() {
     fi
 }
 
+# repair_switch: while no run holds the lock, the .env in place names the images of
+# state/current.env (lib/saas.sh writes the .env first when it moves away from that
+# release and last when it moves back). When it does not, an earlier run was stopped hard
+# while it switched the files: the copy of the current files that run saved is put back
+# first, so the files in place are never saved under the name of another release.
+repair_switch() {
+    local current=$STATE_DIR/current.env dir found='' version
+    [[ -f $current && -f $INSTALL_DIR/.env ]] || return 0
+    if saas_env_names_release "$INSTALL_DIR/.env" "$current"; then return 0; fi
+    version=$(kv_get "$current" VERSION)
+    warn "The files in place name $(in_place_version), but state/current.env names $version: an earlier run stopped while it switched the files"
+    while IFS= read -r dir; do
+        if saas_env_names_release "$dir/.env" "$current" &&
+            [[ $(saas_ref_of "$dir/release.env" server) == "$(saas_ref_of "$current" server)" &&
+                $(saas_ref_of "$dir/release.env" web) == "$(saas_ref_of "$current" web)" ]]; then
+            found=$dir
+            break
+        fi
+    done < <(saas_saved_dirs
+        find "$STATE_DIR" -mindepth 1 -maxdepth 1 -type d -name 'rollback-undo-*' -printf '%p\n' | LC_ALL=C sort -r)
+    if [[ -z $found ]]; then
+        fail "No saved copy of the files of $version is left to put back" \
+            "A person on the server makes /opt/mscd/.env name the images of state/current.env again (docs/saas/deploy.md, When a run is cut off)"
+        return 1
+    fi
+    saas_restore_files "$found" last
+    rm -rf -- "$found"
+    saas_history repair "done" "$version" "files-from=$(basename -- "$found")"
+    pass "The files of $version were put back from $found; this run goes on from there"
+}
+
+# in_place_version: the version that the .env in place names.
+in_place_version() {
+    local version
+    version=$(kv_get "$INSTALL_DIR/.env" MSCD_VERSION)
+    printf '%s' "${version:-another release}"
+}
+
+# rollback_target: the newest saved release other than the one of state/current.env. A
+# copy of the current files that a stopped run left is no rollback target; repair_switch
+# puts it back.
+rollback_target() {
+    local dir
+    while IFS= read -r dir; do
+        if [[ -f $STATE_DIR/current.env ]] && saas_env_names_release "$dir/.env" "$STATE_DIR/current.env"; then
+            continue
+        fi
+        printf '%s\n' "$dir"
+        return 0
+    done < <(saas_saved_dirs)
+}
+
 # restore_saved SAVED VERSION SERVER_REF WEB_REF FORCE: puts the saved files back and
 # starts that release again. True when it is healthy.
 restore_saved() {
     local saved=$1 version=$2 server=$3 web=$4 force=$5 caddy_before
     caddy_before=$(saas_tree_hash "$CADDY_CONFIG")
-    saas_restore_files "$saved"
+    saas_restore_files "$saved" last
     pass "Saved files of $version put back"
     saas_pull "$server" && saas_pull "$web" && restart_services "$force" "$caddy_before" && verify_release "$version"
 }
@@ -700,7 +851,9 @@ deploy_main() {
     title "MSCD SaaS deploy to $TARGET ($INSTALL_DIR)"
     lock_install
     start_log deploy
+    remove_stale_work
     WORK=$(mktemp -d "$INSTALL_DIR/state/.deploy.XXXXXX")
+    last_run_note
 
     step "Refusals: demo images, profiles, settings and files (S-7)"
     saas_refuse_demo "$DIGESTS" "$INSTALL_DIR/.env" "$RELEASE_DIR/deploy/compose/.env.saas.example"
@@ -738,15 +891,26 @@ deploy_main() {
     verify_images "$NEW_VERSION" "$NEW_SERVER_REF" "$NEW_WEB_REF" || saas_discard_pulled
     abort_if_failed
 
+    step "Database"
+    predeploy_check "$CURRENT_VERSION" || true
+    abort_if_failed
+
+    # From here on the run changes files: history.log records its start and its result.
+    history_start deploy "$NEW_VERSION" "from=${CURRENT_VERSION:-none}"
+    PHASE=secrets
     step "Secrets"
     install_secrets "$NEW_SERVER_REF" || true
-    abort_if_failed
+    stop_if_failed
 
+    PHASE=backup
     step "Pre-deploy database backup"
     predeploy_backup "$CURRENT_VERSION" "$NEW_VERSION" || true
-    abort_if_failed
+    stop_if_failed
 
+    PHASE=switch
     step "Switching the files to $NEW_VERSION"
+    repair_switch || true
+    stop_if_failed
     install -d -m 0750 "$STATE_DIR/saved"
     caddy_before=$(saas_tree_hash "$CADDY_CONFIG")
     if [[ -n $CURRENT_VERSION && -f $INSTALL_DIR/.env ]]; then
@@ -761,24 +925,28 @@ deploy_main() {
         deploy_failed "$saved" health
     fi
 
+    PHASE=migrate
     step "Migrating the database to $NEW_VERSION"
     if ! run_migrate; then
         deploy_failed "$saved" migrate
     fi
 
+    PHASE=restart
     step "Restarting the services"
     if ! restart_services true "$caddy_before"; then
         deploy_failed "$saved" health
     fi
 
+    PHASE=check
     step "Checking $NEW_VERSION"
     if ! verify_release "$NEW_VERSION"; then
         deploy_failed "$saved" health
     fi
 
+    PHASE=record
     step "Recording the release"
     record_state deploy "$NEW_VERSION" "$NEW_SERVER_REF" "$NEW_WEB_REF" "$RELEASE_DIR" "$saved"
-    saas_history deploy "done" "$NEW_VERSION" "from=${CURRENT_VERSION:-none}${OVERLAY_PROBLEM:+ overlay=problem}"
+    history_end "done" "from=${CURRENT_VERSION:-none}${OVERLAY_PROBLEM:+ overlay=problem}"
     printf '\n%sMSCD %s is deployed to %s and healthy.%s\n' "$C_GREEN$C_BOLD" "$NEW_VERSION" "$TARGET" "$C_RESET"
     overlay_note
     printf '  Log: %s\n' "$LOG_FILE"
@@ -815,13 +983,14 @@ run_migrate() {
 deploy_failed() {
     local saved=$1 reason=$2 force=false
     if [[ -z $saved ]]; then
-        saas_history deploy failed "$NEW_VERSION" "reason=$reason first-deploy"
+        history_end failed "reason=$reason first-deploy"
         printf '\n%sThe first deploy of %s did not finish.%s Nothing ran before it, so there is nothing to go back to.\n' \
             "$C_RED$C_BOLD" "$NEW_VERSION" "$C_RESET"
         printf '  Fix the cause above and run the deploy again. Log: %s\n' "$LOG_FILE"
         exit 1
     fi
     [[ $reason == health ]] && force=true
+    PHASE=restore
     step "Restoring $CURRENT_VERSION (automatic rollback)"
     if restore_saved "$saved" "$CURRENT_VERSION" "$CURRENT_SERVER_REF" "$CURRENT_WEB_REF" "$force"; then
         rm -rf -- "$saved"
@@ -833,18 +1002,21 @@ deploy_failed() {
             keep+=("$(saas_ref_of "$dir/release.env" server)" "$(saas_ref_of "$dir/release.env" web)")
         done < <(saas_saved_dirs)
         saas_prune_images "${keep[@]}"
-        saas_history deploy restored "$NEW_VERSION" "reason=$reason running=$CURRENT_VERSION"
+        history_end restored "reason=$reason running=$CURRENT_VERSION"
         printf '\n%sThe deploy of %s failed (%s) and was rolled back automatically. %s is running and healthy.%s\n' \
             "$C_YELLOW$C_BOLD" "$NEW_VERSION" "$reason" "$CURRENT_VERSION" "$C_RESET"
         if [[ $reason == migrate ]]; then
-            printf '  The failed migration ran in one transaction per folder, so the database keeps the schema of %s.\n' "$CURRENT_VERSION"
+            printf '  The database is not rolled back. Each migration folder (platform, ref and every organisation\n'
+            printf '  schema) runs in its own transaction: a folder that failed was rolled back, and the folders that\n'
+            printf '  finished stay migrated (the migrate log above lists them). %s works with those migrations\n' "$CURRENT_VERSION"
+            printf '  (expand and contract).\n'
         else
             printf '  The database keeps the migrations of %s, which %s supports (expand and contract).\n' "$NEW_VERSION" "$CURRENT_VERSION"
         fi
         printf '  Log: %s\n' "$LOG_FILE"
         exit 1
     fi
-    saas_history deploy restore-failed "$NEW_VERSION" "reason=$reason"
+    history_end restore-failed "reason=$reason"
     die "The automatic rollback to $CURRENT_VERSION did not finish. The saved files are in $saved; see docs/saas/deploy.md, When a rollback fails."
 }
 
@@ -857,8 +1029,10 @@ rollback_main() {
     title "MSCD SaaS rollback on $TARGET ($INSTALL_DIR)"
     lock_install
     start_log rollback
+    remove_stale_work
     WORK=$(mktemp -d "$INSTALL_DIR/state/.deploy.XXXXXX")
-    target_saved=$(saas_saved_dirs | head -n 1)
+    last_run_note
+    target_saved=$(rollback_target)
 
     step "Refusals: demo images, profiles, settings and files (S-7)"
     saas_refuse_demo "$DIGESTS" "$INSTALL_DIR/.env" ${target_saved:+"$target_saved/.env"}
@@ -899,29 +1073,43 @@ rollback_main() {
     verify_images "$to_version" "$to_server" "$to_web" || saas_discard_pulled
     abort_if_failed
 
+    step "Database"
+    predeploy_check "$CURRENT_VERSION" || true
+    abort_if_failed
+
+    history_start rollback "$to_version" "from=$CURRENT_VERSION"
+    PHASE=secrets
     step "Secrets"
     install_secrets "$to_server" || true
-    abort_if_failed
+    stop_if_failed
 
+    PHASE=backup
     step "Pre-rollback database backup"
     predeploy_backup "$CURRENT_VERSION" "$to_version" || true
-    abort_if_failed
+    stop_if_failed
 
+    PHASE=switch
     step "Switching the files to $to_version"
-    undo=$WORK/undo
+    repair_switch || true
+    stop_if_failed
+    # The copy of the current files stays outside the work folder, so repair_switch finds it
+    # when this run is stopped hard.
+    undo=$STATE_DIR/rollback-undo-$STAMP
     caddy_before=$(saas_tree_hash "$CADDY_CONFIG")
     save_current "$undo"
-    saas_restore_files "$target_saved"
+    saas_restore_files "$target_saved" first
     pass "Saved files of $to_version put back (the database stays as it is: no down migration)"
 
+    PHASE=restart
     step "Restarting the services"
-    if restart_services true "$caddy_before" && { step "Checking $to_version"; verify_release "$to_version"; }; then
+    if restart_services true "$caddy_before" && { PHASE=check; step "Checking $to_version"; verify_release "$to_version"; }; then
+        PHASE=record
         step "Recording the release"
         saas_write_release_env "$STATE_DIR/current.env" "$to_version" "$to_server" "$to_web" \
             "$(kv_get "$target_saved/release.env" RELEASE_DIR)" rollback
-        rm -rf -- "$target_saved"
+        rm -rf -- "$target_saved" "$undo"
         saas_write_previous
-        saas_history rollback "done" "$to_version" "from=$CURRENT_VERSION"
+        history_end "done" "from=$CURRENT_VERSION"
         pass "State: current $to_version$(if [[ -f $STATE_DIR/previous.env ]]; then printf ', previous %s' "$(kv_get "$STATE_DIR/previous.env" VERSION)"; fi)"
         printf '\n%sMSCD is back on %s and healthy.%s The next rollback goes one release further back.\n' \
             "$C_GREEN$C_BOLD" "$to_version" "$C_RESET"
@@ -929,16 +1117,17 @@ rollback_main() {
         printf '  Log: %s\n' "$LOG_FILE"
         return 0
     fi
+    PHASE=restore
     step "Returning to $CURRENT_VERSION"
     if restore_saved "$undo" "$CURRENT_VERSION" "$CURRENT_SERVER_REF" "$CURRENT_WEB_REF" true; then
-        saas_history rollback failed "$to_version" "running=$CURRENT_VERSION"
+        rm -rf -- "$undo"
+        history_end failed "running=$CURRENT_VERSION"
         printf '\n%sThe rollback to %s failed; %s is running and healthy again.%s\n' \
             "$C_YELLOW$C_BOLD" "$to_version" "$CURRENT_VERSION" "$C_RESET"
         exit 1
     fi
-    cp -pR -- "$undo" "$STATE_DIR/rollback-undo-$STAMP"
-    saas_history rollback restore-failed "$to_version" ""
-    die "Neither $to_version nor $CURRENT_VERSION became healthy. The files of $CURRENT_VERSION are in $STATE_DIR/rollback-undo-$STAMP; see docs/saas/deploy.md, When a rollback fails."
+    history_end restore-failed ""
+    die "Neither $to_version nor $CURRENT_VERSION became healthy. The files of $CURRENT_VERSION are in $undo; see docs/saas/deploy.md, When a rollback fails."
 }
 
 # ---------------------------------------------------------------------------
@@ -1001,6 +1190,13 @@ check_main() {
     if [[ -f $INSTALL_DIR/state/previous.env ]]; then
         info "Rollback target: $(kv_get "$INSTALL_DIR/state/previous.env" VERSION)"
     fi
+    if [[ -s $STATE_DIR/history.log ]]; then
+        info "Last line of state/history.log: $(tail -n 1 -- "$STATE_DIR/history.log")"
+    fi
+    if [[ -f $STATE_DIR/current.env && -f $INSTALL_DIR/.env ]] &&
+        ! saas_env_names_release "$INSTALL_DIR/.env" "$STATE_DIR/current.env"; then
+        warn "The files in place name $(in_place_version), but state/current.env names $(kv_get "$STATE_DIR/current.env" VERSION): a run stopped while it switched the files. The next deploy or rollback puts the saved files back first."
+    fi
     if ((FAILURES > 0)); then
         printf '\n%s%d check(s) failed.%s Nothing was changed.\n' "$C_RED" "$FAILURES" "$C_RESET"
         exit 1
@@ -1009,6 +1205,8 @@ check_main() {
 }
 
 main() {
+    # The run carries on when its SSH connection ends (see start_log).
+    trap '' HUP
     parse_args "$@"
     INSTALL_DIR=$(absolute_path "${OPT_INSTALL_DIR:-$MSCD_DEFAULT_DIR}")
     RELEASE_DIR=$(absolute_path "${OPT_RELEASE_DIR:-$SCRIPT_DIR/../..}")

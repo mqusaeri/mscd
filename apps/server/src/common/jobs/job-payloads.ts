@@ -7,8 +7,8 @@ type Empty = Record<string, never>;
 
 /**
  * A daily job of E.2 that `scheduler.tick` enqueues per organisation (Milestone 2 D.2): the local date of its run, the
- * date of its row in `platform.daily_job_run`. The job works on that date (`Clock.runDate`) and not on the date at its
- * start, which a time zone change between the tick and the start can move. Absent when the job is sent another way.
+ * date of its row in `platform.daily_job_run`. The job works on that date (`Clock.runDate`), so a time zone change
+ * between the tick and the job's start cannot move it to another day. Absent when the job is sent another way.
  */
 export interface DailyRun {
   localDate?: string;

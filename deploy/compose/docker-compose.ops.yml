@@ -10,9 +10,9 @@
 #   ops-init           one-shot set-up at every start (deploy/ops/ops-init.sh): the database
 #                      role mscd_monitor, the probe target, the Alertmanager configuration
 #                      from its template, and the optional Grafana site of Caddy
-#   prometheus         scrapes api, worker and storage-gateway (port 9464), the exporters and
-#                      Caddy, evaluates the alert rules of deploy/ops/prometheus/rules, keeps
-#                      30 days of metrics
+#   prometheus         scrapes api, worker and storage-gateway (port 9464) and the exporters,
+#                      evaluates the alert rules of deploy/ops/prometheus/rules, keeps 30 days
+#                      of metrics
 #   alertmanager       sends alerts by email (and Telegram when set up) and pings the watchdog
 #                      heartbeat; the only service here besides the probe that reaches outside
 #   node-exporter      the server: processor, memory, disks, and the text files of
@@ -21,10 +21,13 @@
 #   blackbox-exporter  HTTPS probe of the public URL and its certificate, from outside the stack
 #   grafana            optional (profile grafana): dashboards behind Caddy on ops.<domain>
 #
-# Networks: prometheus, node-exporter, postgres-exporter and grafana are on the internal mscd
-# network only (no route out). alertmanager (mail, Telegram, heartbeat) and blackbox-exporter
-# (the public URL) are also on egress. No service publishes a port. Caddy joins mscd so that
-# Prometheus can read its metrics (conf.d/ops.caddy) and Caddy can reach Grafana.
+# Networks: prometheus, node-exporter and postgres-exporter are on the internal mscd network
+# only (no route out). alertmanager (mail, Telegram, heartbeat) and blackbox-exporter (the
+# public URL) are also on egress. No service publishes a port. Caddy, the only service that
+# faces the internet, stays off mscd, so it has no path to the database, the object store or
+# the storage gateway: it reaches Grafana over ops-web, an internal network of the two only.
+# Grafana is on mscd (Prometheus) and ops-web (Caddy). Caddy itself is not scraped; the probe
+# of the public URL checks it from outside.
 #
 # Settings: the MSCD_SMTP_* values and MSCD_MAIL_FROM of .env and the secret file smtp.password
 # (the app's mail relay), and the files of ${MSCD_SECRETS_DIR}/ops/ that deploy-prod.yml writes
@@ -186,7 +189,9 @@ services:
       - --path.rootfs=/host
       - --web.listen-address=:9100
       - --collector.textfile.directory=/textfile
-      - --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|var/lib/docker/.+|var/lib/containerd/.+|var/lib/containers/storage/.+)($|/)
+      # Leaves out the container's own mounts (/etc/hostname, /etc/hosts, /etc/resolv.conf and
+      # /textfile, which sit on the host's disk and would count it again) and Docker's layers.
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|etc/.+|textfile|var/lib/docker/.+|var/lib/containerd/.+|var/lib/containers/storage/.+)($|/)
     volumes:
       # The host's file systems, read-only, for processor, memory and disk use.
       - /:/host:ro
@@ -279,12 +284,12 @@ services:
       - /tmp:size=64m,mode=1777
     environment:
       # Sign-in only through Caddy's basic auth (conf.d/ops.caddy): Caddy passes the checked
-      # user name, and Grafana trusts that header only from the mscd network.
+      # user name and removes any copy the browser sent. Only containers of the two internal
+      # networks reach Grafana (Caddy on ops-web, the services of mscd); none publishes it.
       GF_AUTH_PROXY_ENABLED: "true"
       GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
       GF_AUTH_PROXY_HEADER_PROPERTY: username
       GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
-      GF_AUTH_PROXY_WHITELIST: ${MSCD_SUBNET:-172.31.250.0/24}
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_AUTH_BASIC_ENABLED: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
@@ -307,8 +312,10 @@ services:
       - ../ops/grafana/provisioning:/etc/grafana/provisioning:ro,z
       - ../ops/grafana/dashboards:/var/lib/grafana-dashboards:ro,z
       - grafana_data:/var/lib/grafana
+    # mscd: the Prometheus data source; ops-web: Caddy, the way in from the internet.
     networks:
       - mscd
+      - ops-web
     depends_on:
       prometheus:
         condition: service_started
@@ -327,14 +334,18 @@ services:
           pids: 256
 
   caddy:
-    environment:
-      # Only these addresses get an answer from the metrics site of conf.d/ops.caddy.
-      MSCD_SUBNET: ${MSCD_SUBNET:-172.31.250.0/24}
     volumes:
       # The Grafana site that ops-init writes (empty when Grafana is not set up).
       - ops_caddy:/etc/caddy-ops:ro
+    # The way to Grafana. Caddy stays off mscd (edge and ops-web only).
     networks:
-      mscd: {}
+      ops-web: {}
+
+networks:
+  # Caddy and Grafana only. Internal: no route out of the server. Docker picks the address
+  # range from its pools, so no setting is needed.
+  ops-web:
+    internal: true
 
 volumes:
   prometheus_data:

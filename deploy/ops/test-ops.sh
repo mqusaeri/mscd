@@ -13,8 +13,8 @@
 # Static checks (docker run --network none with the pinned images of the overlay):
 #   - promtool check config and promtool test rules; every alert rule has a unit test;
 #   - amtool check-config of alertmanager.yml.example, which must equal the template
-#     rendered by ops-init with the example values; the other variants (no Telegram, no
-#     heartbeat, no SMTP login) pass amtool too;
+#     rendered by ops-init with the example values, with its inhibit rule; the other
+#     variants (no Telegram, no heartbeat, no SMTP login) pass amtool too;
 #   - ops-init refuses wrong or missing settings and then writes nothing;
 #   - blackbox exporter configuration check; caddy validate with conf.d/ops.caddy, with and
 #     without the Grafana site; the PromQL of the Grafana dashboard parses;
@@ -27,11 +27,14 @@
 #      (outside mscd), so delivery proves the outbound path; the probe checks Caddy with its
 #      local root certificate; node-exporter reads test files for reboot.prom and backup.prom.
 #   3. Checks: ops-init ran (role mscd_monitor read only), networks and ports, limits, every
-#      Prometheus target up through the Prometheus API inside the container, the probe and
-#      the certificate, every rule loaded, the Watchdog reaches the heartbeat, a real rule
-#      (HostRebootNeeded) and a test alert fired with amtool arrive as email in the Mailpit
-#      on egress and not in the app's Mailpit, Caddy's metrics site refuses the edge network,
-#      ops-init runs again without changes, and (with Grafana) the ops host through Caddy.
+#      Prometheus target up through the Prometheus API inside the container (each with its
+#      Compose service), the probe and the certificate, the host's disks without the
+#      container's own mounts, every rule loaded, the Watchdog reaches the heartbeat, a real
+#      rule (HostRebootNeeded) and a test alert fired with amtool arrive as email in the
+#      Mailpit on egress and not in the app's Mailpit, AlertDeliveryFailing for email mutes
+#      the Watchdog and the heartbeat pings stop, Caddy cannot reach the mscd network and its
+#      admin endpoint stays inside its container, ops-init runs again without changes, and
+#      (with Grafana or its stand-in) the ops host through Caddy.
 #   4. Removes everything: the ops services, then saas-stack.sh down.
 #
 # Settings (environment):
@@ -39,7 +42,11 @@
 #   MSCD_OPS_TEST_DIR       state folder (default /tmp/mscd-ops-test), passed to saas-stack.sh,
 #                           deleted at the end
 #   MSCD_OPS_TEST_GRAFANA   true (default): also start Grafana (profile grafana) and test the
-#                           ops host; false: skip it (the image is about 500 MB)
+#                           ops host; stub: the same ops host with a stand-in of Grafana (the
+#                           pinned Caddy image, which echoes the user name Caddy passes), for
+#                           hosts without disk space for the Grafana image (about 2 GB
+#                           unpacked): it tests Caddy, basic auth and the ops-web network, not
+#                           Grafana itself; false: no ops host
 #   MSCD_OPS_TEST_KEEP      true: leave the stack running for a look (remove it later with
 #                           MSCD_SAAS_TEST_PROJECT=<project> MSCD_SAAS_TEST_DIR=<dir>
 #                           deploy/scripts/test/saas-stack.sh down)
@@ -200,7 +207,7 @@ caddy_validate() {
     local mode=$1 ops_folder=${2:-} args=()
     if [[ -n $ops_folder ]]; then args=(-v "$ops_folder:/etc/caddy-ops:ro"); fi
     docker run --rm --network none -e MSCD_DOMAIN=app.example.com -e MSCD_TLS_MODE="$mode" -e ACME_EMAIL= \
-        -e ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory -e MSCD_SUBNET=172.31.250.0/24 \
+        -e ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory \
         -v "$COMPOSE_DIR/config/caddy:/etc/caddy:ro" "${args[@]}" "$CADDY_IMAGE" \
         caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 }
@@ -239,6 +246,17 @@ if (bad.length) { console.log(bad.join(", ")); process.exit(1); }' "$WORK/compos
         pass "Only Caddy publishes ports"
     else
         fail "Services other than Caddy publish ports"
+    fi
+    if log=$(node -e '
+const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const want = { prometheus: "mscd", "node-exporter": "mscd", "postgres-exporter": "mscd", alertmanager: "egress mscd",
+  "blackbox-exporter": "egress mscd", grafana: "mscd ops-web", caddy: "edge ops-web" };
+const bad = Object.entries(want).map(([n, w]) => [n, w, Object.keys(c.services[n].networks || {}).sort().join(" ")]).filter(([, w, got]) => got !== w);
+if (!c.networks["ops-web"] || c.networks["ops-web"].internal !== true) bad.push(["ops-web", "internal", "not internal"]);
+if (bad.length) { console.log(bad.map(([n, w, got]) => `${n}: ${got} (expected ${w})`).join("; ")); process.exit(1); }' "$WORK/compose.json"); then
+        pass "Networks: Prometheus and the exporters on mscd only, Caddy on edge and ops-web (not mscd), Grafana on mscd and ops-web, ops-web internal"
+    else
+        fail "Networks of the overlay: $log"
     fi
 
     step "Prometheus"
@@ -284,8 +302,9 @@ console.log(`${alerts.length} alert rules in ${files.length} files, each with a 
             sed 's/^/        /' "$WORK/example.diff" | head -n 30
             fail "alertmanager.yml.example differs from the rendered template" "Render it again (see the diff above)"
         fi
-        if amtool_check "$OPS_DIR/alertmanager/alertmanager.yml.example" >"$WORK/amtool.log" 2>&1; then
-            pass "amtool check-config alertmanager.yml.example (email, Telegram, heartbeat, templates)"
+        if amtool_check "$OPS_DIR/alertmanager/alertmanager.yml.example" >"$WORK/amtool.log" 2>&1 &&
+            grep -q -- '- 1 inhibit rules' "$WORK/amtool.log"; then
+            pass "amtool check-config alertmanager.yml.example (email, Telegram, heartbeat, templates, the inhibit rule of the Watchdog)"
         else
             fail "amtool check-config alertmanager.yml.example" "$(tail -n 5 "$WORK/amtool.log" | tr '\n' ' ')"
         fi
@@ -311,6 +330,7 @@ console.log(`${alerts.length} alert rules in ${files.length} files, each with a 
     out=$WORK/render-minimal
     if run_ops_init "$out" "$WORK/secrets-minimal" -e MSCD_OPS_SMTP_USER= >"$WORK/render-minimal.log" 2>&1 &&
         amtool_check "$out/alertmanager/alertmanager.yml" >"$WORK/amtool-minimal.log" 2>&1 &&
+        grep -q -- '- 1 inhibit rules' "$WORK/amtool-minimal.log" &&
         ! grep -q 'telegram_configs\|webhook_configs\|smtp_auth' "$out/alertmanager/alertmanager.yml" &&
         [[ ! -e $out/alertmanager/secrets/smtp_password ]] && grep -q 'nobody notices' "$WORK/render-minimal.log"; then
         pass "Email only (no login, no Telegram, no heartbeat): valid, and ops-init warns about the missing heartbeat"
@@ -412,7 +432,7 @@ fs.writeFileSync(process.argv[2], `groups:\n  - name: dashboard\n    rules:\n${r
 # ---------------------------------------------------------------------------
 
 write_test_files() {
-    local ops=$STATE/ops now
+    local ops=$STATE/ops now edge_subnet probe_address
     install -d -m 0755 "$ops" "$ops/metrics"
     now=$(date +%s)
 
@@ -420,7 +440,7 @@ write_test_files() {
     install -d -m 0700 "$STATE/secrets/ops"
     printf '%s\n' "$ALERT_TO" >"$STATE/secrets/ops/ALERT_EMAIL_TO"
     printf 'http://ops-heartbeat:8080%s\n' "$HEARTBEAT_PATH" >"$STATE/secrets/ops/HEARTBEAT_WATCHDOG_URL"
-    if [[ $GRAFANA == true ]]; then
+    if [[ $GRAFANA != false ]]; then
         OPS_PASSWORD=$(openssl rand -hex 16)
         printf '%s\n' "$OPS_HOST" >"$STATE/secrets/ops/OPS_DOMAIN"
         printf '%s\n' "$OPS_USER" >"$STATE/secrets/ops/OPS_BASIC_AUTH_USER"
@@ -446,8 +466,13 @@ mscd_backup_last_success_timestamp_seconds $((now - 3600))
 EOF
     chmod 0644 "$ops/metrics"/*.prom
 
-    # The probe reaches Caddy by its name on mscd and trusts Caddy's local root certificate;
-    # the rest of the module is the production one.
+    # The probe reaches Caddy by its name on edge and trusts Caddy's local root certificate;
+    # the rest of the module is the production one. On edge the blackbox exporter needs a
+    # fixed address (.20): a free one picked by Docker could be Caddy's or web's fixed
+    # address while Compose recreates them.
+    edge_subnet=$(kv_get "$STATE/.env" MSCD_EDGE_SUBNET)
+    [[ $edge_subnet =~ ^172\.31\.[0-9]{1,3}\.0/24$ ]] || die "Unexpected MSCD_EDGE_SUBNET in $STATE/.env: $edge_subnet"
+    probe_address=${edge_subnet%.0/24}.20
     install -m 0644 "$STATE/caddy-root.crt" "$ops/caddy-root.crt"
     node -e '
 const fs = require("fs");
@@ -463,7 +488,7 @@ fs.writeFileSync(process.argv[3], "# Test copy of deploy/ops/blackbox/blackbox.y
     cat >"$ops/compose.ops-test.yml" <<EOF
 # Test additions of deploy/ops/test-ops.sh (not for a server): the alert mail relay and the
 # heartbeat receiver sit on the egress network only, outside mscd, like the outside services
-# of production; the probe checks Caddy itself.
+# of production; the probe checks Caddy itself over edge.
 services:
   ops-init:
     environment:
@@ -478,6 +503,12 @@ services:
     volumes:
       - $ops/blackbox-test.yml:/etc/blackbox_exporter/config.yml:ro
       - $ops/caddy-root.crt:/etc/blackbox_exporter/caddy-root.crt:ro
+    # The test's public address (127.0.0.1 of the host) cannot be reached from a container,
+    # and Caddy is not on mscd, so the probe reaches Caddy by name on edge. In production the
+    # probe goes out through egress to the public address.
+    networks:
+      edge:
+        ipv4_address: $probe_address
 
   ops-mailpit:
     image: $MAILPIT_IMAGE
@@ -509,8 +540,44 @@ services:
       - egress
 EOF
 
+    if [[ $GRAFANA == stub ]]; then
+        # The stand-in of Grafana: the pinned Caddy image on port 3000, with the networks,
+        # user and hardening of the grafana service. It answers every request with the user
+        # name and the Authorization header that reached it.
+        install -d -m 0755 "$ops/grafana-stub"
+        cat >"$ops/grafana-stub/Caddyfile" <<'STUB'
+{
+	admin off
+	persist_config off
+	auto_https off
+}
+
+:3000 {
+	respond "user={http.request.header.X-WEBAUTH-USER};authorization={http.request.header.Authorization}" 200
+}
+STUB
+        chmod 0644 "$ops/grafana-stub/Caddyfile"
+        cat >>"$ops/compose.ops-test.yml" <<STUB
+
+  # Stand-in of Grafana (MSCD_OPS_TEST_GRAFANA=stub).
+  grafana:
+    image: $CADDY_IMAGE
+    entrypoint: ["caddy"]
+    command: ["run", "--config", "/etc/grafana-stub/Caddyfile", "--adapter", "caddyfile"]
+    # The caddy binary carries this file capability; without it in the bounding set it
+    # does not start.
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      XDG_CONFIG_HOME: /tmp/config
+      XDG_DATA_HOME: /tmp/data
+    volumes:
+      - $ops/grafana-stub:/etc/grafana-stub:ro
+STUB
+    fi
+
     env_set "$STATE/.env" MSCD_METRICS_DIR "$ops/metrics"
-    if [[ $GRAFANA == true ]]; then
+    if [[ $GRAFANA != false ]]; then
         env_set "$STATE/.env" COMPOSE_PROFILES "$(kv_get "$STATE/.env" COMPOSE_PROFILES),grafana"
     fi
 }
@@ -536,7 +603,7 @@ start_ops() {
     pass "ops-init finished: $(grep -c 'ops-init:' "$STATE/ops/ops-init.log") steps, exit 0"
 
     services=(prometheus alertmanager node-exporter postgres-exporter blackbox-exporter caddy ops-mailpit ops-heartbeat)
-    if [[ $GRAFANA == true ]]; then services+=(grafana); fi
+    if [[ $GRAFANA != false ]]; then services+=(grafana); fi
     if ! ops_compose up -d --wait --wait-timeout 300 "${services[@]}" >"$STATE/ops/up.log" 2>&1; then
         tail -n 20 "$STATE/ops/up.log" | sed 's/^/        /'
         for id in "${services[@]}"; do
@@ -591,12 +658,15 @@ check_isolation() {
     local service want got lines
     for service in prometheus node-exporter postgres-exporter grafana alertmanager blackbox-exporter ops-mailpit ops-heartbeat caddy; do
         case $service in
-            prometheus | node-exporter | postgres-exporter | grafana) want=mscd ;;
-            alertmanager | blackbox-exporter) want='egress mscd' ;;
+            prometheus | node-exporter | postgres-exporter) want=mscd ;;
+            grafana) want='mscd ops-web' ;;
+            alertmanager) want='egress mscd' ;;
+            # edge: the test path of the probe to Caddy (compose.ops-test.yml).
+            blackbox-exporter) want='edge egress mscd' ;;
             ops-mailpit | ops-heartbeat) want=egress ;;
-            caddy) want='edge mscd' ;;
+            caddy) want='edge ops-web' ;;
         esac
-        if [[ $service == grafana && $GRAFANA != true ]]; then continue; fi
+        if [[ $service == grafana && $GRAFANA == false ]]; then continue; fi
         got=$(container_networks "$service")
         if [[ $got == "$want" ]]; then
             pass "$service networks: $got"
@@ -613,7 +683,7 @@ check_isolation() {
     fi
     local id total=0 memory ro nnp caps bad=''
     for service in prometheus alertmanager node-exporter postgres-exporter blackbox-exporter grafana; do
-        if [[ $service == grafana && $GRAFANA != true ]]; then continue; fi
+        if [[ $service == grafana && $GRAFANA == false ]]; then continue; fi
         id=$(project_containers "$service" | head -n 1)
         read -r memory ro nnp caps < <(docker inspect --format \
             '{{.HostConfig.Memory}} {{.HostConfig.ReadonlyRootfs}} {{range .HostConfig.SecurityOpt}}{{.}}{{end}} {{len .HostConfig.CapDrop}}' "$id")
@@ -632,17 +702,18 @@ all_targets_up() {
 const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const t = r.data.activeTargets;
 const jobs = new Set(t.map((x) => x.labels.job));
-const want = ["prometheus", "alertmanager", "api", "worker", "storage-gateway", "node", "postgres", "caddy", "blackbox", "public-url"];
+const want = ["prometheus", "alertmanager", "api", "worker", "storage-gateway", "node", "postgres", "blackbox", "public-url"];
 const missing = want.filter((j) => !jobs.has(j));
 const down = t.filter((x) => x.health !== "up").map((x) => `${x.labels.job} (${x.health}: ${x.lastError || "not scraped yet"})`);
-if (missing.length || down.length) { console.log(`missing: ${missing.join(", ") || "none"}; not up: ${down.join("; ") || "none"}`); process.exit(1); }
-console.log(t.map((x) => x.labels.job).sort().join(", "));'
+const noService = t.filter((x) => !x.labels.service).map((x) => x.labels.job);
+if (missing.length || down.length || noService.length) { console.log(`missing: ${missing.join(", ") || "none"}; not up: ${down.join("; ") || "none"}; without a service label: ${noService.join(", ") || "none"}`); process.exit(1); }
+console.log(t.map((x) => `${x.labels.job} (${x.labels.service})`).sort().join(", "));'
 }
 
 check_prometheus() {
     local out
     if wait_for 240 all_targets_up; then
-        pass "Every Prometheus target is up (Prometheus API inside the container): $(all_targets_up)"
+        pass "Every Prometheus target is up, with its Compose service (Prometheus API inside the container): $(all_targets_up)"
     else
         fail "Not every Prometheus target is up: $(all_targets_up 2>&1 || true)"
     fi
@@ -669,9 +740,7 @@ if (rules.length !== want || bad.length) process.exit(1);' "$REPO_DIR" "$OPS_DIR
         'time() - mscd_backup_last_success_timestamp_seconds < 7200|backup.prom read by the text file collector (mscd_backup_last_success_timestamp_seconds)'
         'mscd_http_request_duration_seconds_count{job="api"}|api metrics on port 9464 (mscd_http_request_duration_seconds)'
         'process_resident_memory_bytes{job="worker", mode="worker"}|worker metrics on port 9464 (process metrics of the worker run mode)'
-        'mscd_job_runs_total{job="worker", job_name=~".+"}|Job runs of the worker carry the job name in job_name (relabelling of prometheus.yml)'
         'up{job="storage-gateway"} == 1|storage-gateway metrics on port 9464'
-        'caddy_config_last_reload_successful == 1|Caddy metrics from the metrics site of ops.caddy'
         'node_filesystem_size_bytes{mountpoint="/"}|Disk metrics of the host (node_filesystem_size_bytes of /)'
         'ALERTS{alertname="Watchdog", alertstate="firing"}|The Watchdog alert fires'
         'ALERTS{alertname="HostRebootNeeded", alertstate="firing"}|HostRebootNeeded fires from the test reboot.prom'
@@ -681,15 +750,82 @@ if (rules.length !== want || bad.length) process.exit(1);' "$REPO_DIR" "$OPS_DIR
         expr=${item%%|*} label=${item#*|}
         if wait_for 120 prom_true "$expr"; then pass "$label"; else fail "$label: no result for $expr"; fi
     done
+    # The counter appears at the worker's first job run: the 5-minute cron notifications.dispatch,
+    # which pg-boss starts up to a minute late, read at the next scrape (30 s). So up to about
+    # 6.5 minutes after the worker started.
+    expr='mscd_job_runs_total{job="worker", job_name=~".+"}'
+    if wait_for 420 prom_true "$expr"; then
+        pass "Job runs of the worker carry the job name in job_name (relabelling of prometheus.yml)"
+    else
+        fail "Job runs of the worker carry the job name in job_name (relabelling of prometheus.yml): no result for $expr after 7 minutes"
+    fi
     if prom_true '{exported_job=~".+"}'; then
         fail "Some series still carry exported_job (the job_name relabelling does not work)"
     else
         pass "No series carries exported_job: job names are in job_name"
     fi
+    if prom_true 'node_filesystem_size_bytes{mountpoint=~"/etc/.+|/textfile"}'; then
+        fail "node-exporter reports the container's own mounts: $(prom_values 'node_filesystem_size_bytes{mountpoint=~"/etc/.+|/textfile"}' | cut -c 1-200 | xargs)"
+    else
+        pass "node-exporter leaves out the container's own mounts (/etc/hostname, /etc/hosts, /etc/resolv.conf, /textfile)"
+    fi
 }
 
+# heartbeat_count: the number of watchdog pings the heartbeat receiver has logged.
+heartbeat_count() {
+    ops_compose logs --no-color ops-heartbeat 2>/dev/null | grep '"method":"POST"' | grep -c "\"uri\":\"$HEARTBEAT_PATH\"" || true
+}
+
+# heartbeat_arrived [N]: true when more than N pings (default 0) have arrived.
 heartbeat_arrived() {
-    ops_compose logs --no-color ops-heartbeat 2>/dev/null | grep '"method":"POST"' | grep -q "\"uri\":\"$HEARTBEAT_PATH\""
+    (($(heartbeat_count) > ${1:-0}))
+}
+
+# watchdog_state STATE: true when Alertmanager shows the Watchdog in STATE (active or
+# suppressed).
+watchdog_state() {
+    ops_compose exec -T alertmanager wget -q -O - 'http://127.0.0.1:9093/api/v2/alerts?filter=alertname%3D%22Watchdog%22' |
+        node -e 'const a = JSON.parse(require("fs").readFileSync(0, "utf8"));
+process.exit(a.length === 1 && a[0].status.state === process.argv[1] ? 0 : 1);' "$1"
+}
+
+# delivery_failing [END]: sends AlertDeliveryFailing for email to Alertmanager, as Prometheus
+# would; with END (RFC 3339) the alert ends then.
+delivery_failing() {
+    local -a args=(alert add AlertDeliveryFailing integration=email severity=warning
+        --annotation=summary='Inhibit rule test of test-ops.sh' --annotation=action='Nothing to do.'
+        --alertmanager.url=http://127.0.0.1:9093)
+    if [[ -n ${1:-} ]]; then args+=("--end=$1"); fi
+    ops_compose exec -T alertmanager amtool "${args[@]}" >/dev/null 2>&1
+}
+
+check_inhibition() {
+    local before after
+    if ! wait_for 60 watchdog_state active; then
+        fail "The Watchdog is not active in Alertmanager before the inhibit test"
+        return 0
+    fi
+    if delivery_failing && wait_for 60 watchdog_state suppressed; then
+        pass "AlertDeliveryFailing for email mutes the Watchdog (inhibit rule)"
+    else
+        fail "AlertDeliveryFailing for email did not mute the Watchdog"
+    fi
+    # The heartbeat receiver gets nothing while the Watchdog is muted: about one minute
+    # between pings, so 100 seconds without one show that they stopped.
+    before=$(heartbeat_count)
+    sleep 100
+    after=$(heartbeat_count)
+    if ((after == before)); then
+        pass "The heartbeat pings stop while alert emails fail ($after pings before, none in 100 seconds)"
+    else
+        fail "The heartbeat still got $((after - before)) ping(s) while the Watchdog was muted"
+    fi
+    if delivery_failing "$(date -u +%Y-%m-%dT%H:%M:%SZ)" && wait_for 60 watchdog_state active &&
+        wait_for 150 heartbeat_arrived "$after"; then
+        pass "When AlertDeliveryFailing ends, the Watchdog and the heartbeat pings come back"
+    else
+        fail "The Watchdog or the heartbeat pings did not come back after AlertDeliveryFailing ended"
+    fi
 }
 
 check_alerts() {
@@ -734,18 +870,25 @@ check_alerts() {
     fi
 }
 
-check_caddy_metrics() {
-    local edge code
-    edge=$(kv_get "$STATE/.env" MSCD_CADDY_ADDRESS)
-    code=$(ops_compose exec -T web curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$edge:9180/metrics" 2>/dev/null || true)
-    if [[ $code == 403 ]]; then
-        pass "Caddy's metrics site refuses the edge network (web gets 403)"
+check_caddy() {
+    local edge gateway
+    # The storage gateway answers HTTP on the mscd network: Prometheus reaches it, Caddy must
+    # not, neither by name nor by address.
+    gateway=$(docker inspect --format "{{(index .NetworkSettings.Networks \"${PROJECT}_mscd\").IPAddress}}" \
+        "$(project_containers storage-gateway | head -n 1)" 2>/dev/null || true)
+    if [[ -z $gateway ]]; then
+        fail "Could not read the address of storage-gateway on mscd"
+    elif ops_compose exec -T prometheus wget -q -O /dev/null -T 5 "http://$gateway:9464/readyz" 2>/dev/null &&
+        ! ops_compose exec -T caddy wget -q -O /dev/null -T 5 "http://$gateway:9464/readyz" 2>/dev/null &&
+        ! ops_compose exec -T caddy wget -q -O /dev/null -T 5 http://storage-gateway:9464/readyz 2>/dev/null; then
+        pass "Caddy cannot reach the mscd network (storage-gateway at $gateway answers Prometheus, not Caddy)"
     else
-        fail "Caddy's metrics site answered $code to the web container on edge (expected 403)"
+        fail "Caddy reaches the mscd network, or the storage gateway does not answer Prometheus"
     fi
+    edge=$(kv_get "$STATE/.env" MSCD_CADDY_ADDRESS)
     if ops_compose exec -T caddy wget -q -O /dev/null http://127.0.0.1:2019/config/ 2>/dev/null &&
-        ! ops_compose exec -T prometheus wget -q -O /dev/null -T 5 http://caddy:2019/metrics 2>/dev/null; then
-        pass "Caddy's admin endpoint still listens inside its container only"
+        ! ops_compose exec -T web curl -s -o /dev/null --max-time 5 "http://$edge:2019/config/" 2>/dev/null; then
+        pass "Caddy's admin endpoint listens inside its container only"
     else
         fail "Caddy's admin endpoint is reachable from outside its container, or not running"
     fi
@@ -786,6 +929,30 @@ check_grafana() {
     if [[ $body == *'"uid":"mscd-overview"'* ]]; then pass "The provisioned dashboard MSCD overview is listed"; else fail "The dashboard is not listed: $(printf '%s' "$body" | head -c 200)"; fi
     body=$(ops_curl '/api/datasources/proxy/uid/prometheus/api/v1/query?query=up' -u "$OPS_USER:$OPS_PASSWORD" || true)
     if [[ $body == *'"status":"success"'* ]]; then pass "Grafana queries Prometheus over the mscd network"; else fail "Grafana could not query Prometheus: $(printf '%s' "$body" | head -c 200)"; fi
+    code=$(ops_curl /api/health -o /dev/null -w '%{http_code}' -u "$OPS_USER:$OPS_PASSWORD" || true)
+    if [[ $code == 200 ]]; then pass "Caddy reaches Grafana over the ops-web network"; else fail "Caddy could not reach Grafana (status $code)"; fi
+}
+
+check_grafana_stub() {
+    local code body headers
+    code=$(ops_curl /api/health -o /dev/null -w '%{http_code}' || true)
+    if [[ $code == 401 ]]; then pass "https://$OPS_HOST/ asks for basic auth (401 without a password)"; else fail "Without a password the ops host answered $code (expected 401)"; fi
+    code=$(ops_curl /api/health -o /dev/null -w '%{http_code}' -u "$OPS_USER:wrong-password" || true)
+    if [[ $code == 401 ]]; then pass "A wrong password gets 401"; else fail "A wrong password got $code (expected 401)"; fi
+    code=$(ops_curl /api/health -o /dev/null -w '%{http_code}' -H 'X-WEBAUTH-USER: admin' || true)
+    if [[ $code == 401 ]]; then pass "A forged X-WEBAUTH-USER without a password gets 401"; else fail "A forged X-WEBAUTH-USER got $code"; fi
+    body=$(ops_curl /api/user -u "$OPS_USER:$OPS_PASSWORD" -H 'X-WEBAUTH-USER: admin' -D "$STATE/ops/stub-headers.txt" || true)
+    if [[ $body == "user=$OPS_USER;authorization=" ]]; then
+        pass "Over ops-web the Grafana stand-in gets the user $OPS_USER from Caddy (a forged X-WEBAUTH-USER is replaced, Authorization removed)"
+    else
+        fail "The Grafana stand-in got: $(printf '%s' "$body" | head -c 200)"
+    fi
+    headers=$(tr -d '\r' <"$STATE/ops/stub-headers.txt" 2>/dev/null || true)
+    if grep -qi '^strict-transport-security: max-age=31536000$' <<<"$headers" && ! grep -qi '^server:' <<<"$headers"; then
+        pass "The ops host sends HSTS and no Server header"
+    else
+        fail "The ops host headers are not as expected: $(printf '%s' "$headers" | tr '\n' ' ' | head -c 300)"
+    fi
 }
 
 stack_test() {
@@ -807,13 +974,18 @@ stack_test() {
     check_prometheus
     step "Alerts, email and heartbeat"
     check_alerts
+    step "Inhibit rule: alert emails fail"
+    check_inhibition
     step "Caddy"
-    check_caddy_metrics
+    check_caddy
     step "Second run of ops-init"
     check_rerun
     if [[ $GRAFANA == true ]]; then
         step "Grafana on $OPS_HOST"
         check_grafana
+    elif [[ $GRAFANA == stub ]]; then
+        step "Ops host $OPS_HOST with the Grafana stand-in"
+        check_grafana_stub
     fi
 }
 
@@ -851,7 +1023,8 @@ main() {
     esac
     [[ $# -le 1 ]] || die "Use at most one option"
     [[ $PROJECT =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || die "MSCD_OPS_TEST_PROJECT must be lower-case letters, digits, '-' or '_', got '$PROJECT'"
-    [[ $GRAFANA == true || $GRAFANA == false ]] || die "MSCD_OPS_TEST_GRAFANA must be true or false, got '$GRAFANA'"
+    [[ $GRAFANA == true || $GRAFANA == stub || $GRAFANA == false ]] ||
+        die "MSCD_OPS_TEST_GRAFANA must be true, stub or false, got '$GRAFANA'"
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/mscd-ops-check.XXXXXX")
     trap cleanup EXIT
     static_checks

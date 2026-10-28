@@ -25,9 +25,10 @@ tests:
   - name: TargetDown fires after 2 minutes for the target that stopped answering
     interval: 1m
     input_series:
-      - series: 'up{job="api", instance="api:9464"}'
+      # The label "service" comes from prometheus.yml.
+      - series: 'up{job="api", instance="api:9464", service="api"}'
         values: "1 1 0 0 0 0 0"
-      - series: 'up{job="worker", instance="worker:9464"}'
+      - series: 'up{job="worker", instance="worker:9464", service="worker"}'
         values: "1 1 1 1 1 1 1"
     alert_rule_test:
       - eval_time: 3m
@@ -40,14 +41,43 @@ tests:
               severity: critical
               job: api
               instance: "api:9464"
+              service: api
             exp_annotations:
               summary: "api is not answering (api:9464)"
-              action: "Check the container: docker compose ps api and its logs. See docs/saas/monitoring.md#targetdown"
+              action: "Check the container: docker compose ps api and its log. See docs/saas/monitoring.md#targetdown"
+
+  - name: TargetDown names the Compose service when it differs from the scrape job
+    interval: 1m
+    input_series:
+      - series: 'up{job="node", instance="node-exporter:9100", service="node-exporter"}'
+        values: "1 0 0 0 0 0"
+      - series: 'up{job="public-url", instance="https://app.example.com/healthz", service="blackbox-exporter"}'
+        values: "1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: node
+              instance: "node-exporter:9100"
+              service: node-exporter
+            exp_annotations:
+              summary: "node is not answering (node-exporter:9100)"
+              action: "Check the container: docker compose ps node-exporter and its log. See docs/saas/monitoring.md#targetdown"
+          - exp_labels:
+              severity: critical
+              job: public-url
+              instance: "https://app.example.com/healthz"
+              service: blackbox-exporter
+            exp_annotations:
+              summary: "public-url is not answering (https://app.example.com/healthz)"
+              action: "Check the container: docker compose ps blackbox-exporter and its log. See docs/saas/monitoring.md#targetdown"
 
   - name: PublicUrlDown fires after 2 minutes of failed probes
     interval: 1m
     input_series:
-      - series: 'probe_success{job="public-url", instance="https://app.example.com/healthz"}'
+      - series: 'probe_success{job="public-url", instance="https://app.example.com/healthz", service="blackbox-exporter"}'
         values: "1 0 0 0 0 0"
     alert_rule_test:
       - eval_time: 2m
@@ -60,6 +90,7 @@ tests:
               severity: critical
               job: public-url
               instance: "https://app.example.com/healthz"
+              service: blackbox-exporter
             exp_annotations:
               summary: "https://app.example.com/healthz does not answer"
               action: "Open the address in a browser, then check Caddy and web. See docs/saas/monitoring.md#publicurldown"
@@ -67,7 +98,7 @@ tests:
   - name: DatabaseDown fires after 2 minutes without a database connection
     interval: 1m
     input_series:
-      - series: 'pg_up{job="postgres", instance="postgres-exporter:9187"}'
+      - series: 'pg_up{job="postgres", instance="postgres-exporter:9187", service="postgres-exporter"}'
         values: "1 0 0 0 0 0"
     alert_rule_test:
       - eval_time: 2m
@@ -80,6 +111,7 @@ tests:
               severity: critical
               job: postgres
               instance: "postgres-exporter:9187"
+              service: postgres-exporter
             exp_annotations:
               summary: "PostgreSQL is not reachable"
               action: "Check the postgres container and its disk. See docs/saas/monitoring.md#databasedown"
@@ -198,19 +230,24 @@ tests:
   # ---------------------------------------------------------------------------------------
   # Jobs
   # ---------------------------------------------------------------------------------------
-  - name: JobFailuresRising fires at 3 failed runs of one job within 30 minutes
+  # The worker creates the series of a job at its first failure, with the value 1, so the
+  # series below first appear at 1 (after "_" samples: no series yet). job_name comes from
+  # the relabelling of prometheus.yml. The test clock starts at 0, so the series start late
+  # enough to have a past of 30 minutes.
+  - name: JobFailuresRising counts the failure that creates the series of a job
     interval: 1m
     input_series:
-      # job_name comes from the relabelling of prometheus.yml.
-      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", job_name="notify.send"}'
-        values: "0 0 1 2 3 3 3"
-      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", job_name="freshness.sweep"}'
-        values: "0 0 1 1 1 1 1"
+      - series: 'up{job="worker", instance="worker:9464", service="worker"}'
+        values: "1x80"
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", service="worker", job_name="notify.send"}'
+        values: "_x40 1 1 2 2 3 3x30"
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", service="worker", job_name="freshness.sweep"}'
+        values: "_x40 1 1 1 2x30"
     alert_rule_test:
-      - eval_time: 3m
+      - eval_time: 43m
         alertname: JobFailuresRising
         exp_alerts: []
-      - eval_time: 5m
+      - eval_time: 44m
         alertname: JobFailuresRising
         exp_alerts:
           - exp_labels:
@@ -219,29 +256,112 @@ tests:
             exp_annotations:
               summary: "The job notify.send failed 3 times in 30 minutes"
               action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
+      # The first failure (minute 40) is still inside the 30 minutes.
+      - eval_time: 69m
+        alertname: JobFailuresRising
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job_name: notify.send
+            exp_annotations:
+              summary: "The job notify.send failed 3 times in 30 minutes"
+              action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
+      # Now it is not: 2 failures in the last 30 minutes.
+      - eval_time: 71m
+        alertname: JobFailuresRising
+        exp_alerts: []
 
-  - name: JobQueueStuck fires when the oldest job waits over 15 minutes for 5 minutes
+  - name: JobFailuresRising counts failures after the worker restarted
     interval: 1m
     input_series:
-      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="notify.send"}'
-        values: "1200x10"
-      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="notify.send"}'
-        values: "1200x10"
-      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="export.build"}'
-        values: "30x10"
+      - series: 'up{job="worker", instance="worker:9464", service="worker"}'
+        values: "1x80"
+      # 5 failures before the restart at minute 30; the new worker creates the series again.
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", service="worker", job_name="export.build"}'
+        values: "5x29 stale _x11 1 2 3x30"
     alert_rule_test:
-      - eval_time: 3m
+      - eval_time: 43m
+        alertname: JobFailuresRising
+        exp_alerts: []
+      - eval_time: 44m
+        alertname: JobFailuresRising
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job_name: export.build
+            exp_annotations:
+              summary: "The job export.build failed 3 times in 30 minutes"
+              action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
+
+  - name: JobFailuresRising stays quiet after a gap in the scrapes
+    interval: 1m
+    input_series:
+      # Prometheus was stopped from minute 31 to 41; the worker kept its 7 old failures.
+      - series: 'up{job="worker", instance="worker:9464", service="worker"}'
+        values: "1x30 _x11 1x40"
+      - series: 'mscd_job_failures_total{job="worker", instance="worker:9464", service="worker", job_name="notify.send"}'
+        values: "7x30 _x11 7x40"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: JobFailuresRising
+        exp_alerts: []
+      - eval_time: 68m
+        alertname: JobFailuresRising
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: JobFailuresRising
+        exp_alerts: []
+
+  - name: JobQueueStuck fires when a job waits more than 55 minutes, for 5 minutes
+    interval: 1m
+    input_series:
+      # One more minute of waiting per minute: a job the worker does not take.
+      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="notify.send"}'
+        values: "0+60x70"
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="notify.send"}'
+        values: "0+60x70"
+      - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="export.build"}'
+        values: "30x70"
+    alert_rule_test:
+      - eval_time: 58m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 6m
+      - eval_time: 62m
         alertname: JobQueueStuck
         exp_alerts:
           - exp_labels:
               severity: warning
               queue: notify.send
             exp_annotations:
-              summary: "Jobs of notify.send wait for 20m 0s"
+              summary: "Jobs of notify.send wait for 1h 2m 0s"
               action: "Check that the worker runs and is healthy. See docs/saas/monitoring.md#jobqueuestuck"
+
+  - name: JobQueueStuck stays quiet while daily jobs wait for their start time
+    interval: 1m
+    input_series:
+      # scheduler.tick queues drift.evaluate at 02:05 for 02:45: it waits 40 minutes as
+      # planned, then runs, every hour (one organisation per hour of the day).
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="drift.evaluate"}'
+        values: "0+60x40 0x19 0+60x40 0x19"
+      # The longest lead time: a job at minute 59, queued at minute 5.
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="link-health.repository"}'
+        values: "0+60x54 0x5 0+60x54 0x5"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 54m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 59m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 114m
+        alertname: JobQueueStuck
+        exp_alerts: []
 
   - name: JobOutboxStuck fires after 15 minutes of stuck outbox rows
     interval: 1m
@@ -291,9 +411,9 @@ tests:
   - name: AccessDeniedSpike fires above 50 refused requests within 10 minutes
     interval: 1m
     input_series:
-      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", route="/api/v1/admin/users"}'
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/admin/users"}'
         values: "0x10 0+10x10"
-      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", route="/api/v1/registers"}'
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/registers"}'
         values: "0x20"
     alert_rule_test:
       - eval_time: 10m
@@ -308,6 +428,52 @@ tests:
             exp_annotations:
               summary: "90 requests refused by the permission check in 10 minutes"
               action: "Find the address and account in the api log. See docs/saas/monitoring.md#accessdeniedspike"
+
+  # The api creates the series of a route at its first refusal: the series below first
+  # appear with the refusals made before the next scrape.
+  - name: AccessDeniedSpike counts routes refused for the first time
+    interval: 1m
+    input_series:
+      - series: 'up{job="api", instance="api:9464", service="api"}'
+        values: "1x60"
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/admin/users"}'
+        values: "_x40 10 20x20"
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/admin/organizations"}'
+        values: "_x41 15 30x20"
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/exports"}'
+        values: "_x42 1 2x20"
+    alert_rule_test:
+      - eval_time: 41m
+        alertname: AccessDeniedSpike
+        exp_alerts: []
+      - eval_time: 42m
+        alertname: AccessDeniedSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: security
+            exp_annotations:
+              summary: "51 requests refused by the permission check in 10 minutes"
+              action: "Find the address and account in the api log. See docs/saas/monitoring.md#accessdeniedspike"
+
+  - name: AccessDeniedSpike stays quiet after a gap in the scrapes
+    interval: 1m
+    input_series:
+      # Prometheus was stopped from minute 31 to 41; the api kept its 500 old refusals.
+      - series: 'up{job="api", instance="api:9464", service="api"}'
+        values: "1x30 _x11 1x30"
+      - series: 'mscd_authz_denied_total{job="api", instance="api:9464", service="api", route="/api/v1/admin/users"}'
+        values: "500x30 _x11 500x30"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: AccessDeniedSpike
+        exp_alerts: []
+      - eval_time: 48m
+        alertname: AccessDeniedSpike
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: AccessDeniedSpike
+        exp_alerts: []
 
   # ---------------------------------------------------------------------------------------
   # Host

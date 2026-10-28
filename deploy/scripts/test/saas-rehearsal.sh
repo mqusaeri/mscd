@@ -31,9 +31,12 @@
 #        refusals       a release folder with config/demo-secrets, --no-verify-signature for
 #                       images of another registry, and a failing cosign;
 #        deploy rc.3    refused before anything changes; rc.2 keeps running;
-#        deploy rc.4    migrate fails: automatic restore of rc.2;
-#        deploy rc.5    health check fails after the services were replaced: automatic
-#                       restore of rc.2;
+#        deploy rc.4    after the state a deploy stopped hard while switching the files
+#                       leaves: the saved files of rc.2 are put back first; then migrate
+#                       fails: automatic restore of rc.2;
+#        deploy rc.5    with nobody reading its output after 12 lines (as when the SSH
+#                       connection of the workflow ends): the health check fails after the
+#                       services were replaced, and the run restores rc.2 on its own;
 #        rollback       back to rc.1;
 #        check-only     on the result.
 #   6. Removes every container, network, volume, image and folder it made.
@@ -45,8 +48,9 @@
 # "restrict" key and a stand-in docker command. It checks the pinned host key (the port-22 lines
 # through HostKeyAlias), one SSH login for the whole run, the rsync copy without demo files, the
 # registry login with the job token on standard input and the logout, and that saas-deploy.sh
-# gets every value on standard input and none on a command line or in its output. It needs no
-# host lock and publishes no port.
+# gets every value on standard input and none on a command line or in its output. A second
+# run with an older release checks that the deploy step sends only the names that release
+# takes. It needs no host lock and publishes no port.
 #
 # Settings (environment):
 #   MSCD_TEST_CONTAINER_PREFIX     prefix of the Compose project, containers and image paths
@@ -413,19 +417,31 @@ SIGNATURE_ARGS=(--no-verify-signature)
 
 # deploy_run NAME ACTION TAG [OPTION...]: saas-deploy.sh of the release folder TAG as the
 # deploy user (not root, in the docker group), standard input from INPUT (default
-# <work>/input); the output goes to <work>/logs/NAME.log and the exit code to RC.
+# <work>/input); the output goes to <work>/logs/NAME.log and the exit code to RC. With
+# CUT_AFTER=N, the reader of the output goes away after N lines (into NAME-cut.log), as
+# when the SSH connection of deploy-prod.yml ends.
 deploy_run() {
-    local name=$1 action=$2 tag=$3 start=$SECONDS release=$INSTALL/releases/$3
+    local name=$1 action=$2 tag=$3 start=$SECONDS release=$INSTALL/releases/$3 log
+    local -a run
     shift 3
     RC=0
     # The docker group is also the primary group: a group without a name in /etc/group
     # would make "id -nG" fail in the docker group check of lib/common.sh.
-    setpriv --reuid "$RUN_UID" --regid "$DOCKER_GID" --groups "$DOCKER_GID" --inh-caps=-all --no-new-privs \
-        env -i HOME="$WORK/home" PATH="$PATH" LANG=C.UTF-8 COMPOSE_PROJECT_NAME="$PROJECT" \
-        bash "$release/deploy/scripts/saas-deploy.sh" "$action" --target test --install-dir "$INSTALL" \
-        --release-dir "$release" "${SIGNATURE_ARGS[@]}" --timeout 180 --verify-timeout 120 --min-free-disk 1024 "$@" \
-        <"${INPUT:-$WORK/input}" >"$(log_file "$name")" 2>&1 || RC=$?
-    info "$action $tag: exit code $RC after $((SECONDS - start))s (log: $(log_file "$name"))"
+    run=(setpriv --reuid "$RUN_UID" --regid "$DOCKER_GID" --groups "$DOCKER_GID" --inh-caps=-all --no-new-privs
+        env -i HOME="$WORK/home" PATH="$PATH" LANG=C.UTF-8 COMPOSE_PROJECT_NAME="$PROJECT"
+        bash "$release/deploy/scripts/saas-deploy.sh" "$action" --target test --install-dir "$INSTALL"
+        --release-dir "$release" "${SIGNATURE_ARGS[@]}" --timeout 180 --verify-timeout 120 --min-free-disk 1024 "$@")
+    if [[ -n ${CUT_AFTER:-} ]]; then
+        log=$(log_file "$name-cut")
+        set +e
+        "${run[@]}" <"${INPUT:-$WORK/input}" 2>&1 | head -n "$CUT_AFTER" >"$log"
+        RC=${PIPESTATUS[0]}
+        set -e
+    else
+        log=$(log_file "$name")
+        "${run[@]}" <"${INPUT:-$WORK/input}" >"$log" 2>&1 || RC=$?
+    fi
+    info "$action $tag: exit code $RC after $((SECONDS - start))s (log: $log)"
 }
 
 compose() {
@@ -629,8 +645,10 @@ check_wrong_key() {
     before=$(sha256sum <"$INSTALL/secrets/platform.key")
     INPUT=$WORK/input-wrong deploy_run wrong-key deploy "v$V1"
     if ((RC != 0)) && log_has wrong-key "platform.key does not match PLATFORM_KEY" &&
-        [[ $(sha256sum <"$INSTALL/secrets/platform.key") == "$before" ]]; then
-        ok "A different PLATFORM_KEY is refused and platform.key stays as it was"
+        log_has wrong-key "Nothing was changed" &&
+        [[ $(sha256sum <"$INSTALL/secrets/platform.key") == "$before" ]] &&
+        tail -n 1 "$INSTALL/state/history.log" | grep -q " deploy stopped $V1 exit=1 phase=secrets$"; then
+        ok "A different PLATFORM_KEY is refused and platform.key stays as it was; history.log records the stop"
     else
         bad "A wrong PLATFORM_KEY was not refused as expected (exit code $RC)"
         show_log wrong-key
@@ -690,7 +708,8 @@ check_upgrade() {
     local toc=''
     if [[ -n $dump ]]; then toc=$(compose exec -T postgres pg_restore --list <"$dump" 2>/dev/null || true); fi
     if [[ -n $dump && $(head -c 5 -- "$dump") == PGDMP && $(stat -c '%a' "$dump") == 600 ]] &&
-        grep -qE 'SCHEMA - platform( |$)' <<<"$toc" && grep -qE 'SCHEMA - pgboss( |$)' <<<"$toc"; then
+        grep -qE 'SCHEMA - platform( |$)' <<<"$toc" && grep -qE 'SCHEMA - pgboss( |$)' <<<"$toc" &&
+        log_has deploy-rc2 "PostgreSQL is healthy"; then
         ok "Pre-deploy dump in pg_dump custom format, readable by pg_restore: $(basename -- "$dump")"
     else
         bad "No pre-deploy dump of the upgrade in $INSTALL/backup/pre-deploy"
@@ -775,11 +794,46 @@ check_rc3() {
     fi
 }
 
+# stop_hard_after_switch: the state a deploy leaves when it is stopped hard (a restart of
+# the server) right after it switched the files: the files of V2 saved as its rollback
+# point, the .env of another release and a file of its deploy tree in place, state/current.env
+# still naming V2, a "started" line without a result, and its work folders with a key copy.
+stop_hard_after_switch() {
+    local saved
+    # Two seconds ago: the stopped run came before the next one, whose own copy gets a newer name.
+    saved=$INSTALL/state/saved/$(date -u -d '-2 seconds' +%Y%m%dT%H%M%SZ)-$V2
+    step "A deploy stopped hard right after it switched the files"
+    saas_save_files "$saved"
+    env_set "$INSTALL/.env" MSCD_SERVER_DIGEST "${SERVER_DIGEST[$V4]}"
+    env_set "$INSTALL/.env" MSCD_VERSION "$V4"
+    printf 'left by the stopped run\n' >"$INSTALL/deploy/compose/stopped-run.txt"
+    install -d -m 0700 "$INSTALL/secrets/.deploy.stopped" "$INSTALL/state/.deploy.stopped"
+    printf 'key copy\n' >"$INSTALL/secrets/.deploy.stopped/platform.key"
+    saas_history deploy started "$V4" "from=$V2"
+    chown -R "$RUN_UID:$RUN_UID" "$saved" "$INSTALL/.env" "$INSTALL/deploy/compose/stopped-run.txt" \
+        "$INSTALL/secrets/.deploy.stopped" "$INSTALL/state/.deploy.stopped" "$INSTALL/state/history.log"
+    info "Saved the files of $V2 to $saved; the .env in place names $V4; state/current.env names $V2"
+}
+
 check_rc4() {
+    local saved
+    stop_hard_after_switch
     step "Broken $V4: a migration that fails"
     deploy_run deploy-rc4 deploy "v$V4"
+    saved=$(saas_saved_dirs)
+    if log_has deploy-rc4 "That run recorded no result" &&
+        log_has deploy-rc4 "but state/current.env names $V2: an earlier run stopped while it switched the files" &&
+        log_has deploy-rc4 "The files of $V2 were put back from" &&
+        [[ ! -e $INSTALL/deploy/compose/stopped-run.txt && ! -e $INSTALL/secrets/.deploy.stopped && ! -e $INSTALL/state/.deploy.stopped ]] &&
+        grep -q " repair done $V2 files-from=" "$INSTALL/state/history.log" &&
+        [[ $(wc -l <<<"$saved") == 1 && $(kv_get "$saved/release.env" VERSION) == "$V1" ]]; then
+        ok "The next run saw the stopped one, put the files of $V2 back before saving its rollback point, and removed the work folders and key copy left behind"
+    else
+        bad "The files left by a stopped run were not put back as expected"
+        show_log deploy-rc4 40
+    fi
     if ((RC != 0)) && log_has deploy-rc4 "The migrations of $V4 failed" && log_has deploy-rc4 "rolled back automatically" &&
-        log_has deploy-rc4 "9999_rehearsal_fails"; then
+        log_has deploy-rc4 "9999_rehearsal_fails" && log_has deploy-rc4 "a folder that failed was rolled back"; then
         ok "$V4: migrate fails, the migrate log is printed, the deploy rolls back by itself"
     else
         bad "$V4 did not fail at migrate and roll back (exit code $RC)"
@@ -791,9 +845,20 @@ check_rc4() {
 }
 
 check_rc5() {
-    local id
-    step "Broken $V5: services replaced, then the health check fails"
-    deploy_run deploy-rc5 deploy "v$V5"
+    local id server_log
+    step "Broken $V5: services replaced, then the health check fails, with nobody reading the output"
+    CUT_AFTER=12 deploy_run deploy-rc5 deploy "v$V5"
+    # The output the run wrote after its reader went away is in its log on the server.
+    server_log=$(find "$INSTALL/logs" -maxdepth 1 -name 'deploy-*Z.log' | LC_ALL=C sort | tail -n 1)
+    if [[ -n $server_log ]]; then cp -- "$server_log" "$(log_file deploy-rc5)"; else : >"$(log_file deploy-rc5)"; fi
+    if ((RC == 1)) && (($(wc -l <"$(log_file deploy-rc5-cut)") <= 12)) && ! log_has deploy-rc5-cut "rolled back" &&
+        log_has deploy-rc5 "rolled back automatically" &&
+        tail -n 1 "$INSTALL/state/history.log" | grep -q " deploy restored $V5 reason=health running=$V2$"; then
+        ok "The output reader went away after 12 lines (as when the SSH connection ends): the run carried on to its end, rolled back by itself, and wrote its whole log and its result in history.log"
+    else
+        bad "The run did not carry on after its output reader went away (exit code $RC)"
+        show_log deploy-rc5 20
+    fi
     if ((RC != 0)) && log_has deploy-rc5 "Migrations of $V5 applied" && log_has deploy-rc5 "web did not become healthy" &&
         log_has deploy-rc5 "rolled back automatically" && log_has deploy-rc5 "(health)" &&
         ! grep -qE '"(remote_ip|client_ip)":"[0-9]' "$(log_file deploy-rc5)"; then
@@ -942,17 +1007,17 @@ wf_expect() {
     fi
 }
 
-# wf_steps OUT KNOWN_HOSTS: the run scripts of deploy-prod.yml with test inputs, secrets
-# and variables, one file per step.
+# wf_steps OUT KNOWN_HOSTS [CHECKOUT]: the run scripts of deploy-prod.yml with test inputs,
+# secrets and variables, one file per step, run in CHECKOUT of the runner (default /repo).
 wf_steps() {
-    local out=$1 hosts=$2 key
+    local out=$1 hosts=$2 checkout=${3:-/repo} key
     key=$(docker exec "$WF_RUNNER" cat /keys/deploy)
     rm -rf -- "$out"
     install -d -m 0700 "$out"
-    (cd "$REPO_DIR" && node - "$REPO_DIR/.github/workflows/deploy-prod.yml" "$out" "$WF_SERVER" "$hosts" "$key") <<'EOF'
+    (cd "$REPO_DIR" && node - "$REPO_DIR/.github/workflows/deploy-prod.yml" "$out" "$WF_SERVER" "$hosts" "$key" "$checkout") <<'EOF'
 const fs = require('fs');
 const yaml = require(require.resolve('yaml', { paths: [process.cwd()] }));
-const [file, out, host, known, key] = process.argv.slice(2);
+const [file, out, host, known, key, checkout] = process.argv.slice(2);
 const wf = yaml.parse(fs.readFileSync(file, 'utf8'));
 const inputs = { version: 'v1.1.0', action: 'deploy', target: 'staging', skip_backup: false };
 const secrets = {
@@ -987,7 +1052,7 @@ Object.values(wf.jobs)[0].steps.forEach((step, i) => {
   const env = Object.entries(step.env || {}).map(([k, v]) => `export ${k}=${q(expr(v))}`).join('\n');
   const name = String(i).padStart(2, '0') + '-' + step.name.replace(/[^A-Za-z]+/g, '-').toLowerCase();
   fs.writeFileSync(`${out}/${name}.sh`,
-    `${head}\n${env}\nif [ -f /work/env ]; then set -a; . /work/env; set +a; fi\ncd /repo\n${step.run}`);
+    `${head}\n${env}\nif [ -f /work/env ]; then set -a; . /work/env; set +a; fi\ncd ${checkout}\n${step.run}`);
 });
 EOF
 }
@@ -996,6 +1061,11 @@ EOF
 wf_run_step() {
     docker exec -e RUNNER_TEMP=/work/tmp -e GITHUB_ENV=/work/env -e GITHUB_STEP_SUMMARY=/work/summary.md \
         -e GITHUB_REPOSITORY=mqusaeri/mscd "$WF_RUNNER" bash -c "bash -e /work/steps/$1-*.sh"
+}
+
+# wf_open_and_copy: the steps "Open the SSH connection" and "Copy the release to the server".
+wf_open_and_copy() {
+    wf_run_step 06 && wf_run_step 07
 }
 
 # wf_new_run STEPS: a fresh work folder in the runner, with the digests.json of a release.
@@ -1134,6 +1204,26 @@ EOF
     wf_expect "Summary" wf_run_step 10
     wf_expect "Close the connection and remove the key" wf_run_step 11
     wf_expect "The key and the work folder are gone from the runner" wf_runner 'test ! -e /work/tmp/mscd-ssh && test ! -e /work/tmp/mscd-deploy'
+
+    step "An older release that does not take every name"
+    # The workflow file runs from the default branch, the scripts from the tag: a rollback to
+    # an older release meets a saas-deploy.sh that does not know a newer name.
+    wf_expect "Checkout of an older release whose saas-deploy.sh does not take MSCD_SITE_DOMAIN" wf_runner '
+        mkdir -p /old-release/deploy && cp -R /repo/deploy/compose /repo/deploy/scripts /old-release/deploy/ &&
+        sed -i "s/MSCD_DOMAIN MSCD_SITE_DOMAIN MSCD_TLS_MODE/MSCD_DOMAIN MSCD_TLS_MODE/" /old-release/deploy/scripts/lib/saas.sh &&
+        ! sed -n "/^readonly SAAS_SETTINGS=(/,/^)/p" /old-release/deploy/scripts/lib/saas.sh | grep -q MSCD_SITE_DOMAIN'
+    wf_steps "$WORK/steps-old" "$pinned_lines" /old-release
+    wf_new_run "$WORK/steps-old"
+    wf_expect "Open the SSH connection and copy the older release" wf_open_and_copy
+    wf_run_step 08 >"$WORK/wf-old.out" 2>&1 || true
+    if grep -q '^::notice::MSCD_SITE_DOMAIN is not sent: release v1.1.0 does not take it.$' "$WORK/wf-old.out" &&
+        grep -q '25 values read (not shown)' "$WORK/wf-old.out" && ! grep -q 'which the deploy does not take' "$WORK/wf-old.out"; then
+        ok "The deploy step sends only the names the release takes: MSCD_SITE_DOMAIN is left out with a notice, and the older saas-deploy.sh reads the other 25 values"
+    else
+        bad "The deploy step sent a name the older release does not take"
+        tail -n 20 "$WORK/wf-old.out" | sed 's/^/          /'
+    fi
+    wf_expect "Close the connection and remove the key (older release)" wf_run_step 11
 
     step "Clean-up"
     workflow_down

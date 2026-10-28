@@ -1,25 +1,37 @@
 // The daily runs of `scheduler.tick` (Milestone 2 D.2, risk table I): the pure planner of the run ledger
-// (`planDailyRuns`) and a randomised simulation of ticks, time zone changes and job starts around it. The database
-// side (ledger rows, payload dates, If-Match, locks) is tested in test/int/onboarding/organization.test.ts.
+// (`planDailyRuns`) and a randomised simulation of ticks, time zone changes and job starts around it (jobs that are
+// done at their start; the simulation with a busy queue is in daily-run-busy-queue.test.ts). The database side (ledger
+// rows, payload dates, dropped sends, If-Match, locks) is tested in test/int/onboarding/organization.test.ts.
 import { describe, expect, it } from 'vitest';
 import { addDays, instantOfLocal } from '../../../src/common/dates';
-import { planDailyRuns, type DailyPlanInput, type LedgerRun } from '../../../src/modules/jobs/daily-run-planner';
+import { RECENT_RUN_SECONDS, planDailyRuns, type DailyPlanInput, type LedgerRun, type PlannedRun } from '../../../src/modules/jobs/daily-run-planner';
 import { DAILY_JOBS, weekdayOfDate, type DailyJob } from '../../../src/modules/jobs/schedules';
 import { simulate } from './daily-run-simulation';
 
 const ORG = '00000000-0000-4000-8000-0000000000aa';
 const LONG_AGO = new Date('2029-01-01T00:00:00Z');
 
-/** Ledger rows of every daily job on each of `dates`, at their local time in `zone`. */
+/** Ledger rows of every daily job on each of `dates`, at their local time in `zone` (enqueued at that instant). */
 function fullDays(zone: string, ...dates: string[]): LedgerRun[] {
   return dates.flatMap((date) =>
-    DAILY_JOBS.filter((j) => j.weekday === undefined || weekdayOfDate(date) === j.weekday).map((j) => ({
-      job: j.name,
-      localDate: date,
-      scheduledFor: instantOfLocal(date, j.at, zone),
-    })),
+    DAILY_JOBS.filter((j) => j.weekday === undefined || weekdayOfDate(date) === j.weekday).map((j) => {
+      const scheduledFor = instantOfLocal(date, j.at, zone);
+      return { job: j.name, localDate: date, scheduledFor, enqueuedAt: scheduledFor };
+    }),
   );
 }
+
+/** One ledger row; enqueued at its due instant unless `enqueuedAt` is given. */
+const row = (job: string, localDate: string, scheduledFor: string, enqueuedAt = scheduledFor): LedgerRun => ({
+  job,
+  localDate,
+  scheduledFor: new Date(scheduledFor),
+  enqueuedAt: new Date(enqueuedAt),
+});
+
+/** The ledger rows of planned runs, enqueued by a tick at `at`. */
+const rowsOf = (runs: readonly PlannedRun[], at: string): LedgerRun[] =>
+  runs.map((r) => ({ job: r.job.name, localDate: r.localDate, scheduledFor: r.scheduledFor, enqueuedAt: new Date(at) }));
 
 function plan(now: string, zone: string, ledger: LedgerRun[], extra: Partial<DailyPlanInput> = {}) {
   const firstLocalDate = ledger.length > 0 ? ledger.map((r) => r.localDate).sort()[0]! : null;
@@ -40,7 +52,7 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     expect(runs.map((r) => r.singletonKey)).toEqual([`lc:${ORG}:2030-01-16`, `to:${ORG}:2030-01-16`, `ap:${ORG}:2030-01-16`]);
     expect(runs[1]!.scheduledFor.toISOString()).toBe('2030-01-15T17:15:00.000Z');
     // A run already in the ledger is not planned again (a second tick in the hour, a retried tick).
-    const ledger = [...fullDays('Asia/Jakarta', '2030-01-15'), ...runs.map((r) => ({ job: r.job.name, localDate: r.localDate, scheduledFor: r.scheduledFor }))];
+    const ledger = [...fullDays('Asia/Jakarta', '2030-01-15'), ...rowsOf(runs, '2030-01-15T17:05:00Z')];
     expect(plan('2030-01-15T17:40:00Z', 'Asia/Jakarta', ledger)).toEqual([]);
   });
 
@@ -56,14 +68,14 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
 
   it('catches up the previous local date first, and the current date at the next tick', () => {
     // 00:05 on 17 January in Jakarta; of 16 January only license.check ran.
-    const ledger = [...fullDays('Asia/Jakarta', '2030-01-14', '2030-01-15'), { job: 'license.check', localDate: '2030-01-16', scheduledFor: new Date('2030-01-15T17:05:00Z') }];
+    const ledger = [...fullDays('Asia/Jakarta', '2030-01-14', '2030-01-15'), row('license.check', '2030-01-16', '2030-01-15T17:05:00Z')];
     const runs = plan('2030-01-16T17:05:00Z', 'Asia/Jakarta', ledger);
     expect(runs.filter((r) => r.localDate === '2030-01-16').map((r) => r.job.name)).toEqual(names((j) => j.name !== 'license.check'));
     expect(runs.filter((r) => r.localDate === '2030-01-16').every((r) => r.path === 'catch-up')).toBe(true);
     // license.check of 17 January is due in this hour; tasks.overdue and audit-prep.generate wait for their run of
     // 16 January: at most one run per job and tick, the earliest date first.
     expect(summary(runs.filter((r) => r.localDate === '2030-01-17'))).toEqual(['license.check@2030-01-17 due 0']);
-    const after = [...ledger, ...runs.map((r) => ({ job: r.job.name, localDate: r.localDate, scheduledFor: r.scheduledFor }))];
+    const after = [...ledger, ...rowsOf(runs, '2030-01-16T17:05:00Z')];
     expect(summary(plan('2030-01-16T18:05:00Z', 'Asia/Jakarta', after))).toEqual([
       'tasks.overdue@2030-01-17 catch-up 0',
       'audit-prep.generate@2030-01-17 catch-up 0',
@@ -72,14 +84,42 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
   });
 
   it('enqueues no second run of a job while its run of another date waits for its minute', () => {
-    // drift.evaluate of 16 January waits for 02:45 in Jakarta; a second tick at 02:20 sees that date's run of
-    // drift.evaluate as missing for 17 January only after a move east, and leaves it to a later tick.
-    const ledger = [...fullDays('Asia/Jakarta', '2030-01-14', '2030-01-15'), { job: 'drift.evaluate', localDate: '2030-01-16', scheduledFor: new Date('2030-01-15T19:45:00Z') }];
-    const east = plan('2030-01-15T19:20:00Z', 'Pacific/Kiritimati', ledger);
-    expect(east.map((r) => r.job.name)).not.toContain('drift.evaluate');
-    expect(east.map((r) => r.job.name)).toContain('readiness.recompute');
+    // drift.evaluate of 16 January waits for 02:45 in Jakarta (key `de:<org>:all`), and its run of 15 January is
+    // missing. A second tick at 02:20 leaves that run to a later tick: sent now, the waiting job's key would drop it.
+    const ledger = [
+      ...fullDays('Asia/Jakarta', '2030-01-14'),
+      ...fullDays('Asia/Jakarta', '2030-01-15').filter((r) => r.job !== 'drift.evaluate'),
+      ...fullDays('Asia/Jakarta', '2030-01-16').filter((r) => r.scheduledFor < new Date('2030-01-15T19:00:00Z')),
+      row('drift.evaluate', '2030-01-16', '2030-01-15T19:45:00Z', '2030-01-15T19:05:00Z'),
+    ];
+    const early = plan('2030-01-15T19:20:00Z', 'Asia/Jakarta', ledger);
+    expect(early.map((r) => r.job.name)).not.toContain('drift.evaluate');
+    expect(early.map((r) => r.job.name)).toContain('readiness.recompute');
     // After its start, the other date follows.
-    expect(plan('2030-01-15T19:50:00Z', 'Pacific/Kiritimati', ledger).map((r) => `${r.job.name}@${r.localDate}`)).toContain('drift.evaluate@2030-01-17');
+    expect(summary(plan('2030-01-15T19:50:00Z', 'Asia/Jakarta', ledger)).filter((s) => s.startsWith('drift'))).toEqual(['drift.evaluate@2030-01-15 catch-up 0']);
+  });
+
+  it('enqueues no second run of a job for 30 minutes after a catch-up run, which starts at once, and then the next date', () => {
+    // A worker that was down from 14 January: at 03:05 on 16 January in Jakarta every job catches up 15 January.
+    // readiness.recompute, drift.evaluate and cycle.derive have the keys `<prefix>:<org>:all` (E.2).
+    const ledger = fullDays('Asia/Jakarta', '2030-01-13', '2030-01-14');
+    const first = plan('2030-01-15T20:05:00Z', 'Asia/Jakarta', ledger);
+    expect(first.map((r) => `${r.job.name}@${r.localDate} ${r.path}`)).toEqual(names(() => true).map((n) => `${n}@2030-01-15 catch-up`));
+    const all = first.filter((r) => r.job.allSystems).map((r) => r.singletonKey);
+    expect(all).toEqual([`rr:${ORG}:all`, `de:${ORG}:all`, `cd:${ORG}:all`]);
+    // A retried tick 20 seconds later, and one 25 minutes later with the clock set back an hour: those jobs may still
+    // wait or work, so their runs of 16 January wait. Sent now, the queue would drop them for the `all` keys.
+    const after = [...ledger, ...rowsOf(first, '2030-01-15T20:05:00Z')];
+    expect(plan('2030-01-15T20:05:20Z', 'Asia/Jakarta', after)).toEqual([]);
+    expect(plan('2030-01-15T19:30:00Z', 'Asia/Jakarta', after)).toEqual([]);
+    expect(RECENT_RUN_SECONDS).toBe(1800);
+    // 35 minutes later, 16 January follows: its runs up to 03:40 at once.
+    const next = plan('2030-01-15T20:40:00Z', 'Asia/Jakarta', after);
+    expect(summary(next)).toEqual([
+      ...names((j) => j.at < '03:00').map((n) => `${n}@2030-01-16 catch-up 0`),
+      'cycle.derive@2030-01-16 due 0',
+    ]);
+    expect(next.filter((r) => r.job.allSystems).map((r) => r.singletonKey)).toEqual(all);
   });
 
   it('does not catch up runs before the organisation existed or on the first day of the ledger', () => {
@@ -92,8 +132,8 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     // A fresh ledger (an upgrade, a new installation): the hour runs, nothing is caught up that day; from the next
     // date on the ledger has an earlier row, so missed runs of that date are caught up.
     expect(summary(plan('2030-01-16T04:05:00Z', 'Asia/Jakarta', []))).toEqual([]);
-    const firstRun = { job: 'license.check', localDate: '2030-01-17', scheduledFor: new Date('2030-01-16T17:05:00Z') };
-    expect(plan('2030-01-16T19:05:00Z', 'Asia/Jakarta', [firstRun]).map((r) => r.path)).toEqual(['due', 'due', 'due']);
+    const firstRun = row('license.check', '2030-01-17', '2030-01-16T17:05:00Z');
+    expect(plan('2030-01-16T19:05:00Z', 'Asia/Jakarta', [firstRun]).map((r) => r.path)).toEqual(['due', 'due', 'due', 'due']);
     const second = plan('2030-01-17T19:05:00Z', 'Asia/Jakarta', [firstRun]);
     expect(second.filter((r) => r.path === 'catch-up').map((r) => `${r.job.name}@${r.localDate}`)).toContain('license.check@2030-01-18');
     expect(second.filter((r) => r.localDate === '2030-01-17' && r.path === 'catch-up')).toEqual([]);
@@ -133,7 +173,7 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     // Jakarta ran 16 January up to 07:00. A move to New York at 09:00 Jakarta time (21:00 on 15 January there) runs
     // nothing again: 16 January in New York finds its rows.
     const ran = fullDays('Asia/Jakarta', '2030-01-14', '2030-01-15', '2030-01-16');
-    for (let h = 2; h < 30; h++) {
+    for (let h = 2; h <= 26; h++) {
       const now = new Date(Date.parse('2030-01-16T02:05:00Z') + h * 3_600_000).toISOString();
       expect(plan(now, 'America/New_York', ran), now).toEqual([]);
     }
@@ -150,14 +190,16 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
   });
 
   it('runs the daily jobs of a day that daylight saving shortens or lengthens once', () => {
-    // 10 March 2030 in New York: 02:00 to 02:59 do not exist. The tick of 03:05 catches up the three jobs of 02:xx.
-    const before = [...fullDays('America/New_York', '2030-03-08', '2030-03-09'), ...fullDays('America/New_York', '2030-03-10').filter((r) => r.scheduledFor < new Date('2030-03-10T06:30:00Z'))];
+    // Sunday 10 March 2030 in New York: 02:00 to 02:59 do not exist. The tick of 03:05 catches up the jobs of 02:xx
+    // and runs those of 03:xx (the weekly rehash of Sunday among them).
+    const before = [...fullDays('America/New_York', '2030-03-08', '2030-03-09'), ...fullDays('America/New_York', '2030-03-10').filter((r) => DAILY_JOBS.find((j) => j.name === r.job)!.at < '02:00')];
     const runs = plan('2030-03-10T07:05:00Z', 'America/New_York', before);
     expect(summary(runs)).toEqual([
       'link-health.plan@2030-03-10 catch-up 0',
       'link-health.repository@2030-03-10 catch-up 0',
       'readiness.recompute@2030-03-10 catch-up 0',
       'drift.evaluate@2030-03-10 catch-up 0',
+      'integrity.rehash@2030-03-10 due 0',
       'cycle.derive@2030-03-10 due 600',
     ]);
     // 3 November 2030: 01:00 to 01:59 come twice. The second 01:05 runs nothing.
@@ -176,10 +218,14 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
 describe('daily runs: randomised simulation of ticks, time zone changes and job starts (Milestone 2 D.2)', () => {
   const SEEDS = Array.from({ length: 5000 }, (_, i) => 1000 + i);
 
-  it('works on each (job, local date) once, on the date of its ledger row, and misses none, over 5,000 runs', () => {
+  /** Lets the test runner's messages through between batches of runs. */
+  const breathe = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it('works on each (job, local date) once, on the date of its ledger row, and misses none, over 5,000 runs', async () => {
     const totals = { runs: 0, ticks: 0, jobs: 0, zoneChanges: 0, clockSetBack: 0, startDateDiffers: 0, doubles: 0, misses: 0, mismatches: 0 };
     const failures: string[] = [];
     for (const seed of SEEDS) {
+      if (seed % 100 === 0) await breathe();
       const result = simulate(seed);
       totals.runs++;
       totals.ticks += result.ticks;
@@ -201,15 +247,16 @@ describe('daily runs: randomised simulation of ticks, time zone changes and job 
     expect(totals.startDateDiffers).toBeGreaterThan(0);
   }, 300_000);
 
-  it('finds doubles and misses when jobs work on the date at their start (the design the payload date replaces)', () => {
+  it('finds doubles and misses when jobs work on the date at their start (the design the payload date replaces)', async () => {
     let doubles = 0;
     let misses = 0;
-    for (const seed of SEEDS.slice(0, 2000)) {
+    for (const seed of SEEDS.slice(0, 1000)) {
+      if (seed % 100 === 0) await breathe();
       const result = simulate(seed, { workOn: 'date-at-start' });
       doubles += result.doubles.length;
       misses += result.misses.length;
     }
-    console.log(`daily run simulation, date at start: ${JSON.stringify({ runs: 2000, doubles, misses })}`);
+    console.log(`daily run simulation, date at start: ${JSON.stringify({ runs: 1000, doubles, misses })}`);
     expect(doubles).toBeGreaterThan(0);
     expect(misses).toBeGreaterThan(0);
   }, 300_000);

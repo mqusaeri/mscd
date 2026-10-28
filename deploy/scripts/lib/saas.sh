@@ -754,10 +754,10 @@ saas_discard_pulled() {
 # repositories that are not in KEEP_REF (image@digest) and that no container uses.
 saas_prune_images() {
     local ref repo tag digest name removed=0
-    local -A keep=() repos=()
+    local -A keep_refs=() repos=()
     for ref in "$@"; do
         [[ -n $ref ]] || continue
-        keep[$ref]=1
+        keep_refs[$ref]=1
         repos[$(saas_image_repository "$ref")]=1
     done
     local -A used=()
@@ -767,7 +767,7 @@ saas_prune_images() {
     for repo in "${!repos[@]}"; do
         while read -r name tag digest; do
             [[ -n $digest && $digest != '<none>' ]] || continue
-            [[ -z ${keep[$name@$digest]+x} ]] || continue
+            [[ -z ${keep_refs[$name@$digest]+x} ]] || continue
             [[ -z ${used[$digest]+x} ]] || continue
             if [[ $tag != '<none>' ]]; then docker image rm "$name:$tag" >/dev/null 2>&1 || true; fi
             if docker image rm "$name@$digest" >/dev/null 2>&1; then removed=$((removed + 1)); fi
@@ -914,23 +914,39 @@ saas_link_env() {
     ln -sfn ../../.env "$INSTALL_DIR/deploy/compose/.env"
 }
 
-# saas_restore_files SAVED: puts saved files back. Folders keep their inodes (bind mounts).
+# The .env names the images of the files in place, and while no run holds the lock it names
+# the release of state/current.env. A run that is stopped hard while it switches the files
+# must leave a .env that differs from state/current.env, so the next run sees it
+# (repair_switch of saas-deploy.sh): moving away from the release of current.env, the .env
+# is written first; moving back to it, the .env is written last.
+
+# saas_restore_files SAVED ENV_ORDER: puts saved files back; ENV_ORDER first (moving away
+# from the release of state/current.env) or last (moving back to it). Folders keep their
+# inodes (bind mounts).
 saas_restore_files() {
-    local saved=$1
-    install -m 0600 "$saved/.env" "$INSTALL_DIR/.env"
+    local saved=$1 order=${2:-last}
+    if [[ $order == first ]]; then install -m 0600 "$saved/.env" "$INSTALL_DIR/.env"; fi
     saas_sync_dir "$saved/deploy" "$INSTALL_DIR/deploy"
     saas_sync_dir "$saved/site" "$INSTALL_DIR/site"
+    if [[ $order != first ]]; then install -m 0600 "$saved/.env" "$INSTALL_DIR/.env"; fi
     saas_link_env
 }
 
-# saas_install_release_files ENV_FILE: installs the release's deploy/ tree and site, and
-# ENV_FILE as .env.
+# saas_install_release_files ENV_FILE: installs ENV_FILE as .env (first, see above), then
+# the release's deploy/ tree and site.
 saas_install_release_files() {
     local env=$1
+    install -m 0600 "$env" "$INSTALL_DIR/.env"
     saas_sync_dir "$RELEASE_DIR/deploy" "$INSTALL_DIR/deploy"
     saas_sync_dir "$RELEASE_DIR/site" "$INSTALL_DIR/site"
-    install -m 0600 "$env" "$INSTALL_DIR/.env"
     saas_link_env
+}
+
+# saas_env_names_release ENV_FILE RELEASE_ENV: the .env names the image digests of the
+# release.env (state/current.env or a saved release).
+saas_env_names_release() {
+    [[ -f $1 && -f $2 && $(kv_get "$1" MSCD_SERVER_DIGEST) == "$(kv_get "$2" SERVER_DIGEST)" &&
+        $(kv_get "$1" MSCD_WEB_DIGEST) == "$(kv_get "$2" WEB_DIGEST)" ]]
 }
 
 # saas_write_release_env FILE VERSION SERVER_REF WEB_REF RELEASE_DIR ACTION

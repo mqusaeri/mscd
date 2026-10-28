@@ -13,6 +13,12 @@
 # setting on standard input; log out; check https://<domain>/healthz and the version from
 # here. saas-deploy.sh backs up, migrates, restarts, checks and rolls back by itself.
 #
+# Do not cancel a run once its deploy step has started. A cancelled run, or one that reaches
+# the job's time limit or loses its connection, stops only here: saas-deploy.sh keeps
+# running on the server until it has finished or rolled back, and its result is the last
+# line of /opt/mscd/state/history.log, which the next run prints (docs/saas/deploy.md, When
+# a run is cut off).
+#
 # Environment staging or production (Settings > Environments):
 #   secrets    DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_SSH_KNOWN_HOSTS,
 #              PLATFORM_KEY, STORAGE_KEY, AUDIT_ANCHOR_KEY, SMTP_USER, SMTP_PASSWORD,
@@ -74,6 +80,7 @@ jobs:
   deploy:
     name: ${{ inputs.action }} ${{ inputs.version }} on ${{ inputs.target }}
     runs-on: ubuntu-24.04
+    # A run that reaches this limit stops only on the runner (see the top of this file).
     timeout-minutes: 75
     environment: ${{ inputs.target }}
     # Same group as bootstrap-prod.yml: one run per server at a time, never cancelled.
@@ -279,6 +286,21 @@ jobs:
           . deploy/scripts/lib/saas.sh
           # Optional values that are not set are left out, so the server keeps its default.
           [[ -n $ACME_CA ]] || unset ACME_CA
+          # This file runs from the default branch, the scripts from the tag. Only the names
+          # that the tag's saas-deploy.sh takes are sent (saas_input_names of its lib/saas.sh),
+          # so a rollback to an older release, or a hotfix tag cut before a name was added
+          # here, still runs.
+          accepted=" $(saas_input_names | tr '\n' ' ') "
+          names=()
+          for name in PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
+            MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
+            ACME_EMAIL ACME_CA "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"; do
+            if [[ $accepted == *" $name "* ]]; then
+              names+=("$name")
+            else
+              echo "::notice::$name is not sent: release $VERSION does not take it."
+            fi
+          done
           ssh_cmd=(ssh -F "$SSH_DIR/config" mscd-target)
           # The job token reaches the server on standard input and expires with this job.
           printf '%s' "$GH_TOKEN" | "${ssh_cmd[@]}" "docker login ghcr.io --username $(printf '%q' "$ACTOR") --password-stdin" >/dev/null
@@ -294,15 +316,17 @@ jobs:
           echo "::stop-commands::$token"
           status=0
           # Every secret and setting goes on standard input (NAME=<base64>), never as an argument.
-          saas_encode_input PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
-            MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
-            ACME_EMAIL ACME_CA "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}" |
+          # The script keeps running when this connection ends (docs/saas/deploy.md).
+          saas_encode_input "${names[@]}" |
             "${ssh_cmd[@]}" "NO_COLOR=1 bash $release/deploy/scripts/saas-deploy.sh $(printf '%q ' "${args[@]}")" |
             tee "$out" || status=$?
           echo "::$token::"
           sed -nE 's/^ +WARN +(.*)$/::warning::\1/p' "$out"
           # (lib/common.sh has its own fail, so the error is written out here.)
-          if [[ $status != 0 ]]; then
+          if [[ $status == 255 ]]; then
+            echo "::error::The SSH connection failed or ended before saas-deploy.sh finished (exit code 255). A run that had started keeps running on the server until it has finished or rolled back. Its result is the last line of $INSTALL_DIR/state/history.log, and the next run of this workflow prints it (docs/saas/deploy.md, When a run is cut off)."
+            exit "$status"
+          elif [[ $status != 0 ]]; then
             echo "::error::saas-deploy.sh $ACTION stopped with exit code $status. The lines above say why; the server keeps the full log in $INSTALL_DIR/logs."
             exit "$status"
           fi

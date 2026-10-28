@@ -1,8 +1,8 @@
 // Schedules of build plan E.2 and Milestone 2 J.3. Installation-wide jobs run on cron schedules in UTC; daily jobs of
 // an organisation are enqueued by `scheduler.tick` in the hour of the organisation's local time (D-07), with a
-// singleton key that includes the local date (or `all` for jobs that run for every system).
+// singleton key that includes the local date (or `all` for jobs that run for every system). Which runs a tick
+// enqueues, with the run ledger of Milestone 2 D.2, is decided by `planDailyRuns` (daily-run-planner.ts).
 import type { JobName } from '@mscd/shared';
-import { localDate } from '../../common/dates';
 
 /** Cron jobs of E.2 (UTC). `notifications.dispatch` is the 5 minute sweep of E.6. */
 export const CRON_SCHEDULES: readonly { name: JobName; cron: string; retryLimit: number }[] = [
@@ -68,17 +68,27 @@ const localTimeFormats = new Map<string, Intl.DateTimeFormat>();
 export function localTimeOf(instant: Date, timeZone: string): LocalTime {
   let format = localTimeFormats.get(timeZone);
   if (!format) {
-    format = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
     localTimeFormats.set(timeZone, format);
   }
-  const parts = format.formatToParts(instant);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
+  const parts: Record<string, string> = {};
+  for (const part of format.formatToParts(instant)) parts[part.type] = part.value;
   return {
-    date: localDate(instant, timeZone),
-    hour: Number(get('hour')) % 24,
-    minute: Number(get('minute')),
-    second: Number(get('second')),
-    weekday: WEEKDAYS[get('weekday')] ?? 0,
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour ?? 0) % 24,
+    minute: Number(parts.minute ?? 0),
+    second: Number(parts.second ?? 0),
+    weekday: WEEKDAYS[parts.weekday ?? ''] ?? 0,
   };
 }
 
@@ -90,25 +100,4 @@ export function weekdayOfDate(iso: string): number {
 /** The E.2 singleton key of a run of a daily job: `<prefix>:<org>:<local date>`, or `<prefix>:<org>:all`. */
 export function dailySingletonKey(job: DailyJob, orgId: string, date: string): string {
   return job.allSystems ? `${job.prefix}:${orgId}:all` : `${job.prefix}:${orgId}:${date}`;
-}
-
-export interface DueDailyJob {
-  job: DailyJob;
-  singletonKey: string;
-  /** Delay so the job starts at its local minute (0 when that minute has passed). */
-  startAfterSeconds: number;
-}
-
-/** The daily jobs due in the local hour of `instant` for one organisation (the work of one `scheduler.tick`). */
-export function dueDailyJobs(orgId: string, instant: Date, timeZone: string, jobs: readonly DailyJob[] = DAILY_JOBS): DueDailyJob[] {
-  const local = localTimeOf(instant, timeZone);
-  const due: DueDailyJob[] = [];
-  for (const job of jobs) {
-    const [hour, minute] = job.at.split(':').map(Number) as [number, number];
-    if (hour !== local.hour) continue;
-    if (job.weekday !== undefined && job.weekday !== local.weekday) continue;
-    const startAfterSeconds = Math.max(0, (minute - local.minute) * 60 - local.second);
-    due.push({ job, singletonKey: dailySingletonKey(job, orgId, local.date), startAfterSeconds });
-  }
-  return due;
 }

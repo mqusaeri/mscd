@@ -305,6 +305,11 @@ export async function resetDemo(db: Kysely<DB>, orgs: readonly DemoOrg[], log: (
         await trx.deleteFrom('platform.tenant_key').where('organization_id', '=', org.id).execute();
         await trx.deleteFrom('platform.verified_domain').where('organization_id', '=', org.id).execute();
         await trx.deleteFrom('platform.org_membership').where('organization_id', '=', org.id).execute();
+        // The run ledger of the daily jobs (Milestone 2 D.2; the worker of a demo stack writes it every hour) and the
+        // entitlement (M2-S10). The ledger's foreign key cascades, but a database migrated with the first text of 0006
+        // has a key without the cascade.
+        await trx.deleteFrom('platform.daily_job_run').where('organization_id', '=', org.id).execute();
+        await trx.deleteFrom('platform.entitlement').where('organization_id', '=', org.id).execute();
         // idempotency_key is visible only with the organisation's app.org_id (D-31).
         await sql`select set_config('app.org_id', ${org.id}, true)`.execute(trx);
         await trx.deleteFrom('platform.idempotency_key').where('organization_id', '=', org.id).execute();
@@ -333,9 +338,11 @@ export async function resetDemo(db: Kysely<DB>, orgs: readonly DemoOrg[], log: (
     });
   } catch (error) {
     if ((error as { code?: string }).code === '23503') {
+      // The referencing table, so the operator knows which rows hold the demo organisations or users back.
+      const table = (error as { table?: string }).table;
       throw new SeedError(
-        `--reset cannot remove the demo users: rows outside the demo organisations still refer to them (${(error as Error).message}). ` +
-          'Remove those rows or reset the database',
+        `--reset cannot remove the demo organisations and users: rows of ${table ? `table ${table}` : 'another table'} still refer to them ` +
+          `(${(error as Error).message}). Remove those rows or reset the database`,
         { cause: error },
       );
     }
