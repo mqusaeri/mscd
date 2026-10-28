@@ -49,7 +49,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 | Wave | Full suites (orchestrator) | Notes |
 |---|---|---|
-| 2a (with M2-S05 and M2-S08 of 2b) | Server integration after the ledger rebuild: 125 files, 1449 passed, 59 skipped, 3 files failed only because the disk was below 1% free for the Managed Vault; after freeing disk they passed 13 of 13. Web E2E sample: 286 passed, then the display and offline specs 98 of 98 after the helper fix. Web E2E API: 264 passed, then `framework.spec.js` 6 of 6 after its fix. Smoke test: SMOKE_RESULT | The web E2E helper now counts a page load that began up to 2 s before a cut-off read |
+| 2a (with M2-S05 and M2-S08 of 2b) | Server integration after the ledger rebuild: 125 files, 1449 passed, 59 skipped, 3 files failed only because the disk was below 1% free for the Managed Vault; after freeing disk they passed 13 of 13. Web E2E sample: 286 passed, then the display and offline specs 98 of 98 after the helper fix. Web E2E API: 264 passed, then `framework.spec.js` 6 of 6 after its fix. Smoke test: 11 of 11 passed (full stack in Compose) | The web E2E helper now counts a page load that began up to 2 s before a cut-off read |
 | 1 (1a, 1b, L1) | Server integration: 108 files, 1342 passed, 56 skipped. Web E2E sample: 286 passed, 1 failed once. Web E2E API: 265 passed | The failure was `e2e/offline.spec.js` (a lazy `sample-*.js` chunk cut off by a page load while `page.route` intercepts every request); `--repeat-each=4` then passed 8 of 8. The orchestrator widened the `requestfailed` filter of `apps/web/e2e/helpers.js` for that case between waves (offline, probe and shell specs pass) |
 
 ## Product decisions to keep in mind
