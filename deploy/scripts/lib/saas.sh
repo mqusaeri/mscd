@@ -108,8 +108,10 @@ saas_in_list() {
 
 # saas_redact: copies standard input to standard output with organisation schema names,
 # email addresses and IP addresses hidden. Every log excerpt the deploy prints goes through
-# it, because workflow logs of a public repository are public (M2-S04 follow-up 1). The
-# full logs stay on the server in LOG_DIR.
+# it, because workflow logs of a public repository are public (M2-S04 follow-up 1): the
+# migrate log and the output of docker and Compose commands. It does not hide organisation
+# slugs or names, so service logs, which hold them, are never printed (service_logs of
+# saas-deploy.sh). The full logs stay on the server in LOG_DIR.
 saas_redact() {
     sed -E -e 's/org_[a-z0-9_]+/org_[hidden]/g' \
         -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g' \

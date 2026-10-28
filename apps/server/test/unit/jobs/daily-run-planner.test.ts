@@ -153,7 +153,7 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     expect(second.filter((r) => r.localDate === '2030-01-17').map((r) => r.job.name)).toEqual(names((j) => j.at > '00:20' && j.name !== 'audit-prep.generate'));
   });
 
-  it('catches up, on the first day of the ledger, a run whose send the queue dropped and a run skipped while its job waited', () => {
+  it('catches up on the first day of the ledger: a dropped send, a run skipped while its job waited, a date a move east skipped', () => {
     // UTC, a fresh ledger from 00:05 on 16 January. At 02:05 a job queued for every system holds `rr:<org>:all`, so
     // the queue drops readiness.recompute and the tick deletes its row (scheduler-tick.job.ts). At 03:05 it follows.
     let ledger = fullDays('UTC', '2030-01-16').filter((r) => r.scheduledFor < new Date('2030-01-16T02:00:00Z'));
@@ -175,6 +175,13 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     const at1405 = plan('2030-01-15T14:05:00Z', 'Pacific/Honolulu', after1320);
     expect(summary(at1405.filter((r) => r.job.name === 'cycle.derive'))).toEqual(['cycle.derive@2030-01-15 catch-up 0']);
     expect(at1405.find((r) => r.job.name === 'cycle.derive')!.scheduledFor.toISOString()).toBe('2030-01-15T13:15:00.000Z');
+    // The other way: UTC-12, a fresh ledger from 00:05 on 16 January there (12:05 UTC). At 20:00 UTC the organisation
+    // moves 26 hours east, to 10:00 on 17 January in Kiritimati. The runs of 17 January there were due before the
+    // ledger's first row, but their date is later than its first date, so nothing ran them: they are caught up.
+    const west = fullDays('Etc/GMT+12', '2030-01-16');
+    expect(west.every((r) => r.enqueuedAt >= new Date('2030-01-16T12:05:00Z'))).toBe(true);
+    const east = plan('2030-01-16T20:05:00Z', 'Pacific/Kiritimati', west);
+    expect(east.map((r) => `${r.job.name}@${r.localDate} ${r.path}`)).toEqual(names((j) => j.at < '10:00').map((n) => `${n}@2030-01-17 catch-up`));
   });
 
   it('runs the weekly job on its weekday only, and catches it up on the day after', () => {

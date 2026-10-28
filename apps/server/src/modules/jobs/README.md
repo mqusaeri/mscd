@@ -14,7 +14,8 @@ Job queue drivers and core jobs (build plan E.1, E.2). Owner: WP-22; interface a
   each run's ledger row and sends the job in the same transaction, and the job works on the `localDate` of its
   payload (`Clock.runDate`), so each daily job runs once per local date of the organisation. A job gets no second
   run while a run of it may still be queued (due later, or enqueued less than 30 minutes before); when pg-boss still
-  drops a send for a key `<prefix>:<org>:all`, the tick deletes that row and a later tick sends the run.
+  drops a send for a key `<prefix>:<org>:all`, the tick deletes that row and a later tick sends the run while its
+  date is still the current or previous local date. The limits of the catch-up are in the planner's file comment.
 - Jobs: `scheduler.tick`, `cleanup.expired`, `audit.verify-chain` (installation), `tasks.overdue`,
   `audit-prep.generate` (tenant). `rule-tasks.ts` opens and closes BR-10, BR-11, BR-15 and BR-31 tasks.
 - `tenant-cleanup.ts`: `TenantCleanupRegistry`; other modules register steps that `cleanup.expired` runs in each

@@ -33,7 +33,13 @@
 #      the last 3 releases.
 # A failed migrate or check puts the saved files back and starts the previous digests
 # again. There is no down migration: restoring the database is a manual step, needed only
-# when a migration broke data (docs/saas/deploy.md).
+# when a migration broke data (docs/saas/deploy.md). smtp.password is never put back: a
+# .env put back gets the mail settings of the run, which go with the password it wrote.
+#
+# The output of a run is the workflow log of a public repository: it holds the steps, the
+# settings that are not secret, versions, digests, timings and counts, and short excerpts of
+# the migrate and Compose logs with organisation schema names, email and IP addresses
+# hidden. Service logs, which can name organisations and people, go to <install>/logs only.
 #
 # A run does not depend on its SSH connection. deploy-prod.yml runs it in the foreground of
 # that connection; when the connection ends (a cancelled workflow run, the job's time
@@ -230,6 +236,7 @@ remove_stale_work() {
     for dir in "$INSTALL_DIR"/secrets/.deploy.* "$STATE_DIR"/.deploy.*; do
         if [[ -d $dir ]]; then rm -rf -- "$dir"; fi
     done
+    rm -f -- "$STATE_DIR"/.restore-env.*
 }
 
 # stop_if_failed: abort_if_failed of lib/common.sh for the steps after the "started"
@@ -458,17 +465,23 @@ compose_logged() {
     saas_compose "$@" >>"$COMPOSE_LOG" 2>&1
 }
 
-# service_logs SERVICE...: the last log lines of each service. The full lines go to the
-# server's log folder only; the output (the workflow log) gets a short, redacted excerpt.
+# service_logs SERVICE...: the last 200 log lines of each service go to the server's log
+# folder only. Service logs can name organisations (their slugs) and people, and the output
+# of a run is the workflow log of a public repository (M2-S04 follow-up 1, GL-50), so the
+# output names only the state of each service and where its lines are.
 service_logs() {
-    local svc id file=$LOG_DIR/$ACTION-$STAMP-services.log
+    local svc id file=$LOG_DIR/$ACTION-$STAMP-services.log state counts
     for svc in "$@"; do
         id=$(project_containers "$svc" | head -n 1)
-        [[ -n $id ]] || continue
-        { printf '\n== %s (%s)\n' "$svc" "$(container_state "$id")"; docker logs --tail 200 "$id" 2>&1; } >>"$file" || true
-        printf '        Service %s is %s; last log lines (addresses, emails and organisations hidden; all lines in %s):\n' \
-            "$svc" "$(container_state "$id")" "$file"
-        docker logs --tail 10 "$id" 2>&1 | cut -c1-300 | saas_redact | sed 's/^/          /' || true
+        if [[ -z $id ]]; then
+            printf '        Service %s has no container\n' "$svc"
+            continue
+        fi
+        state=$(container_state "$id")
+        { printf '\n== %s (%s)\n' "$svc" "$state"; docker logs --tail 200 "$id" 2>&1; } >>"$file" || true
+        counts=$(docker inspect --format 'restarts {{.RestartCount}}, last exit code {{.State.ExitCode}}' "$id" 2>/dev/null || true)
+        printf '        Service %s is %s (%s); its last log lines are in %s on the server\n' \
+            "$svc" "$state" "${counts:-no details}" "$file"
     done
 }
 
@@ -545,7 +558,10 @@ wait_started() {
 
 # restart_services FORCE CADDY_HASH_BEFORE: the services of the new .env one by one.
 # FORCE=true recreates the server services also when their settings did not change (a
-# restore after they ran other images, or secret files that were written again).
+# restore after they ran other images, or secret files that were written again), and the
+# overlay services. FORCE=false (the restore after a failed migrate, which stopped no
+# service) recreates only a service whose settings differ from the ones it runs with, and
+# leaves the overlay services alone.
 restart_services() {
     local force=$1 caddy_before=$2 entry svc args caddy_id others
     for entry in "${SAAS_DATA_SERVICES[@]}"; do
@@ -588,6 +604,10 @@ restart_services() {
     # Overlay services (monitoring, backups) are recreated every time, so they read the new
     # configuration files of the release. The app is healthy at this point: a failure here
     # is reported (OVERLAY_PROBLEM) and does not roll the app back.
+    if [[ $force != true ]]; then
+        info "Overlay services left as they run (this run did not restart them)"
+        return 0
+    fi
     mapfile -t others < <(other_services)
     if ((${#others[@]} > 0)); then
         if compose_logged up -d --no-deps --force-recreate "${others[@]}" && wait_started "${others[@]}"; then
@@ -816,7 +836,7 @@ restore_saved() {
     local saved=$1 version=$2 server=$3 web=$4 force=$5 caddy_before
     caddy_before=$(saas_tree_hash "$CADDY_CONFIG")
     saas_restore_files "$saved" last
-    pass "Saved files of $version put back"
+    pass "Saved files of $version put back, with the mail settings of this run (they go with smtp.password)"
     saas_pull "$server" && saas_pull "$web" && restart_services "$force" "$caddy_before" && verify_release "$version"
 }
 
@@ -1024,6 +1044,26 @@ deploy_failed() {
 # rollback
 # ---------------------------------------------------------------------------
 
+# mail_settings_for_rollback SAVED: the mail settings that go with the smtp.password this
+# rollback writes (SAAS_MAIL_SETTINGS): from standard input, else the environment, else the
+# .env in place, else the saved .env of the release to return to. saas_restore_files writes
+# them into the .env it puts back.
+mail_settings_for_rollback() {
+    local saved=$1 name
+    for name in "${SAAS_MAIL_SETTINGS[@]}"; do
+        saas_setting_from "$name" "$INSTALL_DIR/.env" "$saved/.env" "saved .env of the release to return to"
+        saas_check_value "$name" || true
+    done
+    saas_validate_mail_settings "$TARGET"
+    ((FAILURES == 0)) || return 1
+    for name in MSCD_SMTP_HOST MSCD_SMTP_PORT; do
+        detail "$name=${SAAS_VALUE[$name]:-} (${SAAS_SOURCE[$name]:-not set})"
+    done
+    # SMTP_USER is a secret of the GitHub environment (K.2): its value is not shown.
+    detail "MSCD_SMTP_USER (not shown; ${SAAS_SOURCE[MSCD_SMTP_USER]:-not set})"
+    pass "Mail settings for the restored .env, with smtp.password from standard input"
+}
+
 rollback_main() {
     local target_saved to_version to_server to_web undo caddy_before file digest_server digest_web
     title "MSCD SaaS rollback on $TARGET ($INSTALL_DIR)"
@@ -1069,6 +1109,10 @@ rollback_main() {
     abort_if_failed
     pass "${#SAAS_IN[@]} values read (not shown)"
 
+    step "Mail settings"
+    mail_settings_for_rollback "$target_saved" || true
+    abort_if_failed
+
     step "Images of $to_version"
     verify_images "$to_version" "$to_server" "$to_web" || saas_discard_pulled
     abort_if_failed
@@ -1098,7 +1142,7 @@ rollback_main() {
     caddy_before=$(saas_tree_hash "$CADDY_CONFIG")
     save_current "$undo"
     saas_restore_files "$target_saved" first
-    pass "Saved files of $to_version put back (the database stays as it is: no down migration)"
+    pass "Saved files of $to_version put back, with the mail settings of this run (the database stays as it is: no down migration)"
 
     PHASE=restart
     step "Restarting the services"

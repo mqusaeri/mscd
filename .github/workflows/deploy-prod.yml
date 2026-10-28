@@ -29,8 +29,12 @@
 #   variables  MSCD_DOMAIN, ACME_EMAIL, SMTP_HOST, SMTP_PORT, MAIL_FROM, DEPLOY_SSH_PORT,
 #              ALERT_EMAIL_TO, TELEGRAM_CHAT_ID, and optional ACME_CA, MSCD_SITE_DOMAIN,
 #              OPS_DOMAIN, OPS_BASIC_AUTH_USER
-# The repository is public, so the job prints versions, timings and counts only; the
-# server keeps the full logs in /opt/mscd/logs.
+# The repository is public, so the workflow log holds no customer data: the job prints
+# the steps and checks of the deploy, versions, digests, timings and counts, the settings
+# that are not secret (domain, mail host and port), and short excerpts of the migrate and
+# Compose logs with organisation schema names, email and IP addresses hidden. Service logs,
+# which can name organisations and people, stay on the server in /opt/mscd/logs with the
+# full output of each run; the job names only the state of a failing service.
 name: Deploy SaaS
 
 on:

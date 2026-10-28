@@ -35,9 +35,12 @@
 #                       leaves: the saved files of rc.2 are put back first; then migrate
 #                       fails: automatic restore of rc.2;
 #        deploy rc.5    with nobody reading its output after 12 lines (as when the SSH
-#                       connection of the workflow ends): the health check fails after the
-#                       services were replaced, and the run restores rc.2 on its own;
-#        rollback       back to rc.1;
+#                       connection of the workflow ends) and another mail account
+#                       (SMTP_USER and SMTP_PASSWORD): the health check fails after the
+#                       services were replaced, and the run restores rc.2 on its own, which
+#                       still sends mail with the new account;
+#        rollback       back to rc.1, with another mail account than the saved one of rc.1;
+#                       rc.1 sends mail with it;
 #        check-only     on the result.
 #   6. Removes every container, network, volume, image and folder it made.
 #
@@ -100,17 +103,21 @@ readonly ANCHOR_MISMATCH='not among the anchor keys compiled into this build'
 readonly V1=1.1.0-rc.1 V2=1.1.0-rc.2 V3=1.1.0-rc.3 V4=1.1.0-rc.4 V5=1.1.0-rc.5
 readonly APP_HOST=localhost
 readonly OPERATOR_EMAIL=operator@rehearsal.invalid
+# The second mail account that rc.5 and the rollback send (Mailpit accepts both accounts,
+# and neither user with the password of the other).
+readonly SMTP_USER2=rehearsal2
 
 REGISTRY=127.0.0.1:$REGISTRY_PORT/$PROJECT
 REGISTRY_CONTAINER=$PROJECT-registry
 MAILPIT_CONTAINER=$PROJECT-mailpit
+MAILPIT_IP=''
 LOCAL_SERVER=localhost/$PROJECT/mscd-server
 LOCAL_WEB=localhost/$PROJECT/mscd-web
 INSTALL_DIR=$INSTALL
 RC=0
 CHECKS=0
 DOCKER_GID=''
-SMTP_SECRET=''
+SMTP_SECRET='' SMTP_SECRET2=''
 SUBNET_MSCD='' SUBNET_EDGE=''
 declare -A SERVER_DIGEST=() WEB_DIGEST=()
 
@@ -377,10 +384,12 @@ stage_release() {
     chown -R "$RUN_UID:$RUN_UID" "$dest"
 }
 
-# write_input FILE [PLATFORM_KEY_FILE] [OPS_DOMAIN]: standard input of a deploy, as
-# deploy-prod.yml builds it (saas_encode_input), with the rehearsal's settings.
+# write_input FILE [PLATFORM_KEY_FILE] [OPS_DOMAIN] [SMTP_USER SMTP_PASSWORD]: standard
+# input of a deploy, as deploy-prod.yml builds it (saas_encode_input), with the rehearsal's
+# settings (mail account: rehearsal and SMTP_SECRET unless given).
 write_input() {
     local file=$1 platform=${2:-$WORK/keys/production/platform.key} ops_domain=${3:-}
+    local smtp_user=${4:-rehearsal} smtp_secret=${5:-$SMTP_SECRET}
     (
         umask 077
         {
@@ -389,8 +398,8 @@ write_input() {
             printf 'AUDIT_ANCHOR_KEY=%s\n' "$(base64 -w0 <"$WORK/keys/production/audit-anchor.key")"
             # shellcheck disable=SC2030,SC2034  # read by saas_encode_input in this subshell
             (
-                SMTP_PASSWORD=$SMTP_SECRET
-                MSCD_SMTP_USER=rehearsal MSCD_SMTP_HOST=mailpit MSCD_SMTP_PORT=1025 MSCD_SMTP_SECURE=false
+                SMTP_PASSWORD=$smtp_secret
+                MSCD_SMTP_USER=$smtp_user MSCD_SMTP_HOST=mailpit MSCD_SMTP_PORT=1025 MSCD_SMTP_SECURE=false
                 MSCD_MAIL_FROM='MSCD rehearsal <mscd@rehearsal.invalid>'
                 MSCD_DOMAIN=$APP_HOST MSCD_TLS_MODE=internal ACME_EMAIL='' MSCD_SITE_DOMAIN=''
                 MSCD_HTTP_PORT=$HTTP_PORT MSCD_HTTPS_PORT=$HTTPS_PORT
@@ -558,33 +567,66 @@ check_first_deploy() {
     fi
 }
 
+# smtp_probe USER:PASSWORD: true when Mailpit accepts a mail with these credentials.
+smtp_probe() {
+    curl_local "smtp://$MAILPIT_IP:1025" --mail-from probe@rehearsal.invalid --mail-rcpt probe@rehearsal.invalid \
+        --user "$1" -T "$WORK/probe.eml" >/dev/null 2>&1
+}
+
 check_mail() {
-    local ip out
     step "Mail through the cli service"
+    # Two mail accounts, as when the owner moves to another mail provider: a user with the
+    # password of the other account is refused.
     docker run -d --name "$MAILPIT_CONTAINER" --network "${PROJECT}_egress" --network-alias mailpit \
-        -e MP_SMTP_AUTH="rehearsal:$SMTP_SECRET" -e MP_SMTP_AUTH_ALLOW_INSECURE=true \
+        -e MP_SMTP_AUTH="rehearsal:$SMTP_SECRET $SMTP_USER2:$SMTP_SECRET2" -e MP_SMTP_AUTH_ALLOW_INSECURE=true \
         --security-opt no-new-privileges:true "$MAILPIT_IMAGE" >/dev/null
     wait_for 60 docker exec "$MAILPIT_CONTAINER" wget -q -O /dev/null http://127.0.0.1:8025/livez ||
         { bad "Mailpit did not start"; return 0; }
-    ip=$(docker inspect --format "{{(index .NetworkSettings.Networks \"${PROJECT}_egress\").IPAddress}}" "$MAILPIT_CONTAINER")
+    MAILPIT_IP=$(docker inspect --format "{{(index .NetworkSettings.Networks \"${PROJECT}_egress\").IPAddress}}" "$MAILPIT_CONTAINER")
     printf 'Subject: probe\r\n\r\nprobe\r\n' >"$WORK/probe.eml"
-    if ! curl_local "smtp://$ip:1025" --mail-from probe@rehearsal.invalid --mail-rcpt probe@rehearsal.invalid \
-        --user rehearsal:wrong-password -T "$WORK/probe.eml" >/dev/null 2>&1; then
-        ok "Mailpit refuses a wrong SMTP password, so a delivered mail proves smtp.password"
+    if ! smtp_probe rehearsal:wrong-password && ! smtp_probe "rehearsal:$SMTP_SECRET2" &&
+        ! smtp_probe "$SMTP_USER2:$SMTP_SECRET" && smtp_probe "$SMTP_USER2:$SMTP_SECRET2"; then
+        ok "Mailpit refuses a wrong SMTP password and the password of the other account, so a delivered mail proves that the mail user and smtp.password belong together"
     else
-        bad "Mailpit accepted a wrong SMTP password; the mail check would prove nothing"
+        bad "Mailpit does not check the SMTP accounts as expected; the mail checks would prove nothing"
     fi
-    if out=$(compose run --rm --no-deps -T cli admin create-operator --email "$OPERATOR_EMAIL" --name "Rehearsal operator" 2>&1) &&
-        [[ $out == *"Invitation sent to $OPERATOR_EMAIL"* ]]; then
-        ok "cli admin create-operator sent the invitation (MSCD_SMTP_* values and smtp.password)"
+    send_mail "First deploy" "$OPERATOR_EMAIL"
+}
+
+# send_mail LABEL EMAIL: cli admin create-operator sends its invitation to EMAIL with the
+# MSCD_SMTP_* values of .env and smtp.password, and Mailpit receives it.
+send_mail() {
+    local label=$1 email=$2 out
+    if out=$(compose run --rm --no-deps -T cli admin create-operator --email "$email" --name "Rehearsal operator" 2>&1) &&
+        [[ $out == *"Invitation sent to $email"* ]]; then
+        ok "$label: cli admin create-operator sent the invitation (MSCD_SMTP_* values and smtp.password)"
     else
-        bad "cli admin create-operator did not send its invitation" "$(printf '%s' "$out" | tail -n 3 | tr '\n' ' ')"
+        bad "$label: cli admin create-operator did not send its invitation" "$(printf '%s' "$out" | tail -n 3 | tr '\n' ' ')"
     fi
-    if wait_for 30 bash -c "curl --noproxy '*' -s 'http://$ip:8025/api/v1/messages' | grep -q '$OPERATOR_EMAIL'"; then
-        ok "Mailpit holds the mail to $OPERATOR_EMAIL"
+    if wait_for 30 bash -c "curl --noproxy '*' -s 'http://$MAILPIT_IP:8025/api/v1/messages' | grep -q '$email'"; then
+        ok "$label: Mailpit holds the mail to $email"
     else
-        bad "No mail to $OPERATOR_EMAIL arrived in Mailpit"
+        bad "$label: no mail to $email arrived in Mailpit"
     fi
+}
+
+# expect_mail LABEL USER SECRET EMAIL: .env, smtp.password and the running api and worker
+# name the same mail account, and the cli sends a mail with it.
+expect_mail() {
+    local label=$1 user=$2 secret=$3 email=$4 svc id got users=''
+    for svc in api worker; do
+        id=$(project_containers "$svc" | head -n 1)
+        got=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" 2>/dev/null |
+            sed -n 's/^MSCD__MAIL__SMTP__USER=//p')
+        users+=" $svc=$got"
+    done
+    if grep -qx "MSCD_SMTP_USER=$user" "$INSTALL/.env" && [[ $(cat "$INSTALL/secrets/smtp.password") == "$secret" &&
+        $users == " api=$user worker=$user" ]]; then
+        ok "$label: .env, smtp.password and the running api and worker use the same mail account ($user)"
+    else
+        bad "$label: the mail user and smtp.password do not belong together (.env $(kv_get "$INSTALL/.env" MSCD_SMTP_USER),$users)"
+    fi
+    if [[ -n ${MAILPIT_IP:-} ]]; then send_mail "$label" "$email"; fi
 }
 
 check_anchor() {
@@ -815,10 +857,16 @@ stop_hard_after_switch() {
     info "Saved the files of $V2 to $saved; the .env in place names $V4; state/current.env names $V2"
 }
 
+# project_container_ids: every container of the stack (one-shots included), one per line.
+project_container_ids() {
+    docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$PROJECT" | sort
+}
+
 check_rc4() {
-    local saved
+    local saved before
     stop_hard_after_switch
     step "Broken $V4: a migration that fails"
+    before=$(project_container_ids)
     deploy_run deploy-rc4 deploy "v$V4"
     saved=$(saas_saved_dirs)
     if log_has deploy-rc4 "That run recorded no result" &&
@@ -842,12 +890,19 @@ check_rc4() {
     expect_version "$V2" "After $V4"
     expect_digests "$V2"
     expect_healthy "After $V4"
+    if [[ -n $before && $(project_container_ids) == "$before" ]] && log_has deploy-rc4 "Overlay services left as they run"; then
+        ok "After the failed migrate the restore recreated no container, the overlay services included ($(wc -l <<<"$before") containers)"
+    else
+        bad "The restore after the failed migrate recreated containers" \
+            "$(comm -3 <(printf '%s\n' "$before") <(project_container_ids) | wc -l) container IDs differ"
+    fi
 }
 
 check_rc5() {
     local id server_log
     step "Broken $V5: services replaced, then the health check fails, with nobody reading the output"
-    CUT_AFTER=12 deploy_run deploy-rc5 deploy "v$V5"
+    # This deploy also moves to another mail account (SMTP_USER and SMTP_PASSWORD).
+    CUT_AFTER=12 INPUT=$WORK/input-mail deploy_run deploy-rc5 deploy "v$V5"
     # The output the run wrote after its reader went away is in its log on the server.
     server_log=$(find "$INSTALL/logs" -maxdepth 1 -name 'deploy-*Z.log' | LC_ALL=C sort | tail -n 1)
     if [[ -n $server_log ]]; then cp -- "$server_log" "$(log_file deploy-rc5)"; else : >"$(log_file deploy-rc5)"; fi
@@ -881,6 +936,12 @@ check_rc5() {
     else
         bad "state/previous.env no longer names $V1"
     fi
+    if log_has deploy-rc5 "with the mail settings of this run (they go with smtp.password)"; then
+        ok "The restore put the saved files of $V2 back with the mail settings of the run"
+    else
+        bad "The restore did not report the mail settings of the run"
+    fi
+    expect_mail "After $V5 with another mail account" "$SMTP_USER2" "$SMTP_SECRET2" operator-rc5@rehearsal.invalid
 }
 
 # check_overlay: a redeploy of V2 whose monitoring overlay fails. The app stays on V2 without
@@ -954,8 +1015,16 @@ check_images_kept() {
 }
 
 check_rollback() {
+    local saved
     step "Rollback to $V1"
-    deploy_run rollback rollback "v$V1" --version "$V1"
+    # The saved files of V1 name the first mail account; the rollback sends the second one.
+    saved=$(saas_saved_dirs | head -n 1)
+    if [[ $(kv_get "$saved/.env" MSCD_SMTP_USER) == rehearsal ]]; then
+        ok "The saved .env of $V1 names the first mail account; the rollback sends the second one"
+    else
+        bad "The saved .env of $V1 does not name the first mail account"
+    fi
+    INPUT=$WORK/input-mail deploy_run rollback rollback "v$V1" --version "$V1"
     if ((RC == 0)) && log_has rollback "MSCD is back on $V1 and healthy"; then
         ok "Rollback from $V2 to $V1 finished"
     else
@@ -970,6 +1039,13 @@ check_rollback() {
     else
         bad "The state after the rollback is not as expected"
     fi
+    if log_has rollback "Mail settings for the restored .env, with smtp.password from standard input" &&
+        log_has rollback "MSCD_SMTP_USER (not shown; standard input)" && ! log_has rollback "$SMTP_USER2"; then
+        ok "The rollback takes the mail settings from standard input and does not print the SMTP user"
+    else
+        bad "The rollback did not report its mail settings as expected"
+    fi
+    expect_mail "After the rollback to $V1 with another mail account" "$SMTP_USER2" "$SMTP_SECRET2" operator-rollback@rehearsal.invalid
     deploy_run check-only check-only "v$V1"
     if ((RC == 0)) && log_has check-only "Every check passed"; then
         ok "check-only passes on the rolled back install"
@@ -1345,6 +1421,7 @@ setup() {
     install -d -m 0700 -o "$RUN_UID" -g "$RUN_UID" "$WORK/home"
     pass "Install folder $INSTALL (owner $RUN_UID, like /opt/mscd of the deploy account); work folder $WORK"
     SMTP_SECRET=$(random_hex 16)
+    SMTP_SECRET2=$(random_hex 16)
 
     step "Throwaway release keys (saas-keys.sh)"
     bash "$REPO_DIR/deploy/scripts/saas-keys.sh" --out "$WORK/keys" --print-only >"$WORK/keys.log" 2>&1 ||
@@ -1371,6 +1448,7 @@ main() {
     for v in "$V1" "$V2" "$V3" "$V4" "$V5"; do stage_release "v$v" "$v"; done
     ok "Release folders in $INSTALL/releases, copied as deploy-prod.yml does ($(saas_compose_list "$INSTALL/releases/v$V1/deploy/compose" | paste -sd ' ' -))"
     write_input "$WORK/input"
+    write_input "$WORK/input-mail" "" "" "$SMTP_USER2" "$SMTP_SECRET2"
 
     step "First deploy of $V1"
     deploy_run deploy-rc1 deploy "v$V1"

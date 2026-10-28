@@ -33,7 +33,7 @@ The server is bootstrapped with `bootstrap-prod.yml` ([bootstrap.md](bootstrap.m
 | `HEARTBEAT_WATCHDOG_URL`, `TELEGRAM_BOT_TOKEN`, `OPS_BASIC_AUTH_HASH` | secrets | see [monitoring.md](monitoring.md) | One file each in `/opt/mscd/secrets/ops/` |
 | `ALERT_EMAIL_TO`, `TELEGRAM_CHAT_ID`, `OPS_DOMAIN`, `OPS_BASIC_AUTH_USER` | variables | see [monitoring.md](monitoring.md) | One file each in `/opt/mscd/secrets/ops/` |
 
-Every deploy writes all of them again, so the GitHub environment is the only place to change them. A value that is not set, or was removed from the environment, removes its file, so an old Telegram token or Grafana host stops being used. The backup and monitoring files have mode 0400 and belong to the deploy account; the backup and monitoring services read them there. When `OPS_DOMAIN` is set, the deploy adds the `grafana` profile to `COMPOSE_PROFILES`, so Grafana starts.
+Every deploy writes all of them again, so the GitHub environment is the only place to change them. `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST`, `SMTP_PORT` and `MAIL_FROM` describe one mail account: when the owner moves to another account or provider, change them together before the next run. A value that is not set, or was removed from the environment, removes its file, so an old Telegram token or Grafana host stops being used. The backup and monitoring files have mode 0400 and belong to the deploy account; the backup and monitoring services read them there. When `OPS_DOMAIN` is set, the deploy adds the `grafana` profile to `COMPOSE_PROFILES`, so Grafana starts.
 
 The monitoring needs `ALERT_EMAIL_TO` once the release holds the monitoring parts. Without it `ops-init` stops and the deploy ends with a warning (see step 11 below). Set it before that release.
 
@@ -82,12 +82,12 @@ The lines that come from the server are fenced with `::stop-commands::`, so a lo
 7. Writes the line `deploy started` to `history.log`, puts the key files in place (see [Keys](#keys)), then writes the generated secrets that are missing (database passwords, gateway token, S3 identity, internal certificates), `smtp.password`, and the backup and monitoring files.
 8. Takes a pre-deploy dump of the database with `pg_dump --format=custom` to `/opt/mscd/backup/pre-deploy` (the last 3 are kept). When the release has `deploy/backup/backup.sh` (M2-S07), it also sends an off-site copy.
 9. Saves the files in place (the rollback point) and installs the release's files and `.env`. When the files in place belong to another release than the one `state/current.env` names, an earlier run was stopped hard while it switched them: the run first puts back the copy that run saved (see [When a run is cut off](#when-a-run-is-cut-off)).
-10. Runs the database migrations alone, with `docker compose run --rm --no-deps migrate`, while the old services keep serving. The time limit is 10 minutes plus 20 seconds per organisation. The log goes to `/opt/mscd/logs/migrate-<version>-<time>.log` and is printed in the workflow log with organisation names hidden.
+10. Runs the database migrations alone, with `docker compose run --rm --no-deps migrate`, while the old services keep serving. The time limit is 10 minutes plus 20 seconds per organisation. The log goes to `/opt/mscd/logs/migrate-<version>-<time>.log` and is printed in the workflow log with organisation schema names, email addresses and IP addresses hidden.
 11. Restarts the services one at a time and waits until each one passes its health check: PostgreSQL and SeaweedFS (only when their settings changed), storage-gateway, api, worker, web and Caddy. Then it recreates the monitoring and backup services when the release has them, waits until `ops-init` has finished, and reloads Caddy so it reads the Grafana host that `ops-init` writes. These services do not decide whether the app is healthy: when one of them fails, or Caddy refuses the Grafana host, the deploy carries on, ends with a WARN line ("The app runs, but ..."), and the workflow shows it as a warning. Fix the cause and deploy the same version again.
 12. Checks that api, worker and storage-gateway report ready (`/readyz`), that `/healthz` answers through Caddy, and that `/api/v1/system/profile` through Caddy reports the new version.
 13. Records the release in `/opt/mscd/state`, writes the result to `history.log` and removes the images of releases older than the last 3.
 
-The server keeps the whole output in `/opt/mscd/logs/deploy-<time>.log`, and the output of the Compose commands next to it. When a service fails, the workflow log shows its last lines with IP addresses, email addresses and organisation names hidden, because the repository is public; the full lines are in `/opt/mscd/logs/deploy-<time>-services.log`.
+The server keeps the whole output in `/opt/mscd/logs/deploy-<time>.log`, and the output of the Compose commands next to it. The repository is public, so its workflow logs are public too, and they hold no customer data. The workflow log shows the steps and checks, versions, digests, timings and counts, the settings that are not secret (such as the domain and the mail host), and short excerpts of the migrate and Compose output with organisation schema names, email addresses and IP addresses hidden. Service logs can name organisations and people, so they never go to the workflow log: when a service fails, the run names the service and its state, and its last 200 log lines are in `/opt/mscd/logs/deploy-<time>-services.log` (or `rollback-<time>-services.log`) on the server. An admin reads them there (see [Commands on the server](#commands-on-the-server)).
 
 ### First deploy
 
@@ -130,6 +130,13 @@ A deploy goes back to the previous release by itself when:
 
 It puts the saved files and `.env` back, starts the previous digests again (pulling them when they are no longer on the server) and checks them the same way. The workflow run then ends as failed with "The deploy of <version> failed (...) and was rolled back automatically. <old version> is running and healthy."
 
+The services it starts again depend on the failure:
+
+- After failed migrations no service had been stopped. The run recreates only a service whose settings differ from the ones it runs with: normally none, the api and worker when the deploy changed the mail settings. The monitoring and backup services are left as they run.
+- After a later failure it recreates storage-gateway, api, worker and the monitoring and backup services, so they run the old images and read the old files again.
+
+The mail settings are the one exception to "the saved `.env`". The run wrote `smtp.password` from `SMTP_PASSWORD` and never puts an older password back, so the `.env` it puts back gets the mail settings of the run as well: `MSCD_SMTP_HOST`, `MSCD_SMTP_PORT`, `MSCD_SMTP_SECURE`, `MSCD_SMTP_USER` and `MSCD_MAIL_FROM`. The mail user, host and password then always belong to the same mail account, also when the deploy that failed moved to another mail account. No health check covers mail, and without mail SaaS creates no organisation or operator, so a user from one account with the password of another would fail without a warning. Every other setting is the saved one.
+
 The database is not rolled back. There are no down migrations:
 
 - When the migrations failed: each migration folder (`platform`, `ref` and every organisation schema) runs in its own transaction. The folder that failed was rolled back; the folders that finished before it, and the other organisation schemas, stay migrated. The migrate log in the run lists them.
@@ -147,7 +154,7 @@ To return to the release that ran before:
 gh workflow run deploy-prod.yml -f action=rollback -f version=v1.0.2 -f target=production
 ```
 
-`version` is the release to return to. The workflow verifies its signatures like a deploy, and the server refuses when its previous release is another version. The rollback puts back the files and `.env` of that release, starts its images and checks them. It runs no migrations and takes a pre-rollback dump first. Each rollback goes one release further back. The server keeps the files of the last 3 earlier releases (`/opt/mscd/state/saved`) and the images of the running release and the 2 before it; an older image is pulled again by digest when a rollback needs it. After a rollback, a later deploy of a newer version works as usual.
+`version` is the release to return to. The workflow verifies its signatures like a deploy, and the server refuses when its previous release is another version. The rollback puts back the files and `.env` of that release, starts its images and checks them. As in the automatic rollback, the `.env` it puts back gets the current mail settings of the GitHub environment (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `MAIL_FROM`), because the rollback writes `smtp.password` from the current `SMTP_PASSWORD`; a run by hand without them on standard input takes them from its environment, else from the `.env` in place. Every other setting is the one the older release ran with. It runs no migrations and takes a pre-rollback dump first. Each rollback goes one release further back. The server keeps the files of the last 3 earlier releases (`/opt/mscd/state/saved`) and the images of the running release and the 2 before it; an older image is pulled again by digest when a rollback needs it. After a rollback, a later deploy of a newer version works as usual.
 
 ### Restoring the database
 
@@ -217,7 +224,7 @@ The script never uses `ensure_secrets` or `ensure_anchor_key` of the installer, 
 | `/opt/mscd/deploy/` | The `deploy/` folder of the running release. `deploy/compose` is the Compose project folder; its `.env` is a link to `/opt/mscd/.env` |
 | `/opt/mscd/site/` | The marketing site |
 | `/opt/mscd/secrets/` | Secret files, and `backup/` and `ops/` with the backup and monitoring values |
-| `/opt/mscd/releases/<tag>/` | The releases as the workflow copied them; the last 3 are kept |
+| `/opt/mscd/releases/<tag>/` | The releases as the workflow copied them. A deploy keeps the folder of the running release, the folders of the saved releases (the rollback points, up to 3) and the folders of newer versions (copied for a later deploy), and removes the other older ones. A rollback removes none |
 | `/opt/mscd/state/` | `current.env` (running release and digests), `previous.env` (the rollback target), `history.log` (the start and the result of every deploy and rollback), `saved/` (the files of earlier releases), and `rollback-undo-<time>/` after a rollback that could not return |
 | `/opt/mscd/backup/pre-deploy/` | The last 3 pre-deploy dumps (mode 0600) |
 | `/opt/mscd/logs/` | Deploy, rollback and migrate logs |
@@ -233,6 +240,7 @@ Normal work never needs them. For reading and fixing, as the admin account:
 cd /opt/mscd/deploy/compose
 sudo docker compose ps                 # Compose reads .env, which names the files and the project
 sudo docker compose logs --since 15m api
+sudo less /opt/mscd/logs/deploy-<time>-services.log    # the service logs of a failed run
 cat /opt/mscd/state/current.env; tail -n 5 /opt/mscd/state/history.log
 sudo -u deploy bash /opt/mscd/deploy/scripts/saas-deploy.sh check-only --target production
 ```
@@ -260,10 +268,10 @@ It starts a local registry on `127.0.0.1:5000` (`registry:3.0.0`, pinned by dige
 | Deploy `rc.2` | Upgrade with a pre-deploy dump that `pg_restore` can read; the API is polled during it |
 | A release folder with `config/demo-secrets`; `--no-verify-signature` for `ghcr.io` images; a failing `cosign` | Each refused, nothing changed; `cosign verify` was called with the identity of `release.yml` for the tag |
 | Deploy `rc.3` | Refused before anything changes; `rc.2` runs |
-| Deploy `rc.4`, after the state a deploy stopped hard while it switched the files leaves (the `.env` of another release in place, the saved files of `rc.2`, a `started` line without a result, a key copy in a work folder) | The run puts the files of `rc.2` back before it saves its own rollback point and removes the work folders; then the migration fails and the deploy rolls back by itself; `rc.2` runs |
-| Deploy `rc.5`, with nobody reading its output after 12 lines (as when the SSH connection ends) | The run carries on, the health check fails, the deploy rolls back by itself, and the server log and `history.log` hold the whole run and its result; `rc.2` runs |
+| Deploy `rc.4`, after the state a deploy stopped hard while it switched the files leaves (the `.env` of another release in place, the saved files of `rc.2`, a `started` line without a result, a key copy in a work folder) | The run puts the files of `rc.2` back before it saves its own rollback point and removes the work folders; then the migration fails and the deploy rolls back by itself without recreating the api; `rc.2` runs |
+| Deploy `rc.5`, with nobody reading its output after 12 lines (as when the SSH connection ends), and another mail account (`SMTP_USER` and `SMTP_PASSWORD`) | The run carries on, the health check fails, the deploy rolls back by itself, and the server log and `history.log` hold the whole run and its result; `rc.2` runs. The restored `.env`, `smtp.password` and the running api and worker name the new account, and the `cli` service sends a mail with it (Mailpit refuses a user with the password of the other account) |
 | Deploy `rc.2` again with a stand-in monitoring overlay whose `ops-init` stops, an empty `TELEGRAM_BOT_TOKEN` and an `OPS_DOMAIN` (only with `MSCD_REHEARSAL_OVERLAYS=none`) | The deploy ends healthy with a warning and no rollback, Caddy reloads, `history.log` notes `overlay=problem`, the old token file is gone and `COMPOSE_PROFILES` holds `grafana`. Only the images of `rc.1` and `rc.2` stay |
-| Rollback to `rc.1`, then `check-only` | `rc.1` runs; nothing older is left to roll back to; every check passes |
+| Rollback to `rc.1` with another mail account than the saved `.env` of `rc.1`, then `check-only` | `rc.1` runs and sends a mail with the account of the rollback; the SMTP user is not printed; nothing older is left to roll back to; every check passes |
 
 At the end it removes every container, network, volume, image and folder it made, and keeps the deploy logs in `/tmp/mscd-rehearsal-logs`.
 
@@ -296,8 +304,9 @@ Its test containers publish Caddy's ports on every address of the build machine,
 | "PostgreSQL is ..., so no pre-deploy dump can be taken" | Find out why the database is not healthy before deploying. `skip_backup` only when the deploy must fix exactly that |
 | "The migrations of ... failed" | The log in the run (and `/opt/mscd/logs/migrate-*.log`) names the migration. The old release keeps running |
 | "Migrate did not finish within ..." | A migration was too slow. Check it with the migration rehearsal of `restore-test.yml` on production data |
-| "... did not become healthy" or "does not report ready" | The run prints the last log lines of that service; the deploy went back by itself |
-| "The app runs, but the overlay services did not all start" | The app was deployed. The run prints the last log lines of the monitoring or backup service (for `ops-init`, often a missing `ALERT_EMAIL_TO`); fix the value and deploy the same version again |
+| "... did not become healthy" or "does not report ready" | The run names the service and its state; the deploy went back by itself. Its last log lines are in `/opt/mscd/logs/<action>-<time>-services.log` on the server |
+| "The app runs, but the overlay services did not all start" | The app was deployed. The run names the monitoring or backup service; its last log lines are in `/opt/mscd/logs/deploy-<time>-services.log` (for `ops-init`, often a missing `ALERT_EMAIL_TO`). Fix the value and deploy the same version again |
+| Mail fails after a deploy or rollback | Check that `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST`, `SMTP_PORT` and `MAIL_FROM` of the GitHub environment belong to the same mail account, then deploy the running version again |
 | "Caddy refused the configuration of the monitoring overlay" | Caddy keeps serving with the configuration it had. Check `OPS_DOMAIN` and `OPS_BASIC_AUTH_HASH` ([monitoring.md](monitoring.md)) and deploy the same version again |
 | "MSCD_DOMAIN ... is a placeholder", "MSCD_SMTP_HOST ... is the placeholder" | A variable of the GitHub environment is missing |
 | "MSCD_TLS_MODE internal is for test stacks only" | Remove the setting; servers use Let's Encrypt |
