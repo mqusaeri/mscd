@@ -103,7 +103,10 @@ Confirmed by the product owner on 2026-10-27 (the defaults that were already bui
 
 9. Production target: MSCD runs as multi-tenant SaaS for many customer organisations, first on one VPS, deployed by a GitHub Actions workflow (the cloud agent cannot SSH). On-premise stays supported.
 
-Still open: the terminology changes proposed in `docs/product/USER-FLOWS.md`.
+Decided by the product owner on 2026-10-28:
+
+10. Terminology (plan question H.1): "Gate" becomes "Checkpoint" (with its forms: Checkpoint item, Open checkpoint items, Critical checkpoint, Next checkpoint), and "MS Manager" becomes "Management System Manager" (one name for every system). Every other label proposed in `docs/product/USER-FLOWS.md` keeps its current name. M2-17 does only these two renames. The Indonesian wording is still to be confirmed (see M2-STATUS).
+11. ISO 9001:2026 and ISO 37001:2025 stay marked as preview (plan question H.6).
 
 ## Open follow-ups
 
