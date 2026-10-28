@@ -287,11 +287,25 @@ jobs:
           args=("$ACTION" --target "$TARGET" --install-dir "$INSTALL_DIR" --release-dir "$release"
             --version "${VERSION#v}" --cosign "$INSTALL_DIR/bin/cosign")
           [[ $SKIP_BACKUP != true ]] || args+=(--skip-backup)
+          # Lines printed by the server (service logs among them) are never read as workflow
+          # commands; its WARN lines become warnings of the run afterwards.
+          out=$WORK/deploy.out
+          token=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+          echo "::stop-commands::$token"
+          status=0
           # Every secret and setting goes on standard input (NAME=<base64>), never as an argument.
           saas_encode_input PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
             MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
             ACME_EMAIL ACME_CA "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}" |
-            "${ssh_cmd[@]}" "NO_COLOR=1 bash $release/deploy/scripts/saas-deploy.sh $(printf '%q ' "${args[@]}")"
+            "${ssh_cmd[@]}" "NO_COLOR=1 bash $release/deploy/scripts/saas-deploy.sh $(printf '%q ' "${args[@]}")" |
+            tee "$out" || status=$?
+          echo "::$token::"
+          sed -nE 's/^ +WARN +(.*)$/::warning::\1/p' "$out"
+          # (lib/common.sh has its own fail, so the error is written out here.)
+          if [[ $status != 0 ]]; then
+            echo "::error::saas-deploy.sh $ACTION stopped with exit code $status. The lines above say why; the server keeps the full log in $INSTALL_DIR/logs."
+            exit "$status"
+          fi
 
       - name: Check from outside
         env:
@@ -330,6 +344,12 @@ jobs:
             echo "## $ACTION $VERSION on $TARGET: $RESULT"
             echo
             echo "Duration: $(( $(date +%s) - STARTED )) seconds. The server keeps the full log in /opt/mscd/logs."
+            if [[ -s $WORK/deploy.out ]] && grep -qE '^ +WARN ' "$WORK/deploy.out"; then
+              echo
+              echo "Warnings of the server:"
+              echo
+              sed -nE 's/^ +WARN +(.*)$/- \1/p' "$WORK/deploy.out"
+            fi
           } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Close the connection and remove the key

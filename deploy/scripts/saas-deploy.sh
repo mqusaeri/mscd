@@ -107,6 +107,8 @@ EOF
 
 ACTION='' TARGET='' OPT_INSTALL_DIR='' OPT_RELEASE_DIR='' OPT_DIGESTS='' OPT_VERSION=''
 TIMEOUT=300 VERIFY_TIMEOUT=180 MIN_DISK=10240 SKIP_BACKUP=false VERIFY_SIGNATURE=true OPT_COSIGN=''
+# Set by restart_services when an overlay service (monitoring, backups) needs attention.
+OVERLAY_PROBLEM=''
 
 need_value() {
     if [[ $# -lt 2 || -z $2 || $2 == --* ]]; then die "Option $1 needs a value. See --help"; fi
@@ -407,7 +409,9 @@ other_services() {
 }
 
 # wait_started SERVICE...: each container is healthy, running without a health check,
-# or a one-shot that finished with exit code 0.
+# or a one-shot (restart policy no) that finished with exit code 0. Problems are
+# warnings: these are the overlay services, which do not decide whether the app is
+# healthy.
 wait_started() {
     local svc id state code start=$SECONDS pending
     while true; do
@@ -418,16 +422,22 @@ wait_started() {
                 code=$(docker inspect --format '{{.State.ExitCode}}' "$id" 2>/dev/null || echo 1)
                 case "$state" in
                     healthy) ;;
-                    running) [[ -z $(docker inspect --format '{{if .State.Health}}x{{end}}' "$id" 2>/dev/null) ]] || pending+=("$svc") ;;
-                    exited) ((code == 0)) || { fail "$svc exited with code $code"; return 1; } ;;
-                    unhealthy | dead) fail "$svc is $state"; return 1 ;;
+                    running)
+                        # Running without a health check: a one-shot (restart policy no) is
+                        # still at work.
+                        case $(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$id" 2>/dev/null || true) in
+                            no | '') pending+=("$svc") ;;
+                        esac
+                        ;;
+                    exited) ((code == 0)) || { warn "$svc exited with code $code"; return 1; } ;;
+                    unhealthy | dead) warn "$svc is $state"; return 1 ;;
                     *) pending+=("$svc") ;;
                 esac
             done
         done
         ((${#pending[@]} == 0)) && return 0
         if ((SECONDS - start > TIMEOUT)); then
-            fail "Still starting after ${TIMEOUT}s: ${pending[*]}"
+            warn "Still starting after ${TIMEOUT}s: ${pending[*]}"
             return 1
         fi
         sleep 2
@@ -476,18 +486,39 @@ restart_services() {
             return 1
         fi
     fi
-    # Overlay services (monitoring) are recreated every time, so they read the new
-    # configuration files of the release.
+    # Overlay services (monitoring, backups) are recreated every time, so they read the new
+    # configuration files of the release. The app is healthy at this point: a failure here
+    # is reported (OVERLAY_PROBLEM) and does not roll the app back.
     mapfile -t others < <(other_services)
     if ((${#others[@]} > 0)); then
         if compose_logged up -d --no-deps --force-recreate "${others[@]}" && wait_started "${others[@]}"; then
             pass "Overlay services started: ${others[*]}"
         else
-            fail "Overlay services did not start: ${others[*]}"
+            OVERLAY_PROBLEM="the overlay services did not all start (${others[*]})"
+            warn "Overlay services did not all start: ${others[*]}. The app keeps running."
+            saas_print_log "$COMPOSE_LOG" 8
             service_logs "${others[@]}"
-            return 1
+        fi
+        # ops-init writes the Caddy site of the Grafana host into a folder Caddy imports;
+        # Caddy reads it on a reload. An unchanged configuration makes the reload a no-op,
+        # and a refused one leaves the running configuration in place.
+        if saas_in_list ops-init "${others[@]}"; then
+            if compose_logged exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+                pass "Caddy read the configuration of the monitoring overlay"
+            else
+                OVERLAY_PROBLEM="Caddy refused the configuration of the monitoring overlay"
+                warn "Caddy refused the configuration of the monitoring overlay and keeps the one it runs"
+                saas_print_log "$COMPOSE_LOG" 8
+            fi
         fi
     fi
+}
+
+# overlay_note: the closing warning when an overlay service needs attention.
+overlay_note() {
+    [[ -n $OVERLAY_PROBLEM ]] || return 0
+    printf '\n'
+    warn "The app runs, but $OVERLAY_PROBLEM. Fix the cause and deploy the same release again (docs/saas/deploy.md, Troubleshooting)."
 }
 
 # readyz SERVICE PORT: GET /readyz inside the container answers 200 (status ready).
@@ -747,8 +778,9 @@ deploy_main() {
 
     step "Recording the release"
     record_state deploy "$NEW_VERSION" "$NEW_SERVER_REF" "$NEW_WEB_REF" "$RELEASE_DIR" "$saved"
-    saas_history deploy "done" "$NEW_VERSION" "from=${CURRENT_VERSION:-none}"
+    saas_history deploy "done" "$NEW_VERSION" "from=${CURRENT_VERSION:-none}${OVERLAY_PROBLEM:+ overlay=problem}"
     printf '\n%sMSCD %s is deployed to %s and healthy.%s\n' "$C_GREEN$C_BOLD" "$NEW_VERSION" "$TARGET" "$C_RESET"
+    overlay_note
     printf '  Log: %s\n' "$LOG_FILE"
 }
 
@@ -893,6 +925,7 @@ rollback_main() {
         pass "State: current $to_version$(if [[ -f $STATE_DIR/previous.env ]]; then printf ', previous %s' "$(kv_get "$STATE_DIR/previous.env" VERSION)"; fi)"
         printf '\n%sMSCD is back on %s and healthy.%s The next rollback goes one release further back.\n' \
             "$C_GREEN$C_BOLD" "$to_version" "$C_RESET"
+        overlay_note
         printf '  Log: %s\n' "$LOG_FILE"
         return 0
     fi

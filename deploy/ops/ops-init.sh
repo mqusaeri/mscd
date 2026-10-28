@@ -172,7 +172,7 @@ if [ -n "$HEARTBEAT_URL" ]; then
     matches "$HEARTBEAT_URL" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%/?&=+-]*)?$' ||
         error "HEARTBEAT_WATCHDOG_URL must be an http:// or https:// address without spaces or quotes"
     case "$HEARTBEAT_URL" in
-        http://*) warn "HEARTBEAT_WATCHDOG_URL uses http://, not https://" ;;
+        http://*) warn "HEARTBEAT_WATCHDOG_URL uses plain http://; use the https:// address of the heartbeat service" ;;
     esac
 fi
 if [ -n "$TELEGRAM_TOKEN" ] || [ -n "$TELEGRAM_CHAT" ]; then
@@ -196,7 +196,7 @@ if [ -n "$OPS_HOST" ] || [ -n "$OPS_HASH" ]; then
             error "OPS_BASIC_AUTH_USER may hold only letters, digits, '.', '_' and '-' (at most 64)"
         # shellcheck disable=SC2016  # a regular expression, not a shell expansion
         matches "$OPS_HASH" '^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$' ||
-            error "OPS_BASIC_AUTH_HASH must be a bcrypt hash (caddy hash-password), never the password itself"
+            error "OPS_BASIC_AUTH_HASH must be a bcrypt hash made with caddy hash-password (keep the password itself in the password manager)"
     fi
 fi
 

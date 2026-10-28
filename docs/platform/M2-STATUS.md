@@ -24,7 +24,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-S02 SaaS Compose stack and TLS | 1b | Done | Caddy also serves `apps/site` on `MSCD_SITE_DOMAIN`. Without the Alpine mirrors, run its stack test with `MSCD_SAAS_TEST_SCAN=auto` |
 | M2-05 Certification, internal audit and readiness server | 2a | Done, waiting for the wave commit | Its handoff lists the cross-package fixes the orchestrator applies at the end of wave 2a |
 | M2-07 Document control and register server additions | 2a | Done, waiting for the wave commit | APPL-ASSESS also applies on create (plan D.2 updated). Holdings include self-assessment gaps, audit activities and business associate relationship owners |
-| M2-06 Onboarding, accounts and operator server | 2a | Done, waiting for the wave commit; an independent review of the scheduler tick locking is running | The orchestrator applied its three patches outside Owns (set-password link, invite test, CLI test). A time zone change applies from the next whole hourly slot (deviation 11) |
+| M2-06 Onboarding, accounts and operator server | 2a | Built; an independent review found the daily job catch-up after a time zone change unsound, so the orchestrator is rebuilding it on a run ledger (one row per organisation, job and local date) | The orchestrator applied its three patches outside Owns. The ledger adds one platform table (orchestrator decision) |
 | M2-04 Pack content | 2a | Done, waiting for the wave commit | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. Evidence examples and the clause at risk are keyed per system. H.6 still open |
 | MOT-03 In-app illustration library | L2 | Next (M2-01 is done) | |
 | M2-S05 Deploy script and deploy workflow, M2-S08 Monitoring and alerts | 2b | Running (started early: no server or web code) | |
@@ -40,6 +40,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 | Wave | Full suites (orchestrator) | Notes |
 |---|---|---|
+| 2a | Server integration: 124 files, 1458 passed, 56 skipped (before the ledger rebuild). Web E2E sample: 286 passed, 1 failed on a lazy chunk cut off by a page load (helper widened again) | API E2E and the rerun after the ledger rebuild are pending |
 | 1 (1a, 1b, L1) | Server integration: 108 files, 1342 passed, 56 skipped. Web E2E sample: 286 passed, 1 failed once. Web E2E API: 265 passed | The failure was `e2e/offline.spec.js` (a lazy `sample-*.js` chunk cut off by a page load while `page.route` intercepts every request); `--repeat-each=4` then passed 8 of 8. The orchestrator widened the `requestfailed` filter of `apps/web/e2e/helpers.js` for that case between waves (offline, probe and shell specs pass) |
 
 ## Product decisions to keep in mind

@@ -373,10 +373,10 @@ stage_release() {
     chown -R "$RUN_UID:$RUN_UID" "$dest"
 }
 
-# write_input FILE [PLATFORM_KEY_FILE]: standard input of a deploy, as deploy-prod.yml
-# builds it (saas_encode_input), with the rehearsal's settings.
+# write_input FILE [PLATFORM_KEY_FILE] [OPS_DOMAIN]: standard input of a deploy, as
+# deploy-prod.yml builds it (saas_encode_input), with the rehearsal's settings.
 write_input() {
-    local file=$1 platform=${2:-$WORK/keys/production/platform.key}
+    local file=$1 platform=${2:-$WORK/keys/production/platform.key} ops_domain=${3:-}
     (
         umask 077
         {
@@ -399,7 +399,7 @@ write_input() {
                 BACKUP_RESTIC_PASSWORD=rehearsal-restic HEARTBEAT_BACKUP_URL=https://heartbeat.rehearsal.invalid/backup
                 HEARTBEAT_WATCHDOG_URL=https://heartbeat.rehearsal.invalid/watchdog TELEGRAM_BOT_TOKEN=''
                 TELEGRAM_CHAT_ID='' ALERT_EMAIL_TO=alerts@rehearsal.invalid
-                OPS_DOMAIN='' OPS_BASIC_AUTH_USER='' OPS_BASIC_AUTH_HASH=''
+                OPS_DOMAIN=$ops_domain OPS_BASIC_AUTH_USER='' OPS_BASIC_AUTH_HASH=''
                 saas_encode_input SMTP_PASSWORD MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_SMTP_SECURE \
                     MSCD_MAIL_FROM MSCD_DOMAIN MSCD_TLS_MODE ACME_EMAIL MSCD_SITE_DOMAIN MSCD_HTTP_PORT MSCD_HTTPS_PORT \
                     MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS \
@@ -514,8 +514,8 @@ check_first_deploy() {
     if [[ $(cat "$INSTALL/secrets/backup/BACKUP_S3_BUCKET") == mscd-rehearsal &&
         $(stat -c '%a' "$INSTALL/secrets/backup/BACKUP_RESTIC_PASSWORD") == 400 &&
         $(cat "$INSTALL/secrets/ops/ALERT_EMAIL_TO") == alerts@rehearsal.invalid &&
-        -f $INSTALL/secrets/ops/TELEGRAM_BOT_TOKEN && ! -s $INSTALL/secrets/ops/TELEGRAM_BOT_TOKEN ]]; then
-        ok "Off-site backup and monitoring values are files in secrets/backup and secrets/ops (mode 0400, empty when not set)"
+        ! -e $INSTALL/secrets/ops/TELEGRAM_BOT_TOKEN ]]; then
+        ok "Off-site backup and monitoring values are files in secrets/backup and secrets/ops (mode 0400, none for an empty value)"
     else
         bad "The files of secrets/backup and secrets/ops are not as sent"
     fi
@@ -818,6 +818,63 @@ check_rc5() {
     fi
 }
 
+# check_overlay: a redeploy of V2 whose monitoring overlay fails. The app stays on V2 without
+# a rollback, an empty value removes the file of an earlier value, and OPS_DOMAIN adds the
+# grafana profile.
+check_overlay() {
+    local file=$INSTALL/releases/v$V2/deploy/compose/docker-compose.ops.yml old=$WORK/old-token
+    step "Redeploy of $V2 with a monitoring overlay that fails"
+    if [[ $OVERLAYS != none ]]; then
+        info "Skipped: the stand-in overlay needs MSCD_REHEARSAL_OVERLAYS=none"
+        return 0
+    fi
+    cat >"$file" <<EOF
+# Rehearsal stand-in of the monitoring overlay: ops-init stops with exit code 3.
+services:
+  ops-init:
+    image: $REGISTRY_IMAGE
+    pull_policy: never
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo rehearsal stand-in of ops-init stops; exit 3"]
+EOF
+    chown "$RUN_UID:$RUN_UID" "$file"
+    # A Telegram token sent by an earlier deploy; this one sends the value empty.
+    printf 'old-token' >"$old"
+    install -m 0400 -o "$RUN_UID" -g "$RUN_UID" "$old" "$INSTALL/secrets/ops/TELEGRAM_BOT_TOKEN"
+    write_input "$WORK/input-ops" "" "ops.$APP_HOST"
+    INPUT=$WORK/input-ops deploy_run deploy-overlay deploy "v$V2"
+    rm -f -- "$file"
+    if ((RC == 0)) && log_has deploy-overlay "Overlay services did not all start: ops-init" &&
+        log_has deploy-overlay "ops-init exited with code 3" &&
+        log_has deploy-overlay "Caddy read the configuration of the monitoring overlay" &&
+        log_has deploy-overlay "is deployed to test and healthy" &&
+        log_has deploy-overlay "The app runs, but the overlay services did not all start" &&
+        ! log_has deploy-overlay "rolled back"; then
+        ok "A monitoring service that stops is a warning: the healthy app is not rolled back, Caddy reloads"
+    else
+        bad "The failing overlay did not end as a warning on a healthy $V2 (exit code $RC)"
+        show_log deploy-overlay 40
+    fi
+    expect_version "$V2" "After the overlay failure"
+    expect_healthy "After the overlay failure"
+    if tail -n 1 "$INSTALL/state/history.log" | grep -q " deploy done $V2 .*overlay=problem"; then
+        ok "history.log records the deploy with overlay=problem"
+    else
+        bad "history.log does not record the overlay problem"
+    fi
+    if [[ ! -e $INSTALL/secrets/ops/TELEGRAM_BOT_TOKEN && $(cat "$INSTALL/secrets/ops/OPS_DOMAIN") == "ops.$APP_HOST" ]]; then
+        ok "A value sent empty removes its file (TELEGRAM_BOT_TOKEN); OPS_DOMAIN is written"
+    else
+        bad "secrets/ops does not follow the values sent"
+    fi
+    if grep -q '^COMPOSE_PROFILES=bundled-db,bundled-s3,grafana$' "$INSTALL/.env"; then
+        ok "OPS_DOMAIN adds the grafana profile to COMPOSE_PROFILES"
+    else
+        bad "COMPOSE_PROFILES is $(kv_get "$INSTALL/.env" COMPOSE_PROFILES), expected the grafana profile"
+    fi
+}
+
 check_images_kept() {
     local refs expected unexpected
     refs=$(local_image_refs | grep '@' || true)
@@ -1049,6 +1106,16 @@ EOF
         bad "saas-deploy.sh did not get the values, run cosign or pull by digest"
         tail -n 30 "$WORK/wf-deploy.out" | sed 's/^/          /'
     fi
+    if awk '/^::stop-commands::[0-9a-f]{32}$/ { t = substr($0, 18); s = NR }
+            s && $0 == "::" t "::" { e = NR }
+            /26 values read/ { v = NR }
+            END { exit !(s && e && v > s && v < e) }' "$WORK/wf-deploy.out" &&
+        grep -q '^::error::saas-deploy.sh deploy stopped with exit code' "$WORK/wf-deploy.out"; then
+        ok "The output of the server sits between ::stop-commands:: and its token, and the step reports the exit code"
+    else
+        bad "The output of the server is not fenced from workflow commands"
+        tail -n 10 "$WORK/wf-deploy.out" | sed 's/^/          /'
+    fi
     if grep -q 'smtp pass\|workflowtesttoken\|workflow-test-platform\|BEGIN PRIVATE' "$WORK/wf-deploy.out"; then
         bad "A secret value reached the output of the deploy step"
     else
@@ -1226,6 +1293,7 @@ main() {
     check_rc3
     check_rc4
     check_rc5
+    check_overlay
     check_images_kept
     check_rollback
 

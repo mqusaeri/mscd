@@ -33,9 +33,9 @@ The server is bootstrapped with `bootstrap-prod.yml` ([bootstrap.md](bootstrap.m
 | `HEARTBEAT_WATCHDOG_URL`, `TELEGRAM_BOT_TOKEN`, `OPS_BASIC_AUTH_HASH` | secrets | see [monitoring.md](monitoring.md) | One file each in `/opt/mscd/secrets/ops/` |
 | `ALERT_EMAIL_TO`, `TELEGRAM_CHAT_ID`, `OPS_DOMAIN`, `OPS_BASIC_AUTH_USER` | variables | see [monitoring.md](monitoring.md) | One file each in `/opt/mscd/secrets/ops/` |
 
-Every deploy writes all of them again, so the GitHub environment is the only place to change them. A value that is not set becomes an empty file. The backup and monitoring files have mode 0400 and belong to the deploy account; the backup and monitoring services read them there.
+Every deploy writes all of them again, so the GitHub environment is the only place to change them. A value that is not set, or was removed from the environment, removes its file, so an old Telegram token or Grafana host stops being used. The backup and monitoring files have mode 0400 and belong to the deploy account; the backup and monitoring services read them there. When `OPS_DOMAIN` is set, the deploy adds the `grafana` profile to `COMPOSE_PROFILES`, so Grafana starts.
 
-The monitoring stops a deploy when `ALERT_EMAIL_TO` is missing, once the release holds the monitoring parts. Set it before that release.
+The monitoring needs `ALERT_EMAIL_TO` once the release holds the monitoring parts. Without it `ops-init` stops and the deploy ends with a warning (see step 10 below). Set it before that release.
 
 ## Starting a deploy
 
@@ -69,6 +69,8 @@ The workflow, on a GitHub runner:
 6. Logs the server in to `ghcr.io` with the job's own token, which expires with the job, then runs `saas-deploy.sh` with every secret and setting on standard input, and logs the server out again.
 7. Checks `https://<domain>/healthz` and the version from outside.
 
+The lines that come from the server are fenced with `::stop-commands::`, so a log line of a service can never act as a GitHub workflow command. Afterwards the WARN lines of the server become warnings of the run and appear in its summary.
+
 `saas-deploy.sh deploy`, on the server, as the deploy account:
 
 1. Locks `/opt/mscd`, so two deploys never overlap.
@@ -80,11 +82,11 @@ The workflow, on a GitHub runner:
 7. Takes a pre-deploy dump of the database with `pg_dump --format=custom` to `/opt/mscd/backup/pre-deploy` (the last 3 are kept). When the release has `deploy/backup/backup.sh` (M2-S07), it also sends an off-site copy.
 8. Saves the files in place (the rollback point) and installs the release's files and `.env`.
 9. Runs the database migrations alone, with `docker compose run --rm --no-deps migrate`, while the old services keep serving. The time limit is 10 minutes plus 20 seconds per organisation. The log goes to `/opt/mscd/logs/migrate-<version>-<time>.log` and is printed in the workflow log with organisation names hidden.
-10. Restarts the services one at a time and waits until each is healthy: PostgreSQL and SeaweedFS (only when their settings changed), storage-gateway, api, worker, web and Caddy, then the monitoring services when the release has them.
+10. Restarts the services one at a time and waits until each one passes its health check: PostgreSQL and SeaweedFS (only when their settings changed), storage-gateway, api, worker, web and Caddy. Then it recreates the monitoring and backup services when the release has them, waits until `ops-init` has finished, and reloads Caddy so it reads the Grafana host that `ops-init` writes. These services do not decide whether the app is healthy: when one of them fails, or Caddy refuses the Grafana host, the deploy carries on, ends with a WARN line ("The app runs, but ..."), and the workflow shows it as a warning. Fix the cause and deploy the same version again.
 11. Checks that api, worker and storage-gateway report ready (`/readyz`), that `/healthz` answers through Caddy, and that `/api/v1/system/profile` through Caddy reports the new version.
 12. Records the release in `/opt/mscd/state` and removes the images of releases older than the last 3.
 
-The server keeps the whole output in `/opt/mscd/logs/deploy-<time>.log`, and the output of the Compose commands next to it.
+The server keeps the whole output in `/opt/mscd/logs/deploy-<time>.log`, and the output of the Compose commands next to it. When a service fails, the workflow log shows its last lines with IP addresses, email addresses and organisation names hidden, because the repository is public; the full lines are in `/opt/mscd/logs/deploy-<time>-services.log`.
 
 ### First deploy
 
@@ -115,14 +117,14 @@ Every release goes through these steps, each one started by an agent or the owne
 | web restarts | a few seconds | Caddy holds requests for up to 30 seconds and retries, so pages load slowly instead of failing |
 | Caddy restarts (only when its settings changed) | 1 to 3 seconds | The browser shows a connection error once; a reload works |
 
-In the rehearsal, requests to the API every half second during the upgrade went unanswered for a few seconds in a row at most (see [The rehearsal](#the-rehearsal)). Expect slow or refused requests for up to 20 seconds in total. A POST that a client repeats with the same `Idempotency-Key` is stored once: the api answers the repeat with the first result.
+In two rehearsal runs on a busy build machine, a request to the API every half second during an upgrade got an answer 63 times out of 70 and 103 times out of 116, and the longest gaps were 3.7 and 9.9 seconds (see [The rehearsal](#the-rehearsal)). On a server with real load, expect slow or refused requests for up to 20 seconds in total. A POST that a client repeats with the same `Idempotency-Key` is stored once: the api answers the repeat with the first result.
 
 ## Automatic rollback
 
 A deploy goes back to the previous release by itself when:
 
 - the migrations fail or run out of time;
-- a service does not become healthy;
+- a service of the app (PostgreSQL, SeaweedFS, storage-gateway, api, worker, web or Caddy) does not become healthy;
 - a check of step 11 fails.
 
 It puts the saved files and `.env` back, starts the previous digests again (pulling them when they are no longer on the server) and checks them the same way. The workflow run then ends as failed with "The deploy of <version> failed (...) and was rolled back automatically. <old version> is running and healthy."
@@ -142,7 +144,7 @@ To return to the release that ran before:
 gh workflow run deploy-prod.yml -f action=rollback -f version=v1.0.2 -f target=production
 ```
 
-`version` is the release to return to. The workflow verifies its signatures like a deploy, and the server refuses when its previous release is another version. The rollback puts back the files and `.env` of that release, starts its images and checks them. It runs no migrations and takes a pre-rollback dump first. Each rollback goes one release further back; the server keeps the files of the last 3 releases (`/opt/mscd/state/saved`) and their images. After a rollback, a later deploy of a newer version works as usual.
+`version` is the release to return to. The workflow verifies its signatures like a deploy, and the server refuses when its previous release is another version. The rollback puts back the files and `.env` of that release, starts its images and checks them. It runs no migrations and takes a pre-rollback dump first. Each rollback goes one release further back. The server keeps the files of the last 3 earlier releases (`/opt/mscd/state/saved`) and the images of the running release and the 2 before it; an older image is pulled again by digest when a rollback needs it. After a rollback, a later deploy of a newer version works as usual.
 
 ### Restoring the database
 
@@ -230,7 +232,8 @@ It starts a local registry on `127.0.0.1:5000` (`registry:3.0.0`, pinned by dige
 | Deploy `rc.1` with another `PLATFORM_KEY` | Refused; `platform.key` stays as it was |
 | Deploy `rc.2` | Upgrade with a pre-deploy dump that `pg_restore` can read; the API is polled during it |
 | A release folder with `config/demo-secrets`; `--no-verify-signature` for `ghcr.io` images; a failing `cosign` | Each refused, nothing changed; `cosign verify` was called with the identity of `release.yml` for the tag |
-| Deploy `rc.3`, `rc.4`, `rc.5` | Refused, then rolled back after the failed migration, then rolled back after the failed health check; `rc.2` runs each time, and only the images of `rc.1` and `rc.2` stay |
+| Deploy `rc.3`, `rc.4`, `rc.5` | Refused, then rolled back after the failed migration, then rolled back after the failed health check; `rc.2` runs each time |
+| Deploy `rc.2` again with a stand-in monitoring overlay whose `ops-init` stops, an empty `TELEGRAM_BOT_TOKEN` and an `OPS_DOMAIN` (only with `MSCD_REHEARSAL_OVERLAYS=none`) | The deploy ends healthy with a warning and no rollback, Caddy reloads, `history.log` notes `overlay=problem`, the old token file is gone and `COMPOSE_PROFILES` holds `grafana`. Only the images of `rc.1` and `rc.2` stay |
 | Rollback to `rc.1`, then `check-only` | `rc.1` runs; nothing older is left to roll back to; every check passes |
 
 At the end it removes every container, network, volume, image and folder it made, and keeps the deploy logs in `/tmp/mscd-rehearsal-logs`.
@@ -262,6 +265,8 @@ Its test containers publish Caddy's ports on every address of the build machine,
 | "The migrations of ... failed" | The log in the run (and `/opt/mscd/logs/migrate-*.log`) names the migration. The old release keeps running |
 | "Migrate did not finish within ..." | A migration was too slow. Check it with the migration rehearsal of `restore-test.yml` on production data |
 | "... did not become healthy" or "does not report ready" | The run prints the last log lines of that service; the deploy went back by itself |
+| "The app runs, but the overlay services did not all start" | The app was deployed. The run prints the last log lines of the monitoring or backup service (for `ops-init`, often a missing `ALERT_EMAIL_TO`); fix the value and deploy the same version again |
+| "Caddy refused the configuration of the monitoring overlay" | Caddy keeps serving with the configuration it had. Check `OPS_DOMAIN` and `OPS_BASIC_AUTH_HASH` ([monitoring.md](monitoring.md)) and deploy the same version again |
 | "MSCD_DOMAIN ... is a placeholder", "MSCD_SMTP_HOST ... is the placeholder" | A variable of the GitHub environment is missing |
 | "MSCD_TLS_MODE internal is for test stacks only" | Remove the setting; servers use Let's Encrypt |
 | "cosign is needed to check the image signatures" | The workflow copies cosign to `/opt/mscd/bin/cosign`; a run by hand needs `--cosign` |

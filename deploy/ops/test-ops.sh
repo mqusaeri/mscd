@@ -293,7 +293,7 @@ console.log(`${alerts.length} alert rules in ${files.length} files, each with a 
             fail "A secret value appears in the rendered configuration"
         elif [[ $(cat "$out/alertmanager/secrets/smtp_password") == example-password &&
             -s $out/alertmanager/secrets/telegram_bot_token && -s $out/alertmanager/secrets/heartbeat_watchdog_url ]]; then
-            pass "Secrets are separate files next to the configuration, never inside it"
+            pass "Secrets are separate files next to the configuration; the configuration itself holds none"
         else
             fail "The secret files of Alertmanager were not written"
         fi
@@ -668,7 +668,7 @@ if (rules.length !== want || bad.length) process.exit(1);' "$REPO_DIR" "$OPS_DIR
         'mscd_host_reboot_required == 1|reboot.prom read by the text file collector (mscd_host_reboot_required)'
         'time() - mscd_backup_last_success_timestamp_seconds < 7200|backup.prom read by the text file collector (mscd_backup_last_success_timestamp_seconds)'
         'mscd_http_request_duration_seconds_count{job="api"}|api metrics on port 9464 (mscd_http_request_duration_seconds)'
-        'mscd_queue_waiting{job="worker"}|worker metrics on port 9464 (mscd_queue_waiting)'
+        'process_resident_memory_bytes{job="worker", mode="worker"}|worker metrics on port 9464 (process metrics of the worker run mode)'
         'mscd_job_runs_total{job="worker", job_name=~".+"}|Job runs of the worker carry the job name in job_name (relabelling of prometheus.yml)'
         'up{job="storage-gateway"} == 1|storage-gateway metrics on port 9464'
         'caddy_config_last_reload_successful == 1|Caddy metrics from the metrics site of ops.caddy'

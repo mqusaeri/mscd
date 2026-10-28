@@ -57,7 +57,7 @@ The monitoring reads two kinds of settings. Nobody edits them on the server; the
 | `TELEGRAM_CHAT_ID` | variable | with the token | The chat (or group) the bot writes to |
 | `OPS_DOMAIN` | variable | for Grafana | The host name of the dashboards, for example `ops.example.com` |
 | `OPS_BASIC_AUTH_USER` | variable | for Grafana | The user name for the dashboards (default `ops`) |
-| `OPS_BASIC_AUTH_HASH` | secret | for Grafana | The bcrypt hash of the dashboard password, never the password itself |
+| `OPS_BASIC_AUTH_HASH` | secret | for Grafana | The bcrypt hash of the dashboard password, made with `caddy hash-password` ([Dashboards](#dashboards-optional)) |
 
 `ops-init` checks every value before it changes anything, and stops with a clear message when a value is wrong (for example a Telegram token without a chat id). It never prints the alert address, the heartbeat address or a secret. The secrets reach Alertmanager as separate files that only Alertmanager can read; the rendered configuration holds none of them.
 

@@ -39,11 +39,13 @@ export const test = base.extend({
         // A navigation may abort the body of a response that already arrived (the sign-out answer, for example).
         if (await r.response().catch(() => null)) return;
       }
-      // A read that a later page load of the test cut off: an api read, a lazy screen chunk, a font or an image. Under
+      // A read that a page load of the test cut off: an api read, a lazy screen chunk, a font or an image. Under
       // page.route the cut-off read can report another error than net::ERR_ABORTED, so the error text is not checked.
+      // The old page can still start such a read just after the next page load began (an effect of a screen that opened
+      // at the end of a walk), so a load that began up to 2 seconds before the read counts as well.
       const started = starts.get(r);
-      if (!r.isNavigationRequest() && r.method() === 'GET' && started && loads.some((t) => t >= started)) return;
-      problems.push('requestfailed: ' + r.url());
+      if (!r.isNavigationRequest() && r.method() === 'GET' && started && loads.some((t) => t >= started - 2000)) return;
+      problems.push('requestfailed: ' + r.url() + ' (' + (r.failure()?.errorText ?? 'no error text') + ')');
     });
     await use(page);
     expect(problems, 'browser errors during test').toEqual([]);

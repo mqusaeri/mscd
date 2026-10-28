@@ -504,6 +504,11 @@ saas_resolve_settings() {
     else
         SAAS_VALUE[MSCD_EDGE_IPV6]=false SAAS_SOURCE[MSCD_EDGE_IPV6]="this server has no global IPv6 address"
     fi
+    # The Grafana host of the monitoring overlay (OPS_DOMAIN) needs the grafana profile.
+    if [[ -n $(saas_input OPS_DOMAIN 2>/dev/null) && ,${SAAS_VALUE[COMPOSE_PROFILES]:-}, != *,grafana,* ]]; then
+        SAAS_VALUE[COMPOSE_PROFILES]=${SAAS_VALUE[COMPOSE_PROFILES]:+${SAAS_VALUE[COMPOSE_PROFILES]},}grafana
+        SAAS_SOURCE[COMPOSE_PROFILES]+=", grafana added because OPS_DOMAIN is set"
+    fi
     if saas_given MSCD_PUBLIC_URL; then
         saas_setting_from MSCD_PUBLIC_URL "" "$example"
     else
@@ -861,7 +866,9 @@ saas_install_keys() {
 }
 
 # saas_write_value_files DIR NAME...: one file per NAME given on standard input, mode
-# 0400, holding the value without a final line break. Names not given keep their files.
+# 0400, holding the value without a final line break. A NAME given with an empty value
+# removes its file (a value removed from GitHub stops being used); names not given keep
+# their files.
 saas_write_value_files() {
     local dir=$1 name tmp count=0
     shift
@@ -869,6 +876,10 @@ saas_write_value_files() {
     chmod 0700 "$dir"
     for name in "$@"; do
         saas_has_input "$name" || continue
+        if [[ -z $(saas_input "$name" | tr -d '\r') ]]; then
+            rm -f -- "$dir/$name"
+            continue
+        fi
         tmp=$(mktemp "$dir/.$name.XXXXXX")
         chmod 0600 "$tmp"
         printf '%s' "$(saas_input "$name" | tr -d '\r')" >"$tmp"
