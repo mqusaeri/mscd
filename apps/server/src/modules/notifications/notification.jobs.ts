@@ -39,7 +39,7 @@ export class NotificationDigestJob implements JobHandlerInstance<'notifications.
 
   async handle(job: JobRun<'notifications.digest'>): Promise<void> {
     if (!job.env.orgId) throw new Error('notifications.digest needs the organisation of the job envelope');
-    const counts = await this.delivery.digest(job.env.orgId, job.env.requestId);
+    const counts = await this.delivery.digest(job.env.orgId, job.env.requestId, job.env.payload.localDate);
     this.logger.log({ jobId: job.id, orgId: job.env.orgId, attempt: job.attempt, ...counts }, 'notifications.digest done');
     if (counts.retrying > 0) throw new Error(`${counts.retrying} digest notification(s) could not be sent; they stay pending for another attempt`);
   }
@@ -59,7 +59,7 @@ export class DocumentReviewAlertsJob implements JobHandlerInstance<'documents.re
     if (!job.env.orgId) throw new Error('documents.review-alerts needs the organisation of the job envelope');
     const org = await this.delivery.organisation(job.env.orgId);
     if (!org) return;
-    const result = await this.alerts.run(org, job.env.requestId);
+    const result = await this.alerts.run(org, job.env.requestId, job.env.payload.localDate);
     this.logger.log({ jobId: job.id, orgId: org.id, attempt: job.attempt, ...result }, 'documents.review-alerts done');
   }
 }

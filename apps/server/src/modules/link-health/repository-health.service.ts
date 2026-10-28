@@ -7,7 +7,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConnectionStatus, TestConnectionResponse } from '@mscd/shared';
 import { sql } from 'kysely';
-import { Clock } from '../../common/clock';
+import { Clock, checkedRunDate } from '../../common/clock';
 import { diffDays, fmtDay, localDate } from '../../common/dates';
 import { AUDIT_WRITER, GATEWAY_CLIENT, NOTIFICATION_WRITER, SYSTEM_USER_ID, type AuditWriter, type GatewayClient, type NotificationWriter, type TenantInfo, type Trx } from '../../common/tokens';
 import { activeTenantAdmins } from '../storage/storage-policy';
@@ -74,18 +74,19 @@ export class RepositoryHealthService {
     @Inject(NOTIFICATION_WRITER) private readonly notifications: NotificationWriter,
   ) {}
 
-  async checkAll(org: TenantInfo, requestId?: string): Promise<RepositoryCheck[]> {
+  /** Every repository; a run of `scheduler.tick` counts the credential days from its run's date (`runLocalDate`, Milestone 2 D.2). */
+  async checkAll(org: TenantInfo, requestId?: string, runLocalDate?: string): Promise<RepositoryCheck[]> {
     const repositories = await this.runner.run(
       org,
       (trx) => trx.selectFrom('storage_repository').select('id').where('deleted_at', 'is', null).orderBy('position').orderBy('slug').execute(),
       requestId,
     );
     const results: RepositoryCheck[] = [];
-    for (const { id } of repositories) results.push(await this.checkOne(org, id, requestId));
+    for (const { id } of repositories) results.push(await this.checkOne(org, id, requestId, runLocalDate));
     return results;
   }
 
-  async checkOne(org: TenantInfo, repositoryId: string, requestId?: string): Promise<RepositoryCheck> {
+  async checkOne(org: TenantInfo, repositoryId: string, requestId?: string, runLocalDate?: string): Promise<RepositoryCheck> {
     const prepared = await this.runner.run(
       org,
       async (trx) => {
@@ -149,7 +150,7 @@ export class RepositoryHealthService {
         }
         if (after === 'revoked') await this.raiseConnectorAlerts(trx, org, row, outcome.message, changed);
         else if (ok) await this.resolveConnectorAlerts(trx, row);
-        const expiryWarning = credential?.expires_at ? await this.warnExpiry(trx, org, row, credential, at) : null;
+        const expiryWarning = credential?.expires_at ? await this.warnExpiry(trx, org, row, credential, at, runLocalDate) : null;
         return { slug: row.slug, before, after, expiryWarning };
       },
       requestId,
@@ -253,9 +254,10 @@ export class RepositoryHealthService {
     row: RepositoryRow,
     credential: { id: string; expires_at: Date | null },
     at: Date,
+    runLocalDate?: string,
   ): Promise<number | null> {
     const expiry = credential.expires_at!;
-    const today = this.clock.fixedToday ?? localDate(at, org.timeZone);
+    const today = this.clock.fixedToday ?? checkedRunDate(runLocalDate) ?? localDate(at, org.timeZone);
     const expiryDay = localDate(expiry, org.timeZone);
     const left = diffDays(today, expiryDay);
     if (left < 0) return null;

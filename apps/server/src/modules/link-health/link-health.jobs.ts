@@ -56,7 +56,7 @@ export class LinkHealthRepositoryJob implements JobHandlerInstance<'link-health.
   async handle(job: JobRun<'link-health.repository'>): Promise<void> {
     const org = await this.runner.organisation(job.env.orgId, 'link-health.repository');
     if (!org) return;
-    const results = await this.repositories.checkAll(org, job.env.requestId);
+    const results = await this.repositories.checkAll(org, job.env.requestId, job.env.payload.localDate);
     this.logger.log(
       { jobId: job.id, orgId: org.id, attempt: job.attempt, repositories: results.map((r) => `${r.slug}:${r.before}->${r.after}`) },
       'link-health.repository done',

@@ -44,8 +44,9 @@ export class DocumentReviewAlertsService {
     @Inject(NOTIFICATION_WRITER) private readonly notifications: NotificationWriter,
   ) {}
 
-  async run(org: TenantInfo, requestId?: string): Promise<ReviewAlertResult> {
-    const today = await this.clock.today(org.id);
+  /** One run; a run of `scheduler.tick` works on the local date of its run (`runLocalDate`, Milestone 2 D.2). */
+  async run(org: TenantInfo, requestId?: string, runLocalDate?: string): Promise<ReviewAlertResult> {
+    const today = await this.clock.runDate(org.id, runLocalDate);
     const result = await this.scope.withTenant(systemContextOf(org, requestId), (trx) => this.alert(trx, today));
     this.logger.log({ orgId: org.id, ...result }, 'documents.review-alerts done');
     return result;

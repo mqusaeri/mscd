@@ -15,7 +15,7 @@ export class LicenseCheckJob implements JobHandlerInstance<'license.check'> {
   async handle(job: JobRun<'license.check'>): Promise<void> {
     const orgId = job.env.orgId;
     if (!orgId) throw new Error('license.check needs the organisation of the job envelope');
-    const result = await this.licences.checkOrganisation(orgId);
+    const result = await this.licences.checkOrganisation(orgId, job.env.payload.localDate);
     this.logger.log({ jobId: job.id, orgId, attempt: job.attempt, state: result?.state ?? null, changed: result?.changed ?? false }, 'license.check done');
   }
 }

@@ -15,8 +15,21 @@ groups:
           action: "Look for one address or one organisation behind them. See docs/saas/monitoring.md#mfalockspike"
 
       # More than 50 requests refused by the permission check within 10 minutes.
+      #
+      # The api creates the series of a route at its first refusal, with the value 1 (and
+      # again after every restart). increase() cannot see that first step, so a series that
+      # did not exist 10 minutes ago counts with its whole value, as in JobFailuresRising
+      # (jobs.yml): only when the api answered the scrape 10 minutes ago.
       - alert: AccessDeniedSpike
-        expr: sum(increase(mscd_authz_denied_total[10m])) > 50
+        expr: |
+          sum(
+              (increase(mscd_authz_denied_total[10m]) and mscd_authz_denied_total offset 10m)
+            or
+              (
+                (mscd_authz_denied_total unless mscd_authz_denied_total offset 10m)
+                  and on (job, instance) (up offset 10m == 1)
+              )
+          ) > 50
         labels:
           severity: warning
           category: security

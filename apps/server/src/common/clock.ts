@@ -1,6 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { MscdConfig } from '../config/mscd-config';
-import { localDate } from './dates';
+import { isIsoDate, localDate } from './dates';
 
 /** Looks up the time zone of an organisation (`platform.organization.time_zone`); provided by the tenancy module. */
 export interface OrgTimeZoneLookup {
@@ -55,4 +55,25 @@ export class Clock {
     const timeZone = this.timeZones ? await this.timeZones.timeZoneOf(orgId) : DEFAULT_TIME_ZONE;
     return localDate(this.now(), timeZone);
   }
+
+  /**
+   * The local date a daily job works on (Milestone 2 D.2): `demo.fixed_today` when demo mode sets it, else the date of
+   * its run (`localDate` of the payload, which `scheduler.tick` writes with the run's row in `platform.daily_job_run`),
+   * else today in the organisation's time zone (a job sent another way, for example a manual run).
+   */
+  async runDate(orgId: string, runLocalDate?: string | null): Promise<string> {
+    return this.fixedToday ?? checkedRunDate(runLocalDate) ?? (await this.today(orgId));
+  }
+
+  /** `runDate` for a caller that already knows the organisation's time zone. */
+  runDateIn(timeZone: string, runLocalDate?: string | null): string {
+    return this.fixedToday ?? checkedRunDate(runLocalDate) ?? localDate(this.now(), timeZone);
+  }
+}
+
+/** The date of a daily run, or null without one; a malformed date fails the job instead of working on another day. */
+export function checkedRunDate(runLocalDate: string | null | undefined): string | null {
+  if (runLocalDate === undefined || runLocalDate === null) return null;
+  if (!isIsoDate(runLocalDate)) throw new TypeError(`The localDate of a daily job must be a date YYYY-MM-DD, got ${JSON.stringify(runLocalDate)}`);
+  return runLocalDate;
 }

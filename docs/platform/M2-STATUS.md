@@ -40,7 +40,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 | Wave | Full suites (orchestrator) | Notes |
 |---|---|---|
-| 2a | Server integration: 124 files, 1458 passed, 56 skipped (before the ledger rebuild). Web E2E sample: 286 passed, 1 failed on a lazy chunk cut off by a page load (helper widened again) | API E2E and the rerun after the ledger rebuild are pending |
+| 2a | Server integration: 124 files, 1458 passed, 56 skipped (before the ledger rebuild). Web E2E sample: 286 passed, 1 failed on a lazy chunk cut off by a page load; the helper now counts a load that began up to 2 s before the read, and the display and offline specs then passed 98 of 98 (twice each). Web E2E API: 264 passed, 1 failed in `framework.spec.js` (it still expected the ABMS update that M2-04 made the installed version); fixed, 6 of 6 in API mode and 8 of 8 in sample mode | The server suite reruns after the ledger rebuild |
 | 1 (1a, 1b, L1) | Server integration: 108 files, 1342 passed, 56 skipped. Web E2E sample: 286 passed, 1 failed once. Web E2E API: 265 passed | The failure was `e2e/offline.spec.js` (a lazy `sample-*.js` chunk cut off by a page load while `page.route` intercepts every request); `--repeat-each=4` then passed 8 of 8. The orchestrator widened the `requestfailed` filter of `apps/web/e2e/helpers.js` for that case between waves (offline, probe and shell specs pass) |
 
 ## Product decisions to keep in mind

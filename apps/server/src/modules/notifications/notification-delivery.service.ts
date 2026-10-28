@@ -12,7 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RecordRef, type NotificationKind } from '@mscd/shared';
 import { sql } from 'kysely';
-import { Clock } from '../../common/clock';
+import { Clock, checkedRunDate } from '../../common/clock';
 import { localDate, startOfLocalDay } from '../../common/dates';
 import type { TenantInfo, Trx } from '../../common/tokens';
 import { TenantResolver } from '../tenancy/tenant-resolver';
@@ -226,15 +226,18 @@ export class NotificationDeliveryService {
   // notifications.digest
   // -------------------------------------------------------------------------------------------------------------
 
-  /** One email per recipient with the pending digest notifications created before today (local time). */
-  async digest(orgId: string, requestId?: string): Promise<DeliveryCounts & { recipients: number }> {
+  /**
+   * One email per recipient with the pending digest notifications created before today (local time). A run of
+   * `scheduler.tick` takes the local date of its run (`runLocalDate`, Milestone 2 D.2) as today.
+   */
+  async digest(orgId: string, requestId?: string, runLocalDate?: string): Promise<DeliveryCounts & { recipients: number }> {
     const org = await this.organisation(orgId);
     const counts = { ...emptyCounts(), recipients: 0 };
     if (!org) return counts;
     const context = systemContextOf(org, requestId);
-    // created_at is the database time of the insert: the cut-off is the start of the real local day, so a fixed
-    // demo date (D-07) does not hold back recent rows.
-    const cutoff = startOfLocalDay(localDate(this.clock.now(), org.timeZone), org.timeZone);
+    // created_at is the database time of the insert: the cut-off is the start of the real local day (or of the run's
+    // date), so a fixed demo date (D-07) does not hold back recent rows.
+    const cutoff = startOfLocalDay(checkedRunDate(runLocalDate) ?? localDate(this.clock.now(), org.timeZone), org.timeZone);
     const recipients = await this.scope.withTenant(context, async (trx) => {
       const rows = await trx
         .selectFrom('notification')

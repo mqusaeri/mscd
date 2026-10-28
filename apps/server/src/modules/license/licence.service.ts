@@ -216,14 +216,15 @@ export class LicenceService implements OnModuleInit {
    * rollback is logged and audited after the transaction commits (at most once per organisation and hour), unless
    * `reportRollback` is false because the caller records it itself.
    */
-  async evaluate(trx: Trx, orgId: string, options: { reportRollback?: boolean } = {}): Promise<EvaluatedLicence | null> {
+  async evaluate(trx: Trx, orgId: string, options: { reportRollback?: boolean; runLocalDate?: string } = {}): Promise<EvaluatedLicence | null> {
     const record = await this.currentRecord(trx, orgId);
     if (!record) return null;
     const timeZone = await this.timeZoneOf(orgId);
     const mark = await trx.selectFrom('platform.clock_mark').select('high_water').executeTakeFirst();
     const highWater = mark?.high_water ?? null;
     const now = this.clock.now();
-    const today = this.clock.todayIn(timeZone);
+    // The daily check works on the date of its run (`runLocalDate`, Milestone 2 D.2); every other caller on today.
+    const today = this.clock.runDateIn(timeZone, options.runLocalDate);
     const document = parseDocument(record.document);
 
     let problem: string | null = null;
@@ -481,9 +482,10 @@ export class LicenceService implements OnModuleInit {
    * The daily licence check of one organisation (E.2 `license.check`): state changes are audited
    * (`licence.state_changed`) and notified to Tenant Admins (`licence_state`), the `licence` alert of every system is
    * raised, replaced or resolved, Tenant Admins get `licence_expiring` 60, 30 and 7 days before `valid_until`, and
-   * repositories whose adapter is not licensed become read-only (TS 5.7). Idempotent; never writes `ref`.
+   * repositories whose adapter is not licensed become read-only (TS 5.7). Idempotent; never writes `ref`. A run of
+   * `scheduler.tick` evaluates the licence on the local date of its run (`runLocalDate`, Milestone 2 D.2).
    */
-  async checkOrganisation(orgId: string): Promise<{ state: LicenceState | 'none'; changed: boolean } | null> {
+  async checkOrganisation(orgId: string, runLocalDate?: string): Promise<{ state: LicenceState | 'none'; changed: boolean } | null> {
     const tenants = this.requireTenants();
     const org = await tenants.resolveById(orgId);
     if (!org) {
@@ -491,7 +493,7 @@ export class LicenceService implements OnModuleInit {
       return null;
     }
     return this.requireScope().withTenant(systemContextOf(org), async (trx) => {
-      const evaluated = await this.evaluate(trx, orgId, { reportRollback: false });
+      const evaluated = await this.evaluate(trx, orgId, { reportRollback: false, runLocalDate });
       if (evaluated?.clockRollback) {
         this.logger.warn({ orgId }, 'license.check: the system clock is more than 24 hours behind the licence clock high-water mark (D-15)');
         await this.audit?.record(trx, {

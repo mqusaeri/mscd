@@ -62,16 +62,16 @@ export interface LocalTime {
 
 const WEEKDAYS: Readonly<Record<string, number>> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
+const localTimeFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** The local date, hour, minute, second and weekday of `instant` in `timeZone`. */
 export function localTimeOf(instant: Date, timeZone: string): LocalTime {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hourCycle: 'h23',
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(instant);
+  let format = localTimeFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    localTimeFormats.set(timeZone, format);
+  }
+  const parts = format.formatToParts(instant);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
   return {
     date: localDate(instant, timeZone),
@@ -80,6 +80,16 @@ export function localTimeOf(instant: Date, timeZone: string): LocalTime {
     second: Number(get('second')),
     weekday: WEEKDAYS[get('weekday')] ?? 0,
   };
+}
+
+/** The day of the week of a local date `YYYY-MM-DD` (0 Sunday). */
+export function weekdayOfDate(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/** The E.2 singleton key of a run of a daily job: `<prefix>:<org>:<local date>`, or `<prefix>:<org>:all`. */
+export function dailySingletonKey(job: DailyJob, orgId: string, date: string): string {
+  return job.allSystems ? `${job.prefix}:${orgId}:all` : `${job.prefix}:${orgId}:${date}`;
 }
 
 export interface DueDailyJob {
@@ -98,8 +108,7 @@ export function dueDailyJobs(orgId: string, instant: Date, timeZone: string, job
     if (hour !== local.hour) continue;
     if (job.weekday !== undefined && job.weekday !== local.weekday) continue;
     const startAfterSeconds = Math.max(0, (minute - local.minute) * 60 - local.second);
-    const key = job.allSystems ? `${job.prefix}:${orgId}:all` : `${job.prefix}:${orgId}:${local.date}`;
-    due.push({ job, singletonKey: key, startAfterSeconds });
+    due.push({ job, singletonKey: dailySingletonKey(job, orgId, local.date), startAfterSeconds });
   }
   return due;
 }

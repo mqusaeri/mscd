@@ -3,7 +3,8 @@
 groups:
   - name: mscd-services
     rules:
-      # A scrape target (an MSCD process, an exporter, Caddy or Alertmanager) did not answer.
+      # A scrape target (an MSCD process, an exporter or Alertmanager) did not answer. The
+      # label "service" (prometheus.yml) names the Compose service to look at.
       - alert: TargetDown
         expr: up == 0
         for: 2m
@@ -11,7 +12,7 @@ groups:
           severity: critical
         annotations:
           summary: "{{ $labels.job }} is not answering ({{ $labels.instance }})"
-          action: "Check the container: docker compose ps {{ $labels.job }} and its logs. See docs/saas/monitoring.md#targetdown"
+          action: "Check the container: docker compose ps {{ $labels.service }} and its log. See docs/saas/monitoring.md#targetdown"
 
       # The public address does not answer 200 on /healthz over HTTPS, seen from the server.
       - alert: PublicUrlDown

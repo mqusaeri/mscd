@@ -21,18 +21,21 @@ export class CertificateExpiryJob implements JobHandlerInstance<'certificate.exp
   ) {}
 
   async handle(job: JobRun<'certificate.expiry'>): Promise<void> {
-    const result = await this.run(job.env.orgId, job.env.requestId);
+    const result = await this.run(job.env.orgId, job.env.requestId, job.env.payload.localDate);
     this.logger.log(
       { jobId: job.id, orgId: job.env.orgId, attempt: job.attempt, notified: result?.notified ?? 0, expired: result?.expired.length ?? 0 },
       'certificate.expiry done',
     );
   }
 
-  /** One run for an organisation on its local date; null when the organisation is gone or not active. */
-  async run(orgId: string | null, requestId?: string): Promise<CertificateExpiryResult | null> {
+  /**
+   * One run for an organisation on its local date (the date of the run of `scheduler.tick`, `runLocalDate`, Milestone 2
+   * D.2); null when the organisation is gone or not active.
+   */
+  async run(orgId: string | null, requestId?: string, runLocalDate?: string): Promise<CertificateExpiryResult | null> {
     const org = await this.runner.organisation(orgId, 'certificate.expiry');
     if (!org) return null;
-    const today = await this.clock.today(org.id);
+    const today = await this.clock.runDate(org.id, runLocalDate);
     return this.runner.run(org, (trx) => this.expiry.run(trx, today), requestId);
   }
 }

@@ -1,180 +1,60 @@
 // `scheduler.tick` (E.2): hourly at minute 5 UTC. Advances the clock high-water mark of the licence rollback rule
-// (D-15) and enqueues, for every active organisation, the daily jobs whose local time falls in the organisation's
-// current local hour (D-07). Only jobs that have a handler in this build are enqueued, so a job of a later work
-// package starts being scheduled when its handler exists.
+// (D-15) and enqueues, for every active organisation, the runs of its daily jobs that are due (D-07). Only jobs that
+// have a handler in this build are enqueued, so a job of a later work package starts being scheduled when its
+// handler exists.
 //
-// A tick plans its slot: minute 5 of the UTC hour it runs in, the instant the cron schedule names. The local hour is
-// taken at the slot, so a tick that starts a few seconds early or some minutes late plans the same hour as a tick on
-// time; the delay of a job to its local minute is counted from the actual start.
+// Run ledger (Milestone 2 D.2, risk table I; orchestrator decision between waves 2a and 2b, migration
+// `platform/0006_daily_job_run.sql`): a run is one organisation, one daily job and one local date. The tick reads each
+// organisation's current time zone with a plain read (no row lock on organisation rows) and its ledger rows, and
+// `planDailyRuns` (daily-run-planner.ts) names the due runs: the runs of the tick's local hour, delayed to their local
+// minute, and the runs of the current and the previous local date whose local time passed without a run. For each run
+// the tick inserts its ledger row (`insert ... on conflict do nothing returning`) and sends the job only when the row
+// is new. The job carries the run's date in its payload (`localDate`) and works on that date (`Clock.runDate`), so a
+// time zone change between the tick and the job's start cannot move the job to another date. Each daily job therefore
+// runs at most once per local date of its organisation, a missed hour or a time zone change in either direction is
+// caught up, and late, early, repeated or missing ticks and a clock set back change nothing of that.
 //
-// Time zone changes (Milestone 2 D.2, risk table I, M2-06): the singleton key of a daily job holds the local date, but
-// it stops a second job only while the first is still waiting or running. After a Tenant Admin changes the time zone
-// (`org.updated`, see admin-users/organization.service.ts), the same local date could otherwise get a job twice (a
-// zone further west reaches the job's hour of a date the old zone already ran) or not at all (a zone further east
-// passed the job's hour of the date before the change). A run belongs to the local date of its singleton key, the
-// "today" the job works with. For an organisation whose zone changed in the last 54 hours, the tick reads the changes
-// from the organisation's audit trail and plans each local date once:
-// - A change applies from the first slot whose UTC hour starts after the change: the zone of a slot is the zone after
-//   the changes made before minute 0 of the slot's hour. A tick of the slot starts after minute 0 of that hour and
-//   reads the changes once the changes in progress have committed (`zoneHistories`), so it plans the slot with the
-//   zone that a later tick, replaying the slot, gives it, whenever in the hour the tick starts and whatever it sees of
-//   changes made after minute 0.
-// - The catch-up of a change belongs to the first tick whose slot is after the slot of the previous tick (the clock
-//   high-water mark before this tick) and whose hour starts after the change. It enqueues at once the jobs of the
-//   current local date whose hour has passed. When the previous tick is not known (a clock set back), the previous
-//   slot counts as the previous tick. A second tick in a slot that already had one plans nothing.
-// - Before it enqueues anything, the tick replays the plans of the slots of the last 52 hours up to the previous
-//   tick, catch-ups included, and leaves out a job that already ran for the current local date. Every run of a local
-//   date lies in that period.
+// Atomicity: the ledger rows and the jobs are written in one database transaction. The pg-boss driver sends through
+// that transaction (`db: fromKysely(trx)`, pg-boss 12.35), the BullMQ driver writes its outbox row in it, and the
+// in-memory driver queues the job after the commit. A failure rolls back both the rows and the jobs, and the retried
+// tick (E.2 retries 3) or the next tick plans them again, so a run is neither lost nor created twice. A send that the
+// queue drops because a job with the same singleton key is already waiting (E.1) counts as that run: for a key with a
+// date that job is this run, and for a key `<prefix>:<org>:all` it is a recompute of the same job that runs soon on the
+// current date. The planner never enqueues two runs of one job at once (see daily-run-planner.ts).
+//
+// Ordering: the tick first moves the clock high-water mark (`platform.clock_mark`, a single row). Its row lock is held
+// to the commit, so a second tick running at the same time waits there and then reads the ledger rows of the first.
+// The ledger rows reference their organisation, which takes a key share lock on its row; the organisation PATCH locks
+// its row `FOR NO KEY UPDATE`, which does not conflict with it (admin-users/organization.service.ts).
+//
+// Cleanup: the tick deletes ledger rows more than `LEDGER_RETENTION_DAYS` days old.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { JobName } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
+import { addDays } from '../../common/dates';
 import { JobHandler, JobHandlerRegistry, type JobHandlerInstance } from '../../common/jobs/job-handler';
 import { JOB_QUEUE, type JobQueue, type JobRun } from '../../common/jobs/job-queue';
-import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
-import { DAILY_JOBS, dueDailyJobs, localTimeOf, type DailyJob, type DueDailyJob, type LocalTime } from './schedules';
+import { TenantScope } from '../tenancy/tenant-scope';
+import { planDailyRuns, type LedgerRun, type PlannedRun } from './daily-run-planner';
+import { DAILY_JOBS, type DailyJob } from './schedules';
 
 export interface TickResult {
   highWater: string;
   organisations: number;
-  enqueued: { orgId: string; name: JobName; singletonKey: string; startAfterSeconds: number }[];
+  enqueued: { orgId: string; name: JobName; singletonKey: string; startAfterSeconds: number; localDate: string; path: PlannedRun['path'] }[];
+  /** Ledger rows deleted because they are older than `LEDGER_RETENTION_DAYS`. */
+  ledgerRowsDeleted: number;
 }
 
-/** A time zone change of an organisation, from its `org.updated` audit entry. */
-export interface TimeZoneChange {
-  at: Date;
-  from: string;
-  to: string;
-}
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 3_600_000;
-/** The minute of `scheduler.tick` in every UTC hour (`5 * * * *`). */
-const TICK_MINUTE_MS = 5 * MINUTE_MS;
-/**
- * How far back the tick replays the slots of an organisation with a time zone change. Every run of a local date lies
- * in 50 hours: from 00:05 of the date in the zone furthest east (UTC+14) to the date's last hour in the zone furthest
- * west (UTC-12); a catch-up comes later than the hour of its jobs, never earlier.
- */
-export const REPLAY_MS = 52 * HOUR_MS;
-/** How far back the tick reads time zone changes: the replay, the hour before its first slot and a margin. */
-export const TIME_ZONE_HISTORY_MS = 54 * HOUR_MS;
-
-/** The slot of a tick that runs at `instant`: minute 5 of the UTC hour it runs in. */
-export function tickSlotOf(instant: Date): Date {
-  return new Date(Math.floor(instant.getTime() / HOUR_MS) * HOUR_MS + TICK_MINUTE_MS);
-}
-
-/** Minute 0 of the UTC hour of a slot: a time zone change made before it applies to the slot, a later one does not. */
-const hourStartOf = (slot: Date): number => slot.getTime() - TICK_MINUTE_MS;
+/** Ledger rows are kept this many days after their local date. */
+export const LEDGER_RETENTION_DAYS = 14;
 
 /**
- * The zone of a slot, given the changes (oldest first): the zone after the changes made before minute 0 of the slot's
- * UTC hour. That is the zone before the first change made at or after it, else the zone after the last change, else
- * `timeZone`.
+ * The tick reads the ledger rows from this many days before the UTC date of its clock. The current local date of any
+ * zone lies within a day of the UTC date, so this covers the current and the previous local date with a margin.
  */
-export function zoneOfSlot(slot: Date, changes: readonly TimeZoneChange[], timeZone: string): string {
-  const hourStart = hourStartOf(slot);
-  for (const change of changes) if (change.at.getTime() >= hourStart) return change.from;
-  return changes.length > 0 ? changes[changes.length - 1]!.to : timeZone;
-}
-
-/** Local times of recent slots by zone: successive ticks replay almost the same slots. */
-const localTimes = new Map<string, LocalTime>();
-function localTimeAt(slot: Date, timeZone: string): LocalTime {
-  const key = `${slot.getTime()}|${timeZone}`;
-  let local = localTimes.get(key);
-  if (!local) {
-    if (localTimes.size >= 10_000) localTimes.clear();
-    local = localTimeOf(slot, timeZone);
-    localTimes.set(key, local);
-  }
-  return local;
-}
-
-/** A run of a daily job for a local date. */
-const runOf = (job: DailyJob, date: string) => `${job.prefix}@${date}`;
-
-interface SlotPlan {
-  local: LocalTime;
-  /** The jobs of the slot's local hour. */
-  due: DailyJob[];
-  /**
-   * The jobs of the slot's local date whose hour has passed, when a change applies from a slot after the previous
-   * tick's slot, up to this slot.
-   */
-  catchUp: DailyJob[];
-}
-
-/** What the tick of `slot` considers before it leaves out the runs of earlier ticks. */
-function slotPlan(slot: Date, previousSlot: Date, changes: readonly TimeZoneChange[], timeZone: string, jobs: readonly DailyJob[]): SlotPlan {
-  const local = localTimeAt(slot, zoneOfSlot(slot, changes, timeZone));
-  const [from, to] = [hourStartOf(previousSlot), hourStartOf(slot)];
-  const changed = changes.some((c) => c.at.getTime() >= from && c.at.getTime() < to);
-  const plan: SlotPlan = { local, due: [], catchUp: [] };
-  for (const job of jobs) {
-    if (job.weekday !== undefined && job.weekday !== local.weekday) continue;
-    const hour = Number(job.at.slice(0, 2));
-    if (hour === local.hour) plan.due.push(job);
-    else if (changed && hour < local.hour) plan.catchUp.push(job);
-  }
-  return plan;
-}
-
-/**
- * The daily jobs to enqueue for one organisation at `now`, given its zone (`timeZone`, the zone after the last change)
- * and its time zone changes of the last `TIME_ZONE_HISTORY_MS` (oldest first). A change dated after `now` counts too:
- * it applies from a later slot. `previousTick` is the instant of the tick before (the clock high-water mark before
- * this tick); without it the tick before is taken to be the one of the previous slot. Without changes this is
- * `dueDailyJobs` at the tick's slot.
- */
-export function planDailyJobs(
-  orgId: string,
-  now: Date,
-  timeZone: string,
-  changes: readonly TimeZoneChange[],
-  jobs: readonly DailyJob[] = DAILY_JOBS,
-  previousTick?: Date,
-): DueDailyJob[] {
-  const slot = tickSlotOf(now);
-  // The delay to a job's local minute counts from the actual start of the tick.
-  const early = Math.round((slot.getTime() - now.getTime()) / 1000);
-  const fromNow = (due: DueDailyJob): DueDailyJob => ({ ...due, startAfterSeconds: Math.max(0, due.startAfterSeconds + early) });
-  const recent = changes.filter((c) => c.at.getTime() > now.getTime() - TIME_ZONE_HISTORY_MS).sort((a, b) => a.at.getTime() - b.at.getTime());
-  if (recent.length === 0) return dueDailyJobs(orgId, slot, timeZone, jobs).map(fromNow);
-
-  // The slot of the tick before. A clock set back hides it (the mark is ahead of `now`).
-  const knownSlot = previousTick && previousTick.getTime() <= now.getTime() ? tickSlotOf(previousTick) : undefined;
-  if (knownSlot && knownSlot.getTime() === slot.getTime()) return [];
-  const previousSlot = knownSlot ?? new Date(slot.getTime() - HOUR_MS);
-
-  // The runs of the ticks before this one, up to the previous tick: slots after it had no tick.
-  const ran = new Set<string>();
-  for (let t = slot.getTime() - REPLAY_MS; t <= previousSlot.getTime(); t += HOUR_MS) {
-    const earlier = slotPlan(new Date(t), new Date(t - HOUR_MS), recent, timeZone, jobs);
-    for (const job of [...earlier.due, ...earlier.catchUp]) ran.add(runOf(job, earlier.local.date));
-  }
-
-  const plan = slotPlan(slot, previousSlot, recent, timeZone, jobs);
-  const zone = zoneOfSlot(slot, recent, timeZone);
-  const planned: DueDailyJob[] = [];
-  for (const due of dueDailyJobs(orgId, slot, zone, plan.due)) {
-    if (!ran.has(runOf(due.job, plan.local.date))) planned.push(fromNow(due));
-  }
-  for (const job of plan.catchUp) {
-    if (ran.has(runOf(job, plan.local.date))) continue;
-    const key = job.allSystems ? `${job.prefix}:${orgId}:all` : `${job.prefix}:${orgId}:${plan.local.date}`;
-    planned.push({ job, singletonKey: key, startAfterSeconds: 0 });
-  }
-  return planned;
-}
-
-/** The zone of an organisation read before its time zone changes, and those changes (oldest first). */
-interface ZoneHistory {
-  timeZone: string;
-  changes: TimeZoneChange[];
-}
+const LEDGER_READ_DAYS = 3;
 
 @Injectable()
 @JobHandler('scheduler.tick', { concurrency: 1, scope: 'installation' })
@@ -191,7 +71,15 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
   async handle(job: JobRun<'scheduler.tick'>): Promise<void> {
     const result = await this.tick(job.env.requestId);
     this.logger.log(
-      { jobId: job.id, attempt: job.attempt, organisations: result.organisations, enqueued: result.enqueued.length, highWater: result.highWater },
+      {
+        jobId: job.id,
+        attempt: job.attempt,
+        organisations: result.organisations,
+        enqueued: result.enqueued.length,
+        caughtUp: result.enqueued.filter((e) => e.path === 'catch-up').length,
+        ledgerRowsDeleted: result.ledgerRowsDeleted,
+        highWater: result.highWater,
+      },
       'scheduler.tick done',
     );
   }
@@ -201,101 +89,89 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
     const now = this.clock.now();
     const handled = new Set(this.registry.discover().map((h) => h.metadata.name));
     const daily: DailyJob[] = DAILY_JOBS.filter((d) => handled.has(d.name));
-    const histories = await this.zoneHistories(now);
+    const utcDate = now.toISOString().slice(0, 10);
     return this.scope.withPlatform(
       async (trx) => {
-        // The mark before this tick is the instant of the tick before: only this job moves it. The row lock orders
-        // ticks, and a tick that fails leaves the mark where it was, as if it had not run.
-        const previous = await trx.selectFrom('platform.clock_mark').select('high_water').forUpdate().executeTakeFirst();
-        // The mark only moves forward (D-15): a clock set back never lowers it.
+        // The mark only moves forward (D-15): a clock set back never lowers it. The row lock orders ticks (see above).
         const mark = await trx
           .updateTable('platform.clock_mark')
           .set({ high_water: sql<Date>`greatest(high_water, ${now})` })
           .returning('high_water')
           .executeTakeFirst();
-        const previousTick = previous ? new Date(previous.high_water) : undefined;
+        const deleted = await trx
+          .deleteFrom('platform.daily_job_run')
+          .where('local_date', '<', addDays(utcDate, -LEDGER_RETENTION_DAYS))
+          .executeTakeFirst();
         const orgs = await trx
           .selectFrom('platform.organization')
-          .select(['id', 'time_zone'])
+          .select(['id', 'time_zone', 'created_at'])
           .where('status', '=', 'active')
           .where('deleted_at', 'is', null)
           .orderBy('position')
           .orderBy('slug')
           .execute();
+        const ledger = new Map<string, LedgerRun[]>();
+        const recent = await trx
+          .selectFrom('platform.daily_job_run')
+          .select(['organization_id', 'job', 'local_date', 'scheduled_for'])
+          .where('local_date', '>=', addDays(utcDate, -LEDGER_READ_DAYS))
+          .execute();
+        for (const row of recent) {
+          const runs = ledger.get(row.organization_id) ?? [];
+          runs.push({ job: row.job, localDate: row.local_date, scheduledFor: new Date(row.scheduled_for) });
+          ledger.set(row.organization_id, runs);
+        }
+        const firsts = await trx
+          .selectFrom('platform.daily_job_run')
+          .select(['organization_id', (eb) => eb.fn.min<string>('local_date').as('first')])
+          .groupBy('organization_id')
+          .execute();
+        const firstLocalDate = new Map(firsts.map((f) => [f.organization_id, f.first]));
+
         const enqueued: TickResult['enqueued'] = [];
         for (const org of orgs) {
-          // The zone read with the changes; an organisation created since then has none.
-          const history = histories.get(org.id) ?? { timeZone: org.time_zone, changes: [] };
-          for (const due of planDailyJobs(org.id, now, history.timeZone, history.changes, daily, previousTick)) {
+          const runs = planDailyRuns({
+            orgId: org.id,
+            now,
+            timeZone: org.time_zone,
+            createdAt: new Date(org.created_at),
+            ledger: ledger.get(org.id) ?? [],
+            firstLocalDate: firstLocalDate.get(org.id) ?? null,
+            jobs: daily,
+          });
+          for (const run of runs) {
+            // The row first: a run whose row exists (another tick, a retry) is not sent again.
+            const inserted = await trx
+              .insertInto('platform.daily_job_run')
+              .values({ organization_id: org.id, job: run.job.name, local_date: run.localDate, scheduled_for: run.scheduledFor, enqueued_at: now })
+              .onConflict((oc) => oc.columns(['organization_id', 'job', 'local_date']).doNothing())
+              .returning('job')
+              .executeTakeFirst();
+            if (!inserted) continue;
             await this.jobs.send(
-              due.job.name,
-              { orgId: org.id, requestId, payload: {} },
-              { singletonKey: due.singletonKey, retryLimit: due.job.retryLimit, ...(due.startAfterSeconds > 0 ? { startAfterSeconds: due.startAfterSeconds } : {}) },
+              run.job.name,
+              { orgId: org.id, requestId, payload: { localDate: run.localDate } },
+              { singletonKey: run.singletonKey, retryLimit: run.job.retryLimit, ...(run.startAfterSeconds > 0 ? { startAfterSeconds: run.startAfterSeconds } : {}) },
               trx,
             );
-            enqueued.push({ orgId: org.id, name: due.job.name, singletonKey: due.singletonKey, startAfterSeconds: due.startAfterSeconds });
+            enqueued.push({
+              orgId: org.id,
+              name: run.job.name,
+              singletonKey: run.singletonKey,
+              startAfterSeconds: run.startAfterSeconds,
+              localDate: run.localDate,
+              path: run.path,
+            });
           }
         }
-        return { highWater: (mark?.high_water ?? now).toISOString(), organisations: orgs.length, enqueued };
+        return {
+          highWater: (mark?.high_water ?? now).toISOString(),
+          organisations: orgs.length,
+          enqueued,
+          ledgerRowsDeleted: Number(deleted.numDeletedRows),
+        };
       },
       { scope: 'job', requestId },
     );
-  }
-
-  /**
-   * The zone of every active organisation and, for those whose row changed in the last `TIME_ZONE_HISTORY_MS` (the
-   * row's `updated_at` follows every change), the time zone changes of that period from the `org.updated` entries of
-   * their audit trails, without an upper bound on `occurred_at`. The tick plans a slot with the changes made before
-   * minute 0 of its hour, so it must see each of them:
-   * - The zones are read with a key share lock on the organisation rows, after minute 0 of the tick's hour.
-   *   `PATCH /admin/organization` locks its row before it writes, so the read waits for every change that holds its
-   *   row, and a change that locks its row later waits for the read. Such a later change began in this tick's hour
-   *   or after it: the PATCH starts again in a new transaction when its transaction began in an earlier hour than the
-   *   one in which it locked the row. It applies from a later slot.
-   * - The trails are read after the zones, so a change in a zone read is in its trail, where it gives the zone of each
-   *   slot. A change in a trail that applies from a later slot, also one dated after `now`, leaves this slot's zone
-   *   as it was.
-   * A trail that cannot be read is logged and the organisation is planned without changes.
-   */
-  private async zoneHistories(now: Date): Promise<Map<string, ZoneHistory>> {
-    const since = new Date(now.getTime() - TIME_ZONE_HISTORY_MS);
-    const orgs = await this.scope.withPlatform(
-      (trx) =>
-        trx
-          .selectFrom('platform.organization')
-          .select(['id', 'schema_name', 'time_zone'])
-          .select(
-            sql<boolean>`updated_at > least(now(), ${now}::timestamptz) - ${`${TIME_ZONE_HISTORY_MS / 1000} seconds`}::interval`.as('changed'),
-          )
-          .where('status', '=', 'active')
-          .where('deleted_at', 'is', null)
-          .forKeyShare()
-          .execute(),
-      { scope: 'job' },
-    );
-    const out = new Map<string, ZoneHistory>();
-    for (const org of orgs) {
-      out.set(org.id, { timeZone: org.time_zone, changes: [] });
-      if (!org.changed) continue;
-      try {
-        const rows = await this.scope.withTenant(systemContextOf({ id: org.id, schema: org.schema_name }), async (trx) => {
-          const { rows: found } = await sql<{ occurred_at: Date; from_zone: string | null; to_zone: string | null }>`
-            select occurred_at, before_data->>'timeZone' as from_zone, after_data->>'timeZone' as to_zone
-              from audit_trail
-             where entity_type = 'organization' and entity_id = ${org.id} and action = 'org.updated'
-               and occurred_at > ${since}
-               and before_data ? 'timeZone' and after_data ? 'timeZone'
-             order by occurred_at, seq`.execute(trx);
-          return found;
-        });
-        const changes = rows
-          .filter((r) => r.from_zone && r.to_zone)
-          .map((r) => ({ at: new Date(r.occurred_at), from: r.from_zone as string, to: r.to_zone as string }));
-        out.set(org.id, { timeZone: org.time_zone, changes });
-      } catch (error) {
-        this.logger.error({ orgId: org.id }, `Could not read the time zone changes of organisation ${org.id}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    return out;
   }
 }

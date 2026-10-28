@@ -74,9 +74,10 @@ export class DriftService {
     @Inject(MEMBERSHIP_SERVICE) private readonly members: MembershipService,
   ) {}
 
-  async evaluate(org: TenantInfo, scope: { msId?: string }, requestId?: string): Promise<DriftSummary> {
+  /** One evaluation; a run of `scheduler.tick` works on the local date of its run (`scope.localDate`, Milestone 2 D.2). */
+  async evaluate(org: TenantInfo, scope: { msId?: string; localDate?: string }, requestId?: string): Promise<DriftSummary> {
     const at = windowNow(this.clock, org.timeZone);
-    const today = this.clock.todayIn(org.timeZone);
+    const today = this.clock.runDateIn(org.timeZone, scope.localDate);
     return this.runner.run(
       org,
       async (trx) => {

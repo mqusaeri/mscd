@@ -73,6 +73,19 @@ export function startOfLocalDay(iso: string, timeZone: string): Date {
   return new Date(guess);
 }
 
+/**
+ * The instant at which the clock of a time zone shows `time` (`HH:MM`) on a local date. A time that a daylight saving
+ * change skips gives an instant less than an hour from the change; a time that it repeats gives one of the two.
+ */
+export function instantOfLocal(iso: string, time: string, timeZone: string): Date {
+  const hm = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!hm) throw new TypeError(`Not a time HH:MM: ${JSON.stringify(time)}`);
+  const wall = utcMidnight(iso) + Number(hm[1]) * 3_600_000 + Number(hm[2]) * 60_000;
+  let guess = wall - offsetMs(new Date(wall), timeZone);
+  guess = wall - offsetMs(new Date(guess), timeZone);
+  return new Date(guess);
+}
+
 interface ZonedParts {
   year: string;
   month: string;

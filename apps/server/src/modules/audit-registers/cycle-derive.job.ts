@@ -23,7 +23,7 @@ export class CycleDeriveJob implements JobHandlerInstance<'cycle.derive'> {
   ) {}
 
   async handle(job: JobRun<'cycle.derive'>): Promise<void> {
-    const result = await this.run(job.env.orgId, job.env.payload.msId ?? null, job.env.requestId);
+    const result = await this.run(job.env.orgId, job.env.payload.msId ?? null, job.env.requestId, job.env.payload.localDate);
     this.logger.log(
       {
         jobId: job.id, orgId: job.env.orgId, attempt: job.attempt, systems: result.systems, items: result.items.length,
@@ -33,11 +33,14 @@ export class CycleDeriveJob implements JobHandlerInstance<'cycle.derive'> {
     );
   }
 
-  /** One run for an organisation (`msId` null: every system). */
-  async run(orgId: string | null, msId: string | null, requestId?: string): Promise<CycleDeriveResult> {
+  /**
+   * One run for an organisation (`msId` null: every system) on its local date (the date of the run of
+   * `scheduler.tick`, `runLocalDate`, Milestone 2 D.2).
+   */
+  async run(orgId: string | null, msId: string | null, requestId?: string, runLocalDate?: string): Promise<CycleDeriveResult> {
     const org = await this.runner.organisation(orgId, 'cycle.derive');
     if (!org || org.demoDeployLabel) return { systems: 0, items: [], skipped: [] };
-    const today = await this.clock.today(org.id);
+    const today = await this.clock.runDate(org.id, runLocalDate);
     return this.runner.run(org, (trx) => this.derivation.derive(trx, today, msId), requestId);
   }
 }

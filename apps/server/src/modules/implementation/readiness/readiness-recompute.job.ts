@@ -21,18 +21,21 @@ export class ReadinessRecomputeJob implements JobHandlerInstance<'readiness.reco
   ) {}
 
   async handle(job: JobRun<'readiness.recompute'>): Promise<void> {
-    const result = await this.run(job.env.orgId, job.env.payload.msId ?? null, job.env.requestId);
+    const result = await this.run(job.env.orgId, job.env.payload.msId ?? null, job.env.requestId, job.env.payload.localDate);
     this.logger.log(
       { jobId: job.id, orgId: job.env.orgId, attempt: job.attempt, msId: job.env.payload.msId ?? null, systems: result.length },
       'readiness.recompute done',
     );
   }
 
-  /** One run for an organisation (`msId` null: every system) on its local date. */
-  async run(orgId: string | null, msId: string | null, requestId?: string): Promise<SystemReadiness[]> {
+  /**
+   * One run for an organisation (`msId` null: every system) on its local date (the date of the run of
+   * `scheduler.tick`, `runLocalDate`, Milestone 2 D.2).
+   */
+  async run(orgId: string | null, msId: string | null, requestId?: string, runLocalDate?: string): Promise<SystemReadiness[]> {
     const org = await this.runner.organisation(orgId, 'readiness.recompute');
     if (!org) return [];
-    const today = await this.clock.today(org.id);
+    const today = await this.clock.runDate(org.id, runLocalDate);
     return this.runner.run(org, (trx) => this.readiness.recompute(trx, today, msId), requestId);
   }
 }

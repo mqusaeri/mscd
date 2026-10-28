@@ -59,7 +59,7 @@ export class FreshnessSweepJob implements JobHandlerInstance<'freshness.sweep'> 
   async handle(job: JobRun<'freshness.sweep'>): Promise<void> {
     const org = await this.runner.organisation(job.env.orgId, 'freshness.sweep');
     if (!org) return;
-    const result = await this.freshness.sweep(org, job.env.requestId);
+    const result = await this.freshness.sweep(org, job.env.requestId, job.env.payload.localDate);
     this.logger.log({ jobId: job.id, orgId: org.id, attempt: job.attempt, ...summary(result) }, 'freshness.sweep done');
   }
 }

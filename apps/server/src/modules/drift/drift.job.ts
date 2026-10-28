@@ -23,7 +23,7 @@ export class DriftEvaluateJob implements JobHandlerInstance<'drift.evaluate'> {
   async handle(job: JobRun<'drift.evaluate'>): Promise<void> {
     const org = await this.runner.organisation(job.env.orgId, 'drift.evaluate');
     if (!org) return;
-    const summary = await this.drift.evaluate(org, { msId: job.env.payload.msId }, job.env.requestId);
+    const summary = await this.drift.evaluate(org, { msId: job.env.payload.msId, localDate: job.env.payload.localDate }, job.env.requestId);
     this.logger.log({ jobId: job.id, orgId: org.id, attempt: job.attempt, ...summary }, 'drift.evaluate done');
   }
 }

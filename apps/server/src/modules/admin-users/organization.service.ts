@@ -1,41 +1,28 @@
 // The organisation settings of the Tenant Admin (build plan F.4, D.3; Milestone 2 D.1, D.2):
 // - `GET /admin/organization`: slug, name, time zone, site count, local sign-in policy, installation id (for licence
-//   requests), tenancy mode and the number of active Tenant Admins;
+//   requests), tenancy mode and the number of active Tenant Admins, with the weak ETag of the organisation row (from
+//   `updated_at`, in the body and the `ETag` header);
 // - `PATCH /admin/organization`: the local sign-in policy (`allowed`, `admins_only`, `disabled`; audited
 //   `org.settings_updated`, as in Milestone 1) and the name, the IANA time zone and the number of sites (audited
 //   `org.updated` with the values before and after). The slug never changes: it names the organisation's schema.
+//   `If-Match` with the ETag of the GET is checked before anything is written (412 when another change came first,
+//   R-18), so an admin with a stale form does not silently undo another admin's change.
 // Every change drops the organisation from the tenant resolver cache, so sign-in, `PUT /me/org` and local dates use
-// the new values at once (F.7 cache rule). The daily jobs follow a time zone change from the first scheduler tick whose
-// UTC hour starts after the change. The tick reads the `org.updated` entries so the jobs of the local day of the change
-// run once (scheduler-tick.job.ts).
+// the new values at once (F.7 cache rule). The PATCH locks the organisation row `FOR NO KEY UPDATE`: it waits for
+// another change of the row but not for the foreign key checks of rows that reference the organisation (they take a
+// key share lock), so a transaction that holds the tenant audit chain lock and then inserts such a row (an auditor
+// access grant) never deadlocks with it. The daily jobs follow a time zone change through the run ledger of
+// `scheduler.tick`: each runs once per local date of the organisation (jobs/scheduler-tick.job.ts).
 import { Inject, Injectable } from '@nestjs/common';
 import type { OrganizationSettings, OrgPolicyPatch } from '@mscd/shared';
 import { sql } from 'kysely';
+import { assertIfMatch, etagOf } from '../../common/etag';
 import { NotFoundError } from '../../common/problems';
 import { AUDIT_WRITER, type AuditWriter, type Principal, type Trx } from '../../common/tokens';
 import { MscdConfig } from '../../config/mscd-config';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { checkedTimeZone } from './time-zone';
-
-/** How often `PATCH /admin/organization` runs when its transaction began in an earlier UTC hour (see below). */
-const ATTEMPTS = 3;
-
-/** Rolls back a transaction that began in an earlier UTC hour than the one in which it locked the organisation row. */
-class BeganInEarlierHour extends Error {}
-
-/**
- * Whether the transaction locked the organisation row in a later UTC hour than the one it began in. A time zone change
- * counts from the start of its transaction (the `occurred_at` of its `org.updated` entry), and the scheduler tick
- * applies it from the first slot whose UTC hour starts after that instant. The tick reads the changes after minute 0
- * of its hour, once the changes that hold their row have committed (scheduler-tick.job.ts). A change that began before
- * minute 0 and locked its row after that read would be missed by that tick, so it runs again in a new transaction.
- */
-async function beganInEarlierHour(trx: Trx): Promise<boolean> {
-  const { rows } = await sql<{ earlier: boolean }>`
-    select floor(extract(epoch from now()) / 3600) < floor(extract(epoch from clock_timestamp()) / 3600) as earlier`.execute(trx);
-  return rows[0]?.earlier === true;
-}
 
 /** Active Tenant Admins of an organisation: active membership with the role, active person account. */
 export async function countActiveTenantAdmins(trx: Trx, orgId: string): Promise<number> {
@@ -65,7 +52,7 @@ export class OrganizationService {
     return this.scope.withTenant(tenantContextOf(principal), async (trx) => {
       const row = await trx
         .selectFrom('platform.organization')
-        .select(['slug', 'name', 'time_zone', 'site_count', 'local_login'])
+        .select(['slug', 'name', 'time_zone', 'site_count', 'local_login', 'updated_at'])
         .where('id', '=', org.id)
         .where('deleted_at', 'is', null)
         .executeTakeFirst();
@@ -79,79 +66,70 @@ export class OrganizationService {
         installationId: (await trx.selectFrom('platform.installation').select('id').executeTakeFirstOrThrow()).id,
         tenancyMode: this.config.profile.tenancy.mode,
         activeAdminCount: await countActiveTenantAdmins(trx, org.id),
+        etag: etagOf(row.updated_at),
       };
     });
   }
 
   /**
-   * `PATCH /admin/organization`: one audit entry per kind of change; nothing is written when nothing changes. A time
-   * zone change runs again in a new transaction when its transaction began in an earlier UTC hour than the one in
-   * which it locked the organisation row (`beganInEarlierHour`).
+   * `PATCH /admin/organization`: one audit entry per kind of change; nothing is written when nothing changes. A stale
+   * `If-Match` answers 412 before anything is written.
    */
-  async update(principal: Principal, patch: OrgPolicyPatch): Promise<void> {
+  async update(principal: Principal, patch: OrgPolicyPatch, ifMatch?: string): Promise<void> {
     const org = principal.org;
     if (!org) throw new NotFoundError('No current organisation');
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await this.scope.withTenant(tenantContextOf(principal), async (trx) => {
-          const current = await trx
-            .selectFrom('platform.organization')
-            .select(['slug', 'name', 'time_zone', 'site_count', 'local_login'])
-            .where('id', '=', org.id)
-            .forUpdate()
-            .executeTakeFirst();
-          if (!current) throw new NotFoundError('No current organisation');
-          // The last attempt writes without the check, so the PATCH always ends.
-          if (patch.timeZone !== undefined && attempt < ATTEMPTS && (await beganInEarlierHour(trx))) throw new BeganInEarlierHour();
+    await this.scope.withTenant(tenantContextOf(principal), async (trx) => {
+      const current = await trx
+        .selectFrom('platform.organization')
+        .select(['slug', 'name', 'time_zone', 'site_count', 'local_login', 'updated_at'])
+        .where('id', '=', org.id)
+        .forNoKeyUpdate()
+        .executeTakeFirst();
+      if (!current) throw new NotFoundError('No current organisation');
+      assertIfMatch(ifMatch, current.updated_at, current.slug);
 
-          if (patch.localLogin !== undefined && current.local_login !== patch.localLogin) {
-            await trx.updateTable('platform.organization').set({ local_login: patch.localLogin }).where('id', '=', org.id).execute();
-            await this.audit.record(trx, {
-              action: 'org.settings_updated',
-              entityType: 'organization',
-              entityId: org.id,
-              entityCode: org.slug,
-              before: { localLogin: current.local_login },
-              after: { localLogin: patch.localLogin },
-            });
-          }
-
-          const changes: { name?: string; time_zone?: string; site_count?: number } = {};
-          const before: Record<string, unknown> = {};
-          const after: Record<string, unknown> = {};
-          if (patch.name !== undefined && patch.name.trim() !== current.name) {
-            changes.name = patch.name.trim();
-            [before.name, after.name] = [current.name, changes.name];
-          }
-          if (patch.timeZone !== undefined) {
-            const zone = await checkedTimeZone(trx, patch.timeZone);
-            if (zone !== current.time_zone) {
-              changes.time_zone = zone;
-              [before.timeZone, after.timeZone] = [current.time_zone, zone];
-            }
-          }
-          if (patch.siteCount !== undefined && patch.siteCount !== current.site_count) {
-            changes.site_count = patch.siteCount;
-            [before.siteCount, after.siteCount] = [current.site_count, patch.siteCount];
-          }
-          if (Object.keys(changes).length > 0) {
-            await trx.updateTable('platform.organization').set(changes).where('id', '=', org.id).execute();
-            await this.audit.record(trx, {
-              action: 'org.updated',
-              entityType: 'organization',
-              entityId: org.id,
-              entityCode: current.slug,
-              before,
-              after,
-            });
-          }
+      if (patch.localLogin !== undefined && current.local_login !== patch.localLogin) {
+        await trx.updateTable('platform.organization').set({ local_login: patch.localLogin }).where('id', '=', org.id).execute();
+        await this.audit.record(trx, {
+          action: 'org.settings_updated',
+          entityType: 'organization',
+          entityId: org.id,
+          entityCode: org.slug,
+          before: { localLogin: current.local_login },
+          after: { localLogin: patch.localLogin },
         });
-        break;
-      } catch (error) {
-        if (error instanceof BeganInEarlierHour) continue;
-        throw error;
       }
-    }
+
+      const changes: { name?: string; time_zone?: string; site_count?: number } = {};
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      if (patch.name !== undefined && patch.name.trim() !== current.name) {
+        changes.name = patch.name.trim();
+        [before.name, after.name] = [current.name, changes.name];
+      }
+      if (patch.timeZone !== undefined) {
+        const zone = await checkedTimeZone(trx, patch.timeZone);
+        if (zone !== current.time_zone) {
+          changes.time_zone = zone;
+          [before.timeZone, after.timeZone] = [current.time_zone, zone];
+        }
+      }
+      if (patch.siteCount !== undefined && patch.siteCount !== current.site_count) {
+        changes.site_count = patch.siteCount;
+        [before.siteCount, after.siteCount] = [current.site_count, patch.siteCount];
+      }
+      if (Object.keys(changes).length > 0) {
+        await trx.updateTable('platform.organization').set(changes).where('id', '=', org.id).execute();
+        await this.audit.record(trx, {
+          action: 'org.updated',
+          entityType: 'organization',
+          entityId: org.id,
+          entityCode: current.slug,
+          before,
+          after,
+        });
+      }
+    });
     // After the commit: the next lookup reads the new values (F.7 cache rule).
     this.tenants.invalidate(org.id);
   }

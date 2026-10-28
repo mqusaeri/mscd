@@ -88,9 +88,12 @@ export class FreshnessService {
     return this.runner.run(org, (trx) => this.recomputeIn(trx, scope, today, now), requestId);
   }
 
-  /** `freshness.sweep`: the whole organisation, then `evidence_aging` (digest) once per evidence and production date. */
-  async sweep(org: TenantInfo, requestId?: string): Promise<RecomputeResult> {
-    const today = await this.clock.today(org.id);
+  /**
+   * `freshness.sweep`: the whole organisation, then `evidence_aging` (digest) once per evidence and production date. A
+   * run of `scheduler.tick` works on the local date of its run (`runLocalDate`, Milestone 2 D.2).
+   */
+  async sweep(org: TenantInfo, requestId?: string, runLocalDate?: string): Promise<RecomputeResult> {
+    const today = await this.clock.runDate(org.id, runLocalDate);
     const now = windowNow(this.clock, org.timeZone);
     return this.runner.run(
       org,

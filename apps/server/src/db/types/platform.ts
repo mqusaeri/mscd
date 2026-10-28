@@ -1,4 +1,4 @@
-// Kysely row types of the platform tables (migrations/platform/0001 to 0005, build plan C.4 and Milestone 2 D.3).
+// Kysely row types of the platform tables (migrations/platform/0001 to 0006, build plan C.4 and Milestone 2 D.2, D.3).
 // Hand-maintained (C.7): a migration that adds or changes these tables updates this file in the same change;
 // test/int/db/schema-types.test.ts compares TABLE_COLUMNS with the migrated database and fails on any difference.
 // Conventions: columns with a database default are Generated<T>, columns only a trigger writes are
@@ -413,6 +413,18 @@ export interface SystemSettingTable {
   updated_at: Generated<Date>;
 }
 
+/**
+ * `platform.daily_job_run` (0006): one row per organisation, daily job and local date that `scheduler.tick` enqueued
+ * (Milestone 2 D.2). `local_date` is the date the job works on; `scheduled_for` the instant the run is due.
+ */
+export interface DailyJobRunTable {
+  organization_id: string;
+  job: string;
+  local_date: string;
+  scheduled_for: Date;
+  enqueued_at: Generated<Date>;
+}
+
 /** Tables of this group as Kysely table keys. */
 export interface PlatformTables {
   'platform.organization': OrganizationTable;
@@ -444,6 +456,7 @@ export interface PlatformTables {
   'platform.system_setting': SystemSettingTable;
   'platform.organization_status_event': OrganizationStatusEventTable;
   'platform.entitlement': EntitlementTable;
+  'platform.daily_job_run': DailyJobRunTable;
 }
 
 /**
@@ -548,4 +561,5 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
     'organization_id', 'plan', 'source', 'max_users', 'max_management_systems', 'frameworks', 'storage_adapters', 'features',
     'rate_user_per_minute', 'rate_org_per_minute', 'valid_from', 'valid_until', 'grace_days', 'version', 'updated_at', 'updated_by',
   ],
+  'platform.daily_job_run': ['organization_id', 'job', 'local_date', 'scheduled_for', 'enqueued_at'],
 });

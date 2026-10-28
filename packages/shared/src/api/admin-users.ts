@@ -148,7 +148,7 @@ export type RoleGrantParams = z.infer<typeof RoleGrantParams>;
 
 const EXAMPLE_ORG_SETTINGS = {
   slug: 'ndt', name: 'PT Nusantara Digital Teknologi', timeZone: 'Asia/Jakarta', siteCount: 2, localLogin: 'allowed',
-  installationId: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', tenancyMode: 'single', activeAdminCount: 2,
+  installationId: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', tenancyMode: 'single', activeAdminCount: 2, etag: 'W/"1790380800000"',
 } as const;
 
 export const OrganizationSettings = named(
@@ -162,9 +162,14 @@ export const OrganizationSettings = named(
     installationId: Uuid,
     tenancyMode: TenancyMode,
     activeAdminCount: z.int().min(0),
+    /** Weak ETag of the organisation row (`updated_at`), also sent as the `ETag` header; `PATCH` takes it as `If-Match`. */
+    etag: z.string().regex(/^W\/"\d+"$/),
   }),
-  'GET /admin/organization: the organisation settings the Tenant Admin can see; the slug is permanent (Milestone 2 D.1)',
-  { valid: [EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 }], invalid: [{ ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }] },
+  'GET /admin/organization: the organisation settings the Tenant Admin can see and their ETag; the slug is permanent (Milestone 2 D.1)',
+  {
+    valid: [EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 }],
+    invalid: [{ ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }, { ...EXAMPLE_ORG_SETTINGS, etag: undefined }],
+  },
 );
 export type OrganizationSettings = z.infer<typeof OrganizationSettings>;
 
@@ -293,14 +298,15 @@ export const adminOrganizationUpdateRoute = defineRoute({
   owner: 'WP-39',
   method: 'PATCH',
   path: '/api/v1/admin/organization',
-  summary: 'Change the local sign-in policy, the name, the time zone or the number of sites of the organisation; the slug is permanent (audited org.settings_updated and org.updated)',
+  summary: 'Change the local sign-in policy, the name, the time zone or the number of sites of the organisation; the slug is permanent (audited org.settings_updated and org.updated). If-Match with the ETag of GET; 412 when another change came first',
   auth: 'session',
   permission: 'org.settings.manage',
   scope: 'org',
   body: OrgPolicyPatch,
   response: NoBody,
   status: 204,
-  errors: [],
+  errors: [412],
+  ifMatch: true,
 });
 
 export const adminOrganizationGetRoute = defineRoute({

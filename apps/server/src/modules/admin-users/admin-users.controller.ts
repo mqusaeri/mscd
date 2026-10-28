@@ -1,5 +1,6 @@
 // The user, organisation settings and role grant routes of D.3 "Administration" (WP-39), with the organisation settings
-// read and the extended organisation update of Milestone 2 (D.1, D.2, M2-06).
+// read and the extended organisation update of Milestone 2 (D.1, D.2, M2-06): the read sends the ETag of the
+// organisation row, which the update takes as `If-Match`.
 import { Controller, Req, Res } from '@nestjs/common';
 import {
   adminOrganizationGetRoute,
@@ -26,7 +27,7 @@ import {
   type UserView,
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ApiRoute, CurrentAuthz, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import { ApiRoute, CurrentAuthz, CurrentPrincipal, IfMatchHeader, RouteInputParam } from '../../common/api-route';
 import type { AuthzState, Principal } from '../../common/tokens';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
@@ -77,8 +78,12 @@ export class AdminUsersController {
   }
 
   @ApiRoute(adminOrganizationUpdateRoute)
-  updateOrganization(@CurrentPrincipal() principal: Principal, @RouteInputParam('body') body: OrgPolicyPatch): Promise<void> {
-    return this.organization.update(principal, body);
+  updateOrganization(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('body') body: OrgPolicyPatch,
+    @IfMatchHeader() ifMatch: string | undefined,
+  ): Promise<void> {
+    return this.organization.update(principal, body, ifMatch);
   }
 
   @ApiRoute(adminRolesGrantRoute)
@@ -111,7 +116,9 @@ export class AdminUsersController {
   }
 
   @ApiRoute(adminOrganizationGetRoute)
-  organizationSettings(@CurrentPrincipal() principal: Principal): Promise<OrganizationSettings> {
-    return this.organization.get(principal);
+  async organizationSettings(@Res({ passthrough: true }) reply: FastifyReply, @CurrentPrincipal() principal: Principal): Promise<OrganizationSettings> {
+    const settings = await this.organization.get(principal);
+    reply.header('etag', settings.etag);
+    return settings;
   }
 }

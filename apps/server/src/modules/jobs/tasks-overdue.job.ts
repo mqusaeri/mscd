@@ -90,14 +90,15 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
   ) {}
 
   async handle(job: JobRun<'tasks.overdue'>): Promise<void> {
-    const result = await this.run(job.env.orgId, job.env.requestId);
+    const result = await this.run(job.env.orgId, job.env.requestId, job.env.payload.localDate);
     this.logger.log({ jobId: job.id, orgId: job.env.orgId, attempt: job.attempt, ...result }, 'tasks.overdue done');
   }
 
-  async run(orgId: string | null, requestId?: string): Promise<TasksOverdueResult> {
+  /** One run on the organisation's local date (the date of the run of `scheduler.tick`, `runLocalDate`, Milestone 2 D.2). */
+  async run(orgId: string | null, requestId?: string, runLocalDate?: string): Promise<TasksOverdueResult> {
     const org = await this.runner.organisation(orgId, 'tasks.overdue');
     if (!org) return emptyResult();
-    const today = await this.clock.today(org.id);
+    const today = await this.clock.runDate(org.id, runLocalDate);
     return this.runner.run(
       org,
       async (trx) => {

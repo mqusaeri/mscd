@@ -5,24 +5,33 @@ import type { JobName } from '@mscd/shared';
 /** Jobs whose payload is the empty object. */
 type Empty = Record<string, never>;
 
+/**
+ * A daily job of E.2 that `scheduler.tick` enqueues per organisation (Milestone 2 D.2): the local date of its run, the
+ * date of its row in `platform.daily_job_run`. The job works on that date (`Clock.runDate`) and not on the date at its
+ * start, which a time zone change between the tick and the start can move. Absent when the job is sent another way.
+ */
+export interface DailyRun {
+  localDate?: string;
+}
+
 export interface JobPayloads {
   'scheduler.tick': Empty;
   'freshness.recompute': { msId?: string; evidenceIds?: string[]; entryIds?: string[] };
-  'freshness.sweep': Empty;
-  'tasks.overdue': Empty;
-  'documents.review-alerts': Empty;
-  'audit-prep.generate': Empty;
-  'license.check': Empty;
+  'freshness.sweep': DailyRun;
+  'tasks.overdue': DailyRun;
+  'documents.review-alerts': DailyRun;
+  'audit-prep.generate': DailyRun;
+  'license.check': DailyRun;
   'packs.lifecycle': Empty;
   'edition.withdrawn-alerts': Empty;
-  'link-health.plan': Empty;
+  'link-health.plan': DailyRun;
   'link-health.check': { repositoryId: string; storageObjectIds: string[]; taskId?: string };
-  'link-health.repository': Empty;
-  'drift.evaluate': { msId?: string };
-  'integrity.rehash': Empty;
-  'cycle.derive': { msId?: string };
+  'link-health.repository': DailyRun;
+  'drift.evaluate': { msId?: string } & DailyRun;
+  'integrity.rehash': DailyRun;
+  'cycle.derive': { msId?: string } & DailyRun;
   'notifications.dispatch': { notificationIds?: string[] };
-  'notifications.digest': Empty;
+  'notifications.digest': DailyRun;
   'evidence-pack.build': { packId: string };
   'export.build': { taskId: string };
   'pack.install': { installId: string; objectKey: string; requestedBy: string; orgId?: string };
@@ -30,9 +39,9 @@ export interface JobPayloads {
   'cleanup.expired': Empty;
   // Milestone 2 J.3 (written by M2-02; filled by the package named in J.3).
   /** One system, or every system of the organisation when absent (M2-05, D.6). */
-  'readiness.recompute': { msId?: string };
+  'readiness.recompute': { msId?: string } & DailyRun;
   /** Daily per organisation (M2-05, D.4). */
-  'certificate.expiry': Empty;
+  'certificate.expiry': DailyRun;
   /** The import to commit and its background task (M2-08). */
   'import.run': { importId: string; taskId: string };
   /** The framework versions an installation updated; the organisation is the envelope's (M2-03, E.3). */
