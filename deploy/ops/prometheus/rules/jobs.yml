@@ -27,17 +27,16 @@ groups:
           summary: "The job {{ $labels.job_name }} failed {{ $value | printf \"%.0f\" }} times in 30 minutes"
           action: "Read the worker log for this job. See docs/saas/monitoring.md#jobfailuresrising"
 
-      # The oldest waiting job of a queue has waited more than 55 minutes.
+      # The oldest due job of a queue has waited more than 15 minutes.
       #
-      # mscd_queue_oldest_age_seconds counts from the moment a job was queued, also for jobs
-      # queued to start later: scheduler.tick (minute 5 of every hour) queues the daily jobs
-      # of the hour up to 54 minutes before their start time (for example at 02:05 for 02:45),
-      # and those jobs wait in the queue as planned. 55 minutes is above that lead time, so
-      # the alert means a job that should have run is still waiting. Once the server measures
-      # the age from the start time of jobs that are due (handoff M2-S08, follow-up), lower
-      # the threshold to 900 seconds.
+      # mscd_queue_oldest_age_seconds counts from the start time of the jobs that are due: the
+      # time a job was queued for, or for a retry the time of the retry. A job queued to start
+      # later, such as a daily job that scheduler.tick (minute 5 of every hour) queues up to 54
+      # minutes ahead, counts only once its start time has come. So a value above 15 minutes
+      # means a job that should have run is still waiting. The api and the worker report the
+      # same queues, hence max by (queue).
       - alert: JobQueueStuck
-        expr: max by (queue) (mscd_queue_oldest_age_seconds) > 55 * 60
+        expr: max by (queue) (mscd_queue_oldest_age_seconds) > 900
         for: 5m
         labels:
           severity: warning

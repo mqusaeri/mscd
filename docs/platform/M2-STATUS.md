@@ -30,7 +30,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-06 Onboarding, accounts and operator server | 2a | Done | Daily jobs run from a ledger, `platform.daily_job_run` (one row per organisation, job and local date; orchestrator decision): over 600,000 simulated ticks, 0 doubles, 0 misses. Every new daily job must go through the ledger and read its date from the payload (`localDate`). The organisation PATCH checks If-Match |
 | M2-04 Pack content | 2a | Done | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. Evidence examples and the clause at risk are keyed per system. H.6 still open |
 | MOT-03 In-app illustration library | L2 | Done | Eight scenes (`getting-started`, `no-systems`, `no-documents`, `no-evidence`, `no-findings`, `all-done`, `error`, `offline`) through `<Illustration scene=... />` from `apps/web/src/illustrations`, passed to the EmptyState `illustration` prop. The handoff note says which scene goes where. Gallery at `?screen=illustrations` in the sample build only (the orchestrator assigned `apps/web/src/screens/illustrations/**`) |
-| M2-S08 Monitoring and alerts | 2b | Done | Real Grafana image test assigned to M2-S13 |
+| M2-S08 Monitoring and alerts | 2b | Done | Real Grafana image test assigned to M2-S13. The orchestrator follow-up of 2026-10-28 made the queue age count from the start time of due jobs and set `JobQueueStuck` back to 900 seconds (deviation 9 closed) |
 | M2-S05 Deploy script and deploy workflow | 2b | Done | The deploy rehearsal passed 78 checks. Deploys run only through `.github/workflows/deploy-prod.yml` with the owner's approval |
 | M2-S07 Backups and restore test, M2-S10 Per-organisation entitlements | 2b | Running | M2-S10: write `platform.entitlement` only in platform scope (see its brief); its daily `entitlement.expiry` job goes through the run ledger of M2-06 and reads `localDate` from the payload. M2-S07: the backup values come from `deploy-prod.yml` of M2-S05 |
 | M2-08 Bulk import, M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28): they share no file with the open packages of 2b |
@@ -43,11 +43,9 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 ## Open orchestrator items
 
-- Between waves 2b and 3a: make `mscd_queue_oldest_age_seconds` count from the start time of due jobs (`stats()` in `apps/server/src/modules/jobs/pgboss-job-queue.ts` and `bullmq-job-queue.ts`), then set `JobQueueStuck` in `deploy/ops/prometheus/rules/jobs.yml` and its promtool tests back to 900 seconds (M2-S08 deviation 9).
-- Running now: make `mscd_queue_oldest_age_seconds` count from the start time of due jobs and set `JobQueueStuck` back to 900 seconds (the first item above).
 - After M2-S07: run the M2-S05 rehearsal once more with the default overlays (`repo`), so it deploys the backup overlay too (M2-S05 handoff, follow-ups).
 - After M2-09: add the Administration entries `systems` and `routing` to the expectations of the shared tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` (owned by M2-01; MOT-03 found them).
-- After M2-S10: add `entitlements` to the expected `license` sub-commands in `apps/server/test/unit/cli/program.test.ts`.
+- With M2-S10: add `entitlements` to the expected `license` sub-commands in `apps/server/test/unit/cli/program.test.ts`, and commit the `06:15` line already added to `apps/server/test/int/jobs/scheduler.test.ts`.
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 - Owner: H.1 (terminology, gates M2-17) and H.6 (ISO 9001:2026 and ISO 37001:2025 trees) are still open.

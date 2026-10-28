@@ -119,13 +119,15 @@ export class InMemoryJobQueue implements JobQueue {
     return [...names].sort().map((name) => {
       const waiting = this.waiting.filter((j) => j.name === name);
       const active = [...this.activeJobs.values()].filter((a) => a.job.name === name).length;
-      const oldest = waiting.reduce((min, j) => Math.min(min, j.createdAt), Number.POSITIVE_INFINITY);
+      // The age counts from the start time (`runAfter`: the send time plus the start delay, or the time of the retry)
+      // of the jobs that are due; a job whose start time is ahead counts in `waiting` only.
+      const oldestDue = waiting.reduce((min, j) => (j.runAfter <= now ? Math.min(min, j.runAfter) : min), Number.POSITIVE_INFINITY);
       return {
         name,
         waiting: waiting.length,
         active,
         failed: this.failedJobs.filter((j) => j.name === name).length,
-        oldestAgeSeconds: Number.isFinite(oldest) ? Math.floor((now - oldest) / 1000) : 0,
+        oldestAgeSeconds: Number.isFinite(oldestDue) ? Math.floor((now - oldestDue) / 1000) : 0,
       };
     });
   }

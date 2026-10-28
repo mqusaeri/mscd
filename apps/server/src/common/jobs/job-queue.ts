@@ -40,9 +40,16 @@ export type JobHandlerFn<N extends JobName> = (job: JobRun<N>) => Promise<void>;
 
 export interface QueueStats {
   name: string;
+  /** Jobs not yet taken by a worker: due jobs, jobs whose start time is ahead and jobs waiting for a retry. */
   waiting: number;
   active: number;
   failed: number;
+  /**
+   * Seconds the oldest due job has waited since its start time: the send time plus `startAfterSeconds`, or for a
+   * retry the time of the retry. A job whose start time is ahead does not count until it is due; 0 when no job is due.
+   * On BullMQ a retry that a worker already moved back to the waiting list keeps no retry time and counts from the
+   * start of its failed run, early by the run time and the backoff.
+   */
   oldestAgeSeconds: number;
 }
 

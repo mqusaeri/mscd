@@ -121,13 +121,16 @@ export class PgBossJobQueue implements JobQueue {
 
   async stats(): Promise<QueueStats[]> {
     await this.ready();
-    // Counted from the job table: pg-boss's queue counters are refreshed by its monitor only.
+    // Counted from the job table: pg-boss's queue counters are refreshed by its monitor only. `waiting` counts every
+    // job not yet taken, also those whose start time is ahead. The age counts from `start_after` of the jobs that are
+    // due: the send time plus the start delay, and for a retry the time of the retry (pg-boss sets `start_after` to
+    // the failure time plus the backoff), so a job queued to start later counts only once its start time has come.
     const { rows } = await this.boss.getDb().executeSql(
       `SELECT name,
               count(*) FILTER (WHERE state IN ('created', 'retry'))::int AS waiting,
               count(*) FILTER (WHERE state = 'active')::int AS active,
               count(*) FILTER (WHERE state = 'failed')::int AS failed,
-              coalesce(extract(epoch FROM (now() - min(created_on) FILTER (WHERE state IN ('created', 'retry'))))::bigint, 0) AS age
+              coalesce(floor(extract(epoch FROM (now() - min(start_after) FILTER (WHERE state IN ('created', 'retry') AND start_after <= now()))))::bigint, 0) AS age
          FROM ${PGBOSS_SCHEMA}.job
         GROUP BY name`,
     );

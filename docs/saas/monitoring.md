@@ -131,7 +131,7 @@ Every alert email has the subject `[MSCD <domain>] Alert: <name>` and gives, for
 | [AuditChainBroken](#auditchainbroken) | An audit chain is broken or does not match its signed anchor | critical |
 | [LicenceExpiringSoon](#licenceexpiringsoon) | An organisation's licence ends in less than 30 days | warning |
 | [JobFailuresRising](#jobfailuresrising) | One job failed 3 times or more in 30 minutes | warning |
-| [JobQueueStuck](#jobqueuestuck) | A job has waited more than 55 minutes, for 5 minutes | warning |
+| [JobQueueStuck](#jobqueuestuck) | A due job has waited more than 15 minutes, for 5 minutes | warning |
 | [JobOutboxStuck](#joboutboxstuck) | Job outbox rows have been stuck for 15 minutes | warning |
 | [MfaLockSpike](#mfalockspike) | 3 or more second-factor lockouts in 15 minutes | warning, security |
 | [AccessDeniedSpike](#accessdeniedspike) | More than 50 refused requests in 10 minutes | warning, security |
@@ -200,7 +200,7 @@ $C exec prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets       # every 
 
 ### JobQueueStuck
 
-**What it means.** The oldest job of a queue has waited more than 55 minutes. The server counts the wait from the moment a job was queued, and the hourly scheduler queues the daily jobs of each organisation up to 54 minutes before their start time (for example at 02:05 for a job at 02:45). Those jobs wait as planned, so the alert allows for that. Above 55 minutes, a job that should have run is still waiting: emails, reminders or exports are delayed.
+**What it means.** A job of this queue has been due for more than 15 minutes and was still waiting 5 minutes later. A job is due from its start time: the moment it was sent, or the later time it was planned for. A job that failed and waits to be tried again is due from the time of that retry (with the BullMQ job driver, which the SaaS stack does not use, a retry already back in the waiting list counts from the start of its failed run, a little early). The hourly scheduler queues the daily jobs of each organisation up to 54 minutes before their start time (for example at 02:05 for a job at 02:45); those jobs do not count until their start time comes, so a planned wait never raises this alert. When the alert fires, a job that should have run is still waiting: emails, reminders or exports are delayed.
 
 **First step.** Check that the worker runs and is healthy: `$C ps worker` and `$C logs --tail 100 worker`. Restart it with `$C restart worker` when it hangs.
 

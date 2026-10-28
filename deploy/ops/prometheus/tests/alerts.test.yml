@@ -312,54 +312,63 @@ tests:
         alertname: JobFailuresRising
         exp_alerts: []
 
-  - name: JobQueueStuck fires when a job waits more than 55 minutes, for 5 minutes
+  - name: JobQueueStuck fires when a due job waits more than 15 minutes, for 5 minutes
     interval: 1m
     input_series:
-      # One more minute of waiting per minute: a job the worker does not take.
+      # A job due at minute 0 that the worker does not take: one more minute of waiting per
+      # minute, reported by the api and the worker alike. Above 15 minutes from minute 16.
       - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="notify.send"}'
-        values: "0+60x70"
+        values: "0+60x30"
       - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="notify.send"}'
-        values: "0+60x70"
+        values: "0+60x30"
+      # A queue whose jobs are taken within a minute.
       - series: 'mscd_queue_oldest_age_seconds{job="api", instance="api:9464", queue="export.build"}'
-        values: "30x70"
+        values: "30x30"
     alert_rule_test:
-      - eval_time: 58m
+      - eval_time: 15m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 62m
+      - eval_time: 20m
+        alertname: JobQueueStuck
+        exp_alerts: []
+      - eval_time: 21m
         alertname: JobQueueStuck
         exp_alerts:
           - exp_labels:
               severity: warning
               queue: notify.send
             exp_annotations:
-              summary: "Jobs of notify.send wait for 1h 2m 0s"
+              summary: "Jobs of notify.send wait for 21m 0s"
               action: "Check that the worker runs and is healthy. See docs/saas/monitoring.md#jobqueuestuck"
 
-  - name: JobQueueStuck stays quiet while daily jobs wait for their start time
+  - name: JobQueueStuck stays quiet on a healthy queue
     interval: 1m
     input_series:
-      # scheduler.tick queues drift.evaluate at 02:05 for 02:45: it waits 40 minutes as
-      # planned, then runs, every hour (one organisation per hour of the day).
+      # scheduler.tick queues drift.evaluate at 02:05 for 02:45. While it waits for its start
+      # time the job is not due, so the age stays 0; at its start time the worker takes it
+      # within a minute. The same every hour (one organisation per hour of the day).
       - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="drift.evaluate"}'
-        values: "0+60x40 0x19 0+60x40 0x19"
-      # The longest lead time: a job at minute 59, queued at minute 5.
-      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="link-health.repository"}'
-        values: "0+60x54 0x5 0+60x54 0x5"
+        values: "0x40 20 0x18 0x40 20 0x18"
+      # A burst of link checks: the oldest due job waits up to 15 minutes, then the queue drains.
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="link-health.check"}'
+        values: "0x10 0+60x15 0x94"
+      # A longer burst: above 15 minutes for 4 minutes only (minutes 47 to 50), then drained.
+      - series: 'mscd_queue_oldest_age_seconds{job="worker", instance="worker:9464", queue="export.build"}'
+        values: "0x30 0+60x19 0x70"
     alert_rule_test:
-      - eval_time: 40m
+      - eval_time: 26m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 54m
+      - eval_time: 41m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 59m
+      - eval_time: 50m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 100m
+      - eval_time: 52m
         alertname: JobQueueStuck
         exp_alerts: []
-      - eval_time: 114m
+      - eval_time: 101m
         alertname: JobQueueStuck
         exp_alerts: []
 

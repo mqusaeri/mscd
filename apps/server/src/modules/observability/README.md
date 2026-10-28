@@ -16,7 +16,7 @@ Where each ARCHITECTURE 12 metric comes from:
 | Metric | Source |
 |---|---|
 | `mscd_http_request_duration_seconds{route,method,status}` | Fastify `onResponse` hook of this module (api and storage-gateway) |
-| `mscd_queue_waiting{queue}`, `mscd_queue_oldest_age_seconds{queue}` | Collected by `modules/ops` from `JobQueue.stats()` |
+| `mscd_queue_waiting{queue}`, `mscd_queue_oldest_age_seconds{queue}` | Collected by `modules/ops` from `JobQueue.stats()`. `mscd_queue_waiting` counts every job not yet taken by a worker, also jobs whose start time is ahead (queued with a start delay, or waiting for a retry). `mscd_queue_oldest_age_seconds` is the wait of the oldest due job, counted from its start time: the time it was queued for, or for a retry the time of the retry. A job queued to start later (for example a daily job that `scheduler.tick` queues up to 54 minutes ahead) counts only once its start time has come; with no due job the value is 0. On the BullMQ driver a retry that a worker already moved back to the waiting list keeps no retry time and counts from the start of its failed run, so it reads early by the run time and the backoff (pg-boss and the in-memory driver keep the retry time). The alert JobQueueStuck reads it (`deploy/ops/prometheus/rules/jobs.yml`) |
 | `mscd_job_failures_total{job}` | Derived from `mscd_job_runs_total{outcome="failed"}` of the worker runtime |
 | `mscd_link_status_objects{status}` | Collected by `modules/ops`: storage objects of every active organisation |
 | `mscd_freshness_recompute_seconds{job}` | Derived from `mscd_job_duration_seconds` of `freshness.recompute` and `freshness.sweep` |

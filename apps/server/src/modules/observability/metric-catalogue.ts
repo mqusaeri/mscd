@@ -35,13 +35,16 @@ export const METRICS = {
   },
   queueWaiting: {
     name: 'mscd_queue_waiting',
-    help: 'Jobs waiting (including delayed and retrying) per queue',
+    help: 'Jobs not yet taken by a worker per queue: due jobs, jobs whose start time is ahead and jobs waiting for a retry',
     type: 'gauge',
     labelNames: ['queue'],
   },
   queueOldestAge: {
     name: 'mscd_queue_oldest_age_seconds',
-    help: 'Age of the oldest waiting job per queue',
+    help:
+      'Seconds the oldest due job per queue has waited since its start time (the time it was queued for, or its retry time; ' +
+      'on BullMQ a retry already moved back to the waiting list counts from the start of its failed run); ' +
+      'jobs whose start time is ahead do not count until it comes, 0 when no job is due',
     type: 'gauge',
     labelNames: ['queue'],
   },

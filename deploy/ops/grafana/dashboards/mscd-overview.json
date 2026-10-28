@@ -550,8 +550,8 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "Oldest waiting job",
-      "description": "Age of the oldest waiting job per queue. The alert JobQueueStuck fires above 15 minutes.",
+      "title": "Oldest due job",
+      "description": "How long the oldest due job of each queue has waited since its start time. A job queued to start later counts once its start time has come. The alert JobQueueStuck fires above 15 minutes, held for 5 minutes.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

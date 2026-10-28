@@ -42,6 +42,29 @@ export const OUTBOX_PARKED_ATTEMPTS = 32_767;
 /** Longest wait between two relay attempts of a failing row. */
 export const OUTBOX_MAX_BACKOFF_SECONDS = 600;
 
+/** Entries of the waiting list and of the prioritized set read per queue to find the oldest due job (`oldestDueAt`). */
+const DUE_SCAN_LIMIT = 1000;
+
+/** BullMQ scores its delayed set with the start time in ms times 0x1000 plus a sequence number (`getDelayedScore.lua`). */
+const DELAYED_SCORE_FACTOR = 0x1000;
+
+/**
+ * Start time in ms of a waiting or prioritized BullMQ job from the `timestamp`, `opts` and `processedOn` fields of its
+ * hash (see `oldestDueAt`), or null when the hash is gone (the job finished or was removed meanwhile).
+ */
+function startTimeOf(timestamp: string | null, opts: string | null, processedOn: string | null): number | null {
+  const queuedAt = timestamp === null ? Number.NaN : Number(timestamp);
+  if (!Number.isFinite(queuedAt)) return null;
+  let delay = 0;
+  try {
+    delay = Number((JSON.parse(opts ?? '{}') as { delay?: unknown }).delay ?? 0);
+  } catch {
+    delay = 0;
+  }
+  const lastRunAt = processedOn === null ? 0 : Number(processedOn);
+  return Math.max(queuedAt + (Number.isFinite(delay) && delay > 0 ? delay : 0), Number.isFinite(lastRunAt) ? lastRunAt : 0);
+}
+
 /** Seconds before the next relay attempt of a row that has failed `attempts` times: 2, 4, 8, ... up to 600. */
 export function outboxBackoffSeconds(attempts: number): number {
   return Math.min(OUTBOX_MAX_BACKOFF_SECONDS, 2 ** Math.max(1, Math.min(attempts, 20)));
@@ -163,21 +186,57 @@ export class BullMqJobQueue implements JobQueue {
     for (const name of JOB_NAMES) {
       const queue = this.queue(name);
       const counts = await queue.getJobCounts('waiting', 'delayed', 'prioritized', 'active', 'failed');
-      const oldest = await queue.getJobs(['waiting', 'prioritized'], 0, 0, true);
+      // `waiting` counts every job not yet taken, also those whose start time is ahead (the delayed set).
       const waiting = (counts.waiting ?? 0) + (counts.delayed ?? 0) + (counts.prioritized ?? 0);
       const active = counts.active ?? 0;
       const failed = counts.failed ?? 0;
       if (waiting === 0 && active === 0 && failed === 0 && !this.workers.has(name)) continue;
-      const first = oldest[0];
+      const now = Date.now();
+      const dueAt = waiting > 0 ? await this.oldestDueAt(queue, now) : null;
       out.push({
         name,
         waiting,
         active,
         failed,
-        oldestAgeSeconds: first ? Math.max(0, Math.floor((Date.now() - first.timestamp) / 1000)) : 0,
+        oldestAgeSeconds: dueAt === null ? 0 : Math.max(0, Math.floor((now - dueAt) / 1000)),
       });
     }
     return out;
+  }
+
+  /**
+   * Start time in ms of the oldest due job of a queue, or null when no job is due. BullMQ keeps a job that no worker
+   * has taken in the delayed set, the waiting list or the prioritized set:
+   * - The delayed set holds jobs queued with a start delay and retries waiting for their backoff, ordered by start
+   *   time (its score). A worker moves due jobs from it to the waiting list only when it fetches its next job, so
+   *   while no worker takes jobs a due job stays there: the first entry counts once its start time has passed.
+   * - The waiting list (ordered by the time a job entered it) and the prioritized set (ordered by priority, then by
+   *   the order of adding) hold jobs that are due, in no order of start time, so up to `DUE_SCAN_LIMIT` entries of
+   *   each are read: the waiting list from the job that entered it first, the prioritized set from its highest
+   *   priority down. Past `DUE_SCAN_LIMIT` prioritized jobs the lowest-priority ones, which may have waited longest,
+   *   are not seen (no caller sets a priority yet).
+   * - A job's start time is `timestamp + opts.delay`: BullMQ sets the job's own `delay` field to 0 when the job
+   *   leaves the delayed set, while its options keep the delay it was queued with. A job that has run before (a
+   *   retry, or a job moved back after its worker stopped) keeps no retry time once it left the delayed set; it
+   *   counts from the start of its last run (`processedOn`), earlier than the retry time by the run time and the
+   *   backoff.
+   */
+  private async oldestDueAt(queue: Queue, now: number): Promise<number | null> {
+    const client = await queue.client;
+    let oldest = Number.POSITIVE_INFINITY;
+    const delayedKey = queue.keys.delayed;
+    if (delayedKey) {
+      const [, score] = await client.zrange(delayedKey, 0, 0, { WITHSCORES: true });
+      const startAt = score === undefined ? Number.NaN : Math.floor(Number(score) / DELAYED_SCORE_FACTOR);
+      if (startAt <= now) oldest = startAt;
+    }
+    const ids = await queue.getRanges(['wait', 'paused', 'prioritized'], 0, DUE_SCAN_LIMIT - 1, true);
+    const fields = await Promise.all(ids.map((id) => client.hmget(queue.toKey(id), 'timestamp', 'opts', 'processedOn')));
+    for (const [timestamp, opts, processedOn] of fields) {
+      const startAt = startTimeOf(timestamp, opts, processedOn);
+      if (startAt !== null && startAt < oldest) oldest = startAt;
+    }
+    return Number.isFinite(oldest) ? Math.min(oldest, now) : null;
   }
 
   async stop(): Promise<void> {

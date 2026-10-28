@@ -3,7 +3,8 @@
 // authorisation guard, the queue, storage objects by link status, licences, MFA lockouts from the platform audit
 // log, and the derived job, freshness and gateway metrics.
 import { Counter, Histogram } from 'prom-client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { InMemoryJobQueue } from '../../../src/common/jobs/in-memory-job-queue';
 import { JOB_QUEUE, type JobQueue } from '../../../src/common/jobs/job-queue';
 import { AUDIT_WRITER, type AuditWriter } from '../../../src/common/tokens';
 import { ARCHITECTURE_METRIC_NAMES, METRICS, SOURCE_METRICS } from '../../../src/modules/observability/metric-catalogue';
@@ -112,6 +113,37 @@ describe('ARCHITECTURE 12 metrics on /metrics (WP-34)', () => {
     expect(mfaLocks).toBeGreaterThanOrEqual(1);
     expect(sample(text, 'mscd_job_outbox_stuck_rows')).toBe(1);
     expect(text).toMatch(/mscd_job_outbox_stuck_rows\{mode="api"\} 1/);
+  });
+
+  it('counts the queue age from the start time of due jobs: a job queued to start later waits with age 0, a due job counts from its start time', async () => {
+    const queue = ctx.moduleRef.get<JobQueue>(JOB_QUEUE);
+    // The test profile keeps jobs in memory, where a job takes its queue time and its start time from Date.now(). Both
+    // jobs below were queued two hours ago (no worker runs in this api application): drift.evaluate to start in an
+    // hour, as scheduler.tick queues a daily job ahead of its start time, and cycle.derive to start ten minutes ago.
+    // Counted from the time they were queued, both would show two hours.
+    expect(queue).toBeInstanceOf(InMemoryJobQueue);
+    const queuedAt = Date.now() - 2 * 3_600_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(queuedAt);
+    let sent: Promise<string | null>[];
+    try {
+      // The in-memory driver stores a job before `send` returns its promise, so the clock is set back for this call only.
+      sent = [
+        queue.send('drift.evaluate', { orgId: null, payload: {} }, { startAfterSeconds: 3 * 3600 }),
+        queue.send('cycle.derive', { orgId: null, payload: {} }, { startAfterSeconds: 2 * 3600 - 600 }),
+      ];
+    } finally {
+      clock.mockRestore();
+    }
+    for (const id of await Promise.all(sent)) expect(id).toBeTruthy();
+    await ctx.moduleRef.get(OpsMetricsCollector).refresh();
+    const text = await scrape();
+    expect(sample(text, 'mscd_queue_waiting', { queue: 'drift.evaluate' })).toBe(1);
+    expect(sample(text, 'mscd_queue_oldest_age_seconds', { queue: 'drift.evaluate' })).toBe(0);
+    expect(sample(text, 'mscd_queue_waiting', { queue: 'cycle.derive' })).toBe(1);
+    expect(sample(text, 'mscd_queue_oldest_age_seconds', { queue: 'cycle.derive' })).toBeGreaterThanOrEqual(600);
+    expect(sample(text, 'mscd_queue_oldest_age_seconds', { queue: 'cycle.derive' })).toBeLessThan(660);
+    expect(text).toContain(`# HELP ${METRICS.queueOldestAge.name} ${METRICS.queueOldestAge.help}\n`);
+    expect(METRICS.queueOldestAge.help).toMatch(/start time/);
   });
 
   it('derives job failures, freshness recompute time and gateway latency and throttling from their sources', async () => {
