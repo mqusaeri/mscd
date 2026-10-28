@@ -9,7 +9,11 @@ import { Instant, IsoDate, OrgSlug, commandResultWith, defineRoute, named } from
 import type { RouteDef } from './common.js';
 import { OrgParams, PlanPresetName } from './ops.js';
 
-/** Limits of an entitlement or a plan preset (Milestone 2 D.3 `platform.entitlement`, `license.plans`). */
+/**
+ * Limits of an entitlement or a plan preset (Milestone 2 D.3 `platform.entitlement`, `license.plans`). `maxUsers` counts
+ * active members without guests (product decision 5). An empty `frameworks` list of a preset or of limits set by the
+ * operator means every framework; a row from a signed licence keeps the licence's list as it is.
+ */
 const limitsShape = {
   maxUsers: z.int().min(0),
   maxManagementSystems: z.int().min(0),
@@ -46,7 +50,7 @@ export const Entitlement = named(
     updatedAt: Instant,
     usage: z.object({ users: z.int().min(0), managementSystems: z.int().min(0) }),
   }),
-  'The platform.entitlement row of an organisation with its current use (active members without guests, systems); the ETag of the answer is the If-Match value of a change',
+  'The platform.entitlement row of an organisation with its current use (active members without guests, systems that are not archived); the ETag of the answer is the If-Match value of a change',
   {
     valid: [EXAMPLE_ENTITLEMENT, { ...EXAMPLE_ENTITLEMENT, plan: null, source: 'signed_licence', validUntil: null }],
     invalid: [{ ...EXAMPLE_ENTITLEMENT, source: 'invoice' }, { ...EXAMPLE_ENTITLEMENT, maxUsers: -1 }, { ...EXAMPLE_ENTITLEMENT, usage: undefined }],

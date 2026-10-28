@@ -1,6 +1,8 @@
 // Area `license` (owner from wave 5: WP-12): the licence of the organisation (D.2 `LicenceView`, D.3, D-15, D-32).
+// Milestone 2 (M2-S10): with tenancy.mode multi the effective licence of an organisation is its `platform.entitlement`
+// row; the view then names the row's `source` and `plan`.
 import { z } from 'zod';
-import { StorageAdapter } from '../enums.js';
+import { EntitlementSource, StorageAdapter } from '../enums.js';
 import { LicenceDocument } from '../pack/licence.js';
 import { EXAMPLE_LICENCE } from '../examples.js';
 import { IsoDate, OrgSlug, Uuid, defineRoute, named } from './common.js';
@@ -38,9 +40,27 @@ export const LicenceView = named(
     storageAdapters: z.array(StorageAdapter),
     features: z.array(z.string()),
     signature: z.object({ alg: z.literal('Ed25519'), keyId: z.string(), verified: z.boolean(), offline: z.boolean() }),
+    /**
+     * Multi tenancy only (Milestone 2 M2-S10): where the effective licence comes from, the `platform.entitlement` row's
+     * source (a plan preset, limits set by the operator, or an uploaded signed licence). Absent in single tenancy.
+     */
+    source: EntitlementSource.optional(),
+    /** Multi tenancy only: the plan preset name of the entitlement row, null for limits set without a preset. */
+    plan: z.string().nullable().optional(),
   }),
-  'Verified licence with its derived state and the current usage (D.2); nothing derived is stored (D-15)',
-  { valid: [EXAMPLE_VIEW, { ...EXAMPLE_VIEW, state: 'grace', clockRollback: true }], invalid: [{ ...EXAMPLE_VIEW, state: 'expired' }, { ...EXAMPLE_VIEW, signature: { alg: 'RSA', keyId: 'k', verified: true, offline: true } }] },
+  'Verified licence with its derived state and the current usage (D.2); nothing derived is stored (D-15). With tenancy.mode multi it is the entitlement of the organisation (Milestone 2 M2-S10)',
+  {
+    valid: [
+      EXAMPLE_VIEW,
+      { ...EXAMPLE_VIEW, state: 'grace', clockRollback: true },
+      { ...EXAMPLE_VIEW, licenseId: 'standard', source: 'preset', plan: 'standard', signature: { alg: 'Ed25519', keyId: '-', verified: true, offline: false } },
+    ],
+    invalid: [
+      { ...EXAMPLE_VIEW, state: 'expired' },
+      { ...EXAMPLE_VIEW, signature: { alg: 'RSA', keyId: 'k', verified: true, offline: true } },
+      { ...EXAMPLE_VIEW, source: 'invoice' },
+    ],
+  },
 );
 export type LicenceView = z.infer<typeof LicenceView>;
 

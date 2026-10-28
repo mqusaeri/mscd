@@ -1,24 +1,55 @@
-// Per-organisation entitlements and plan presets of the SaaS track (Milestone 2 D.1, K.6). Stubs of M2-02, answering
-// 501 `not-implemented` after the guard; M2-S10 replaces them and registers its services in entitlements.module.ts.
-import { Controller } from '@nestjs/common';
-import { opsEntitlementsGetRoute, opsEntitlementsSetRoute, opsPlansListRoute } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+// Per-organisation entitlements and plan presets of the SaaS track (Milestone 2 D.1, K.6, M2-S10): the operator
+// routes `ops.entitlements.get` and `ops.entitlements.set`, which send the entitlement's ETag, and `ops.plans.list`.
+// The permission checks (`ops.read`, `ops.entitlements.manage`, platform scope) are the guard's; the rules are in
+// entitlement.service.ts.
+import { Controller, Res } from '@nestjs/common';
+import {
+  opsEntitlementsGetRoute,
+  opsEntitlementsSetRoute,
+  opsPlansListRoute,
+  type Entitlement,
+  type EntitlementSet,
+  type EntitlementSetResult,
+  type OrgParams,
+  type PlanPreset,
+} from '@mscd/shared';
+import type { FastifyReply } from 'fastify';
+import { ApiRoute, CurrentPrincipal, IfMatchHeader, RouteInputParam } from '../../common/api-route';
+import { UnauthenticatedError } from '../../common/problems';
+import type { Principal } from '../../common/tokens';
+import { EntitlementService } from './entitlement.service';
 
 @Controller()
 export class EntitlementsController {
+  constructor(private readonly entitlements: EntitlementService) {}
+
   @ApiRoute(opsEntitlementsGetRoute)
-  get(): never {
-    return routeStub(opsEntitlementsGetRoute);
+  async get(
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: Principal | null,
+    @RouteInputParam('params') params: OrgParams,
+  ): Promise<Entitlement> {
+    const read = await this.entitlements.get(principal, params.org);
+    reply.header('etag', read.etag);
+    return read.entitlement;
   }
 
   @ApiRoute(opsEntitlementsSetRoute)
-  set(): never {
-    return routeStub(opsEntitlementsSetRoute);
+  async set(
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: Principal | null,
+    @RouteInputParam('params') params: OrgParams,
+    @RouteInputParam('body') body: EntitlementSet,
+    @IfMatchHeader() ifMatch: string | undefined,
+  ): Promise<EntitlementSetResult> {
+    if (!principal) throw new UnauthenticatedError();
+    const written = await this.entitlements.set(principal, params.org, body, ifMatch);
+    reply.header('etag', written.etag);
+    return written.result;
   }
 
   @ApiRoute(opsPlansListRoute)
-  plans(): never {
-    return routeStub(opsPlansListRoute);
+  plans(): PlanPreset[] {
+    return this.entitlements.plans();
   }
 }

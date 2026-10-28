@@ -31,8 +31,8 @@ describe('mscd-server command line (D-01)', () => {
     // Milestone 2 D.3: the operator commands of M2-06.
     expect(sub('admin')).toEqual(['create-user', 'create-operator', 'revoke-operator']);
     expect(sub('seed')).toEqual(['demo']);
-    // Milestone 2 D.3: placeholders registered by M2-02, built by M2-06 (license), M2-S07 (backup) and M2-S09 (diagnostics).
-    expect(sub('license')).toEqual(['show-id']);
+    // Milestone 2 D.3: placeholders registered by M2-02, built by M2-06 and M2-S10 (license), M2-S07 (backup) and M2-S09 (diagnostics).
+    expect(sub('license')).toEqual(['show-id', 'entitlements']);
     expect(sub('backup')).toEqual(['verify']);
   });
 });

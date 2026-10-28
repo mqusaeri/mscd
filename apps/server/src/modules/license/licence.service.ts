@@ -3,6 +3,15 @@
 // organisation (an unbound licence only as a trial of at most 90 days), and is stored as the signed document. The
 // state and the entitlements are derived on every evaluation from the verified document and the clock; the
 // verification itself is cached in memory by the hash of the canonical document.
+//
+// Multi tenancy (Milestone 2 K.6, M2-S10): the effective licence of an organisation is its `platform.entitlement`
+// row (entitlement-row.ts). `evaluate` turns the row into the same `EvaluatedLicence` (a licence document derived from
+// the row, `entitlement` set), so every caller of the licence (the gate, the views, `license.check`, the metrics)
+// works unchanged. The upload of a signed licence (`PUT /admin/license {org, licence}`) still verifies the signature
+// and also writes the row with source `signed_licence`. An organisation without a row that holds a current verified
+// signed licence (installed before M2-S10) gets its row from that licence on the first read, written once in platform
+// scope and audited `ops.entitlements_changed`. An organisation with neither has no licence (the Milestone 1 rule).
+// Single tenancy keeps the signed licence as before.
 import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional, type OnModuleInit } from '@nestjs/common';
 import {
@@ -35,6 +44,9 @@ import { acceptsAfterCommit, afterCommit } from '../../common/transaction-hooks'
 import { MscdConfig } from '../../config/mscd-config';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
+import { EntitlementRegistry } from './entitlement-registry';
+import { NO_END_DATE, allFrameworks, licenceValues, readEntitlement, type EntitlementRecord } from './entitlement-row';
+import { EntitlementStore } from './entitlement-store';
 import {
   LICENCE_EXPIRY_WARNING_DAYS,
   evaluateLicenceState,
@@ -62,15 +74,41 @@ export interface LicenceBindingView {
 
 /** The current licence of an organisation with its derived state (nothing of this is stored, D-15). */
 export interface EvaluatedLicence extends LicenceStateResult {
+  /**
+   * The `platform.licence` row; for an entitlement without a signed licence (multi tenancy, source `preset` or
+   * `manual`) a record derived from the entitlement row (id: the organisation id, key id `-`).
+   */
   record: LicenceRecord;
-  /** The document as the licence schema reads it; null when it no longer matches the schema. */
+  /**
+   * The document as the licence schema reads it; null when it no longer matches the schema. For an entitlement, the
+   * document derived from the row: an empty framework list of a preset is every framework installed, and a row without
+   * an end date ends on `NO_END_DATE`.
+   */
   document: LicenceDocument | null;
-  /** Signature, key and binding checked against this build and this installation. */
+  /** Signature, key and binding checked against this build and this installation (an entitlement row counts as verified). */
   verified: boolean;
   /** Why the stored licence does not verify (then the state is `read_only` and nothing is licensed). */
   problem: string | null;
   binding: LicenceBindingView;
+  /** Multi tenancy (Milestone 2 M2-S10): the entitlement row this licence comes from; null for a signed licence alone. */
+  entitlement: EntitlementRecord | null;
 }
+
+/** Options of `LicenceService.evaluate`. */
+export interface EvaluateOptions {
+  /** False when the caller records a clock rollback itself (`license.check`). */
+  reportRollback?: boolean;
+  /** The date of a daily run (Milestone 2 D.2); today otherwise. */
+  runLocalDate?: string;
+  /**
+   * The entitlement row as the caller already read it (the registry's cached row in `evaluateOrg`); read in the
+   * transaction when absent. Null: the organisation has no row (the backfill from a signed licence still runs).
+   */
+  entitlement?: EntitlementRecord | null;
+}
+
+/** The key id shown for an entitlement that no signed licence carries (`LicenceView.signature.keyId`). */
+export const ENTITLEMENT_KEY_ID = '-';
 
 /** Display labels of the licence features (G.5 `LICENCE.features`). */
 export const FEATURE_LABELS: Readonly<Record<LicenceFeature, Messages>> = {
@@ -82,6 +120,8 @@ export const FEATURE_LABELS: Readonly<Record<LicenceFeature, Messages>> = {
 
 /** Most verification results kept in memory (one per distinct licence document). */
 const VERIFIED_CACHE_SIZE = 512;
+/** How long the list of installed framework codes (every framework of an entitlement) is kept in memory. */
+const FRAMEWORK_CODES_TTL_MS = 60_000;
 /** A clock rollback is audited at most once per organisation and hour from request paths. */
 const ROLLBACK_AUDIT_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -115,6 +155,7 @@ export class LicenceService implements OnModuleInit {
   private readonly verified = new Map<string, VerifiedDocument>();
   private readonly throttle = new Map<string, number>();
   private installationId: string | null = null;
+  private frameworkCache: { at: number; codes: string[] } | null = null;
   private readonly clock: Clock;
 
   constructor(
@@ -126,8 +167,15 @@ export class LicenceService implements OnModuleInit {
     @Optional() @Inject(AUDIT_WRITER) private readonly audit?: AuditWriter,
     @Optional() @Inject(NOTIFICATION_WRITER) private readonly notifications?: NotificationWriter,
     @Optional() @Inject(JOB_QUEUE) private readonly jobs?: JobQueue,
+    @Optional() private readonly entitlements?: EntitlementStore,
+    @Optional() private readonly registry?: EntitlementRegistry,
   ) {
     this.clock = clock ?? new Clock(config);
+  }
+
+  /** True when entitlement rows are the effective licences (tenancy.mode multi, Milestone 2 M2-S10). */
+  get usesEntitlements(): boolean {
+    return this.config.profile.tenancy.mode === 'multi' && this.entitlements !== undefined;
   }
 
   /**
@@ -215,16 +263,37 @@ export class LicenceService implements OnModuleInit {
    * and the state at today's date with the clock high-water rule (D-15). Null when no licence is installed. A clock
    * rollback is logged and audited after the transaction commits (at most once per organisation and hour), unless
    * `reportRollback` is false because the caller records it itself.
+   *
+   * Multi tenancy (M2-S10): the licence is the organisation's entitlement row. Without a row, a current signed
+   * licence that verifies is written as the row first (the backfill); one that does not verify is evaluated as before
+   * (read-only), and without any licence the result is null.
    */
-  async evaluate(trx: Trx, orgId: string, options: { reportRollback?: boolean; runLocalDate?: string } = {}): Promise<EvaluatedLicence | null> {
-    const record = await this.currentRecord(trx, orgId);
-    if (!record) return null;
+  async evaluate(trx: Trx, orgId: string, options: EvaluateOptions = {}): Promise<EvaluatedLicence | null> {
+    if (!this.usesEntitlements) {
+      const record = await this.currentRecord(trx, orgId);
+      return record ? this.evaluateRecord(trx, orgId, record, options) : null;
+    }
+    let row = options.entitlement !== undefined ? options.entitlement : await readEntitlement(trx, orgId);
+    if (!row) {
+      const record = await this.currentRecord(trx, orgId);
+      if (!record) return null;
+      row = await this.backfill(trx, orgId, record);
+      if (!row) return this.evaluateRecord(trx, orgId, record, options);
+    }
+    return this.evaluateEntitlement(trx, orgId, row, options);
+  }
+
+  /** The clock reading of an evaluation: zone, high-water mark, now and the day evaluated. */
+  private async clockOf(trx: Trx, orgId: string, runLocalDate?: string): Promise<{ timeZone: string; highWater: Date | null; now: Date; today: string }> {
     const timeZone = await this.timeZoneOf(orgId);
     const mark = await trx.selectFrom('platform.clock_mark').select('high_water').executeTakeFirst();
-    const highWater = mark?.high_water ?? null;
-    const now = this.clock.now();
     // The daily check works on the date of its run (`runLocalDate`, Milestone 2 D.2); every other caller on today.
-    const today = this.clock.runDateIn(timeZone, options.runLocalDate);
+    return { timeZone, highWater: mark?.high_water ?? null, now: this.clock.now(), today: this.clock.runDateIn(timeZone, runLocalDate) };
+  }
+
+  /** The signed licence evaluation (single tenancy, and a multi-tenancy licence that has no entitlement row). */
+  private async evaluateRecord(trx: Trx, orgId: string, record: LicenceRecord, options: EvaluateOptions): Promise<EvaluatedLicence> {
+    const { timeZone, highWater, now, today } = await this.clockOf(trx, orgId, options.runLocalDate);
     const document = parseDocument(record.document);
 
     let problem: string | null = null;
@@ -245,25 +314,131 @@ export class LicenceService implements OnModuleInit {
       verified: verifiedOk,
       problem: verifiedOk ? null : (problem ?? 'the stored licence does not match the licence schema'),
       binding: bindingView(record.document),
+      entitlement: null,
     };
     if (!verifiedOk && this.due(`${orgId}:unverified`)) {
       this.logger.error({ orgId, licenseId: record.licenseId, problem: evaluated.problem }, 'The installed licence does not verify: the organisation is read-only');
     }
-    if (result.clockRollback && options.reportRollback !== false && this.due(`${orgId}:rollback`)) {
-      const report = () => this.reportRollback(orgId, highWater, now);
-      // Never write the platform audit log from inside the caller's transaction here: it may hold the chain lock.
-      if (acceptsAfterCommit(trx)) afterCommit(trx, report);
-      else void report();
-    }
+    this.scheduleRollbackReport(trx, orgId, result, highWater, now, options);
     return evaluated;
   }
 
-  /** `evaluate` in a transaction of its own (the guard's read-only check). Null without a licence or a database. */
+  /**
+   * The licence an entitlement row gives (multi tenancy, M2-S10): the state from its dates and the clock rule of D-15
+   * (a row without an end date never expires), and a licence document derived from its limits. A row from a signed
+   * licence keeps that licence's id, organisation name and key id.
+   */
+  private async evaluateEntitlement(trx: Trx, orgId: string, row: EntitlementRecord, options: EvaluateOptions): Promise<EvaluatedLicence> {
+    const { timeZone, highWater, now, today } = await this.clockOf(trx, orgId, options.runLocalDate);
+    const validUntil = row.validUntil ?? NO_END_DATE;
+    const result = evaluateLicenceState(
+      { valid_from: row.validFrom, valid_until: validUntil, grace_days: row.validUntil ? row.graceDays : 0 },
+      { today, now, highWater, timeZone },
+    );
+    const signed = row.source === 'signed_licence' ? await this.currentRecord(trx, orgId) : null;
+    const signedDocument = signed ? parseDocument(signed.document) : null;
+    const organisation = signedDocument?.organization ?? (await this.tenants?.resolveById(orgId))?.name ?? orgId;
+    const document: LicenceDocument = {
+      license_id: signed?.licenseId ?? row.plan ?? 'custom',
+      organization: organisation,
+      valid_from: row.validFrom,
+      valid_until: validUntil,
+      grace_days: row.graceDays,
+      frameworks: allFrameworks(row) ? await this.frameworkCodes(trx) : [...row.frameworks],
+      max_management_systems: row.maxManagementSystems,
+      max_users: row.maxUsers,
+      storage_adapters: [...row.storageAdapters],
+      features: [...row.features],
+      organization_id: orgId,
+      key_id: signed?.keyId ?? ENTITLEMENT_KEY_ID,
+      signature: '',
+    };
+    const record: LicenceRecord = signed ?? {
+      id: orgId,
+      organizationId: orgId,
+      licenseId: document.license_id,
+      document: document as unknown as Record<string, unknown>,
+      documentSha256: '',
+      keyId: ENTITLEMENT_KEY_ID,
+      installedAt: row.updatedAt,
+    };
+    this.scheduleRollbackReport(trx, orgId, result, highWater, now, options);
+    return {
+      ...result,
+      record,
+      document,
+      verified: true,
+      problem: null,
+      binding: signed ? bindingView(signed.document) : { organizationId: orgId, trial: false },
+      entitlement: row,
+    };
+  }
+
+  /** Reports a clock rollback after the transaction commits (D-15), at most once per organisation and hour. */
+  private scheduleRollbackReport(trx: Trx, orgId: string, result: LicenceStateResult, highWater: Date | null, now: Date, options: EvaluateOptions): void {
+    if (!result.clockRollback || options.reportRollback === false || !this.due(`${orgId}:rollback`)) return;
+    const report = () => this.reportRollback(orgId, highWater, now);
+    // Never write the platform audit log from inside the caller's transaction here: it may hold the chain lock.
+    if (acceptsAfterCommit(trx)) afterCommit(trx, report);
+    else void report();
+  }
+
+  /**
+   * The backfill of M2-S10: the entitlement row of an organisation that has none, from its current signed licence
+   * when that licence verifies, with source `signed_licence`, audited `ops.entitlements_changed` (actor system).
+   * Written once (insert without overwrite, in platform scope) inside a savepoint, so a transaction that cannot write
+   * (one set read only) stays usable and a later read writes the row. Null when the licence does not verify or the
+   * row cannot be written now.
+   */
+  private async backfill(trx: Trx, orgId: string, record: LicenceRecord): Promise<EntitlementRecord | null> {
+    const store = this.entitlements;
+    const document = parseDocument(record.document);
+    if (!store || !document) return null;
+    try {
+      const verified = this.verifyDocument(record.document);
+      if (await this.bindingProblem(trx, verified, orgId)) return null;
+    } catch {
+      return null;
+    }
+    const slug = (await this.tenants?.resolveById(orgId))?.slug ?? null;
+    await sql`savepoint mscd_entitlement_backfill`.execute(trx);
+    try {
+      const written = await store.insertIfMissing(trx, orgId, licenceValues(document), { reason: 'backfill', actor: { userId: null, kind: 'system' }, slug });
+      const row = written ?? (await readEntitlement(trx, orgId));
+      await sql`release savepoint mscd_entitlement_backfill`.execute(trx);
+      if (written) {
+        this.logger.log({ orgId, licenseId: record.licenseId }, 'The signed licence of the organisation is now its entitlement row (source signed_licence)');
+      }
+      return row;
+    } catch (error) {
+      await sql`rollback to savepoint mscd_entitlement_backfill`.execute(trx);
+      if (this.due(`${orgId}:backfill`)) {
+        this.logger.warn({ orgId, licenseId: record.licenseId }, `The entitlement row could not be written from the signed licence yet; the licence is evaluated as before: ${(error as Error).message}`);
+      }
+      return null;
+    }
+  }
+
+  /** The codes of every installed framework (an entitlement whose empty list means every framework). */
+  private async frameworkCodes(trx: Trx): Promise<string[]> {
+    const cached = this.frameworkCache;
+    if (cached && Date.now() - cached.at < FRAMEWORK_CODES_TTL_MS) return [...cached.codes];
+    const rows = await trx.selectFrom('ref.framework').select('code').orderBy('code').execute();
+    const codes = rows.map((r) => r.code);
+    this.frameworkCache = { at: Date.now(), codes };
+    return [...codes];
+  }
+
+  /**
+   * `evaluate` in a transaction of its own (the guard's read-only check, features, adapters, metrics). Null without a
+   * licence or a database. In multi tenancy the entitlement row comes from the registry (cached up to 60 seconds).
+   */
   async evaluateOrg(orgId: string): Promise<EvaluatedLicence | null> {
     if (!this.scope || !this.tenants) return null;
     const org = await this.tenants.resolveById(orgId);
     if (!org) return null;
-    return this.scope.withTenant(systemContextOf(org), (trx) => this.evaluate(trx, orgId));
+    const options: EvaluateOptions = this.usesEntitlements && this.registry ? { entitlement: await this.registry.get(orgId) } : {};
+    return this.scope.withTenant(systemContextOf(org), (trx) => this.evaluate(trx, orgId, options));
   }
 
   /** True at most once per key and hour (log and audit throttle of request paths). */
@@ -352,6 +527,8 @@ export class LicenceService implements OnModuleInit {
       storageAdapters: [...doc.storage_adapters],
       features: [...doc.features],
       signature: { alg: 'Ed25519', keyId: evaluated.record.keyId, verified: evaluated.verified, offline: this.config.profile.license.validation === 'offline' },
+      // Multi tenancy (M2-S10): where the effective licence comes from.
+      ...(evaluated.entitlement ? { source: evaluated.entitlement.source, plan: evaluated.entitlement.plan } : {}),
     };
   }
 
@@ -394,6 +571,8 @@ export class LicenceService implements OnModuleInit {
     return scope.withTenant({ orgId: target.id, schema: target.schema, userId: principal.user.id }, async (trx) => {
       await sql`select pg_advisory_xact_lock(hashtextextended(${`licence-install:${target.id}`}, 0))`.execute(trx);
       const current = await this.currentRecord(trx, target.id);
+      const actor = { userId: principal.user.id, kind: this.config.profile.tenancy.mode === 'multi' && !principal.org ? ('operator' as const) : ('user' as const) };
+      let checkKey: string | null = null;
       if (current?.documentSha256 !== sha) {
         if (current) {
           await trx.updateTable('platform.licence').set({ superseded_at: new Date() }).where('id', '=', current.id).execute();
@@ -412,7 +591,7 @@ export class LicenceService implements OnModuleInit {
           .executeTakeFirstOrThrow();
         await this.audit?.record(trx, {
           action: 'licence.installed',
-          actor: { userId: principal.user.id, kind: this.config.profile.tenancy.mode === 'multi' && !principal.org ? 'operator' : 'user' },
+          actor,
           organizationId: target.id,
           entityType: 'licence',
           entityId: row.id,
@@ -426,13 +605,26 @@ export class LicenceService implements OnModuleInit {
             binding: verified.binding.kind,
           },
         });
-        // Alerts, read-only repositories and notifications follow the new licence right away (E.2 license.check).
-        const jobs = this.jobs;
-        if (jobs) {
-          afterCommit(trx, async () => {
-            await jobs.send('license.check', { orgId: target.id, requestedBy: principal.user.id, payload: {} }, { singletonKey: `lc:${target.id}:${row.id}`, retryLimit: 3 });
-          });
-        }
+        checkKey = `lc:${target.id}:${row.id}`;
+      }
+      // Multi tenancy (M2-S10): the verified licence becomes the organisation's entitlement row (source
+      // `signed_licence`); rate limits set by the operator are kept, since a licence has none.
+      if (this.usesEntitlements && this.entitlements) {
+        const previous = await readEntitlement(trx, target.id);
+        const written = await this.entitlements.write(trx, target.id, licenceValues(verified.document, previous ?? undefined), {
+          reason: 'licence_upload',
+          actor,
+          slug: target.slug,
+        });
+        if (written.changed) checkKey ??= `lc:${target.id}:e${written.row.version}`;
+      }
+      // Alerts, read-only repositories and notifications follow the new licence right away (E.2 license.check).
+      const jobs = this.jobs;
+      const key = checkKey;
+      if (jobs && key) {
+        afterCommit(trx, async () => {
+          await jobs.send('license.check', { orgId: target.id, requestedBy: principal.user.id, payload: {} }, { singletonKey: key, retryLimit: 3 });
+        });
       }
       const evaluated = await this.evaluate(trx, target.id);
       if (!evaluated) throw new Error('The licence just installed cannot be read back');
@@ -500,7 +692,7 @@ export class LicenceService implements OnModuleInit {
           action: 'licence.clock_rollback',
           actor: { userId: SYSTEM_USER_ID, kind: 'system' },
           organizationId: orgId,
-          entityType: 'licence',
+          entityType: entityTypeOf(evaluated),
           entityId: evaluated.record.id,
           after: { now: this.clock.now().toISOString(), evaluatedOn: evaluated.evaluatedOn },
         });
@@ -517,7 +709,7 @@ export class LicenceService implements OnModuleInit {
           action: 'licence.state_changed',
           actor: { userId: SYSTEM_USER_ID, kind: 'system' },
           organizationId: orgId,
-          entityType: 'licence',
+          entityType: entityTypeOf(evaluated),
           entityId: evaluated.record.id,
           entityCode: evaluated.record.licenseId,
           before: { state: previous },
@@ -538,35 +730,81 @@ export class LicenceService implements OnModuleInit {
 
       if (evaluated?.verified && evaluated.document && evaluated.state === 'valid') {
         const days = evaluated.daysToExpiry;
-        if ((LICENCE_EXPIRY_WARNING_DAYS as readonly number[]).includes(days)) {
-          const until = evaluated.document.valid_until;
-          const title = { en: `Licence expires in ${days} days`, id: `Lisensi berakhir dalam ${days} hari` };
-          for (const userId of admins) {
-            const already = await trx
-              .selectFrom('notification')
-              .select('id')
-              .where('recipient_user_id', '=', userId)
-              .where('kind', '=', 'licence_expiring')
-              .where('title_en', '=', title.en)
-              .where(sql<boolean>`position(${evaluated.record.licenseId} in body_en) > 0`)
-              .executeTakeFirst();
-            if (already) continue;
-            await this.notifications?.create(trx, {
-              recipientUserId: userId,
-              kind: 'licence_expiring',
-              title,
-              body: {
-                en: `Licence ${evaluated.record.licenseId} is valid until ${fmtDay(until)}. Install a renewed licence before then.`,
-                id: `Lisensi ${evaluated.record.licenseId} berlaku sampai ${fmtDay(until, 'id')}. Pasang lisensi baru sebelum tanggal itu.`,
-              },
-              createdBy: SYSTEM_USER_ID,
-            });
-          }
-        }
+        if ((LICENCE_EXPIRY_WARNING_DAYS as readonly number[]).includes(days)) await this.notifyExpiring(trx, evaluated, days, admins);
       }
       if (evaluated) await this.syncRepositoryAccess(trx, evaluated);
       return { state, changed };
     });
+  }
+
+  /**
+   * The `licence_expiring` notice of a licence `days` days before its last day for each of `recipients` (Tenant
+   * Admins), once per recipient, notice day and licence: `license.check` (60, 30 and 7 days) and, in multi tenancy,
+   * `entitlement.expiry` (30 and 7 days, M2-S10) share it, so a Tenant Admin gets one notice, and one email through
+   * `notifications.dispatch`, whichever job runs first. In multi tenancy the text tells the reader to ask the service
+   * provider, who renews plans and licences there. Returns the notices written.
+   */
+  async notifyExpiring(trx: Trx, evaluated: EvaluatedLicence, days: number, recipients: readonly string[]): Promise<number> {
+    const doc = evaluated.document;
+    if (!doc) return 0;
+    const notice = this.expiryNotice(evaluated, doc.valid_until, days);
+    let written = 0;
+    for (const userId of recipients) {
+      const already = await trx
+        .selectFrom('notification')
+        .select('id')
+        .where('recipient_user_id', '=', userId)
+        .where('kind', '=', 'licence_expiring')
+        .where('title_en', '=', notice.title.en)
+        .where(sql<boolean>`position(${notice.token} in body_en) > 0`)
+        .executeTakeFirst();
+      if (already) continue;
+      const id = await this.notifications?.create(trx, {
+        recipientUserId: userId,
+        kind: 'licence_expiring',
+        title: notice.title,
+        body: notice.body,
+        createdBy: SYSTEM_USER_ID,
+      });
+      if (id) written += 1;
+    }
+    return written;
+  }
+
+  /** Title, body and the text that identifies the licence in the body (the once-only check of `notifyExpiring`). */
+  private expiryNotice(evaluated: EvaluatedLicence, until: string, days: number): { title: Messages; body: Messages; token: string } {
+    const title = { en: `Licence expires in ${days} days`, id: `Lisensi berakhir dalam ${days} hari` };
+    const licenseId = evaluated.record.licenseId;
+    const row = evaluated.entitlement;
+    if (row && row.source !== 'signed_licence') {
+      const plan = row.plan ? `${row.plan} ` : '';
+      return {
+        title,
+        token: fmtDay(until),
+        body: {
+          en: `The ${plan}plan of this organisation is valid until ${fmtDay(until)}. Ask your MSCD service provider to renew it before then.`,
+          id: `Paket ${plan}organisasi ini berlaku sampai ${fmtDay(until, 'id')}. Mintalah penyedia layanan MSCD Anda untuk memperpanjangnya sebelum tanggal itu.`,
+        },
+      };
+    }
+    if (this.config.profile.tenancy.mode === 'multi') {
+      return {
+        title,
+        token: licenseId,
+        body: {
+          en: `Licence ${licenseId} is valid until ${fmtDay(until)}. Ask your MSCD service provider to renew it before then.`,
+          id: `Lisensi ${licenseId} berlaku sampai ${fmtDay(until, 'id')}. Mintalah penyedia layanan MSCD Anda untuk memperpanjangnya sebelum tanggal itu.`,
+        },
+      };
+    }
+    return {
+      title,
+      token: licenseId,
+      body: {
+        en: `Licence ${licenseId} is valid until ${fmtDay(until)}. Install a renewed licence before then.`,
+        id: `Lisensi ${licenseId} berlaku sampai ${fmtDay(until, 'id')}. Pasang lisensi baru sebelum tanggal itu.`,
+      },
+    };
   }
 
   /** The state of the newest `licence.state_changed` entry of the organisation; `valid` when there is none. */
@@ -701,8 +939,9 @@ export class LicenceService implements OnModuleInit {
   // Entitlements used by the gate and the management system service
   // -------------------------------------------------------------------------------------------------------------
 
-  /** BR-21: the framework of a pack must be in the licence (TS 6.2). */
+  /** BR-21: the framework of a pack must be in the licence (TS 6.2); an entitlement without frameworks has every one. */
   assertFrameworkLicensed(evaluated: EvaluatedLicence | null, frameworkCode: string): void {
+    if (evaluated?.entitlement && allFrameworks(evaluated.entitlement)) return;
     const frameworks = evaluated?.verified && evaluated.document ? evaluated.document.frameworks : [];
     if (!frameworks.includes(frameworkCode)) {
       throw new BusinessRuleError('BR-21', {
@@ -743,6 +982,11 @@ const STATE_LABELS: Readonly<Record<LicenceState, Messages>> = {
   grace: { en: 'grace period', id: 'masa tenggang' },
   read_only: { en: 'read-only', id: 'hanya baca' },
 };
+
+/** The audit entity of a licence: the signed licence, or the entitlement row it comes from (multi tenancy). */
+function entityTypeOf(evaluated: EvaluatedLicence): string {
+  return evaluated.entitlement && evaluated.entitlement.source !== 'signed_licence' ? 'entitlement' : 'licence';
+}
 
 function firstLine(text: string): string {
   return text.split('\n')[0] ?? text;

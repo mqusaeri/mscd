@@ -46,6 +46,9 @@ export const DAILY_JOBS: readonly DailyJob[] = [
   { name: 'cycle.derive', at: '03:15', prefix: 'cd', allSystems: true, retryLimit: 3 },
   // Milestone 2 J.3 (M2-05): certificate notices 90, 30 and 7 days ahead and the lapse to expired (D.4).
   { name: 'certificate.expiry', at: '06:00', prefix: 'ce', retryLimit: 3 },
+  // Milestone 2 J.3 (M2-S10): entitlement notices to the operators (30, 7, 1 days) and Tenant Admins (30, 7 days).
+  // Its handler exists only with tenancy.mode multi, so single tenancy never schedules it.
+  { name: 'entitlement.expiry', at: '06:15', prefix: 'ee', retryLimit: 3 },
   { name: 'documents.review-alerts', at: '06:30', prefix: 'dra', retryLimit: 3 },
   { name: 'notifications.digest', at: '07:00', prefix: 'ndg', retryLimit: 3 },
 ];

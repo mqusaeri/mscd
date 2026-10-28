@@ -78,8 +78,8 @@ describe('scheduler.tick (E.2)', () => {
       ['cycle.derive', `cd:${jakarta}:all`, 'due'],
     ]);
     expect(due('2030-01-20T20:05:00Z', 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['cycle.derive']);
-    // Milestone 2 J.3 (M2-05): readiness.recompute at 02:30 and certificate.expiry at 06:00.
-    expect(DAILY_JOBS.map((d) => d.at)).toEqual(['00:05', '00:15', '00:30', '01:00', '02:00', '02:30', '02:30', '02:45', '03:00', '03:15', '06:00', '06:30', '07:00']);
+    // Milestone 2 J.3: readiness.recompute at 02:30 and certificate.expiry at 06:00 (M2-05), entitlement.expiry at 06:15 (M2-S10).
+    expect(DAILY_JOBS.map((d) => d.at)).toEqual(['00:05', '00:15', '00:30', '01:00', '02:00', '02:30', '02:30', '02:45', '03:00', '03:15', '06:00', '06:15', '06:30', '07:00']);
   });
 
   it('advances the clock high-water mark and never moves it back', async () => {

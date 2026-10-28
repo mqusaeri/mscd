@@ -1,7 +1,10 @@
 // Texts of the `account` and `security` emails (build plan E.6, F.4, F.5, F.8, F.14, Milestone 2 D.1 and D.2) in English
-// and Indonesian.
+// and Indonesian. Milestone 2 J.3 (M2-S10): `entitlement_expiring`, the notice of `entitlement.expiry` to the platform
+// operators that an organisation's plan or licence ends soon (Tenant Admins get the in-app `licence_expiring` notice,
+// which `notifications.dispatch` emails).
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
 // `http.public_url`. Security messages end with the same advice, so a user who did not act knows what to do.
+import { fmtDay } from '../../common/dates';
 
 export type MailLanguage = 'en' | 'id';
 
@@ -14,7 +17,23 @@ export type AccountTemplate =
   /** An existing active account was invited to another organisation (Milestone 2 D.2): accept or decline after signing in. */
   | { name: 'membership_invited'; link: string; organisation: string; invitedBy: string | null }
   /** A new platform operator account: the one-time link to set the password (`admin create-operator`, M2-06). */
-  | { name: 'operator_invitation'; link: string; hours: number };
+  | { name: 'operator_invitation'; link: string; hours: number }
+  /**
+   * The entitlement of an organisation ends in `days` days (`entitlement.expiry`, Milestone 2 J.3, M2-S10): to every
+   * platform operator, 30, 7 and 1 days before `validUntil` (an ISO date). `plan` names the preset, `licenceId` the
+   * signed licence the entitlement comes from; neither for limits set by hand.
+   */
+  | {
+      name: 'entitlement_expiring';
+      link: string;
+      organisation: string;
+      slug: string;
+      plan: string | null;
+      licenceId: string | null;
+      validUntil: string;
+      days: number;
+      graceDays: number;
+    };
 
 export type SecurityTemplate =
   | { name: 'mfa_enrolled'; link: string }
@@ -164,6 +183,40 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
             ],
         link: { href: template.link, label: en ? 'Choose your password' : 'Pilih kata sandi Anda' },
       };
+    case 'entitlement_expiring': {
+      const what = en
+        ? template.licenceId
+          ? `licence ${template.licenceId}`
+          : template.plan
+            ? `${template.plan} plan`
+            : 'plan'
+        : template.licenceId
+          ? `lisensi ${template.licenceId}`
+          : template.plan
+            ? `paket ${template.plan}`
+            : 'paket';
+      const until = fmtDay(template.validUntil, language);
+      const days = en ? `${template.days} ${template.days === 1 ? 'day' : 'days'}` : `${template.days} hari`;
+      return {
+        title: en ? `${template.organisation}: the ${what} ends in ${days}` : `${template.organisation}: ${what} berakhir dalam ${days}`,
+        paragraphs: en
+          ? [
+              `The ${what} of ${template.organisation} (organisation ${template.slug}) is valid until ${until}.`,
+              template.graceDays > 0
+                ? `After that day the organisation keeps working for a grace period of ${template.graceDays} days, then it becomes read-only: its users can still read and export their data, but not change it.`
+                : 'After that day the organisation becomes read-only: its users can still read and export their data, but not change it.',
+              'To renew it, set the entitlement in the operator console or with "mscd-server license entitlements set". If the contract ends, agree the next steps with the customer.',
+            ]
+          : [
+              `${what[0]!.toUpperCase()}${what.slice(1)} milik ${template.organisation} (organisasi ${template.slug}) berlaku sampai ${until}.`,
+              template.graceDays > 0
+                ? `Setelah tanggal itu organisasi tetap berjalan selama masa tenggang ${template.graceDays} hari, lalu hanya dapat dibaca: penggunanya masih dapat membaca dan mengekspor data, tetapi tidak dapat mengubahnya.`
+                : 'Setelah tanggal itu organisasi hanya dapat dibaca: penggunanya masih dapat membaca dan mengekspor data, tetapi tidak dapat mengubahnya.',
+              'Untuk memperpanjangnya, tetapkan paket di konsol operator atau dengan "mscd-server license entitlements set". Jika kontrak berakhir, sepakati langkah berikutnya dengan pelanggan.',
+            ],
+        link: { href: template.link, label: en ? 'Open the operator console' : 'Buka konsol operator' },
+      };
+    }
     case 'mfa_enrolled':
       return security(
         language,

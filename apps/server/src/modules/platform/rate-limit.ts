@@ -4,9 +4,13 @@
 // authenticated requests, the per-user and per-organisation limits of every api request. Keys use `request.ip`
 // (trustworthy with the F.12 proxy rules), the normalised email of the body, the session, the user, the
 // organisation, the guest grant or the calendar token.
+//
+// Milestone 2 (M2-S10): the per-user and per-organisation limits of every api request come from the entitlement of
+// the request's organisation (`ORG_RATE_LIMITS`, multi tenancy), with `DEFAULT_RATE_LIMITS` where its value is null.
+// The bucket key carries the limit, so a changed limit counts in a new bucket from the next request on.
 import { createHash } from 'node:crypto';
 import fastifyRateLimit from '@fastify/rate-limit';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DEFAULT_RATE_LIMITS, type RateLimitDef, type RouteDef } from '@mscd/shared';
@@ -15,7 +19,7 @@ import { Redis } from 'ioredis';
 import type { MscdConfig } from '../../config/mscd-config';
 import { RateLimitedError } from '../../common/problems';
 import type { Principal } from '../../common/tokens';
-import { RATE_LIMIT_BACKEND, type RateLimitBackend } from '../tenancy/rate-limit-store';
+import { ORG_RATE_LIMITS, RATE_LIMIT_BACKEND, type OrgRateLimitSource, type OrgRateLimits, type RateLimitBackend } from '../tenancy/rate-limit-store';
 
 /** Request member that carries the bucket key to the plugin's key generator. */
 const BUCKET_KEY = Symbol('mscd.rateLimitBucketKey');
@@ -120,8 +124,12 @@ export class RateLimitService {
   private readonly logger = new Logger(RateLimitService.name);
   private readonly limiters = new Map<string, Limiter>();
   private missingPluginReported = false;
+  private orgLimitFailureAt = 0;
 
-  constructor(private readonly adapterHost: HttpAdapterHost) {}
+  constructor(
+    private readonly adapterHost: HttpAdapterHost,
+    @Optional() @Inject(ORG_RATE_LIMITS) private readonly orgLimits?: OrgRateLimitSource,
+  ) {}
 
   /**
    * Applies the limits of `phase` (`early`: keys known before validation; `late`: keys read from the validated body).
@@ -136,7 +144,7 @@ export class RateLimitService {
     input: { body?: unknown; query?: unknown } = {},
   ): Promise<void> {
     const limits: { scope: string; limit: RateLimitDef }[] = (def.rateLimits ?? []).map((limit) => ({ scope: def.id, limit }));
-    if (principal && def.auth !== 'public') for (const limit of DEFAULT_RATE_LIMITS) limits.push({ scope: 'api', limit });
+    if (principal && def.auth !== 'public') for (const limit of await this.apiLimits(principal)) limits.push({ scope: 'api', limit });
     let retryAfter = 0;
     for (const { scope, limit } of limits) {
       if (BODY_KEYS.has(limit.key) !== (phase === 'late')) continue;
@@ -149,6 +157,34 @@ export class RateLimitService {
     }
     this.writeHeaders(request as RateLimitedRequest, reply);
     if (retryAfter > 0) throw new RateLimitedError(retryAfter);
+  }
+
+  /**
+   * The limits of every authenticated api request for this caller (F.3): `DEFAULT_RATE_LIMITS`, with the per-user and
+   * per-organisation values of the entitlement of the caller's organisation where it sets them (Milestone 2 M2-S10).
+   * When the entitlement cannot be read, the defaults apply (logged at most once a minute).
+   */
+  async apiLimits(principal: Principal): Promise<readonly RateLimitDef[]> {
+    const orgId = principal.org?.id;
+    if (!orgId || !this.orgLimits) return DEFAULT_RATE_LIMITS;
+    let custom: OrgRateLimits | null;
+    try {
+      custom = await this.orgLimits.limitsFor(orgId);
+    } catch (error) {
+      if (Date.now() - this.orgLimitFailureAt > 60_000) {
+        this.orgLimitFailureAt = Date.now();
+        this.logger.warn(`The rate limits of organisation ${orgId} could not be read; the defaults apply: ${(error as Error).message}`);
+      }
+      return DEFAULT_RATE_LIMITS;
+    }
+    if (!custom) return DEFAULT_RATE_LIMITS;
+    const { userPerMinute, orgPerMinute } = custom;
+    return DEFAULT_RATE_LIMITS.map((limit) => {
+      const perMinute = limit.key === 'user' ? userPerMinute : limit.key === 'org' ? orgPerMinute : null;
+      if (perMinute === null) return limit;
+      // The entitlement counts requests per minute; the window of the default limit decides the bucket length.
+      return { ...limit, max: Math.max(1, Math.round((perMinute * limit.windowSeconds) / 60)) };
+    });
   }
 
   /**

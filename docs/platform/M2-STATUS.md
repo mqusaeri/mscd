@@ -32,10 +32,13 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | MOT-03 In-app illustration library | L2 | Done | Eight scenes (`getting-started`, `no-systems`, `no-documents`, `no-evidence`, `no-findings`, `all-done`, `error`, `offline`) through `<Illustration scene=... />` from `apps/web/src/illustrations`, passed to the EmptyState `illustration` prop. The handoff note says which scene goes where. Gallery at `?screen=illustrations` in the sample build only (the orchestrator assigned `apps/web/src/screens/illustrations/**`) |
 | M2-S08 Monitoring and alerts | 2b | Done | Real Grafana image test assigned to M2-S13. The orchestrator follow-up of 2026-10-28 made the queue age count from the start time of due jobs and set `JobQueueStuck` back to 900 seconds (deviation 9 closed) |
 | M2-S05 Deploy script and deploy workflow | 2b | Done | The deploy rehearsal passed 78 checks. Deploys run only through `.github/workflows/deploy-prod.yml` with the owner's approval |
-| M2-S07 Backups and restore test, M2-S10 Per-organisation entitlements | 2b | Running | M2-S10: write `platform.entitlement` only in platform scope (see its brief); its daily `entitlement.expiry` job goes through the run ledger of M2-06 and reads `localDate` from the payload. M2-S07: the backup values come from `deploy-prod.yml` of M2-S05 |
+| M2-S10 Per-organisation entitlements | 2b | Done | Each organisation's licence is its `platform.entitlement` row in multi tenancy (presets `trial` and `standard` in `saas.yaml`), cached 60 s and refreshed across processes by `NOTIFY mscd_tenant_changed`. Operator routes `ops.entitlements.*` and `ops.plans.list`, CLI `license entitlements show|set`, daily `entitlement.expiry` at 06:15 through the run ledger. M2-S09 reuses `publishTenantChange` and `EntitlementService.applyPreset` |
+| M2-S07 Backups and restore test | 2b | Running | The backup values come from `deploy-prod.yml` of M2-S05 |
 | M2-08 Bulk import, M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28): they share no file with the open packages of 2b |
-| M2-S09, M2-10 | 3a | Next | Start when M2-S10 is committed: M2-S09 calls its `applyPreset` and change notice and shares two files with it; M2-10's invitations meet the user limits M2-S10 changes |
-| M2-S11, M2-16, M2-11, M2-12 | 3b | After 3a | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
+| M2-10 People, roles and sign-in | 3a | Running | |
+| M2-S09 Operator commands and organisation lifecycle | 3a | Running | Started after M2-S10 was committed |
+| M2-11, M2-12, M2-16 | 3b | Next | Web packages of wave 3b; they start as slots free up (at most five packages at once on this host, the owner's rule) |
+| M2-S11 Organisation discovery at sign-in | 3b | After M2-S09 and M2-10 (shared files) | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
 | M2-S12, M2-13, M2-14, M2-15 | 3c | After 3b | |
 | M2-17 Terminology | 4 | Waits for the owner's approval of H.1 | |
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
@@ -45,7 +48,6 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 - After M2-S07: run the M2-S05 rehearsal once more with the default overlays (`repo`), so it deploys the backup overlay too (M2-S05 handoff, follow-ups).
 - After M2-09: add the Administration entries `systems` and `routing` to the expectations of the shared tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` (owned by M2-01; MOT-03 found them).
-- With M2-S10: add `entitlements` to the expected `license` sub-commands in `apps/server/test/unit/cli/program.test.ts`, and commit the `06:15` line already added to `apps/server/test/int/jobs/scheduler.test.ts`.
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 - Owner: H.1 (terminology, gates M2-17) and H.6 (ISO 9001:2026 and ISO 37001:2025 trees) are still open.

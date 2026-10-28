@@ -46,8 +46,8 @@ export interface JobPayloads {
   'import.run': { importId: string; taskId: string };
   /** The framework versions an installation updated; the organisation is the envelope's (M2-03, E.3). */
   'applicability.sync': { frameworkVersionIds: string[]; packInstallId?: string };
-  /** Daily installation-wide (M2-S10). */
-  'entitlement.expiry': Empty;
+  /** Daily per organisation in multi tenancy, on the date of its run (M2-S10). */
+  'entitlement.expiry': DailyRun;
   /** One domain (add, verify now) or, when absent, the hourly sweep of pending and the monthly check of verified domains (M2-S11). */
   'domain.verify': { organizationId?: string; domain?: string };
 }

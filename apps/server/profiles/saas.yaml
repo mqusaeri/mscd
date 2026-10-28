@@ -11,7 +11,21 @@
 #   mail.from, mail.smtp.*   the SMTP provider (MSCD__MAIL__*, from MSCD_SMTP_* and MSCD_MAIL_FROM)
 #   database.*, gateway.vault.*, the secret file paths   as on-premise
 tenancy:   { mode: multi, isolation: schema, default_region: id }
-license:   { validation: online, plans: {} }                         # signed entitlement per organisation (D-32)
+# Licences (D-32): each organisation's limits are its entitlement row, set by the operator from a plan preset below,
+# from explicit limits, or from an uploaded signed licence (Milestone 2 M2-S10, docs/saas/entitlements.md). The
+# presets are the D-S4 defaults; change them here. An empty `frameworks` list means every framework; null rate limits
+# keep the defaults of every api request (600 per user and 6000 per organisation each minute).
+license:
+  validation: online
+  plans:
+    trial:    { max_users: 10, max_management_systems: 1, valid_days: 30, grace_days: 7, frameworks: [],
+                storage_adapters: [managed_vault, m365, google_drive],
+                features: [integrated_mode, edition_transition, link_health_monitor, auditor_guest_access],
+                rate_user_per_minute: null, rate_org_per_minute: null }
+    standard: { max_users: 50, max_management_systems: 3, valid_days: 365, grace_days: 30, frameworks: [],
+                storage_adapters: [managed_vault, m365, google_drive],
+                features: [integrated_mode, edition_transition, link_health_monitor, auditor_guest_access],
+                rate_user_per_minute: null, rate_org_per_minute: null }
 updates:   { channel: managed }
 packs:     { channel: managed, dir: /app/packs, channel_url: null }
 telemetry: { enabled: false, otlp_endpoint: null }

@@ -1,8 +1,0 @@
-{
-  "workPackage": "M2-S10",
-  "routes": [
-    "ops.entitlements.get",
-    "ops.entitlements.set",
-    "ops.plans.list"
-  ]
-}
