@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { AdminApi } from './admin.js';
 import { requestPrincipal } from './auth.js';
+import { type RunningDnsResponder, registerDnsAdminRoutes, startDnsResponder } from './dns.js';
 import { DriveApi } from './drive.js';
 import { type Api, MockHttpError, entraError, genericError, googleError, googleOAuthError, graphError } from './errors.js';
 import { type FixtureDocument, applyFixtures, parseFixtureDocument, parseSettings } from './fixtures.js';
@@ -9,6 +10,7 @@ import { GraphApi } from './graph.js';
 import { apiOf, header, rawPath } from './http.js';
 import { registerIdentityRoutes } from './identity.js';
 import { newRequestId } from './ids.js';
+import { registerOidcRoutes } from './oidc.js';
 import { DEFAULT_SETTINGS, type MockSettings, MockState, PROVIDER_APIS, type ProviderApi, type ThrottleState } from './state.js';
 
 export interface MockProvidersOptions {
@@ -23,6 +25,8 @@ export interface MockProvidersOptions {
   settings?: Partial<MockSettings>;
   /** Receives one line per request: method, path without query, status and duration. */
   onRequestLog?: (line: string) => void;
+  /** The address of the DNS responder for `GET /_admin/dns` (set by `startMockProviders` when it opens one). */
+  dnsAddress?: () => string | null;
 }
 
 export interface StartOptions extends MockProvidersOptions {
@@ -30,6 +34,13 @@ export interface StartOptions extends MockProvidersOptions {
   port?: number;
   /** Default 127.0.0.1. */
   host?: string;
+  /**
+   * UDP port of the DNS responder for TXT records (Milestone 2 M2-S11, dns.ts); 0 picks a free port. Default: no
+   * responder (the records can still be set through the admin API).
+   */
+  dnsPort?: number;
+  /** Address the DNS responder binds; default `host`. */
+  dnsHost?: string;
 }
 
 export interface RunningMockProviders {
@@ -37,10 +48,14 @@ export interface RunningMockProviders {
   /** Base URL, for example http://127.0.0.1:4310 */
   url: string;
   port: number;
+  /** The DNS responder when `dnsPort` was given: its `address` goes in `network.dns_resolvers`. */
+  dns: RunningDnsResponder | null;
   close(): Promise<void>;
 }
 
 const BODY_LIMIT = 256 * 1024 * 1024;
+/** Where an application of `buildMockProviders` keeps its state, for `mockState`. */
+const STATE = Symbol.for('mscd.mockProviders.state');
 
 function throttleError(api: ProviderApi, path: string, throttle: ThrottleState): MockHttpError {
   const headers = { 'Retry-After': String(throttle.retryAfterSeconds) };
@@ -84,6 +99,7 @@ export function buildMockProviders(options: MockProvidersOptions = {}): FastifyI
   if (baseFixtures) applyFixtures(state, baseFixtures);
 
   const app = Fastify({ logger: false, bodyLimit: BODY_LIMIT, routerOptions: { maxParamLength: 2048 } });
+  (app as FastifyInstance & { [STATE]?: MockState })[STATE] = state;
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: BODY_LIMIT }, (_request, body, done) => done(null, body));
 
@@ -143,6 +159,8 @@ export function buildMockProviders(options: MockProvidersOptions = {}): FastifyI
   });
 
   registerIdentityRoutes(app, { state, publicUrl: options.publicUrl });
+  registerOidcRoutes(app, { publicUrl: options.publicUrl });
+  registerDnsAdminRoutes(app, state.dns, () => options.dnsAddress?.() ?? null);
   new GraphApi({ state, publicUrl: options.publicUrl }).register(app);
   new DriveApi({ state, publicUrl: options.publicUrl }).register(app);
   new AdminApi({
@@ -158,11 +176,37 @@ export function buildMockProviders(options: MockProvidersOptions = {}): FastifyI
 
 /** Builds the application and listens; `url` is the base URL to give adapters and tests. */
 export async function startMockProviders(options: StartOptions = {}): Promise<RunningMockProviders> {
-  const app = buildMockProviders(options);
+  let dns: RunningDnsResponder | null = null;
+  const app = buildMockProviders({ ...options, dnsAddress: () => dns?.address ?? null });
   const host = options.host ?? '127.0.0.1';
   await app.listen({ port: options.port ?? 0, host });
   const address = app.server.address();
   const port = typeof address === 'object' && address !== null ? address.port : (options.port ?? 0);
   const urlHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host.includes(':') ? `[${host}]` : host;
-  return { app, url: `http://${urlHost}:${port}`, port, close: () => app.close() };
+  if (options.dnsPort !== undefined) {
+    try {
+      dns = await startDnsResponder(mockState(app).dns, { port: options.dnsPort, host: options.dnsHost ?? host });
+    } catch (error) {
+      await app.close();
+      throw error;
+    }
+  }
+  const running = dns;
+  return {
+    app,
+    url: `http://${urlHost}:${port}`,
+    port,
+    dns: running,
+    close: async () => {
+      await running?.close();
+      await app.close();
+    },
+  };
+}
+
+/** The state behind an application of `buildMockProviders` (the DNS zone of the responder). */
+export function mockState(app: FastifyInstance): MockState {
+  const state = (app as FastifyInstance & { [STATE]?: MockState })[STATE];
+  if (!state) throw new Error('Not an application of buildMockProviders');
+  return state;
 }

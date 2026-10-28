@@ -41,7 +41,7 @@ export function ForgotPasswordPage({ env, notice = null }: { env: AuthEnv; notic
         <Alert kind="ok">{li(TEXT.forgotDone, lang)}</Alert>
       ) : (
         <form className="au-form" onSubmit={submit} noValidate>
-          <EmailField id="au-email" lang={lang} value={email} onChange={setEmail} invalid={problem !== null} autoFocus />
+          <EmailField id="au-email" lang={lang} value={email} onChange={setEmail} invalid={problem !== null} autoFocus demo={Boolean(env.profile?.demo.enabled)} />
           <SubmitButton busy={busy} label={li(TEXT.sendLink, lang)} busyLabel={li(TEXT.working, lang)} />
         </form>
       )}

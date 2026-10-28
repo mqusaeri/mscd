@@ -27,6 +27,8 @@ import { IdentityModule } from '../modules/identity/identity.module';
 import { KeysModule } from '../modules/keys/keys.module';
 import { LicenseModule } from '../modules/license/license.module';
 import { DiagnosticsService } from '../modules/ops/diagnostics.service';
+import { DnsTxtChecker } from '../modules/ops/domains/dns-txt';
+import { DomainsService } from '../modules/ops/domains/domains.service';
 import { OpsMetricsCollector } from '../modules/ops/ops-metrics.collector';
 import { OpsService } from '../modules/ops/ops.service';
 import { OrganizationStatusService } from '../modules/ops/organization-status.service';
@@ -99,16 +101,21 @@ export function register(program: Command): void {
     });
   tenant
     .command('verify-domain')
-    .description('Record an email domain as verified for an organisation (needed for JIT provisioning, D-25)')
+    .description(
+      'Record an email domain as verified for an organisation (needed for JIT provisioning, D-25). In multi tenancy (SaaS) ' +
+        'domains are verified by their DNS record from the operator console; this command verifies one by hand and needs --manual-reason',
+    )
     .requiredOption('--org <slug>', 'organisation slug')
     .requiredOption('--domain <domain>', 'email domain')
     .requiredOption('--by <name>', 'who verified it')
+    .option('--manual-reason <text>', 'multi tenancy: why the domain is verified without its DNS record (3 to 500 characters, audited with method manual)')
     .action(async (options: TenantVerifyDomainOptions) => {
       await runCommand('tenant verify-domain', async (config) => {
         const result = await tenantVerifyDomain(config, options);
+        const method = result.method === 'manual' ? ' (method manual)' : '';
         process.stdout.write(
           result.created
-            ? `tenant verify-domain: ${result.domain} is now verified for organisation ${options.org}\n`
+            ? `tenant verify-domain: ${result.domain} is now verified for organisation ${options.org}${method}\n`
             : `tenant verify-domain: ${result.domain} was already verified for organisation ${options.org}; nothing changed\n`,
         );
       });
@@ -289,15 +296,44 @@ export interface TenantVerifyDomainOptions {
   org: string;
   domain: string;
   by: string;
+  /** Multi tenancy: why the domain is verified by hand instead of by its DNS record (Milestone 2 K.6, M2-S11). */
+  manualReason?: string;
 }
 
-/** `tenant verify-domain` with a loaded configuration. */
-export async function tenantVerifyDomain(config: MscdConfig, options: TenantVerifyDomainOptions): Promise<VerifiedDomain> {
-  return verifyTenantDomain(config.databaseUrl('migrator'), {
-    orgSlug: options.org,
-    domain: options.domain,
-    verifiedBy: options.by,
-    actor: { kind: 'operator' },
+/** The answer of `tenant verify-domain`; `method` is `manual` for the multi-tenancy path. */
+export type TenantVerifiedDomain = VerifiedDomain & { method?: 'manual' };
+
+/**
+ * `tenant verify-domain` with a loaded configuration. Single tenancy (on-premise) records the domain as before,
+ * through `verifyTenantDomain` as the database owner. Multi tenancy (Milestone 2 K.6, M2-S11) verifies domains by their
+ * DNS TXT record from the operator console; the command verifies one by hand through `DomainsService.verifyManually`
+ * of the operator routes: it needs `--manual-reason`, refuses free mail domains and a domain another organisation holds
+ * verified (`domain_taken`), turns a pending or failed DNS claim of the organisation into the verification, and is
+ * audited `ops.domain_verified` with method `manual`, the reason and actor kind `operator`.
+ */
+export async function tenantVerifyDomain(config: MscdConfig, options: TenantVerifyDomainOptions, context?: INestApplicationContext): Promise<TenantVerifiedDomain> {
+  const multi = (config as Partial<MscdConfig>).profile?.tenancy.mode === 'multi';
+  if (!multi) {
+    if (options.manualReason !== undefined) {
+      process.stderr.write('tenant verify-domain: --manual-reason is used in multi tenancy only; it was not recorded\n');
+    }
+    return verifyTenantDomain(config.databaseUrl('migrator'), {
+      orgSlug: options.org,
+      domain: options.domain,
+      verifiedBy: options.by,
+      actor: { kind: 'operator' },
+    });
+  }
+  if (options.manualReason === undefined || options.manualReason.trim() === '') {
+    throw new Error(
+      'In multi tenancy domains are verified by their DNS record from the operator console; to verify one by hand, give --manual-reason <text> ' +
+        '(for example the ticket where the customer proved the domain)',
+    );
+  }
+  const reason = options.manualReason;
+  return withContext(config, context, async (app) => {
+    const verified = await app.get(DomainsService, { strict: false }).verifyManually(CLI_OPERATOR, options.org, options.domain, { verifiedBy: options.by, reason });
+    return { ...verified, method: 'manual' as const };
   });
 }
 
@@ -355,7 +391,8 @@ class OpsCliModule {
         IdentityModule,
         LicenseModule,
       ],
-      providers: [OpsOrganizationsService, OrganizationStatusService, TenantDataKeys, OpsMetricsCollector, OpsService, DiagnosticsService],
+      // DnsTxtChecker and DomainsService: `tenant verify-domain` in multi tenancy (Milestone 2 M2-S11).
+      providers: [OpsOrganizationsService, OrganizationStatusService, TenantDataKeys, OpsMetricsCollector, OpsService, DiagnosticsService, DnsTxtChecker, DomainsService],
     };
   }
 }

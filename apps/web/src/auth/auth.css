@@ -107,6 +107,9 @@ body:has(.au-root[data-theme="dark"]),body:has(.au-boot[data-theme="dark"]){back
 .au-note{margin-top:16px;padding:12px 14px;border-radius:10px;background:var(--au-sur);border:1px solid var(--au-bd);font-size:13px;line-height:1.45;color:var(--au-tx2);display:flex;gap:10px;align-items:flex-start}
 .au-note svg{flex:none;margin-top:1px;color:var(--au-ok)}
 .au-foot{margin-top:28px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 16px;font-size:12.5px;color:var(--au-tx3)}
+/* Milestone 2 M2-S11: the privacy notice and terms under the sign-in form, and the switch away from a remembered organisation. */
+.au-legal{margin-top:16px;padding-top:14px;border-top:1px solid var(--au-bd);display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12.5px}
+.au-org-switch{margin-top:12px}
 .au-actions{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13.5px}
 
 /* enrolment */

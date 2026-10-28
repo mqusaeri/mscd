@@ -1,6 +1,7 @@
 import { type KeyObject, randomBytes } from 'node:crypto';
 import { GOOGLE_FOLDER_MIME, hashContent, isGoogleNative, synthesizeContent } from './content.js';
 import type { Api } from './errors.js';
+import { DnsZone } from './dns.js';
 import { newDriveFileId, newGraphItemId, randomToken, stableDriveRevisionId, stableGuid } from './ids.js';
 
 // In-memory state of the mock providers: drives and items of both providers, registered credentials, issued
@@ -284,6 +285,8 @@ export class MockState {
   readonly accessTokens = new Map<string, AccessTokenState>();
   readonly uploadSessions = new Map<string, UploadSession>();
   readonly copyJobs = new Map<string, CopyJob>();
+  /** TXT records of the mock DNS responder (Milestone 2 M2-S11, dns.ts). */
+  readonly dns = new DnsZone();
   /** Signs pre-authenticated download URLs. */
   readonly secret = randomBytes(32);
   settings: MockSettings;
@@ -317,6 +320,7 @@ export class MockState {
     this.throttle = null;
     this.latency = null;
     this.requestLog = [];
+    this.dns.clear();
   }
 
   /**

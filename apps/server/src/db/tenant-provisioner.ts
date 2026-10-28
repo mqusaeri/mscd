@@ -246,7 +246,18 @@ export async function verifyTenantDomain(connectionString: string, input: Verify
         .values({ organization_id: org.id, domain, verified_by: verifiedBy })
         .onConflict((oc) => oc.columns(['organization_id', 'domain']).doNothing())
         .returning('domain')
-        .executeTakeFirst();
+        .executeTakeFirst()
+        .catch((error: unknown) => {
+          // Milestone 2 (M2-S11, D.1 `domain_taken`): a verified domain belongs to one organisation only (unique index
+          // verified_domain_verified_uq of platform migration 0005).
+          if ((error as { code?: unknown; constraint?: unknown })?.code === '23505') {
+            throw new TenantProvisioningError(
+              `The domain ${domain} is already verified for another organisation (domain_taken); a verified domain belongs to one organisation only, so remove it there first`,
+              { cause: error },
+            );
+          }
+          throw error;
+        });
       if (inserted) {
         await writePlatformAudit(conn, input.actor ?? { kind: 'operator' }, {
           organizationId: org.id,

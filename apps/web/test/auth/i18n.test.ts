@@ -41,7 +41,7 @@ describe('texts', () => {
 
   it('are translated (the Indonesian text differs) except names and codes', () => {
     const same = Object.entries(TEXT).filter(([, [en, id]]) => en === id).map(([k]) => k);
-    expect(same.sort()).toEqual(['deployOnprem', 'deploySaas', 'emailPlaceholder', 'factFrameworks', 'passwordPlaceholder', 'tls'].sort());
+    expect(same.sort()).toEqual(['deployOnprem', 'deploySaas', 'factFrameworks', 'passwordPlaceholder', 'tls'].sort());
   });
 });
 

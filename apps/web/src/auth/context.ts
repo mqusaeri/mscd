@@ -27,6 +27,11 @@ export interface AuthEnv {
   /** Footer facts of the brand panel. */
   facts: string[];
   store: StorageLike | null;
+  /**
+   * Storage that outlives the tab (`localStorage`, guarded): the organisation of the last sign-in (Milestone 2 M2-S11).
+   * Null or absent where it is not available.
+   */
+  memory?: StorageLike | null;
   /** Relative URL the application opens after sign-in; also the `returnTo` of identity provider sign-in. */
   returnTo: string;
   navigate(page: AuthPage, options?: NavigateOptions): void;

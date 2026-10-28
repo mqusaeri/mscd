@@ -2,7 +2,7 @@
 // project/MSCD Login.dc.html, notes, provider buttons, fields and the busy button.
 import React, { useEffect, useRef } from 'react';
 import type { AuthProvider, SystemProfile } from '@mscd/shared';
-import { TEXT, fill, li } from './i18n';
+import { TEXT, emailPlaceholder, fill, li } from './i18n';
 import type { Lang, Pair } from './i18n';
 import { mountBrandMotion } from './motion/BrandMotion';
 import type { BrandMotion } from './motion/BrandMotion';
@@ -262,19 +262,40 @@ export function CodeField({
   );
 }
 
-/** Email field of the design (placeholder of the design, `autocomplete="username"`). */
+/**
+ * Email field of the design (`autocomplete="username"`). The placeholder is a generic example (`name@company.com`,
+ * Milestone 2 M2-S11); a demo installation (`demo`, from `system.profile.demo.enabled`) shows the demo persona's address.
+ */
 export function EmailField({
-  id, lang, value, onChange, onBlur, invalid, autoFocus,
-}: { id: string; lang: Lang; value: string; onChange: (v: string) => void; onBlur?: () => void; invalid?: boolean; autoFocus?: boolean }) {
+  id, lang, value, onChange, onBlur, invalid, autoFocus, demo = false,
+}: { id: string; lang: Lang; value: string; onChange: (v: string) => void; onBlur?: () => void; invalid?: boolean; autoFocus?: boolean; demo?: boolean }) {
   return (
     <label className="au-label" htmlFor={id}>
       {li(TEXT.workEmail, lang)}
       <input
         id={id} name="email" className="au-input" type="email" autoComplete="username" inputMode="email" spellCheck={false}
-        placeholder={li(TEXT.emailPlaceholder, lang)} value={value} autoFocus={autoFocus} aria-invalid={invalid ? true : undefined}
+        placeholder={emailPlaceholder(lang, demo)} value={value} autoFocus={autoFocus} aria-invalid={invalid ? true : undefined}
         onChange={(e) => onChange(e.target.value)} onBlur={onBlur}
       />
     </label>
+  );
+}
+
+/**
+ * Links to the privacy notice and the terms of the service under the sign-in form (Milestone 2 D.2, M2-S11), from
+ * `system.profile.legal`. A link that is not set (null) is not shown; with neither, nothing is rendered. Only http and
+ * https addresses are linked.
+ */
+export function LegalLinks({ legal, lang }: { legal: SystemProfile['legal'] | null | undefined; lang: Lang }) {
+  const safe = (url: string | null | undefined): string | null => (typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null);
+  const privacy = safe(legal?.privacyUrl);
+  const terms = safe(legal?.termsUrl);
+  if (!privacy && !terms) return null;
+  return (
+    <nav className="au-legal" aria-label={li(TEXT.legalLinks, lang)}>
+      {privacy ? <a href={privacy} rel="noopener noreferrer">{li(TEXT.privacyNotice, lang)}</a> : null}
+      {terms ? <a href={terms} rel="noopener noreferrer">{li(TEXT.termsOfService, lang)}</a> : null}
+    </nav>
   );
 }
 

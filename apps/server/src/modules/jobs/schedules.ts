@@ -11,6 +11,10 @@ export const CRON_SCHEDULES: readonly { name: JobName; cron: string; retryLimit:
   { name: 'audit.verify-chain', cron: '0 4 * * *', retryLimit: 2 },
   { name: 'cleanup.expired', cron: '20 * * * *', retryLimit: 3 },
   { name: 'notifications.dispatch', cron: '*/5 * * * *', retryLimit: 5 },
+  // Milestone 2 J.3 (M2-S11): the TXT records of email domains, hourly for pending domains (7 days, then failed) and
+  // every 30 days for verified ones. It works on every organisation at once, so it is a cron job and not a daily job
+  // of `scheduler.tick`. Its handler exists only with tenancy.mode multi, so single tenancy never schedules it.
+  { name: 'domain.verify', cron: '35 * * * *', retryLimit: 1 },
 ];
 
 /** Retry limit of a cron job (E.2); 3 for a name without an entry in `CRON_SCHEDULES`. */

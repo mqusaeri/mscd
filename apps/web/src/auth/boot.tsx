@@ -12,6 +12,8 @@
 //   page; `deploy` stays a demo override (only when the profile says demo mode is on).
 // - The user's saved preferences (`Me.preferences`: `language`, `theme`, `density`) apply before the application's
 //   first render, unless the address sets the same setting (MILESTONE-2 C.3).
+// - Whenever the application opens with a session, the slug of its organisation is remembered in `localStorage`
+//   (guarded), so the next sign-in page in this browser offers that organisation's sign-in at once (MILESTONE-2 M2-S11).
 import React, { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { GuestStartResponse, Me, SystemProfile } from '@mscd/shared';
@@ -24,8 +26,8 @@ import type { AuthEnv, NavigateOptions } from './context';
 import type { EnrolMode } from './EnrolPage';
 import { TEXT, detectLang, li } from './i18n';
 import {
-  AUTH_PATHS, authPageOf, beginGuestAccess, keptSearch, peekReturnTo, readReauth, sessionStore, storeReauth, storeReturnTo,
-  storeStep, takeCsrfFragment, takeFragmentToken, takeReturnTo,
+  AUTH_PATHS, authPageOf, beginGuestAccess, keptSearch, localStore, peekReturnTo, readReauth, sessionStore, storeLastOrg, storeReauth,
+  storeReturnTo, storeStep, takeCsrfFragment, takeFragmentToken, takeReturnTo,
 } from './routes';
 import type { AuthPage, PendingReauth, StorageLike } from './routes';
 import { decideBoot } from './session';
@@ -149,12 +151,14 @@ export function withPreferences(settings: DisplaySettings, preferences: Record<s
 export interface ApiRootProps extends Omit<BootOptions, 'container'> {
   api: AuthApi;
   store: StorageLike | null;
+  /** `localStorage` (guarded), for the organisation of the last sign-in; null where it is not available. */
+  memory?: StorageLike | null;
   /** Language of the sign-in pages: `?lang=` or the browser language (H.6). */
   authLang: Lang;
   initial: Initial;
 }
 
-export function ApiRoot({ api, store, authLang, initial, settings, App, createDataSource }: ApiRootProps) {
+export function ApiRoot({ api, store, memory = null, authLang, initial, settings, App, createDataSource }: ApiRootProps) {
   const client = api.client;
   const theme = settings.theme;
   const [mode, setModeState] = useState<Mode>({ kind: 'loading' });
@@ -193,6 +197,7 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
   const openApp = useCallback((me: Me, prof: SystemProfile, url: string | null) => {
     meRef.current = me;
     client.rememberMe(me);
+    if (me.org?.slug) storeLastOrg(memory, me.org.slug);
     if (url !== null) window.history.replaceState(null, '', url);
     const shown = withPreferences(settings, me.preferences, window.location.search);
     setAppSettings(shown);
@@ -210,7 +215,7 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
         if (current()) setMode({ kind: 'failed', message: CANNOT_LOAD, detail: e instanceof Error ? e.message : String(e), canSignOut: true });
       },
     );
-  }, [client, createDataSource, settings, setMode]);
+  }, [client, createDataSource, settings, setMode, memory]);
 
   const start = useCallback(async () => {
     setMode({ kind: 'loading' });
@@ -334,6 +339,7 @@ export function ApiRoot({ api, store, authLang, initial, settings, App, createDa
     profile,
     facts: brandFacts(profile, authLang, deployOverride),
     store,
+    memory,
     returnTo: peekReturnTo(store),
     navigate: (page, options = {}) => {
       setErrorCode(null);
@@ -388,10 +394,11 @@ export function boot({ container, settings, App, createDataSource }: BootOptions
   const authLang = detectLang(window.location.search, typeof navigator === 'undefined' ? [] : navigator.languages ?? [navigator.language]);
   const api = new AuthApi(new ApiClient({ lang: authLang }));
   const store = sessionStore();
+  const memory = localStore();
   const initial = readInitial(api, window.location, window.history);
   createRoot(container).render(
     <StrictMode>
-      <ApiRoot api={api} store={store} authLang={authLang} initial={initial} settings={settings} App={App} createDataSource={createDataSource} />
+      <ApiRoot api={api} store={store} memory={memory} authLang={authLang} initial={initial} settings={settings} App={App} createDataSource={createDataSource} />
     </StrictMode>,
   );
 }

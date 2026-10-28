@@ -185,7 +185,7 @@ export function InvitePage({
             <ProviderButtons providers={providers} hrefOf={hrefOf} />
           ) : lookup.open ? (
             <form className="au-form" onSubmit={findProviders} noValidate>
-              <EmailField id="au-lookup-email" lang={lang} value={lookup.email} onChange={(v) => setLookup({ open: true, email: v, none: false })} autoFocus />
+              <EmailField id="au-lookup-email" lang={lang} value={lookup.email} onChange={(v) => setLookup({ open: true, email: v, none: false })} autoFocus demo={Boolean(env.profile?.demo.enabled)} />
               <button type="submit" className="au-btn au-btn-quiet">{li(TEXT.findSignIn, lang)}</button>
               {lookup.none ? <p className="au-muted" role="status" style={{ margin: 0 }}>{li(TEXT.noSso, lang)}</p> : null}
             </form>

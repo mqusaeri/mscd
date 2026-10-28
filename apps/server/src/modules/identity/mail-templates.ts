@@ -4,7 +4,9 @@
 // which `notifications.dispatch` emails). Milestone 2 J.4 (M2-S09): `organization_status_changed`, the email to the
 // Tenant Admins of an organisation whose status the platform operator changed, with the new status, what it means
 // for the members and the operator's reason. It names no person (the repository and its tests are public, and the
-// email goes to several people): only the organisation, the status and the reason.
+// email goes to several people): only the organisation, the status and the reason. Milestone 2 J.3 (M2-S11):
+// `domain_record_missing`, the email of `domain.verify` to the platform operators when the monthly check no longer
+// finds the DNS TXT record of a verified email domain (the domain stays verified).
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
 // `http.public_url`. Security messages end with the same advice, so a user who did not act knows what to do.
 import { fmtDay } from '../../common/dates';
@@ -41,7 +43,12 @@ export type AccountTemplate =
    * The platform operator changed the status of the organisation (`ops.organizations.status`, `tenant set-status`,
    * Milestone 2 J.4, J.8, M2-S09): to each Tenant Admin, with what the new status means and the operator's reason.
    */
-  | { name: 'organization_status_changed'; link: string; organisation: string; status: OrganisationStatusName; reason: string };
+  | { name: 'organization_status_changed'; link: string; organisation: string; status: OrganisationStatusName; reason: string }
+  /**
+   * The monthly check of `domain.verify` (Milestone 2 J.3, M2-S11) did not find the TXT record `txtName` of a verified
+   * email domain: to every platform operator. The domain stays verified. `verifiedAt` is an ISO instant or null.
+   */
+  | { name: 'domain_record_missing'; link: string; organisation: string; slug: string; domain: string; txtName: string; verifiedAt: string | null };
 
 /** The four statuses of an organisation (J.8 `organization.status`). */
 export type OrganisationStatusName = 'active' | 'suspended' | 'offboarding' | 'archived';
@@ -286,6 +293,26 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
               'Jika ada pertanyaan, hubungi penyedia layanan MSCD Anda.',
             ],
         link: { href: template.link, label: OPEN_APP[language] },
+      };
+    }
+    case 'domain_record_missing': {
+      const since = template.verifiedAt ? fmtDay(template.verifiedAt.slice(0, 10), language) : null;
+      return {
+        title: en
+          ? `${template.organisation}: the DNS record of ${template.domain} is gone`
+          : `${template.organisation}: catatan DNS ${template.domain} tidak ditemukan`,
+        paragraphs: en
+          ? [
+              `The monthly check did not find the TXT record ${template.txtName}, which proves that ${template.organisation} (organisation ${template.slug}) owns the email domain ${template.domain}${since ? ` (verified on ${since})` : ''}.`,
+              'The domain stays verified, so sign-in by email domain and accounts made at first sign-in keep working. Ask the customer\'s IT team whether the record was removed on purpose.',
+              'If it was removed by mistake, the customer puts the same value back and the next check finds it. If nobody has the value any more, or the customer no longer owns the domain, remove the domain in the operator console; add it again there to get a new record.',
+            ]
+          : [
+              `Pemeriksaan bulanan tidak menemukan catatan TXT ${template.txtName}, yang membuktikan bahwa ${template.organisation} (organisasi ${template.slug}) memiliki domain email ${template.domain}${since ? ` (diverifikasi pada ${since})` : ''}.`,
+              'Domain tetap terverifikasi, sehingga masuk berdasarkan domain email dan akun yang dibuat saat masuk pertama tetap berfungsi. Tanyakan kepada tim TI pelanggan apakah catatan itu sengaja dihapus.',
+              'Jika terhapus karena kesalahan, pelanggan memasang kembali nilai yang sama dan pemeriksaan berikutnya akan menemukannya. Jika tidak ada lagi yang memiliki nilai tersebut, atau pelanggan tidak lagi memiliki domain itu, hapus domain di konsol operator; tambahkan lagi di sana untuk mendapatkan catatan baru.',
+            ],
+        link: { href: template.link, label: en ? 'Open the operator console' : 'Buka konsol operator' },
       };
     }
     case 'mfa_enrolled':

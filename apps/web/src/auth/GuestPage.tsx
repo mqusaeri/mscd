@@ -110,7 +110,7 @@ export function GuestPage({ env, start = null }: GuestPageProps) {
 
       {phase === 'email' ? (
         <form className="au-form" onSubmit={sendCode} noValidate>
-          <EmailField id="au-guest-email" lang={lang} value={email} onChange={setEmail} invalid={problem !== null} autoFocus />
+          <EmailField id="au-guest-email" lang={lang} value={email} onChange={setEmail} invalid={problem !== null} autoFocus demo={Boolean(env.profile?.demo.enabled)} />
           <SubmitButton busy={busy} label={li(TEXT.sendMeCode, lang)} busyLabel={li(TEXT.working, lang)} />
         </form>
       ) : null}

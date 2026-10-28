@@ -9,6 +9,7 @@ Local stand-ins for the provider APIs MSCD calls (build plan J.7 and D.5): the M
 | `node tools/mock-providers/dist/server.js --port 4310 --fixtures <file>` | Starts the server (`--host`, default `0.0.0.0`; `--public-url`; `--verbose` prints one line per request) |
 | `node tools/mock-providers/dist/server.js --fixtures demo` | Loads `fixtures/demo.json` (written by the seed export, WP-14); any name without `/` or `.json` is looked up in `fixtures/` |
 | `node tools/mock-providers/dist/server.js --port 0 --self-test` | Starts on a free port, runs a token, list and upload round trip for Microsoft 365 and Google Drive, exits 0 or 1 |
+| `node tools/mock-providers/dist/server.js --dns-port 0` | Also opens the DNS responder for TXT records on UDP (0 picks a free port; the address is printed), on the host of `--host` |
 
 In-process use:
 
@@ -20,6 +21,8 @@ const mock = await startMockProviders({ port: 0, fixtures }); // { app, url, por
 // google api_base_url = mock.url, token_url = `${mock.url}/token`
 await mock.close();
 ```
+
+With `dnsPort` (0 for a free port), `startMockProviders` also opens the DNS responder: `mock.dns.address` (for example `127.0.0.1:53053`) goes in the server profile key `network.dns_resolvers`, and `mockState(mock.app).dns` is the zone the test sets records in (`zone.set(name, values)`), the same zone the admin API changes.
 
 `buildMockProviders(options)` returns the Fastify application without listening (for `app.inject`). Options: `fixtures` (a parsed fixture document), `publicUrl` (origin written into generated links, default the request's Host), `settings`, `onRequestLog`. The package also exports `quickXorHash` and `QuickXorHash`, `hashContent`, `createSelfSignedCertificate`, `inspectCertificate`, `createM365ClientAssertion`, `createGoogleServiceAccountAssertion`, `parseFixtureDocument`, `runSelfTest`, `GRAPH_ID_PATTERN` and `DRIVE_ID_PATTERN`.
 
@@ -35,6 +38,7 @@ One server answers all APIs on the real paths, matching the development profiles
 | Google consent page | `GET /o/oauth2/v2/auth` | `accounts.google.com` |
 | Google Drive | `/drive/v3/...`, `/upload/drive/v3/...` | `www.googleapis.com` |
 | Generated URLs | `/_upload/graph/{id}` (upload session), `/_monitor/{id}` (copy), `/_download/{token}` (pre-authenticated download) | provider hosts |
+| OpenID Connect discovery of a mock issuer | `GET /oidc/{realm}/.well-known/openid-configuration`, `GET /oidc/{realm}/jwks` | any OpenID Connect provider |
 | Admin | `/_admin/...` | none |
 
 ## Endpoints
@@ -78,6 +82,30 @@ Google Drive v3 (file, drive and revision ids must match `^[A-Za-z0-9_-]+$`, oth
 Behaviour kept from the real API because adapters depend on it: responses hold only the default fields (`kind,id,name,mimeType` for files) unless `fields` asks for more; shared drive items answer 404 without `supportsAllDrives=true`; `size` and `version` are strings; `md5Checksum`, `sha256Checksum` and `headRevisionId` exist only for binary files; `owners` only outside shared drives, naming the account that created or uploaded the file (a fixture item without a `createdBy` email shows the drive owner); shared drive files name their creator through `lastModifyingUser` of the first revision; a My Drive answers only its owner and the accounts in its `allowedPrincipals` (`files.get`, `alt=media` and every other call by id give 404 `notFound` to anyone else, and `files.list` leaves it out); a file without `parents` goes to the caller's My Drive, which exists only when a `my_drive` fixture is owned by the caller. Every Drive id in a request (path, `addParents`, `removeParents`, `driveId`, ids in `q`, and the file id of a resumable session URL) is checked against `^[A-Za-z0-9_-]+$` before anything else and answered 400 when it fails.
 
 Errors use each API's documented envelope: Graph `{error: {code, message, innerError}}`, Google `{error: {code, message, errors: [{message, domain, reason, location?, locationType?}]}}`, OAuth `{error, error_description}`. `test/shapes.test.ts` compares every response type with documented example payloads (`test/fixtures`, see its README).
+
+## DNS responder for TXT records
+
+The email domain verification of MSCD (Milestone 2 M2-S11) looks up `_mscd-verify.<domain>` TXT with `node:dns` through the resolvers of `network.dns_resolvers`. The responder answers those lookups (`src/dns.ts`) over UDP:
+
+| Query | Answer |
+|---|---|
+| TXT or ANY for a name with records | NOERROR with one TXT record per value, TTL 0 (a value over 255 bytes becomes several character strings of one record) |
+| Another type for a name with records | NOERROR without answers (`ENODATA` in `node:dns`) |
+| A name without records | NXDOMAIN (`ENOTFOUND`) |
+
+Names compare without case and without a trailing dot. One question per message, no compression in the question, no EDNS in the answer. The records live in memory; `POST /_admin/reset` clears them.
+
+| Request | Effect |
+|---|---|
+| `GET /_admin/dns` | `{address, fault, records}`: the responder's address (null when no UDP port was opened), the fault switch and the number of names |
+| `GET /_admin/dns/records` | Every name with its values, and the last 200 queries (name, type, answer code) |
+| `POST /_admin/dns/records` | `{name, values: [...]}` replaces the values of a name (at most 32 values of 4096 bytes); `values: []` removes it |
+| `DELETE /_admin/dns/records` | Removes every record |
+| `POST /_admin/dns/fault` | `{rcode: "servfail" \| "refused" \| null, drop?: boolean}`: every query is answered with that code, or not at all (the client times out) |
+
+## OpenID Connect discovery
+
+`GET /oidc/{realm}/.well-known/openid-configuration` (and `.../oauth-authorization-server`) answers the discovery document of the issuer `<origin>/oidc/{realm}` (`publicUrl` when set), and `GET /oidc/{realm}/jwks` one RSA signing key. MSCD runs discovery before it saves an OpenID Connect provider and for "Test", so tests can use `http://127.0.0.1:<port>/oidc/<realm>` as the issuer (the test profile allows plain HTTP issuers). Discovery only: the authorization, token, userinfo and logout endpoints are named but not served.
 
 ## Admin API and fault switches
 

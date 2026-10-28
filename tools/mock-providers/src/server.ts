@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // CLI: node dist/server.js [--port 4310] [--host 0.0.0.0] [--fixtures <file>|<name>] [--public-url <url>]
-//                          [--verbose] [--self-test]
+//                          [--dns-port <port>] [--verbose] [--self-test]
 //
 // --fixtures takes a JSON file, or a name such as "demo" for fixtures/<name>.json of this package.
+// --dns-port opens the DNS responder for TXT records on UDP (0 picks a free port; the address is printed), on the
+// host of --host. Without it no UDP port is opened.
 // --self-test starts the server (on 127.0.0.1 unless --host is given), runs a token, list and upload round trip
 // for Microsoft 365 and Google Drive against it, stops and exits 0 on success or 1 on failure.
 import { existsSync } from 'node:fs';
@@ -14,7 +16,7 @@ import { FixtureError } from './fixtures.js';
 import { runSelfTest } from './self-test.js';
 
 const USAGE =
-  'Usage: mock-providers [--port 4310] [--host 0.0.0.0] [--fixtures <file>|<name>] [--public-url <url>] [--verbose] [--self-test]\n';
+  'Usage: mock-providers [--port 4310] [--host 0.0.0.0] [--fixtures <file>|<name>] [--public-url <url>] [--dns-port <port>] [--verbose] [--self-test]\n';
 
 function fail(message: string, code = 2): never {
   process.stderr.write(`mock-providers: ${message}\n`);
@@ -29,6 +31,7 @@ try {
       host: { type: 'string' },
       fixtures: { type: 'string' },
       'public-url': { type: 'string' },
+      'dns-port': { type: 'string' },
       'self-test': { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
@@ -49,6 +52,9 @@ const port = Number(values.port);
 if (!/^\d+$/.test(String(values.port)) || port > 65535) fail(`--port must be an integer from 0 to 65535, got "${String(values.port)}"`);
 const publicUrl = values['public-url'] as string | undefined;
 if (publicUrl !== undefined && !URL.canParse(publicUrl)) fail(`--public-url must be an absolute URL, got "${publicUrl}"`);
+const dnsPortText = values['dns-port'] as string | undefined;
+const dnsPort = dnsPortText === undefined ? undefined : Number(dnsPortText);
+if (dnsPortText !== undefined && (!/^\d+$/.test(dnsPortText) || dnsPort! > 65535)) fail(`--dns-port must be an integer from 0 to 65535, got "${dnsPortText}"`);
 const selfTest = values['self-test'] === true;
 const host = (values.host as string | undefined) ?? (selfTest ? '127.0.0.1' : '0.0.0.0');
 
@@ -72,6 +78,7 @@ try {
     host,
     fixtures,
     publicUrl,
+    dnsPort,
     onRequestLog: values.verbose ? (line) => process.stdout.write(`${line}\n`) : undefined,
   });
 } catch (error) {
@@ -93,6 +100,7 @@ if (selfTest) {
 }
 
 process.stdout.write(`mock-providers listening on ${host}:${running.port} (${running.url})\n`);
+if (running.dns) process.stdout.write(`mock-providers dns listening on udp ${running.dns.address}\n`);
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     void running.close().then(() => process.exit(0));

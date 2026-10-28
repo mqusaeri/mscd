@@ -3,6 +3,8 @@
 // verified domain belongs to one organisation only (409 `conflict`, messageKey `domain_taken`); free mail domains are
 // refused (422 `business-rule`, messageKey `domain_not_allowed`). In single tenancy every route answers 409
 // `conflict` with messageKey `single_tenancy` (J.6); on-premise keeps the operator command `tenant verify-domain`.
+// A pending domain is checked every hour until `pendingUntil` (7 days after it was added), then it is `failed`;
+// adding it again gives a new token and 7 more days. "Verify now" answers whether the record was found.
 import { z } from 'zod';
 import { DomainStatus, DomainVerificationMethod } from '../enums.js';
 import { Instant, NoBody, OrgSlug, defineRoute, named } from './common.js';
@@ -26,8 +28,9 @@ export type OrgDomainParams = z.infer<typeof OrgDomainParams>;
 
 const EXAMPLE_DOMAIN = {
   domain: 'nusantaradigital.co.id', status: 'verified', method: 'dns', requestedAt: '2026-10-20T03:00:00Z', verifiedAt: '2026-10-20T04:00:00Z',
-  lastCheckedAt: '2026-10-27T04:00:00Z', txtName: '_mscd-verify.nusantaradigital.co.id',
+  lastCheckedAt: '2026-10-27T04:00:00Z', pendingUntil: null, txtName: '_mscd-verify.nusantaradigital.co.id',
 } as const;
+const EXAMPLE_PENDING = { ...EXAMPLE_DOMAIN, status: 'pending', verifiedAt: null, lastCheckedAt: null, pendingUntil: '2026-10-27T03:00:00Z' } as const;
 
 export const OrgDomain = named(
   'OrgDomain',
@@ -38,15 +41,28 @@ export const OrgDomain = named(
     requestedAt: Instant.nullable(),
     verifiedAt: Instant.nullable(),
     lastCheckedAt: Instant.nullable(),
+    /** Pending domains: the end of the hourly checks (requested + 7 days); null for other statuses. */
+    pendingUntil: Instant.nullable(),
     txtName: z.string(),
   }),
-  'Email domain of an organisation with its verification state, method and the requested, verified and last checked times',
+  'Email domain of an organisation with its verification state, method, the requested, verified and last checked times and, while pending, the end of the hourly checks',
   {
-    valid: [EXAMPLE_DOMAIN, { ...EXAMPLE_DOMAIN, status: 'pending', verifiedAt: null, lastCheckedAt: null }, { ...EXAMPLE_DOMAIN, method: 'manual', requestedAt: null }],
-    invalid: [{ ...EXAMPLE_DOMAIN, status: 'ok' }, { ...EXAMPLE_DOMAIN, method: 'email' }],
+    valid: [EXAMPLE_DOMAIN, EXAMPLE_PENDING, { ...EXAMPLE_DOMAIN, method: 'manual', requestedAt: null }],
+    invalid: [{ ...EXAMPLE_DOMAIN, status: 'ok' }, { ...EXAMPLE_DOMAIN, method: 'email' }, { ...EXAMPLE_DOMAIN, pendingUntil: undefined }],
   },
 );
 export type OrgDomain = z.infer<typeof OrgDomain>;
+
+export const OrgDomainCheck = named(
+  'OrgDomainCheck',
+  OrgDomain.extend({ recordFound: z.boolean() }),
+  'POST /ops/organizations/{org}/domains/{domain}/verify answer: the domain after the check and whether the TXT record with its token was found (a verified domain stays verified when it is not)',
+  {
+    valid: [{ ...EXAMPLE_DOMAIN, recordFound: true }, { ...EXAMPLE_PENDING, lastCheckedAt: '2026-10-21T05:00:00Z', recordFound: false }, { ...EXAMPLE_DOMAIN, recordFound: false }],
+    invalid: [EXAMPLE_DOMAIN, { ...EXAMPLE_DOMAIN, recordFound: 'yes' }],
+  },
+);
+export type OrgDomainCheck = z.infer<typeof OrgDomainCheck>;
 
 export const OrgDomainAdd = named(
   'OrgDomainAdd',
@@ -81,8 +97,8 @@ export const opsDomainsAddRoute = defineRoute({
 });
 export const opsDomainsVerifyRoute = defineRoute({
   ...ops, id: 'ops.domains.verify', method: 'POST', path: '/api/v1/ops/organizations/:org/domains/:domain/verify',
-  summary: 'Check the TXT record now (audited ops.domain_verified or ops.domain_verification_failed)',
-  permission: 'ops.tenants.manage', params: OrgDomainParams, response: OrgDomain, errors: [404, 409, 503],
+  summary: 'Check the TXT record now (audited ops.domain_verified or ops.domain_verification_failed; 409 domain_taken; 503 when DNS cannot be reached)',
+  permission: 'ops.tenants.manage', params: OrgDomainParams, response: OrgDomainCheck, errors: [404, 409, 503],
 });
 export const opsDomainsRemoveRoute = defineRoute({
   ...ops, id: 'ops.domains.remove', method: 'DELETE', path: '/api/v1/ops/organizations/:org/domains/:domain',

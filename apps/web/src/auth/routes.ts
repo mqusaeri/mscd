@@ -1,6 +1,8 @@
 // Paths of the sign-in and account pages (BUILD-PLAN H.6), the helpers that read single-use tokens from the URL
 // fragment, and the small per-tab state that survives a reload during sign-in (the URL to return to, the pending
-// second-factor step and an organisation switch that needs a new sign-in). Nothing here imports React.
+// second-factor step and an organisation switch that needs a new sign-in). Milestone 2 (M2-S11): the slug of the
+// organisation of the last sign-in, kept in `localStorage` for the sign-in page of the one shared host (D-S3).
+// Nothing here imports React.
 import type { ReauthMethods } from '@mscd/shared';
 
 export type AuthPage = 'login' | 'mfa' | 'enrol' | 'forgot' | 'reset' | 'invite' | 'guest';
@@ -83,6 +85,7 @@ export interface StorageLike {
 }
 
 const RETURN_KEY = 'mscd.auth.returnTo';
+const LAST_ORG_KEY = 'mscd.auth.lastOrg';
 const STEP_KEY = 'mscd.auth.step';
 const REAUTH_KEY = 'mscd.auth.reauth';
 
@@ -90,6 +93,15 @@ const REAUTH_KEY = 'mscd.auth.reauth';
 export function sessionStore(): StorageLike | null {
   try {
     return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** `localStorage`, or null where it is not available or blocked (private modes, tests, storage settings). */
+export function localStore(): StorageLike | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
     return null;
   }
@@ -110,6 +122,29 @@ function write(store: StorageLike | null, key: string, value: string | null): vo
   } catch {
     // storage full or blocked: the flow still works within this page
   }
+}
+
+/** An organisation slug as the server accepts it (`?org=` of `GET /auth/providers`). */
+export const ORG_SLUG = /^[a-z][a-z0-9_]{1,39}$/;
+
+/** The slug when it is one (anything else from an address or from storage is ignored), else null. */
+export function validSlug(value: string | null | undefined): string | null {
+  return typeof value === 'string' && ORG_SLUG.test(value) ? value : null;
+}
+
+/**
+ * The organisation of the last sign-in in this browser (Milestone 2 M2-S11): the sign-in page offers its sign-in
+ * methods at once when the address names no organisation. Kept in `localStorage`; every read and write is guarded,
+ * so a blocked or full storage only means nothing is remembered.
+ */
+export function readLastOrg(store: StorageLike | null): string | null {
+  return validSlug(read(store, LAST_ORG_KEY));
+}
+
+/** Remembers (a valid slug) or forgets (null) the organisation of the last sign-in. */
+export function storeLastOrg(store: StorageLike | null, slug: string | null): void {
+  if (slug === null) write(store, LAST_ORG_KEY, null);
+  else if (validSlug(slug)) write(store, LAST_ORG_KEY, slug);
 }
 
 /** Remembers the application URL to open after the next sign-in (H.7). */

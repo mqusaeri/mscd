@@ -1,8 +1,11 @@
 // Mock servers for the provider APIs MSCD calls (build plan J.7 and D.5): the Microsoft identity platform token
 // endpoint, the Microsoft Graph drive item API, and the Google OAuth 2.0 and Drive v3 APIs, with an admin API for
-// fixtures and fault switches. Tests and the demo only; never part of a release.
+// fixtures and fault switches. Milestone 2 (M2-S11) adds a DNS responder for the TXT records of email domain
+// verification and the OpenID Connect discovery of a mock issuer. Tests and the demo only; never part of a release.
 
-export { buildMockProviders, startMockProviders, type MockProvidersOptions, type RunningMockProviders, type StartOptions } from './app.js';
+export { buildMockProviders, mockState, startMockProviders, type MockProvidersOptions, type RunningMockProviders, type StartOptions } from './app.js';
+export { DnsZone, answerQuery, normaliseDnsName, startDnsResponder, type DnsFault, type DnsFaultCode, type RunningDnsResponder } from './dns.js';
+export { discoveryDocument } from './oidc.js';
 export { createSelfSignedCertificate, inspectCertificate, type CertificateInfo, type SelfSignedCertificate, type SelfSignedCertificateOptions } from './certs.js';
 export { createGoogleServiceAccountAssertion, createM365ClientAssertion, type GoogleAssertionInput, type M365AssertionInput } from './client.js';
 export { hashContent, type ContentHashes } from './content.js';

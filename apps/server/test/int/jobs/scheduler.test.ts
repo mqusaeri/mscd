@@ -113,6 +113,8 @@ describe('scheduler.tick (E.2)', () => {
       ['audit.verify-chain', '0 4 * * *'],
       ['cleanup.expired', '20 * * * *'],
       ['notifications.dispatch', '*/5 * * * *'],
+      // Milestone 2 J.3 (M2-S11): email domain checks, hourly; only scheduled where its handler exists (multi tenancy).
+      ['domain.verify', '35 * * * *'],
     ]);
     expect(app.moduleRef.get(WorkerRuntime).state).toEqual({ queues: ['scheduler.tick'], schedules: [] });
     expect(app.queue.schedules).toEqual([]);

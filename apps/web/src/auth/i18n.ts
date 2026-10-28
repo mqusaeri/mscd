@@ -49,7 +49,7 @@ export const TEXT = {
   continue: ['Continue', 'Lanjutkan'],
   verify: ['Verify', 'Verifikasi'],
   working: ['Please wait', 'Mohon tunggu'],
-  emailPlaceholder: ['rina.kusuma@nusantaradigital.co.id', 'rina.kusuma@nusantaradigital.co.id'],
+  emailPlaceholder: ['name@company.com', 'nama@perusahaan.co.id'],
   passwordPlaceholder: ['•'.repeat(12), '•'.repeat(12)],
   enterEmail: ['Enter your work email address.', 'Masukkan alamat email kantor Anda.'],
   enterPassword: ['Enter your password.', 'Masukkan kata sandi Anda.'],
@@ -81,6 +81,10 @@ export const TEXT = {
   reauthNone: ['none is available to your account', 'tidak ada yang tersedia untuk akun Anda'],
   reauthCancel: ['Stay in the current organisation', 'Tetap di organisasi saat ini'],
   ssoOnly: ['Your organisation signs in with single sign-on only.', 'Organisasi Anda hanya menggunakan single sign-on untuk masuk.'],
+  otherOrganisation: ['Use a different organisation', 'Gunakan organisasi lain'],
+  legalLinks: ['Privacy and terms', 'Privasi dan ketentuan'],
+  privacyNotice: ['Privacy notice', 'Pemberitahuan privasi'],
+  termsOfService: ['Terms of service', 'Ketentuan layanan'],
 
   // second factor (/login/mfa)
   mfaEyebrow: ['TWO-STEP SIGN-IN', 'MASUK DUA LANGKAH'],
@@ -229,6 +233,17 @@ export const TEXT = {
 } satisfies Record<string, Pair>;
 
 export type TextKey = keyof typeof TEXT;
+
+/**
+ * The placeholder of the email fields on a demo installation (`system.profile.demo.enabled`), where the demo persona's
+ * address helps people try the product; every other installation shows the generic example of `emailPlaceholder`.
+ */
+export const DEMO_EMAIL_PLACEHOLDER = 'rina.kusuma@nusantaradigital.co.id';
+
+/** The placeholder of an email field: the demo persona's address on a demo installation, else the generic example. */
+export function emailPlaceholder(lang: Lang, demo: boolean): string {
+  return demo ? DEMO_EMAIL_PLACEHOLDER : li(TEXT.emailPlaceholder, lang);
+}
 
 /** Messages of `/login?error=<code>` (F.8 step 6, H.6). */
 export const LOGIN_ERROR_MESSAGES: Record<LoginErrorCode, Pair> = {

@@ -376,6 +376,8 @@ export class IdentityProvidersService {
       .select('domain')
       .where('organization_id', '=', orgId)
       .where('domain', 'in', domains)
+      // Milestone 2 (M2-S11): a pending or failed DNS claim is not a verified domain.
+      .where('status', '=', 'verified')
       .execute();
     const have = new Set(verified.map((v) => v.domain));
     const missing = domains.filter((d) => !have.has(d));

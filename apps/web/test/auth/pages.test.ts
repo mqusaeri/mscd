@@ -64,7 +64,8 @@ describe('sign-in page /login', () => {
   it('has the email and password fields of the design, Keep me signed in (unchecked), Continue and the notes', () => {
     const env = envFor();
     const html = render(LoginPage, { env });
-    expect(html).toMatch(/<input id="au-email" name="email" class="au-input" type="email" autoComplete="username"[^>]*placeholder="rina.kusuma@nusantaradigital.co.id"[^>]*value=""/);
+    // A generic example address (Milestone 2 M2-S11); the demo persona's address only on a demo installation.
+    expect(html).toMatch(/<input id="au-email" name="email" class="au-input" type="email" autoComplete="username"[^>]*placeholder="name@company.com"[^>]*value=""/);
     expect(html).toMatch(/<input id="au-password" name="password" class="au-input" type="password" autoComplete="current-password" placeholder="•{12}" value=""/);
     expect(html).toMatch(/<input type="checkbox" name="remember"\/>/);
     const text = textOf(html);

@@ -518,6 +518,8 @@ export class OidcSignInService implements OnModuleInit {
       .select('domain')
       .where('organization_id', '=', provider.organization_id)
       .where('domain', 'in', allowed)
+      // Milestone 2 (M2-S11): a pending or failed DNS claim is not a verified domain.
+      .where('status', '=', 'verified')
       .execute();
     if (verified.length !== allowed.length) throw new SsoFailure('no_account', 'jit_domain_unverified');
     if (!allowed.includes(emailDomain(token.email))) throw new SsoFailure('no_account', 'jit_domain_not_allowed');

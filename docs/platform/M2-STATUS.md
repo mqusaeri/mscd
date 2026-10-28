@@ -41,13 +41,13 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-16 Getting started, account, notifications and operator console | 3b | Done | Getting started (D.5 checklist with the MOT-03 scene; the landing of a Tenant Admin without a business role), Organisation settings, My account (password, authenticator, recovery codes, linked sign-in, calendar feeds, preferences), notification bell, invitation banner, operator console base (health, queues, organisations, packs, factor reset). M2-S12 grows `ops/Organizations.tsx` (its follow-up 7) |
 | M2-11 Controls, evidence and phases forms | 3b | Done | Add control, entry panel (edit, reject, not applicable), New evidence (file now or Later), targets (add, remove, never the last), freshness limits, Start activity and Record blocker. Evidence rows carry their targets for readers with `evidence.manage` |
 | M2-12 Document control screens | 3b | Done | Document control panel on the document detail (edit, owner and approver with BR-16, reassign, first and new versions, versions tab, review with Approve and Return to draft) and the Required documented information screen per clause with the H.9 scope panel |
-| M2-S11 Organisation discovery at sign-in | 3b | After M2-S09 and M2-10 (shared files) | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
+| M2-S11 Organisation discovery at sign-in | 3b | Done | Email discovery at sign-in with D-S10 (the same answer for strangers), `?org=` and the remembered organisation, verified email domains (`ops.domains.*`, DNS TXT, hourly `domain.verify`, monthly recheck), legal links in `system.profile`, a mock DNS responder and OIDC discovery in `tools/mock-providers` |
 | M2-14 Audit registers screens | 3c | Done | Internal audit (programme, events with scope and report, activities, AUD-INDEP warnings), Findings and actions (root cause, systemic check, corrective action steps, effectiveness check with the `no-findings` scene), Management review (inputs, outputs, joint reviews) |
 | M2-13 Registers, M2-15 Certification timeline and auditor workspace | 3c | Running | Started early (owner's approval) |
 | M2-S12 Operator console screens | 3c | Next | After M2-S11 (and M2-16, done) |
 | M2-17 Terminology | 4 | Next after wave 3c (alone in its wave) | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (one name for every system); every other proposed label keeps its name. Indonesian screens use the same English words, "Checkpoint" and "Management System Manager" (owner, 2026-10-28; today "gate" and "Manajer SM") |
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
-| M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | |
+| M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | Also assigned by the orchestrator: pass `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` to the server as `MSCD__LEGAL__*` (M2-S11 follow-up 8) and start the mock DNS responder in `apps/web/e2e-api/stack.mjs` for the multi-tenant stack (M2-S11 deviation 4) |
 
 ## Open orchestrator items
 
