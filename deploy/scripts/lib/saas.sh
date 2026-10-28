@@ -247,6 +247,8 @@ saas_prune_logs() {
 #   deploy/compose/docker-compose.{backup,ops}.yml when present
 #   deploy/compose/config/{postgres,caddy}
 #   deploy/scripts, and deploy/backup and deploy/ops when present
+#   with deploy/backup (M2-S07): deploy/docker/backup.Dockerfile (the backup tools image, built
+#   on the server) and deploy/host/systemd/mscd-backup.{service,timer} (the nightly timer)
 #   site/{index.html,id,assets}: the marketing site of apps/site (MSCD_SITE_DOMAIN)
 # The demo secrets, the demo overlay and the development files are never copied; the
 # workflow's rsync excludes them again.
@@ -271,6 +273,14 @@ saas_stage_release() {
     for name in backup ops; do
         if [[ -d $repo/deploy/$name ]]; then cp -R -- "$repo/deploy/$name" "$dest/deploy/$name"; fi
     done
+    if [[ -d $repo/deploy/backup ]]; then
+        for name in docker/backup.Dockerfile host/systemd/mscd-backup.service host/systemd/mscd-backup.timer; do
+            if [[ -f $repo/deploy/$name ]]; then
+                install -d -m 0755 "$(dirname -- "$dest/deploy/$name")"
+                install -m 0644 "$repo/deploy/$name" "$dest/deploy/$name"
+            fi
+        done
+    fi
     if [[ -f $repo/apps/site/index.html ]]; then
         install -d -m 0755 "$dest/site"
         cp -R -- "$repo/apps/site/index.html" "$dest/site/"

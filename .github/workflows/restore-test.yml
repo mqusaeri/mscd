@@ -1,0 +1,206 @@
+# Weekly restore test of the off-site backups (Milestone 2 plan K, M2-S07;
+# docs/saas/backup-restore.md). Runs every Monday and by hand:
+#   gh workflow run restore-test.yml
+#   gh workflow run restore-test.yml -f target_version=v1.2.0     (the migration rehearsal)
+#
+# On a GitHub runner, so the production server carries no load: it restores the newest database
+# dump and a sample of vault objects of the off-site bucket into scratch containers, runs migrate
+# of the target release (default: the release the backup came from) on the restored database,
+# starts storage-gateway and api, checks /readyz, runs "mscd-server backup verify" and SQL checks
+# (organisation count; newest audit_log entry under 26 hours old), writes the measured restore
+# time to the job summary and pings the restore-test heartbeat. deploy/backup/restore-test.sh
+# --ci does the work; the scratch containers and every file are removed at the end.
+#
+# Environment restore-test (Settings > Environments, limited to the default branch, D-S12):
+#   secrets  BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY and BACKUP_S3_SECRET_KEY
+#            (the read-only key of the bucket), BACKUP_RESTIC_PASSWORD, PLATFORM_KEY and
+#            STORAGE_KEY (copies of the production keys), HEARTBEAT_RESTORE_URL
+# Repository variable RESTORE_TEST_RUNNER (optional): the label of a self-hosted runner, used
+# when the restore test must run in Indonesia (go-live checklist GL-49); runs-on below is the
+# only place that names the runner.
+#
+# The repository is public, so the log and the summary hold versions, timings, sizes and counts
+# only, and organisations by id at most; never names, email addresses or secret values (GL-50).
+name: Restore test
+
+on:
+  schedule:
+    # Mondays 05:17 UTC (12:17 WIB), after the Sunday prune of the nightly backup (02:00 UTC).
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: Release tag to migrate the restored database to, such as v1.2.0 (default the release of the backup)
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: restore-test
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: ghcr.io/mqusaeri
+  SIGNER: https://github.com/mqusaeri/mscd/.github/workflows/release.yml
+  OIDC_ISSUER: https://token.actions.githubusercontent.com
+  COSIGN_RELEASE: v3.1.3
+  PROJECT: mscd-restore-test
+
+jobs:
+  restore-test:
+    name: Restore test
+    # GitHub-hosted by default. GL-49: when the lawyer does not accept a runner outside
+    # Indonesia, set the repository variable RESTORE_TEST_RUNNER to the label of a self-hosted
+    # runner in Indonesia (docs/saas/backup-restore.md, Where the restore test runs).
+    runs-on: ${{ vars.RESTORE_TEST_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 120
+    environment: restore-test
+    steps:
+      - name: Check the input
+        env:
+          TARGET: ${{ inputs.target_version }}
+        run: |
+          if [[ -n $TARGET && ! $TARGET =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::target_version must be a release tag such as v1.2.0 or v1.2.0-rc.1, got '$TARGET'."
+            exit 1
+          fi
+          {
+            echo "WORK=$RUNNER_TEMP/mscd-restore-test"
+            echo "STARTED=$(date +%s)"
+          } >>"$GITHUB_ENV"
+          echo "Target release: ${TARGET:-the release of the newest backup}."
+
+      - name: Check out the restore test scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the newest backup
+        id: backup
+        env:
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+          BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+          BACKUP_RESTIC_PASSWORD: ${{ secrets.BACKUP_RESTIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          out=$(NO_COLOR=1 bash deploy/backup/restore-test.sh --ci-version --project "$PROJECT" --work "$WORK")
+          version=$(sed -n 's/^version=//p' <<<"$out")
+          echo "Newest database dump: snapshot $(sed -n 's/^snapshot=//p' <<<"$out") of $(sed -n 's/^time=//p' <<<"$out"), release ${version:-unknown}."
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Choose the target release
+        id: target
+        env:
+          TARGET: ${{ inputs.target_version }}
+          BACKUP_VERSION: ${{ steps.backup.outputs.version }}
+        run: |
+          tag=${TARGET:-v$BACKUP_VERSION}
+          if [[ ! $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::The newest backup names no release ('$BACKUP_VERSION'). Run the workflow with target_version set."
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "The restored database is migrated to $tag."
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_RELEASE }}
+
+      - name: Read and verify the server image of the target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          VERSION: ${{ steps.target.outputs.tag }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern digests.json --dir "$WORK" --clobber ||
+            fail "The GitHub Release $VERSION has no digests.json. Releases are made by release.yml."
+          d=$WORK/digests.json
+          [[ $(jq -r .version "$d") == "${VERSION#v}" ]] || fail "digests.json is not for version ${VERSION#v}."
+          for name in server web; do
+            digest=$(jq -r ".$name" "$d")
+            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digests.json holds no $name digest."
+            [[ $(jq -r ".${name}Image" "$d") == "$REGISTRY/mscd-$name" ]] || fail "digests.json names another $name image."
+            [[ $(jq -r ".${name}Ref" "$d") == "$REGISTRY/mscd-$name@$digest" ]] || fail "${name}Ref of digests.json does not match."
+          done
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin >/dev/null
+          ref=$(jq -r .serverRef "$d")
+          cosign verify "$ref" --certificate-identity "$SIGNER@refs/tags/$VERSION" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+          echo "Signed by release.yml at $VERSION: $ref"
+
+      - name: Check out the target release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.target.outputs.tag }}
+          path: release
+          persist-credentials: false
+
+      - name: Restore and verify
+        env:
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+          BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+          BACKUP_RESTIC_PASSWORD: ${{ secrets.BACKUP_RESTIC_PASSWORD }}
+          PLATFORM_KEY: ${{ secrets.PLATFORM_KEY }}
+          STORAGE_KEY: ${{ secrets.STORAGE_KEY }}
+          VERSION: ${{ steps.target.outputs.tag }}
+        run: |
+          NO_COLOR=1 bash deploy/backup/restore-test.sh --ci --project "$PROJECT" --work "$WORK" \
+            --release-dir release --digests "$WORK/digests.json" --target-version "${VERSION#v}" \
+            --summary "$WORK/summary.md"
+
+      - name: Ping the restore-test heartbeat
+        env:
+          HEARTBEAT_RESTORE_URL: ${{ secrets.HEARTBEAT_RESTORE_URL }}
+        run: |
+          if [[ -z $HEARTBEAT_RESTORE_URL ]]; then
+            echo "::warning::HEARTBEAT_RESTORE_URL is not set in the environment restore-test, so nobody notices when this test stops running (docs/saas/monitoring.md)."
+            exit 0
+          fi
+          [[ $HEARTBEAT_RESTORE_URL =~ ^https://[^[:space:]\"]+$ ]] || { echo "::error::HEARTBEAT_RESTORE_URL must be an https address."; exit 1; }
+          # The address is a secret: it reaches curl in a config on standard input.
+          printf 'url = "%s"\n' "$HEARTBEAT_RESTORE_URL" | curl -fsS --max-time 20 --retry 3 --retry-delay 5 -o /dev/null -K -
+          echo "Heartbeat sent."
+
+      - name: Summary
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          if [[ -s $WORK/summary.md ]]; then
+            cat "$WORK/summary.md" >>"$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Restore test: $RESULT"
+              echo
+              echo "The restore test stopped before its checks; the log of the job says why (docs/saas/backup-restore.md, Troubleshooting)."
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
+          echo >>"$GITHUB_STEP_SUMMARY"
+          echo "Job duration: $(( $(date +%s) - STARTED )) seconds." >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the scratch containers and files
+        if: always()
+        run: |
+          for kind in container volume network; do
+            case $kind in
+              container) ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") ;;
+              volume) ids=$(docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT") ;;
+              network) ids=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") ;;
+            esac
+            for id in $ids; do docker "$kind" rm -f "$id" >/dev/null 2>&1 || docker "$kind" rm "$id" >/dev/null 2>&1 || true; done
+          done
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          rm -rf "$WORK" release

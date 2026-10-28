@@ -1,0 +1,31 @@
+# MSCD off-site backup (Milestone 2 M2-S07, docs/saas/backup-restore.md). Installed once per server
+# with: sudo bash /opt/mscd/deploy/backup/backup.sh install-timer
+# Started by mscd-backup.timer; by hand: sudo systemctl start mscd-backup.service
+# Output: journalctl -u mscd-backup.service, and /opt/mscd/logs/backup-run-<time>.log
+[Unit]
+Description=MSCD off-site backup (database, vault, secrets)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Root reads the secret files of every service (each belongs to its own container user) and hands
+# copies to the backup container, which never runs as root.
+ExecStartPre=/usr/bin/install -d -m 0700 /opt/mscd/backup/home
+ExecStart=/usr/bin/bash /opt/mscd/deploy/backup/backup.sh run --install-dir /opt/mscd
+# The docker CLI keeps its build state under this home instead of /root (read-only below).
+Environment=HOME=/opt/mscd/backup/home DOCKER_CONFIG=/opt/mscd/backup/home/.docker
+TimeoutStartSec=4h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/opt/mscd/backup /opt/mscd/metrics /opt/mscd/logs
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

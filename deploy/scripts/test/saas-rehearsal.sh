@@ -27,7 +27,9 @@
 #                       a test mail through the cli service to Mailpit with the MSCD_SMTP_*
 #                       values and smtp.password, and the audit anchor check;
 #        deploy rc.1    with a wrong PLATFORM_KEY: refused, the key file stays;
-#        deploy rc.2    upgrade with a pre-deploy dump, while the API is polled;
+#        deploy rc.2    upgrade with a pre-deploy dump and its off-site copy (backups of
+#                       M2-S07: a SeaweedFS container on the egress network of the stack
+#                       stands in for the off-site bucket), while the API is polled;
 #        refusals       a release folder with config/demo-secrets, --no-verify-signature for
 #                       images of another registry, and a failing cosign;
 #        deploy rc.3    refused before anything changes; rc.2 keeps running;
@@ -73,6 +75,8 @@
 #                                  gate. auto: for build hosts that cannot reach the Alpine
 #                                  mirrors (as saas-stack.sh)
 #   MSCD_BUILD_CA                  CA certificate of a TLS-inspecting proxy for the image builds
+#                                  (release images, and the backup tools image that
+#                                  saas-deploy.sh and backup.sh build)
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -99,6 +103,9 @@ export COMPOSE_PROJECT_NAME=$PROJECT
 # K.4: the local registry of deploy rehearsals (tests only), exact version and digest.
 readonly REGISTRY_IMAGE=registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e
 readonly MAILPIT_IMAGE=axllent/mailpit:v1.31.3
+# The stand-in of the off-site backup bucket (M2-S07): the object store image of the stack.
+readonly OFFSITE_IMAGE=chrislusf/seaweedfs:4.48
+readonly OFFSITE_ALIAS=offsite-backup
 readonly ANCHOR_MISMATCH='not among the anchor keys compiled into this build'
 readonly V1=1.1.0-rc.1 V2=1.1.0-rc.2 V3=1.1.0-rc.3 V4=1.1.0-rc.4 V5=1.1.0-rc.5
 readonly APP_HOST=localhost
@@ -111,6 +118,11 @@ REGISTRY=127.0.0.1:$REGISTRY_PORT/$PROJECT
 REGISTRY_CONTAINER=$PROJECT-registry
 MAILPIT_CONTAINER=$PROJECT-mailpit
 MAILPIT_IP=''
+OFFSITE_CONTAINER=$PROJECT-offsite
+BACKUP_IMAGE_NAME=${PREFIX}backup
+# MSCD_BUILD_CA for the backup tools image that saas-deploy.sh and backup.sh build (env -i): a
+# copy the deploy user can read, set by setup when MSCD_BUILD_CA is given (R-12).
+BUILD_CA_ENV=()
 LOCAL_SERVER=localhost/$PROJECT/mscd-server
 LOCAL_WEB=localhost/$PROJECT/mscd-web
 INSTALL_DIR=$INSTALL
@@ -377,7 +389,7 @@ stage_release() {
     saas_stage_release "$REPO_DIR" "$dest"
     if [[ $OVERLAYS == none ]]; then
         rm -rf -- "$dest/deploy/compose/docker-compose.backup.yml" "$dest/deploy/compose/docker-compose.ops.yml" \
-            "$dest/deploy/backup" "$dest/deploy/ops"
+            "$dest/deploy/backup" "$dest/deploy/ops" "$dest/deploy/docker" "$dest/deploy/host"
         find "$dest/deploy/compose/config/caddy/conf.d" -name '*.caddy' -delete 2>/dev/null || true
     fi
     install -m 0644 "$WORK/digests-$version.json" "$dest/digests.json"
@@ -406,7 +418,7 @@ write_input() {
                 MSCD_SUBNET=172.31.$SUBNET_MSCD.0/24 MSCD_WEB_ADDRESS=172.31.$SUBNET_MSCD.10
                 MSCD_EDGE_SUBNET=172.31.$SUBNET_EDGE.0/24 MSCD_CADDY_ADDRESS=172.31.$SUBNET_EDGE.2
                 MSCD_WEB_EDGE_ADDRESS=172.31.$SUBNET_EDGE.3
-                BACKUP_S3_ENDPOINT=https://backup.rehearsal.invalid BACKUP_S3_BUCKET=mscd-rehearsal
+                BACKUP_S3_ENDPOINT=http://$OFFSITE_ALIAS:8333 BACKUP_S3_BUCKET=mscd-rehearsal
                 BACKUP_S3_ACCESS_KEY=rehearsal-access BACKUP_S3_SECRET_KEY=rehearsal-secret
                 BACKUP_SECRETS_ACCESS_KEY=rehearsal-secrets-access BACKUP_SECRETS_SECRET_KEY=rehearsal-secrets-secret
                 BACKUP_RESTIC_PASSWORD=rehearsal-restic HEARTBEAT_BACKUP_URL=https://heartbeat.rehearsal.invalid/backup
@@ -438,6 +450,7 @@ deploy_run() {
     # would make "id -nG" fail in the docker group check of lib/common.sh.
     run=(setpriv --reuid "$RUN_UID" --regid "$DOCKER_GID" --groups "$DOCKER_GID" --inh-caps=-all --no-new-privs
         env -i HOME="$WORK/home" PATH="$PATH" LANG=C.UTF-8 COMPOSE_PROJECT_NAME="$PROJECT"
+        MSCD_SAAS_TEST=1 MSCD_BACKUP_IMAGE_NAME="$BACKUP_IMAGE_NAME" "${BUILD_CA_ENV[@]}"
         bash "$release/deploy/scripts/saas-deploy.sh" "$action" --target test --install-dir "$INSTALL"
         --release-dir "$release" "${SIGNATURE_ARGS[@]}" --timeout 180 --verify-timeout 120 --min-free-disk 1024 "$@")
     if [[ -n ${CUT_AFTER:-} ]]; then
@@ -763,6 +776,60 @@ check_upgrade() {
     fi
     info "During the upgrade the API answered $((total - failed)) of $total requests (every 0.5s) through Caddy; the longest gap was ${longest}s"
     printf '%s %s %s\n' "$total" "$failed" "$longest" >"$WORK/upgrade-gap.txt"
+}
+
+# start_offsite: the stand-in of the off-site backup bucket (M2-S07), a SeaweedFS container on the
+# egress network of the stack (the way out of the backup container), with the keys that
+# write_input sends. Releases without deploy/backup need none.
+start_offsite() {
+    [[ -f $INSTALL/releases/v$V1/deploy/backup/backup.sh ]] || return 0
+    step "Stand-in of the off-site backup bucket"
+    cat >"$WORK/offsite-s3.json" <<'JSON'
+{"identities":[
+ {"name":"data","credentials":[{"accessKey":"rehearsal-access","secretKey":"rehearsal-secret"}],"actions":["Admin","Read","Write","List","Tagging"]},
+ {"name":"secrets","credentials":[{"accessKey":"rehearsal-secrets-access","secretKey":"rehearsal-secrets-secret"}],"actions":["Admin","Read","Write","List","Tagging"]}
+]}
+JSON
+    chmod 0644 "$WORK/offsite-s3.json"
+    docker run -d --name "$OFFSITE_CONTAINER" --network "${PROJECT}_egress" --network-alias "$OFFSITE_ALIAS" \
+        --tmpfs /data:size=1g,mode=1777 -v "$WORK/offsite-s3.json:/etc/offsite-s3.json:ro" \
+        --security-opt no-new-privileges:true "$OFFSITE_IMAGE" mini -dir=/data -s3.config=/etc/offsite-s3.json \
+        -bucket=mscd-rehearsal >/dev/null
+    if wait_for 120 docker exec "$OFFSITE_CONTAINER" wget -q -O /dev/null http://127.0.0.1:8888/buckets/mscd-rehearsal/; then
+        ok "SeaweedFS stands in for the off-site backup bucket on the egress network of the stack"
+    else
+        bad "The stand-in of the off-site backup bucket did not start"
+    fi
+}
+
+# check_backup_overlay: the backup parts of a release (M2-S07) through the deploys: the backup
+# tools image and the timer check at the end of a deploy, and the off-site copy of each
+# pre-deploy dump.
+check_backup_overlay() {
+    local out
+    [[ -f $INSTALL/releases/v$V1/deploy/backup/backup.sh ]] || return 0
+    step "Off-site backup of the deploys"
+    if log_has deploy-rc1 "Backup tools image" && log_has deploy-rc1 "Off-site backup values are set" &&
+        log_has deploy-rc1 "mscd-backup.timer serves /opt/mscd only"; then
+        ok "The first deploy built the backup tools image and checked the off-site values and the timer"
+    else
+        bad "The first deploy did not check the off-site backup"
+        show_log deploy-rc1 30
+    fi
+    if log_has deploy-rc2 "Off-site copy of the dump sent"; then
+        ok "The upgrade sent its pre-deploy dump off-site (deploy/backup/backup.sh --pre-deploy)"
+    else
+        bad "The upgrade did not send its pre-deploy dump off-site"
+        show_log deploy-rc2 30
+    fi
+    out=$(env -i PATH="$PATH" HOME="$WORK/home" MSCD_SAAS_TEST=1 MSCD_BACKUP_IMAGE_NAME="$BACKUP_IMAGE_NAME" \
+        "${BUILD_CA_ENV[@]}" bash "$INSTALL/deploy/backup/backup.sh" status --install-dir "$INSTALL" 2>&1 || true)
+    if grep -q 'pre_deploy_count: [1-9]' <<<"$out" && grep -q "version=$V1" <<<"$out"; then
+        ok "The off-site repository holds the pre-deploy dump, tagged with the release it came from"
+    else
+        bad "The off-site repository does not hold the pre-deploy dump"
+        printf '%s\n' "$out" | tail -n 12 | sed 's/^/        | /'
+    fi
 }
 
 check_refusals() {
@@ -1327,9 +1394,11 @@ project_resources() {
     ((count == 0)) || printf 'volumes: %d\n' "$count"
     count=$(docker network ls -q --filter "$filter" | wc -l)
     ((count == 0)) || printf 'networks: %d\n' "$count"
-    for name in "$REGISTRY_CONTAINER" "$MAILPIT_CONTAINER"; do
+    for name in "$REGISTRY_CONTAINER" "$MAILPIT_CONTAINER" "$OFFSITE_CONTAINER"; do
         if docker container inspect "$name" >/dev/null 2>&1; then printf 'container: %s\n' "$name"; fi
     done
+    refs=$(docker images --format '{{.Repository}}:{{.Tag}}' "$BACKUP_IMAGE_NAME" 2>/dev/null | xargs)
+    [[ -z $refs ]] || printf 'backup images: %s\n' "$refs"
     refs=$(local_image_refs | xargs)
     [[ -z $refs ]] || printf 'images: %s\n' "$refs"
     for name in "$INSTALL" "$WORK"; do
@@ -1339,7 +1408,7 @@ project_resources() {
 
 down_quiet() {
     local id
-    docker rm -f "$MAILPIT_CONTAINER" "$REGISTRY_CONTAINER" >/dev/null 2>&1 || true
+    docker rm -f -v "$MAILPIT_CONTAINER" "$REGISTRY_CONTAINER" "$OFFSITE_CONTAINER" >/dev/null 2>&1 || true
     if [[ -f $INSTALL/.env && -d $INSTALL/deploy/compose ]]; then
         compose --profile cli down --volumes --remove-orphans --timeout 20 >/dev/null 2>&1 || true
     fi
@@ -1353,6 +1422,9 @@ down_quiet() {
         docker network rm "$id" >/dev/null 2>&1 || true
     done
     remove_local_images
+    for id in $(docker images --format '{{.Repository}}:{{.Tag}}' "$BACKUP_IMAGE_NAME" 2>/dev/null); do
+        docker image rm "$id" >/dev/null 2>&1 || true
+    done
     rm -rf -- "$INSTALL" "$WORK"
     for id in "$V1" "$V2"; do rm -rf -- "$REPO_DIR/deploy/dist/mscd-images-$id.logs"; done
 }
@@ -1419,6 +1491,12 @@ setup() {
     install -d -m 0755 -o "$RUN_UID" -g "$RUN_UID" "$INSTALL" "$INSTALL/releases"
     install -d -m 0755 "$WORK" "$WORK/logs"
     install -d -m 0700 -o "$RUN_UID" -g "$RUN_UID" "$WORK/home"
+    if [[ -n ${MSCD_BUILD_CA:-} ]]; then
+        [[ -f $MSCD_BUILD_CA && -r $MSCD_BUILD_CA ]] || die "MSCD_BUILD_CA names $MSCD_BUILD_CA, which cannot be read"
+        install -m 0644 -o "$RUN_UID" -g "$RUN_UID" -- "$MSCD_BUILD_CA" "$WORK/home/build-ca.pem"
+        BUILD_CA_ENV=(MSCD_BUILD_CA="$WORK/home/build-ca.pem")
+        info "MSCD_BUILD_CA: a copy in $WORK/home goes to saas-deploy.sh and backup.sh (backup tools image)"
+    fi
     pass "Install folder $INSTALL (owner $RUN_UID, like /opt/mscd of the deploy account); work folder $WORK"
     SMTP_SECRET=$(random_hex 16)
     SMTP_SECRET2=$(random_hex 16)
@@ -1453,10 +1531,12 @@ main() {
     step "First deploy of $V1"
     deploy_run deploy-rc1 deploy "v$V1"
     check_first_deploy || exit 1
+    start_offsite
     check_mail
     check_anchor
     check_wrong_key
     check_upgrade || exit 1
+    check_backup_overlay
     check_refusals
     check_rc3
     check_rc4

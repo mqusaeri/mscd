@@ -180,6 +180,18 @@ lock_install() {
     command -v flock >/dev/null 2>&1 || die "flock is not installed (package util-linux)"
     exec 8<"$INSTALL_DIR"
     if flock -n 8; then return 0; fi
+    # The nightly off-site backup (or a restore) of deploy/backup holds the folder while it runs
+    # and names itself in backup/run.active, "<pid> <start> <what>" (M2-S07): wait for it.
+    local active pid what cmdline=''
+    active=$(head -n 1 -- "$INSTALL_DIR/backup/run.active" 2>/dev/null || true)
+    pid=${active%% *}
+    if [[ $pid =~ ^[0-9]+$ ]]; then cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline" || true); fi
+    if [[ $cmdline =~ backup/(backup|restore)\.sh ]]; then
+        what=$(cut -d ' ' -f 3- <<<"$active")
+        info "The ${what:-off-site backup} (started $(cut -d ' ' -f 2 <<<"$active")) holds $INSTALL_DIR; waiting up to 45 minutes for it to end"
+        if flock -w 2700 8; then return 0; fi
+        die "The ${what:-off-site backup} still holds $INSTALL_DIR after 45 minutes. Nothing was changed. Start this run again later (docs/saas/backup-restore.md, Troubleshooting)."
+    fi
     if [[ -s $STATE_DIR/history.log ]]; then
         info "Last line of state/history.log: $(tail -n 1 -- "$STATE_DIR/history.log")"
     fi
@@ -965,9 +977,21 @@ deploy_main() {
     step "Recording the release"
     record_state deploy "$NEW_VERSION" "$NEW_SERVER_REF" "$NEW_WEB_REF" "$RELEASE_DIR" "$saved"
     history_end "done" "from=${CURRENT_VERSION:-none}${OVERLAY_PROBLEM:+ overlay=problem}"
+    backup_setup || true
     printf '\n%sMSCD %s is deployed to %s and healthy.%s\n' "$C_GREEN$C_BOLD" "$NEW_VERSION" "$TARGET" "$C_RESET"
     overlay_note
     printf '  Log: %s\n' "$LOG_FILE"
+}
+
+# backup_setup: the off-site backup of the installed release (M2-S07): its values, the backup
+# tools image (built when missing) and the nightly timer. Only PASS, INFO and WARN lines: the app
+# runs whatever this step finds, and the workflow shows the warnings.
+backup_setup() {
+    local script=$INSTALL_DIR/deploy/backup/backup.sh
+    [[ -f $script ]] || return 0
+    step "Off-site backup"
+    bash "$script" deploy-check --install-dir "$INSTALL_DIR" 2>&1 | grep -E '^ +(PASS|INFO|WARN) ' ||
+        warn "The off-site backup could not be checked (deploy/backup/backup.sh deploy-check)"
 }
 
 # run_migrate: migrate of the new release alone; the running services are not touched.

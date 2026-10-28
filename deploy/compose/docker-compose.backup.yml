@@ -1,0 +1,114 @@
+# MSCD SaaS backup overlay (Milestone 2 plan K, M2-S07): the on-demand backup service.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.saas.yml -f docker-compose.backup.yml \
+#     --env-file .env run --rm backup <command>
+#
+# Nothing starts this service with "up": profile backup keeps it out of every "docker compose up"
+# and out of the deploy. deploy/backup/backup.sh runs it with "docker compose run", from the
+# systemd timer mscd-backup.timer (02:00 UTC) and from the pre-deploy step of saas-deploy.sh, and
+# restore.sh and restore-test.sh run it for a restore. docs/saas/backup-restore.md explains it.
+#
+# A run (deploy/backup/backup-run.sh inside the container) does, with no downtime:
+#   1. pg_dump --format=custom of the database mscd (every org_ schema) into the restic repository
+#      <bucket>/restic of the off-site bucket;
+#   2. rclone sync of the vault bucket (objects already sealed by the storage gateway) to
+#      <bucket>/vault;
+#   3. a restic copy of the secret files, .env, state/ and the audit anchor lines of the worker in
+#      the restic repository <bucket>/secrets, with the second key pair;
+#   then restic forget (14 daily, 8 weekly, 12 monthly).
+#
+# Networks: mscd (internal: PostgreSQL and the vault bucket) and egress (the off-site bucket; mscd
+# has no route out). No port, read-only, no capabilities, never root: backup.sh runs it as the
+# owner of the off-site value files (MSCD_BACKUP_USER, the deploy account on a server).
+#
+# Image: mscd-backup:<hash>, built on the server from deploy/docker/backup.Dockerfile by backup.sh
+# (MSCD_BACKUP_IMAGE); it is never pulled.
+#
+# Mounts:
+#   ${MSCD_BACKUP_SCRIPTS_DIR}           deploy/backup of the release (backup.sh sets it to the
+#                                        folder it runs from; default ../backup), read-only
+#   ${MSCD_SECRETS_DIR}/backup           one file per off-site value (deploy-prod.yml writes them;
+#                                        mode 0400, owner deploy), read-only
+#   ${MSCD_BACKUP_RUN_DIR}               the files backup.sh prepares for one run (the database and
+#                                        vault passwords it copies as root, the archive of the host
+#                                        files), read-only, removed after the run
+#   ${MSCD_BACKUP_CACHE_DIR}             the restic cache (speeds up later runs) and the temporary
+#                                        files of restic (TMPDIR), on the disk of the server
+#
+# MSCD_SAAS_TEST=1 (test stacks only) lets the off-site endpoint use plain http.
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "10"
+
+services:
+  backup:
+    image: ${MSCD_BACKUP_IMAGE:-mscd-backup:local}
+    pull_policy: never
+    profiles: [backup]
+    restart: "no"
+    user: "${MSCD_BACKUP_USER:-70:70}"
+    entrypoint: ["bash", "/backup/backup-run.sh"]
+    command: ["help"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    environment:
+      HOME: /tmp
+      RESTIC_CACHE_DIR: /var/cache/mscd-backup
+      # restic writes each pack (16 MiB, several at once) to a temporary file before the upload:
+      # on the disk, not in the 64 MB /tmp.
+      TMPDIR: /var/cache/mscd-backup/tmp
+      # The vault bucket of the stack (the bundled SeaweedFS, as the storage gateway sees it).
+      MSCD_VAULT_ENDPOINT: ${MSCD_S3_ENDPOINT:-http://objectstore:8333}
+      MSCD_VAULT_BUCKET: ${MSCD_S3_BUCKET:-mscd-vault}
+      MSCD_VAULT_REGION: ${MSCD_S3_REGION:-us-east-1}
+      # Set per run by backup.sh: the release that runs (a tag of the database snapshot).
+      MSCD_BACKUP_VERSION: ${MSCD_BACKUP_VERSION:-}
+      # More vault deletions than this stop the sync (backup.sh --allow-vault-deletes lifts it).
+      MSCD_BACKUP_MAX_DELETE: ${MSCD_BACKUP_MAX_DELETE:-}
+      # Test stacks only: an off-site endpoint and heartbeat over plain http.
+      MSCD_SAAS_TEST: ${MSCD_SAAS_TEST:-}
+    volumes:
+      - type: bind
+        source: ${MSCD_BACKUP_SCRIPTS_DIR:-../backup}
+        target: /backup
+        read_only: true
+        bind:
+          selinux: z
+          create_host_path: false
+      - type: bind
+        source: ${MSCD_SECRETS_DIR:-/opt/mscd/secrets}/backup
+        target: /run/backup-values
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSCD_BACKUP_RUN_DIR:-/opt/mscd/backup/run}
+        target: /run/backup-run
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MSCD_BACKUP_CACHE_DIR:-/opt/mscd/backup/cache}
+        target: /var/cache/mscd-backup
+        bind:
+          create_host_path: false
+    # mscd: PostgreSQL and the vault bucket; egress: the off-site bucket.
+    networks:
+      - mscd
+      - egress
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${MSCD_BACKUP_CPUS:-1.0}"
+          memory: ${MSCD_BACKUP_MEMORY:-1G}
+          pids: 256

@@ -1,0 +1,13 @@
+# MSCD off-site backup every day at 02:00 UTC (Milestone 2 M2-S07, docs/saas/backup-restore.md).
+# Persistent: a run missed while the server was off starts after the next boot.
+[Unit]
+Description=MSCD off-site backup at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target
