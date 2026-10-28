@@ -61,7 +61,7 @@ describe('scheduler.tick (E.2)', () => {
     // The runs a tick plans in the local hour (`planDailyRuns`, path due). With an empty ledger it plans no catch-up,
     // so these are the jobs of the hour alone (the Milestone 1 behaviour).
     const due = (at: string, zone: string) =>
-      planDailyRuns({ orgId: jakarta, now: new Date(at), timeZone: zone, createdAt: new Date('2029-01-01T00:00:00Z'), ledger: [], firstLocalDate: null });
+      planDailyRuns({ orgId: jakarta, now: new Date(at), timeZone: zone, createdAt: new Date('2029-01-01T00:00:00Z'), ledger: [], firstLocalDate: null, firstEnqueuedAt: null });
     expect(due('2030-01-15T17:05:00Z', 'Asia/Jakarta').map((d) => [d.job.name, d.singletonKey, d.startAfterSeconds, d.path])).toEqual([
       ['license.check', `lc:${jakarta}:2030-01-16`, 0, 'due'],
       ['tasks.overdue', `to:${jakarta}:2030-01-16`, 600, 'due'],

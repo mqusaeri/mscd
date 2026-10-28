@@ -33,9 +33,11 @@ const row = (job: string, localDate: string, scheduledFor: string, enqueuedAt = 
 const rowsOf = (runs: readonly PlannedRun[], at: string): LedgerRun[] =>
   runs.map((r) => ({ job: r.job.name, localDate: r.localDate, scheduledFor: r.scheduledFor, enqueuedAt: new Date(at) }));
 
+/** The tick's plan, with the earliest local date and `enqueued_at` of `ledger` as the tick reads them. */
 function plan(now: string, zone: string, ledger: LedgerRun[], extra: Partial<DailyPlanInput> = {}) {
   const firstLocalDate = ledger.length > 0 ? ledger.map((r) => r.localDate).sort()[0]! : null;
-  return planDailyRuns({ orgId: ORG, now: new Date(now), timeZone: zone, createdAt: LONG_AGO, ledger, firstLocalDate, ...extra });
+  const firstEnqueuedAt = ledger.length > 0 ? new Date(Math.min(...ledger.map((r) => r.enqueuedAt.getTime()))) : null;
+  return planDailyRuns({ orgId: ORG, now: new Date(now), timeZone: zone, createdAt: LONG_AGO, ledger, firstLocalDate, firstEnqueuedAt, ...extra });
 }
 const summary = (runs: ReturnType<typeof plan>) => runs.map((r) => `${r.job.name}@${r.localDate} ${r.path} ${r.startAfterSeconds}`);
 const names = (filter: (j: DailyJob) => boolean) => DAILY_JOBS.filter((j) => j.weekday === undefined && filter(j)).map((j) => j.name);
@@ -122,21 +124,57 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     expect(next.filter((r) => r.job.allSystems).map((r) => r.singletonKey)).toEqual(all);
   });
 
-  it('does not catch up runs before the organisation existed or on the first day of the ledger', () => {
+  it('does not catch up runs before the organisation existed or before the first row of its ledger', () => {
     // A new organisation created at 10:00 in Jakarta: nothing of that morning, nothing of the day before.
     expect(plan('2030-01-16T04:05:00Z', 'Asia/Jakarta', [], { createdAt: new Date('2030-01-16T03:00:00Z') })).toEqual([]);
     expect(plan('2030-01-16T04:05:00Z', 'Asia/Jakarta', fullDays('Asia/Jakarta', '2030-01-14'), { createdAt: new Date('2030-01-16T03:00:00Z') })).toEqual([]);
     // An organisation created at 01:30: the runs of that morning after its creation are caught up.
     const created = plan('2030-01-16T04:05:00Z', 'Asia/Jakarta', fullDays('Asia/Jakarta', '2030-01-14', '2030-01-15'), { createdAt: new Date('2030-01-15T18:30:00Z') });
     expect(created.map((r) => r.job.name)).toEqual(names((j) => j.at > '01:30' && j.at < '11:00'));
-    // A fresh ledger (an upgrade, a new installation): the hour runs, nothing is caught up that day; from the next
-    // date on the ledger has an earlier row, so missed runs of that date are caught up.
+    // A fresh ledger (an upgrade, a new installation): nothing is caught up before its first row.
     expect(summary(plan('2030-01-16T04:05:00Z', 'Asia/Jakarta', []))).toEqual([]);
+    // Its only row is license.check at 00:05 on 17 January. At 02:05 the missing runs due after that row are caught up,
+    // on the ledger's first day too, and none of 16 January, which were due before it.
     const firstRun = row('license.check', '2030-01-17', '2030-01-16T17:05:00Z');
-    expect(plan('2030-01-16T19:05:00Z', 'Asia/Jakarta', [firstRun]).map((r) => r.path)).toEqual(['due', 'due', 'due', 'due']);
-    const second = plan('2030-01-17T19:05:00Z', 'Asia/Jakarta', [firstRun]);
+    expect(summary(plan('2030-01-16T19:05:00Z', 'Asia/Jakarta', [firstRun]))).toEqual([
+      'tasks.overdue@2030-01-17 catch-up 0',
+      'audit-prep.generate@2030-01-17 catch-up 0',
+      'freshness.sweep@2030-01-17 catch-up 0',
+      'link-health.plan@2030-01-17 due 0',
+      'link-health.repository@2030-01-17 due 1500',
+      'readiness.recompute@2030-01-17 due 1500',
+      'drift.evaluate@2030-01-17 due 2400',
+    ]);
+    // A ledger that starts at 00:20 does not catch up the runs of 00:05 and 00:15 that day; the next date runs in full.
+    const lateStart = row('audit-prep.generate', '2030-01-17', '2030-01-16T17:30:00Z', '2030-01-16T17:20:00Z');
+    expect(plan('2030-01-16T19:05:00Z', 'Asia/Jakarta', [lateStart]).filter((r) => r.path === 'catch-up').map((r) => r.job.name)).toEqual(['freshness.sweep']);
+    const second = plan('2030-01-17T19:05:00Z', 'Asia/Jakarta', [lateStart]);
     expect(second.filter((r) => r.path === 'catch-up').map((r) => `${r.job.name}@${r.localDate}`)).toContain('license.check@2030-01-18');
-    expect(second.filter((r) => r.localDate === '2030-01-17' && r.path === 'catch-up')).toEqual([]);
+    expect(second.filter((r) => r.localDate === '2030-01-17').map((r) => r.job.name)).toEqual(names((j) => j.at > '00:20' && j.name !== 'audit-prep.generate'));
+  });
+
+  it('catches up, on the first day of the ledger, a run whose send the queue dropped and a run skipped while its job waited', () => {
+    // UTC, a fresh ledger from 00:05 on 16 January. At 02:05 a job queued for every system holds `rr:<org>:all`, so
+    // the queue drops readiness.recompute and the tick deletes its row (scheduler-tick.job.ts). At 03:05 it follows.
+    let ledger = fullDays('UTC', '2030-01-16').filter((r) => r.scheduledFor < new Date('2030-01-16T02:00:00Z'));
+    const at0205 = plan('2030-01-16T02:05:00Z', 'UTC', ledger);
+    expect(at0205.map((r) => r.job.name)).toContain('readiness.recompute');
+    ledger = [...ledger, ...rowsOf(at0205.filter((r) => r.job.name !== 'readiness.recompute'), '2030-01-16T02:05:00Z')];
+    expect(summary(plan('2030-01-16T03:05:00Z', 'UTC', ledger))).toEqual(['readiness.recompute@2030-01-16 catch-up 0', 'cycle.derive@2030-01-16 due 600']);
+    // Kiritimati (UTC+14), a fresh ledger from 00:05 on 16 January there (10:05 UTC on 15 January); the tick of 03:05
+    // (13:05 UTC) sent cycle.derive of 16 January for 03:15. At 13:10 UTC the organisation moves 24 hours west, to
+    // Honolulu: 03:10 on 15 January. A tick at 13:20 UTC finds cycle.derive of 15 January due, but its run of 16 January
+    // may still wait, so it sends nothing of that job; at 14:05 the run is caught up, as its instant (13:15 UTC) comes
+    // after the ledger's first row.
+    const kiritimati = fullDays('Pacific/Kiritimati', '2030-01-16')
+      .filter((r) => r.scheduledFor <= new Date('2030-01-15T13:15:00Z'))
+      .map((r) => (r.job === 'cycle.derive' ? { ...r, enqueuedAt: new Date('2030-01-15T13:05:00Z') } : r));
+    const at1320 = plan('2030-01-15T13:20:00Z', 'Pacific/Honolulu', kiritimati);
+    expect(at1320.map((r) => r.job.name)).not.toContain('cycle.derive');
+    const after1320 = [...kiritimati, ...rowsOf(at1320, '2030-01-15T13:20:00Z')];
+    const at1405 = plan('2030-01-15T14:05:00Z', 'Pacific/Honolulu', after1320);
+    expect(summary(at1405.filter((r) => r.job.name === 'cycle.derive'))).toEqual(['cycle.derive@2030-01-15 catch-up 0']);
+    expect(at1405.find((r) => r.job.name === 'cycle.derive')!.scheduledFor.toISOString()).toBe('2030-01-15T13:15:00.000Z');
   });
 
   it('runs the weekly job on its weekday only, and catches it up on the day after', () => {

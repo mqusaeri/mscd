@@ -7,12 +7,14 @@
 // `platform/0006_daily_job_run.sql`): a run is one organisation, one daily job and one local date. The tick reads each
 // organisation's current time zone with a plain read (no row lock on organisation rows) and its ledger rows, and
 // `planDailyRuns` (daily-run-planner.ts) names the due runs: the runs of the tick's local hour, delayed to their local
-// minute, and the runs of the current and the previous local date whose local time passed without a run. For each run
-// the tick inserts its ledger row (`insert ... on conflict do nothing returning`) and sends the job only when the row
-// is new. The job carries the run's date in its payload (`localDate`) and works on that date (`Clock.runDate`), so a
-// time zone change between the tick and the job's start cannot move the job to another date. Each daily job therefore
-// runs at most once per local date of its organisation, a missed hour or a time zone change in either direction is
-// caught up, and late, early, repeated or missing ticks and a clock set back change nothing of that.
+// minute, and the runs of the current and the previous local date whose local time passed without a run while the
+// ledger kept the organisation's runs (after its earliest local date or `enqueued_at`). For each run the tick inserts
+// its ledger row
+// (`insert ... on conflict do nothing returning`) and sends the job only when the row is new. The job carries the run's
+// date in its payload (`localDate`) and works on that date (`Clock.runDate`), so a time zone change between the tick
+// and the job's start cannot move the job to another date. Each daily job therefore runs at most once per local date
+// of its organisation, a missed hour or a time zone change in either direction is caught up, and late, early, repeated
+// or missing ticks and a clock set back change nothing of that (within the limits in daily-run-planner.ts).
 //
 // Atomicity: the ledger rows and the jobs are written in one database transaction. The pg-boss driver sends through
 // that transaction (`db: fromKysely(trx)`, pg-boss 12.35), the BullMQ driver writes its outbox row in it, and the
@@ -25,9 +27,12 @@
 // - a key with a date (`<prefix>:<org>:<date>`): that job is this run (sent before the ledger existed), so the row
 //   stays and the run counts as queued;
 // - a key `<prefix>:<org>:all` (readiness.recompute, drift.evaluate, cycle.derive): that job is a run of another date
-//   that is still waiting or working (a queue delay of more than `RECENT_RUN_SECONDS`), or a recompute that a command
-//   queued. The tick deletes the row it inserted, in the same transaction, and a later tick plans the run again once
-//   the key is free. The ledger still keeps the run to one per date.
+//   that is still waiting or working (a queue delay of more than `RECENT_RUN_SECONDS`), or a job queued for every
+//   system outside the daily runs (today every command, and every job a command starts, names its system). The tick
+//   deletes the row it inserted, in the same transaction, and a later tick plans the run again as a catch-up once the
+//   key is free. The ledger still keeps the run to one per date. Limits (daily-run-planner.ts): the run is lost when
+//   the drop happens at the last tick before its date leaves the window of the current and the previous local date,
+//   or when its row would have been the organisation's first ledger row on the ledger's first local date.
 // The BullMQ driver decides at relay time and cannot report a drop to the tick; there the planner's rule alone keeps
 // the sends apart, which holds while a queued daily job starts and ends within `RECENT_RUN_SECONDS`.
 //
@@ -148,10 +153,10 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
         }
         const firsts = await trx
           .selectFrom('platform.daily_job_run')
-          .select(['organization_id', (eb) => eb.fn.min<string>('local_date').as('first')])
+          .select(['organization_id', (eb) => eb.fn.min<string>('local_date').as('date'), (eb) => eb.fn.min<Date>('enqueued_at').as('enqueued')])
           .groupBy('organization_id')
           .execute();
-        const firstLocalDate = new Map(firsts.map((f) => [f.organization_id, f.first]));
+        const first = new Map(firsts.map((f) => [f.organization_id, { localDate: f.date, enqueuedAt: new Date(f.enqueued) }]));
 
         const enqueued: TickRun[] = [];
         const deferred: TickRun[] = [];
@@ -163,7 +168,8 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
             timeZone: org.time_zone,
             createdAt: new Date(org.created_at),
             ledger: ledger.get(org.id) ?? [],
-            firstLocalDate: firstLocalDate.get(org.id) ?? null,
+            firstLocalDate: first.get(org.id)?.localDate ?? null,
+            firstEnqueuedAt: first.get(org.id)?.enqueuedAt ?? null,
             jobs: daily,
           });
           for (const run of runs) {
@@ -192,7 +198,7 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
             if (jobId !== null) {
               enqueued.push(entry);
             } else if (run.job.allSystems) {
-              // Another job holds the key `<prefix>:<org>:all`: no run now, a later tick plans it again (see above).
+              // Another job holds the key `<prefix>:<org>:all`: no run now, a later tick catches it up (see above).
               await trx
                 .deleteFrom('platform.daily_job_run')
                 .where('organization_id', '=', org.id)

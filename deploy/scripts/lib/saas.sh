@@ -57,6 +57,11 @@ readonly SAAS_SETTINGS=(
     MSCD_HTTP_PORT MSCD_HTTPS_PORT MSCD_LOG_LEVEL
     MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS MSCD_EDGE_SUBNET6
 )
+# The mail settings of .env, which go with the secret file smtp.password (MSCD_SMTP_USER
+# is the account the password belongs to). Every deploy and rollback writes smtp.password
+# from standard input, so a .env put back from saved files gets the mail settings of the
+# run as well (saas_restore_files); every other setting is the saved one.
+readonly SAAS_MAIL_SETTINGS=(MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_SMTP_SECURE MSCD_SMTP_USER MSCD_MAIL_FROM)
 # Settings that come from the environment or the files only, never from standard input:
 # the images (from digests.json), the profile and the Compose profiles.
 readonly SAAS_FILE_SETTINGS=(MSCD_PROFILE_FILE COMPOSE_PROFILES)
@@ -466,10 +471,11 @@ saas_input_to_file() {
 # Settings and .env
 # ---------------------------------------------------------------------------
 
-# saas_setting_from NAME CURRENT_ENV EXAMPLE: sets SAAS_VALUE[NAME] and SAAS_SOURCE[NAME]
-# from standard input, the environment, the .env in place or the example, in that order.
+# saas_setting_from NAME CURRENT_ENV EXAMPLE [EXAMPLE_LABEL]: sets SAAS_VALUE[NAME] and
+# SAAS_SOURCE[NAME] from standard input, the environment, the .env in place or the example
+# (named EXAMPLE_LABEL in SAAS_SOURCE, default .env.saas.example), in that order.
 saas_setting_from() {
-    local name=$1 current=$2 example=$3
+    local name=$1 current=$2 example=$3 label=${4:-.env.saas.example}
     if saas_has_input "$name"; then
         SAAS_VALUE[$name]=$(saas_input "$name")
         SAAS_SOURCE[$name]="standard input"
@@ -479,9 +485,9 @@ saas_setting_from() {
     elif [[ -f $current ]] && grep -q "^$name=" "$current"; then
         SAAS_VALUE[$name]=$(kv_get "$current" "$name")
         SAAS_SOURCE[$name]=".env in place"
-    elif grep -q "^$name=" "$example"; then
+    elif [[ -f $example ]] && grep -q "^$name=" "$example"; then
         SAAS_VALUE[$name]=$(kv_get "$example" "$name")
-        SAAS_SOURCE[$name]=".env.saas.example"
+        SAAS_SOURCE[$name]=$label
     fi
 }
 
@@ -581,33 +587,20 @@ saas_validate_settings() {
         fail "ACME_EMAIL '$value' is the placeholder of .env.saas.example; Let's Encrypt refuses it" \
             "Set the variable ACME_EMAIL of the GitHub environment, or leave it empty"
     fi
-    value=${v[MSCD_SMTP_HOST]:-}
-    if ! valid_host "$value"; then
-        fail "MSCD_SMTP_HOST '$value' is not a host name" "Set the variable SMTP_HOST of the GitHub environment"
-    elif [[ $target != test && ($value == *example.* || $value == *.invalid) ]]; then
-        fail "MSCD_SMTP_HOST '$value' is the placeholder of .env.saas.example" "Set the variable SMTP_HOST of the GitHub environment"
-    fi
-    for name in MSCD_SMTP_PORT MSCD_HTTP_PORT MSCD_HTTPS_PORT; do
+    saas_validate_mail_settings "$target"
+    for name in MSCD_HTTP_PORT MSCD_HTTPS_PORT; do
         value=${v[$name]:-}
-        if [[ -n $value || $name == MSCD_SMTP_PORT ]] && ! valid_port "$value"; then
+        if [[ -n $value ]] && ! valid_port "$value"; then
             fail "$name '$value' is not a port number"
         fi
     done
     if [[ -n ${v[MSCD_HTTP_PORT]:-} && ${v[MSCD_HTTP_PORT]:-} == "${v[MSCD_HTTPS_PORT]:-}" ]]; then
         fail "MSCD_HTTP_PORT and MSCD_HTTPS_PORT must differ"
     fi
-    for name in MSCD_SMTP_SECURE MSCD_EDGE_IPV6; do
-        case "${v[$name]:-}" in
-            true | false) ;;
-            *) fail "$name must be true or false, got '${v[$name]:-}'" ;;
-        esac
-    done
-    value=${v[MSCD_MAIL_FROM]:-}
-    if [[ ! $value =~ @[A-Za-z0-9.-]+\.[A-Za-z]{2,} ]]; then
-        fail "MSCD_MAIL_FROM '$value' holds no email address" "Set the variable MAIL_FROM of the GitHub environment"
-    elif [[ $target != test && $value == *@example.* ]]; then
-        fail "MSCD_MAIL_FROM '$value' is the placeholder of .env.saas.example" "Set the variable MAIL_FROM of the GitHub environment"
-    fi
+    case "${v[MSCD_EDGE_IPV6]:-}" in
+        true | false) ;;
+        *) fail "MSCD_EDGE_IPV6 must be true or false, got '${v[MSCD_EDGE_IPV6]:-}'" ;;
+    esac
     case "${v[MSCD_LOG_LEVEL]:-info}" in
         fatal | error | warn | info | debug | trace) ;;
         *) fail "MSCD_LOG_LEVEL must be fatal, error, warn, info, debug or trace" ;;
@@ -633,6 +626,30 @@ saas_validate_settings() {
     value=,${v[COMPOSE_PROFILES]:-},
     if [[ $value != *,bundled-db,* || $value != *,bundled-s3,* || ! $value =~ ^,[a-z0-9_,-]*,$ || $value == *demo* ]]; then
         fail "COMPOSE_PROFILES '${v[COMPOSE_PROFILES]:-}' must list bundled-db and bundled-s3 (and optional profiles such as grafana)"
+    fi
+}
+
+# saas_validate_mail_settings TARGET: FAIL lines for mail settings of SAAS_VALUE that cannot
+# work (saas_validate_settings, and the rollback, which sets only these).
+saas_validate_mail_settings() {
+    local target=$1 value
+    value=${SAAS_VALUE[MSCD_SMTP_HOST]:-}
+    if ! valid_host "$value"; then
+        fail "MSCD_SMTP_HOST '$value' is not a host name" "Set the variable SMTP_HOST of the GitHub environment"
+    elif [[ $target != test && ($value == *example.* || $value == *.invalid) ]]; then
+        fail "MSCD_SMTP_HOST '$value' is the placeholder of .env.saas.example" "Set the variable SMTP_HOST of the GitHub environment"
+    fi
+    value=${SAAS_VALUE[MSCD_SMTP_PORT]:-}
+    valid_port "$value" || fail "MSCD_SMTP_PORT '$value' is not a port number"
+    case "${SAAS_VALUE[MSCD_SMTP_SECURE]:-}" in
+        true | false) ;;
+        *) fail "MSCD_SMTP_SECURE must be true or false, got '${SAAS_VALUE[MSCD_SMTP_SECURE]:-}'" ;;
+    esac
+    value=${SAAS_VALUE[MSCD_MAIL_FROM]:-}
+    if [[ ! $value =~ @[A-Za-z0-9.-]+\.[A-Za-z]{2,} ]]; then
+        fail "MSCD_MAIL_FROM '$value' holds no email address" "Set the variable MAIL_FROM of the GitHub environment"
+    elif [[ $target != test && $value == *@example.* ]]; then
+        fail "MSCD_MAIL_FROM '$value' is the placeholder of .env.saas.example" "Set the variable MAIL_FROM of the GitHub environment"
     fi
 }
 
@@ -791,8 +808,12 @@ saas_read_secret() {
         return
     fi
     owner=$(stat -c '%u:%g' -- "$dir/$name") || return 1
-    docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
-        --user "$owner" --entrypoint cat -v "$dir/$name:/run/mscd-secret:ro,z" "$image" /run/mscd-secret
+    # The key reaches this script through the attached output only: with the log driver
+    # none, the Docker daemon writes none of it to its log store (the local driver of the
+    # server writes container output to disk, journald or syslog would keep it).
+    docker run --rm --log-driver none --network none --read-only --cap-drop ALL \
+        --security-opt no-new-privileges:true --user "$owner" --entrypoint cat \
+        -v "$dir/$name:/run/mscd-secret:ro,z" "$image" /run/mscd-secret
 }
 
 # saas_compact: standard input without any white space (key files compare by content,
@@ -920,15 +941,29 @@ saas_link_env() {
 # (repair_switch of saas-deploy.sh): moving away from the release of current.env, the .env
 # is written first; moving back to it, the .env is written last.
 
+# saas_apply_mail_settings FILE: writes the mail settings of SAAS_VALUE (SAAS_MAIL_SETTINGS)
+# into the .env FILE; names without a value in SAAS_VALUE are left as they are.
+saas_apply_mail_settings() {
+    local file=$1 name
+    for name in "${SAAS_MAIL_SETTINGS[@]}"; do
+        if [[ -n ${SAAS_VALUE[$name]+x} ]]; then env_set "$file" "$name" "${SAAS_VALUE[$name]}"; fi
+    done
+}
+
 # saas_restore_files SAVED ENV_ORDER: puts saved files back; ENV_ORDER first (moving away
 # from the release of state/current.env) or last (moving back to it). Folders keep their
-# inodes (bind mounts).
+# inodes (bind mounts). The saved .env gets the mail settings of this run first: this run
+# wrote smtp.password from standard input, and the saved MSCD_SMTP_USER and host may belong
+# to another mail account (SAAS_MAIL_SETTINGS).
 saas_restore_files() {
-    local saved=$1 order=${2:-last}
-    if [[ $order == first ]]; then install -m 0600 "$saved/.env" "$INSTALL_DIR/.env"; fi
+    local saved=$1 order=${2:-last} env
+    env=$(mktemp "$INSTALL_DIR/state/.restore-env.XXXXXX")
+    install -m 0600 "$saved/.env" "$env"
+    saas_apply_mail_settings "$env"
+    if [[ $order == first ]]; then mv -f -- "$env" "$INSTALL_DIR/.env"; fi
     saas_sync_dir "$saved/deploy" "$INSTALL_DIR/deploy"
     saas_sync_dir "$saved/site" "$INSTALL_DIR/site"
-    if [[ $order != first ]]; then install -m 0600 "$saved/.env" "$INSTALL_DIR/.env"; fi
+    if [[ $order != first ]]; then mv -f -- "$env" "$INSTALL_DIR/.env"; fi
     saas_link_env
 }
 

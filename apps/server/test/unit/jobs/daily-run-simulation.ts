@@ -232,6 +232,7 @@ export function simulate(seed: number, options: SimulationOptions = {}): Simulat
     }
   }
   const firstLocalDate = addDays(firstDate, -3);
+  const firstEnqueuedAt = new Date(Math.min(...rows.map((r) => r.enqueuedAt.getTime())));
 
   // Jobs in the queue (waiting or working) until their end; a job is played through when it is sent, because its
   // start and end follow from the send.
@@ -274,7 +275,7 @@ export function simulate(seed: number, options: SimulationOptions = {}): Simulat
       recentFrom = from;
       recent = rows.filter((r) => r.localDate >= from);
     }
-    const planned = planDailyRuns({ orgId: ORG, now, timeZone: zone, createdAt, ledger: recent, firstLocalDate, jobs: DAILY_JOBS });
+    const planned = planDailyRuns({ orgId: ORG, now, timeZone: zone, createdAt, ledger: recent, firstLocalDate, firstEnqueuedAt, jobs: DAILY_JOBS });
     for (const run of planned) {
       const key = `${run.job.name}@${run.localDate}`;
       // The database keeps the first row (`on conflict do nothing`); the tick sends nothing for an existing row.
