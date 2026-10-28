@@ -12,7 +12,7 @@ async function openFw(page, query = '') {
 }
 
 test.describe('Framework library', () => {
-  test('lists every framework with edition, signed pack, status and repository', async ({ page }) => {
+  test('lists every framework with edition, signed pack, status and repository', async ({ page, dataSource }) => {
     await openFw(page);
     await expect(page.locator('main thead th')).toHaveText(['Standard', 'Editions', 'Pack version', 'Status', 'Active management systems', 'Files', '']);
     await expect(rows(page)).toHaveCount(4);
@@ -24,7 +24,14 @@ test.describe('Framework library', () => {
     await expect(row(page, 'ISO 9001 : 2015')).toContainText('2026, 2015 in transition');
     await expect(row(page, 'ISO 22301 : 2019')).toContainText('Zero-transit');
     await expect(row(page, 'ISO 37001 : 2025')).toContainText('Beta pack');
-    await expect(row(page, 'ISO 37001 : 2025')).toContainText('Update available 0.7.0');
+    if (dataSource === 'api') {
+      // Milestone 2 E.3 (M2-04): the api installs the content step 0.7.0, which is the update the sample's card offers, so
+      // the api offers no update for this edition (the parity test checks the same).
+      await expect(row(page, 'ISO 37001 : 2025')).toContainText('0.7.0 (beta)');
+      await expect(row(page, 'ISO 37001 : 2025')).not.toContainText('Update available');
+    } else {
+      await expect(row(page, 'ISO 37001 : 2025')).toContainText('Update available 0.7.0');
+    }
     // only the edition in transition offers the transition assistant
     await expect(page.locator('main button', { hasText: /^Transition$/ })).toHaveCount(1);
     await expect(page.locator('main button', { hasText: /^Manage$/ })).toHaveCount(4);
