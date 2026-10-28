@@ -465,10 +465,24 @@ image_file() {
     printf 'images/%s-%s.tar.gz' "${name//:/-}" "$ARCH"
 }
 
+# docker_save REF [docker save options]: `docker save` of the image for linux/$ARCH. The
+# --platform option needs Docker Engine 28 or later; an older engine (23 to 27, for example
+# the docker.io package of Ubuntu 24.04) saves the single platform that the build loaded or
+# the pull fetched (extra_images checks its architecture).
+docker_save() {
+    local ref=$1
+    shift
+    if docker save --help 2>/dev/null | grep -q -- '--platform'; then
+        docker save --platform "linux/$ARCH" "$@" "$ref"
+    else
+        docker save "$@" "$ref"
+    fi
+}
+
 # save_image REF FILE
 save_image() {
     local ref=$1 file=$2
-    docker save --platform "linux/$ARCH" "$ref" | gzip -6 >"$STAGE/$file"
+    docker_save "$ref" | gzip -6 >"$STAGE/$file"
     pass "$ref saved to $file ($(du -m "$STAGE/$file" | cut -f1) MB, layers $(image_fingerprint "$ref"))"
 }
 
@@ -754,8 +768,8 @@ images_only_main() {
     else
         WEB_FILE=images/web-$ARCH.tar
         SERVER_FILE=images/server-$ARCH.tar
-        docker save --platform "linux/$ARCH" "$WEB_REF" -o "$STAGE/$WEB_FILE"
-        docker save --platform "linux/$ARCH" "$SERVER_REF" -o "$STAGE/$SERVER_FILE"
+        docker_save "$WEB_REF" -o "$STAGE/$WEB_FILE"
+        docker_save "$SERVER_REF" -o "$STAGE/$SERVER_FILE"
         SCAN_REPORT=$LOG_DIR/SECURITY-SCAN.txt
         scan_images
         rm -f -- "$STAGE/$WEB_FILE" "$STAGE/$SERVER_FILE"
