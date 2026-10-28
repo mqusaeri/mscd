@@ -24,11 +24,11 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-S02 SaaS Compose stack and TLS | 1b | Done | Caddy also serves `apps/site` on `MSCD_SITE_DOMAIN`. Without the Alpine mirrors, run its stack test with `MSCD_SAAS_TEST_SCAN=auto` |
 | M2-05 Certification, internal audit and readiness server | 2a | Done, waiting for the wave commit | Its handoff lists the cross-package fixes the orchestrator applies at the end of wave 2a |
 | M2-07 Document control and register server additions | 2a | Done, waiting for the wave commit | APPL-ASSESS also applies on create (plan D.2 updated). Holdings include self-assessment gaps, audit activities and business associate relationship owners |
-| M2-06 Onboarding, accounts and operator server | 2a | Built; an independent review found the daily job catch-up after a time zone change unsound, so the orchestrator is rebuilding it on a run ledger (one row per organisation, job and local date) | The orchestrator applied its three patches outside Owns. The ledger adds one platform table (orchestrator decision) |
+| M2-06 Onboarding, accounts and operator server | 2a | Done, waiting for the wave commit | Daily jobs run from a ledger, `platform.daily_job_run` (one row per organisation, job and local date; orchestrator decision): verified with over 600,000 simulated ticks, 0 doubles, 0 misses. The organisation PATCH checks If-Match |
 | M2-04 Pack content | 2a | Done, waiting for the wave commit | Six packs at the content step: ISO27001-2022 1.3.0, ISO9001-2015 1.5.0, ISO9001-2026 0.10.0, ISO22301-2019 1.1.0, ISO37001-2016 1.1.0, ISO37001-2025 0.7.0. Evidence examples and the clause at risk are keyed per system. H.6 still open |
 | MOT-03 In-app illustration library | L2 | Next (M2-01 is done) | |
 | M2-S08 Monitoring and alerts | 2b | Done, waiting for the wave commit | Orchestrator item between waves 2b and 3a: queue age metric from the start time of due jobs, then `JobQueueStuck` back to 900 s. Real Grafana image test assigned to M2-S13 |
-| M2-S05 Deploy script and deploy workflow | 2b | Running (started early: no server or web code) | |
+| M2-S05 Deploy script and deploy workflow | 2b | Done, waiting for the wave commit | The deploy rehearsal passed 78 checks. Deploys run only through `.github/workflows/deploy-prod.yml` with the owner's approval |
 | M2-S07 Backups, M2-S10 Entitlements | 2b | Next, after the wave 2a commit | M2-S10: write `platform.entitlement` only in platform scope (see its brief) |
 | M2-S09, M2-08, M2-09, M2-10 | 3a | After wave 2 | |
 | M2-S11, M2-16, M2-11, M2-12 | 3b | After 3a | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |

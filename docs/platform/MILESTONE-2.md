@@ -1553,6 +1553,7 @@ Brief:
   - the release rehearsal order: staging first, then the restore-test migration rehearsal (M2-S07), then production;
   - rollback;
   - what users see during a deploy: slow requests for up to 20 seconds, and retried POSTs are safe because of idempotency keys.
+- Orchestrator note (wave 2b): deviations 1 to 5, 9 and 11 to 15 of `docs/platform/handoff/M2-S05.md` are accepted and take precedence over this brief where they differ, for example `set_smtp_password` runs before `fix_secret_owners` so the server user can read `smtp.password`.
 
 Acceptance:
 
