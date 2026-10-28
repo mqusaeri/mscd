@@ -1,0 +1,13 @@
+{
+  "id": "internal-audit",
+  "label": ["Internal audit", "Audit internal"],
+  "group": "audit",
+  "order": 40,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "auditor", "top"],
+  "nav": true,
+  "pageActions": [["Plan internal audit", "Rencanakan audit internal"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

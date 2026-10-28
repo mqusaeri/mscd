@@ -1,0 +1,13 @@
+{
+  "id": "findings",
+  "label": ["Findings and actions", "Temuan dan tindakan"],
+  "group": "audit",
+  "order": 50,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "auditor", "top", "owner"],
+  "nav": true,
+  "pageActions": [["Raise finding", "Catat temuan"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

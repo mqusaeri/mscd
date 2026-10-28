@@ -42,7 +42,9 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-11 Controls, evidence and phases forms | 3b | Running | Started early (owner's approval) |
 | M2-12 Document control screens | 3b | Done | Document control panel on the document detail (edit, owner and approver with BR-16, reassign, first and new versions, versions tab, review with Approve and Return to draft) and the Required documented information screen per clause with the H.9 scope panel |
 | M2-S11 Organisation discovery at sign-in | 3b | After M2-S09 and M2-10 (shared files) | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
-| M2-S12, M2-13, M2-14, M2-15 | 3c | After 3b | |
+| M2-14 Audit registers screens | 3c | Done | Internal audit (programme, events with scope and report, activities, AUD-INDEP warnings), Findings and actions (root cause, systemic check, corrective action steps, effectiveness check with the `no-findings` scene), Management review (inputs, outputs, joint reviews) |
+| M2-13 Registers, M2-15 Certification timeline and auditor workspace | 3c | Running | Started early (owner's approval) |
+| M2-S12 Operator console screens | 3c | Next | After M2-S11 (and M2-16, done) |
 | M2-17 Terminology | 4 | Next after wave 3c (alone in its wave) | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (one name for every system); every other proposed label keeps its name. Indonesian screens use the same English words, "Checkpoint" and "Management System Manager" (owner, 2026-10-28; today "gate" and "Manajer SM") |
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | |
@@ -55,6 +57,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 - Backlog from M2-S09: the worker could skip queued tenant jobs of organisations that are not active (follow-up 6); `SessionRevokeReason` in `identity/session.service.ts` could list `organisation_suspended` and `organisation_archived` (follow-up 7); nothing moves an organisation to `archived` at the end of the 30 days of D-S5 yet (follow-up 8). For M2-S13: `test/int/saas-ops` in `test:int:saas`, `saas-ops.sh` in the shellcheck step and `jq` on the runner (follow-ups 3 and 10); `docs/saas/README.md` lists `operator.md` and `entitlements.md` (follow-up 4 here and of M2-S10).
 - Backlog from M2-16 (owner of the M2-01 host files): a screen permission every signed-in session holds, `ctx.setDisplay`, a binary answer in `ApiClient.request`; a route for the state of a pack installation; a decision whether the unread count read may leave the session idle time alone (follow-ups 4, 5, 6, 8 and 9).
 - Backlog from M2-12 (contract, later server package): template title and type in `DocumentedInfoItem` or a template list route, and the template document of a record to retain (its follow-ups 1 and 9).
+- Backlog from M2-14: no pack has activity templates for internal audits (ISO/IEC 27001 has Stage 1 and Stage 2 only), so an internal audit starts empty with real data; a lead auditor should write them (pack content). The root cause and systemic check texts belong in `FindingItem` (contract).
 - Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).

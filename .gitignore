@@ -24,3 +24,6 @@ deploy/helm/mscd/ci/.schema-cache/
 tools/smoke/.explore/
 deploy/compose/.docker-compose.compat.yml
 deploy/compose/.demo-ports
+
+# Screenshots and logs of browser tooling used by agents
+.playwright-mcp/

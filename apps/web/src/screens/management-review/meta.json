@@ -1,0 +1,13 @@
+{
+  "id": "management-review",
+  "label": ["Management review", "Tinjauan manajemen"],
+  "group": "audit",
+  "order": 60,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "top", "auditor"],
+  "nav": true,
+  "pageActions": [["Plan review", "Rencanakan tinjauan"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

@@ -81,13 +81,13 @@ describe('visibility of host screens', () => {
     const admin = nav.find((g) => g.id === 'admin')!;
     expect(admin.items.map((i) => i.id)).toEqual(['getting-started', 'fw', 'storage', 'organization', 'license', 'systems', 'routing']);
     expect(admin.items[4]).toMatchObject({ host: true, label: 'Licence', order: 30 });
-    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'admin', 'ops']);
+    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'audit', 'admin', 'ops']);
     // A persona without the Administration group gets it when a host screen of the group is visible.
     const top = hostNav([{ id: 'top', label: null, items: [{ id: 'portfolio', label: 'P' }] }], ctxOf({ lang: 'id' }), 'top');
-    // Required documented information (M2-12) also opens for Top Management, so the Implementation group appears too.
-    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['admin', 'Administrasi']]);
-    // With no built-in entries, a Domain Owner gets only the Implementation group of Required documented information (M2-12).
-    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info']]]);
+    // Required documented information (M2-12) and the audit screens (M2-14) also open for Top Management.
+    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['audit', 'Audit'], ['admin', 'Administrasi']]);
+    // With no built-in entries, a Domain Owner gets Required documented information (M2-12) and Findings and actions (M2-14).
+    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info']], ['audit', ['findings']]]);
     expect(GROUP_LABELS.ops).toEqual(['Operations', 'Operasi']);
   });
 
@@ -128,7 +128,8 @@ describe('header values of an open host screen', () => {
   });
 
   it('extensions render nothing when no package adds one; the top bar slot needs a session (M2-16)', () => {
-    expect(detailNode('req', ctxOf(), { ms: 'isms', recordKey: 'isms:req:A.5.1', record: {}, close: () => undefined })).toBeNull();
+    // Packages extend `req`, `ev` and `activity` (M2-11, M2-14); no package extends `item`.
+    expect(detailNode('item', ctxOf(), { ms: 'isms', recordKey: 'isms:x:R-031', record: {}, close: () => undefined })).toBeNull();
     // M2-16 puts the notification bell and "My account" in the top bar; in API mode they need a signed-in person.
     expect(slotNode('topbar', ctxOf())).not.toBeNull();
     expect(slotNode('topbar', ctxOf({ mode: 'api', me: null }))).toBeNull();
