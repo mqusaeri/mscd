@@ -74,7 +74,7 @@ describe('freshness jobs (E.3)', () => {
   }
 
   const entryState = async (id: string) =>
-    (await one<{ implementation_status: string; freshness_status: string | null; integrity_status: string | null; last_evidence_at: Date | null }>(
+    (await one<{ implementation_status: string; freshness_status: string | null; integrity_status: string | null; last_evidence_at: string | null }>(
       `SELECT implementation_status, freshness_status, integrity_status, last_evidence_at FROM org_tst.applicability_entry WHERE id = $1`,
       [id],
     ))[0]!;
@@ -191,7 +191,7 @@ describe('freshness jobs (E.3)', () => {
     const result = await app.moduleRef.get(FreshnessService).recompute(org, { entryIds: [both.entry] });
     expect(result.downgraded).toEqual([]);
     expect(await entryState(both.entry)).toMatchObject({ implementation_status: 'implemented', freshness_status: 'fresh', integrity_status: 'ok' });
-    expect((await entryState(both.entry)).last_evidence_at?.toISOString().slice(0, 10)).toBe('2026-09-15');
+    expect((await entryState(both.entry)).last_evidence_at).toBe('2026-09-15');
   });
 
   it('notifies evidence_aging once per production date (digest)', async () => {

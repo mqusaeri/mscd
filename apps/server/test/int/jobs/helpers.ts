@@ -12,6 +12,7 @@ import { Clock } from '../../../src/common/clock';
 import { InMemoryJobQueue } from '../../../src/common/jobs/in-memory-job-queue';
 import { JOB_QUEUE, type JobEnvelope, type JobPayloads, type SendOptions } from '../../../src/common/jobs/job-queue';
 import { GATEWAY_CLIENT, type GatewayClient } from '../../../src/common/tokens';
+import { PG_DATE_OID } from '../../../src/db/kysely';
 import { JobsModule } from '../../../src/modules/jobs/jobs.module';
 import { WorkerRuntime } from '../../../src/worker/worker-runtime';
 import { WorkerRuntimeModule } from '../../../src/worker/worker-runtime.module';
@@ -133,9 +134,24 @@ export async function startValkey(): Promise<StartedValkey> {
 
 export type AdminClient = pg.Client;
 
-/** A superuser connection to the test database (fixtures that bypass RLS, the chain rewrite of F.11). */
+/**
+ * Reads a PostgreSQL `date` as the `YYYY-MM-DD` string, as the server's pools do (src/db/kysely.ts). The node-postgres
+ * default gives a Date at local midnight, which `toISOString` shows as the day before when the host time zone is
+ * east of UTC.
+ */
+const adminTypes = {
+  getTypeParser: ((oid: number, format?: 'text' | 'binary') =>
+    oid === PG_DATE_OID && format !== 'binary'
+      ? (value: string) => value
+      : pg.types.getTypeParser(oid, format)) as typeof pg.types.getTypeParser,
+};
+
+/**
+ * A superuser connection to the test database (fixtures that bypass RLS, the chain rewrite of F.11). A `date` column
+ * comes back as `YYYY-MM-DD`, as on the server.
+ */
 export async function adminClient(db: Pick<TestDatabase, 'urls'>): Promise<AdminClient> {
-  const client = new pg.Client({ connectionString: db.urls.admin, application_name: 'mscd-test-jobs' });
+  const client = new pg.Client({ connectionString: db.urls.admin, application_name: 'mscd-test-jobs', types: adminTypes });
   client.on('error', () => undefined);
   await client.connect();
   return client;

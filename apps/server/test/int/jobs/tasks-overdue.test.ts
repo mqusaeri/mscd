@@ -151,14 +151,14 @@ describe('tasks.overdue and audit-prep.generate (E.2)', () => {
     // Without them the window (60 days before 2026-11-12) is open on 2026-09-29.
     await admin.query(`UPDATE org_tst.audit_prep_task SET deleted_at = now() WHERE audit_event_id = $1`, [ids.event]);
     await app.run('audit-prep.generate', { orgId: TST, payload: {} });
-    const created = await one<{ template_code: string; due_at: Date; owner: string; status: string }>(
+    const created = await one<{ template_code: string; due_at: string; owner: string; status: string }>(
       `SELECT template_code, due_at, (SELECT handle FROM platform.app_user u WHERE u.id = owner_user_id) AS owner, status
          FROM org_tst.audit_prep_task WHERE audit_event_id = $1 AND deleted_at IS NULL ORDER BY position`,
       [ids.event],
     );
     expect(created.map((c) => c.template_code)).toEqual(['PREP-01', 'PREP-02', 'PREP-03', 'PREP-04', 'PREP-05', 'PREP-06', 'PREP-07']);
     expect(created.every((c) => c.owner === 'rina' && c.status === 'not_started')).toBe(true);
-    expect(created.map((c) => c.due_at.toISOString().slice(0, 10))).toEqual(['2026-10-10', '2026-10-06', '2026-10-15', '2026-10-20', '2026-10-28', '2026-11-05', '2026-11-09']);
+    expect(created.map((c) => c.due_at)).toEqual(['2026-10-10', '2026-10-06', '2026-10-15', '2026-10-20', '2026-10-28', '2026-11-05', '2026-11-09']);
     const notes = await one<{ kind: string; digest: boolean }>(`SELECT kind, digest FROM org_tst.notification WHERE kind = 'prep_task_assigned'`);
     expect(notes).toEqual([{ kind: 'prep_task_assigned', digest: true }]);
 

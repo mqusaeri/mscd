@@ -5,7 +5,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 ## How to continue
 
 1. Read `CLAUDE.md`, then the wave table in section G.1 of the plan and the motion track in section L.
-2. New machine: install Docker, Node 22 and npm 10, run `npm ci`, and check that `docker info` works. On macOS install `flock` (`brew install flock`); the workflows use it so packages do not block each other. Run the tests with `TZ=UTC` on a host whose time zone is not UTC (as CI does): `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` fail otherwise. Keep about 10 GB of free disk: the Managed Vault (SeaweedFS) refuses to write below 1% free, which fails the vault tests and the smoke test.
+2. New machine: install Docker, Node 22 and npm 10, run `npm ci`, and check that `docker info` works. On macOS install `flock` (`brew install flock`); the workflows use it so packages do not block each other. Run the tests with `TZ=UTC` on a host whose time zone is not UTC, as CI does (two job tests that read `date` columns failed otherwise until 2026-10-29; they now read dates as the server does, so the suites pass in any zone). Keep about 10 GB of free disk: the Managed Vault (SeaweedFS) refuses to write below 1% free, which fails the vault tests and the smoke test.
 3. Start the next packages with `.claude/workflows/mscd-m2-wp.js`, args `{wp: "<id>", notes: "<anything from the Notes column>"}`. Run at most four at once (rule R-02); a machine with more cores may run more, as long as no two running packages own the same file.
 4. When a session ends while a package is still being built, start `.claude/workflows/mscd-m2-wp.js` again with `interrupted: true` and, if you have it, `previousTranscript` (the stopped implementer's transcript): the new implementer finishes the work in the tree instead of starting over.
 5. When a package's workflow ends with open findings, or was stopped part way, continue it with `.claude/workflows/mscd-m2-followup.js`, args `{wp, notes, review: {acceptancePassed, problems}, interrupted}` (the `review` is the `final` object of the ended run). Name in `notes` any path outside the package's Owns list that you assign for the fix.
@@ -59,7 +59,6 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 - Backlog from M2-12 (contract, later server package): template title and type in `DocumentedInfoItem` or a template list route, and the template document of a record to retain (its follow-ups 1 and 9).
 - Backlog from M2-14: no pack has activity templates for internal audits (ISO/IEC 27001 has Stage 1 and Stage 2 only), so an internal audit starts empty with real data; a lead auditor should write them (pack content). The root cause and systemic check texts belong in `FindingItem` (contract).
 - Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
-- Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 
 ## Wave results
