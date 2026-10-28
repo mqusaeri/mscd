@@ -1,0 +1,25 @@
+/* Certification timeline forms (MILESTONE-2 M2-15): the panels below the audit event of the timeline and the actions
+   of its preparation tasks and cycle items. Tokens of src/styles.css only; no text under 12px; link actions keep the
+   accent colour of the kit's link button, which reaches 4.5:1 on the card in both themes. */
+
+.mx-tl-panel{display:grid;gap:12px;min-width:0}
+.mx-tl-box{display:grid;gap:10px;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:8px;background:var(--sur)}
+.mx-tl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;min-width:0}
+.mx-tl-title{margin:0;font-size:inherit;font-weight:600;color:var(--tx)}
+.mx-tl-sub{display:block;margin-top:2px;font-size:12px;color:var(--tx2)}
+.mx-tl-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0}
+.mx-tl-badges{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mx-tl-list{display:grid;min-width:0}
+.mx-tl-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px 0;border-top:1px solid var(--bd);min-width:0}
+.mx-tl-row-title{color:var(--tx);overflow-wrap:anywhere}
+.mx-tl-row-meta{display:block;font-size:12px;color:var(--tx2);overflow-wrap:anywhere}
+.mx-tl-row-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.mx-tl-code{font-family:var(--ffm);font-weight:600;margin-right:6px}
+.mx-tl-text{margin:0;color:var(--tx2);font-size:max(12px,.95em);line-height:1.45}
+.mx-tl-link{display:inline;border:0;background:transparent;padding:0;margin:0;font:inherit;font-size:max(12px,.92em);font-weight:500;line-height:1.4;color:var(--acc);text-decoration:underline;text-align:left;white-space:normal;cursor:pointer}
+.mx-tl-link:hover{color:var(--tx)}
+.mx-tl-link:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:2px}
+.mx-tl-busy{font-size:max(12px,.92em);color:var(--tx2)}
+.mx-tl-item-actions{display:inline-flex;flex-wrap:wrap;gap:4px 12px;min-width:0}
+.mx-tl-template{display:grid;gap:4px;padding:10px 12px;border-radius:8px;background:var(--sur2);color:var(--tx);font-size:max(12px,.95em)}
+.mx-tl-template b{font-weight:600}

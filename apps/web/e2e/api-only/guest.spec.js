@@ -1,8 +1,9 @@
 import { test, expect, ui, go, expectToast } from '../helpers.js';
 import { totpOf, waitForMail, freshTotpStep } from '../../e2e-api/fixtures.js';
 
-// Guest auditor access (build plan F.14, D-27, J.6): rina grants access from Audit readiness, the auditor opens the
-// emailed single-use link, enters the emailed one-time code, enrols TOTP and reads the system without changing it.
+// Guest auditor access (build plan F.14, D-27, J.6): rina grants access from Audit readiness with the grant form of
+// M2-15 (email and 14 days), the auditor opens the emailed single-use link, enters the emailed one-time code, enrols
+// TOTP and reads the system without changing it.
 const AUDITOR = 'lead.auditor@certifier.co.id';
 
 test.describe('Guest auditor access @api-only', () => {
@@ -11,9 +12,12 @@ test.describe('Guest auditor access @api-only', () => {
     await page.goto('/');
     await expect(ui.title(page)).toBeVisible();
     await go(page, 'Audit readiness');
-    page.once('dialog', (dialog) => dialog.accept(AUDITOR));
+    // "Auditor access" opens the grant form (M2-15, claim `audit.auditorAccess`), which replaced the email prompt.
     await ui.pageAction(page, 'Auditor access').click();
-    await expectToast(page, `the link was emailed to ${AUDITOR}`);
+    await expect(ui.modal(page)).toContainText('Grant auditor access');
+    await ui.modal(page).locator('input[name="email"]').fill(AUDITOR);
+    await ui.modal(page).locator('button', { hasText: /^Grant access$/ }).click();
+    await expectToast(page, `The link was emailed to ${AUDITOR}`);
 
     const [link] = await waitForMail(AUDITOR, /https?:\/\/\S+\/guest#[A-Za-z0-9_-]+/);
     const guest = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });

@@ -1,0 +1,13 @@
+{
+  "id": "auditor-access",
+  "label": ["Auditor access", "Akses auditor"],
+  "group": "audit",
+  "order": 70,
+  "scope": "ms",
+  "perm": ["auditor_access.grant", "ms.read"],
+  "roles": ["manager", "auditor", "top"],
+  "nav": true,
+  "pageActions": [["Grant access", "Berikan akses"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

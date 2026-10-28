@@ -106,12 +106,22 @@ test.describe('Certification timeline', () => {
     await expect(cycleRows(page)).toHaveCount(4);
   });
 
-  test('Add audit event from the empty lane and the page action', async ({ page }) => {
+  test('Add audit event from the empty lane and the page action', async ({ page, dataSource }) => {
     await openTimeline(page);
+    // API builds open the Add audit event form (M2-15, claim `timeline.addEvent`); this test leaves it unsaved.
+    const opened = async () => {
+      if (dataSource === 'api') {
+        await expect(ui.modal(page)).toContainText('Add audit event');
+        await page.keyboard.press('Escape');
+        await expect(ui.modal(page)).toHaveCount(0);
+      } else {
+        await expectToast(page, 'Audit event form opened');
+      }
+    };
     await lane(page, 'ABMS').locator('button', { hasText: 'Add audit event' }).click();
-    await expectToast(page, 'Audit event form opened');
+    await opened();
     await ui.pageAction(page, 'Add audit event').click();
-    await expectToast(page, 'Audit event form opened');
+    await opened();
   });
 
   test('regression detector lists the affected records and toggles off', async ({ page }) => {

@@ -1,0 +1,13 @@
+{
+  "id": "audit-trail",
+  "label": ["Audit trail", "Jejak audit"],
+  "group": "audit",
+  "order": 90,
+  "scope": "ms",
+  "perm": ["audit_trail.read", "audit_trail.metadata.read"],
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}
