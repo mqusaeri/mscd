@@ -7,9 +7,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   type ActivityItem, type ApplicabilityItem, type ApplicabilityQuery, type BusinessRole, type ChainResponse, type CycleItem, type DocumentItem,
-  type DocumentsQuery, type DriftPattern, type EvidenceItem, type EvidenceQuery, type GateItemView, type ImplementationSummary, type NextAuditEvent,
-  type Page, type PendingAggregate, type PendingPerson, type PendingQuery, type PendingRecord, type Permission, type StageReadiness,
-  type StageRecordsQuery, type SurveillanceEvent,
+  type DocumentsQuery, type DriftPattern, type EvidenceItem, type EvidenceQuery, type EvidenceTargetView, type GateItemView,
+  type ImplementationSummary, type NextAuditEvent, type Page, type PendingAggregate, type PendingPerson, type PendingQuery, type PendingRecord,
+  type Permission, type StageReadiness, type StageRecordsQuery, type SurveillanceEvent,
 } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
@@ -20,8 +20,9 @@ import { ActivityService } from '../implementation';
 import { buildSystemSnapshot, loadOrgData, systemFields } from '../read-model';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import {
-  applicabilityPage, chainFrom, cycleItems, documentsPage, driftPatterns, evidencePage, gateItems, implementationSummary, nextAuditEvent,
-  pendingAggregate, pendingOf, pendingPerPerson, phaseActivities, stageReadiness, stageRecordsPage, surveillanceEvent,
+  applicabilityPage, chainFrom, cycleItems, documentsPage, driftPatterns, evidencePage, evidenceTargetIds, gateItems, implementationSummary,
+  nextAuditEvent, pendingAggregate, pendingOf, pendingPerPerson, phaseActivities, stageReadiness, stageRecordsPage, surveillanceEvent,
+  withEvidenceTargets,
   type ActivityDetail, type DriftRuleDetail, type EventDetail, type FindingDetail, type Person, type PrepDetail, type RepositoryNames,
   type ScreenData,
 } from './screens';
@@ -144,8 +145,19 @@ export class ScreenReadService {
     return this.screen(principal, ms, lang, async (trx, d) => driftPatterns(d, rule, await this.driftDetails(trx, d.system.active.id)));
   }
 
-  evidence(principal: Principal, ms: string, lang: Lang, query: EvidenceQuery): Promise<Page<EvidenceItem>> {
-    return this.screen(principal, ms, lang, async (_trx, d) => evidencePage(d, query));
+  /**
+   * The evidence page; the rows of records on which the caller may change targets (`evidence.manage`, in full or on
+   * own records) carry their live targets in every system.
+   */
+  async evidence(principal: Principal, ms: string, lang: Lang, query: EvidenceQuery): Promise<Page<EvidenceItem>> {
+    // Decided before the transaction opens, as `require` does, so the decision never needs a second pool connection.
+    const manage = await this.evaluator.evaluate(principal, 'evidence.manage', { scope: 'ms', ms });
+    return this.screen(principal, ms, lang, async (trx, d) => {
+      const page = evidencePage(d, query);
+      const ids = evidenceTargetIds(d, page, manage);
+      if (ids.length === 0) return page;
+      return withEvidenceTargets(page, ids, await this.evidenceTargets(trx, ids));
+    });
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -236,6 +248,29 @@ export class ScreenReadService {
       const list = out.get(r.entry_id) ?? [];
       list.push(r.evidence_id);
       out.set(r.entry_id, list);
+    }
+    return out;
+  }
+
+  /**
+   * Live targets of evidence records in every system, by evidence id (`evidence_target`): the rows, ids and order that
+   * `evidence.targets.remove` reads, so the count a form shows is the count the "never the last target" rule checks.
+   */
+  private async evidenceTargets(trx: Trx, evidenceIds: readonly string[]): Promise<Map<string, EvidenceTargetView[]>> {
+    const { rows } = await sql<{ evidence_id: string; id: string; slug: string; target_type: EvidenceTargetView['targetType']; code: string | null }>`
+      select t.evidence_id, t.id, m.slug, t.target_type, coalesce(ci.item_code, r.requirement_code) as code
+        from evidence_target t
+        join management_system m on m.id = t.management_system_id
+        left join ref.catalogue_item ci on ci.id = t.catalogue_item_id
+        left join ref.requirement r on r.id = t.requirement_id
+       where t.evidence_id = any(${[...evidenceIds]}::uuid[]) and t.deleted_at is null
+       order by t.evidence_id, t.position, t.created_at`.execute(trx);
+    const out = new Map<string, EvidenceTargetView[]>();
+    for (const r of rows) {
+      if (!r.code) continue;
+      const list = out.get(r.evidence_id) ?? [];
+      list.push({ id: r.id, ms: r.slug, targetType: r.target_type, code: r.code });
+      out.set(r.evidence_id, list);
     }
     return out;
   }

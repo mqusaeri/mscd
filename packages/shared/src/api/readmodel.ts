@@ -3,7 +3,7 @@
 // in the language of Accept-Language (D.1 Language), and records carry a ref (A-21, TS 9.3).
 import { z } from 'zod';
 import {
-  AuditEventType, AuditOutcome, BusinessRole, DocStatus, DriftSeverity, DriftSourceKind, FindingClassification,
+  ApplicabilityTarget, AuditEventType, AuditOutcome, BusinessRole, DocStatus, DriftSeverity, DriftSourceKind, FindingClassification,
   FindingStatus, FreshnessStatus, IntegrityStatus, LinkStatus, ReqStatus, TaskProgressStatus,
 } from '../enums.js';
 import { Activity, Document, Evidence, Requirement } from '../ui/records.js';
@@ -11,7 +11,8 @@ import {
   EXAMPLE_ACTIVITY, EXAMPLE_DOCUMENT, EXAMPLE_EVIDENCE, EXAMPLE_REF, EXAMPLE_REQUIREMENT,
 } from '../examples.js';
 import {
-  FreqId, Instant, IsoDate, MsParams, MsRecordParams, PersonId, QueryBoolean, RecordRef, StageKey, Uuid, defineRoute, named, pageOf, pageQueryShape,
+  Code, FreqId, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, QueryBoolean, RecordRef, StageKey, Uuid, defineRoute, named, pageOf,
+  pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
 
@@ -382,11 +383,34 @@ export const EvidenceQuery = named(
 );
 export type EvidenceQuery = z.infer<typeof EvidenceQuery>;
 
+export const EvidenceTargetView = named(
+  'EvidenceTargetView',
+  z.object({ id: Uuid, ms: MsId, targetType: ApplicabilityTarget, code: Code }),
+  'A live target of an evidence record (evidence_target): its id for evidence.targets.remove, the system it serves, and the catalogue item or requirement code',
+  {
+    valid: [{ id: '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d2e', ms: 'isms', targetType: 'catalogue_item', code: 'A.8.13' }, { id: '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d2f', ms: 'qms', targetType: 'requirement', code: '7.5' }],
+    invalid: [{ ms: 'isms', targetType: 'catalogue_item', code: 'A.8.13' }, { id: '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d2e', ms: 'isms', targetType: 'control', code: 'A.8.13' }],
+  },
+);
+export type EvidenceTargetView = z.infer<typeof EvidenceTargetView>;
+
 export const EvidenceItem = named(
   'EvidenceItem',
-  z.object({ ...Evidence.shape, ref: RecordRef, integrity: IntegrityStatus.nullable() }),
-  'Evidence row: UI 1.7 fields with next due, freshness, integrity code and status, and ref',
-  { valid: [{ ...EXAMPLE_EVIDENCE, ref: { ...EXAMPLE_REF, entityType: 'evidence', code: 'EV-0313', module: 'surveillance' }, integrity: 'broken' }], invalid: [{ ...EXAMPLE_EVIDENCE, integrity: 'broken' }] },
+  z.object({ ...Evidence.shape, ref: RecordRef, integrity: IntegrityStatus.nullable(), targets: z.array(EvidenceTargetView).optional() }),
+  'Evidence row: UI 1.7 fields with next due, freshness, integrity code and status, and ref; `targets` lists every live target of the record in every system, only on records where the caller may change targets (evidence.manage: every record for a grant in full, own records for an own grant)',
+  {
+    valid: [
+      { ...EXAMPLE_EVIDENCE, ref: { ...EXAMPLE_REF, entityType: 'evidence', code: 'EV-0313', module: 'surveillance' }, integrity: 'broken' },
+      {
+        ...EXAMPLE_EVIDENCE, ref: { ...EXAMPLE_REF, entityType: 'evidence', code: 'EV-0313', module: 'surveillance' }, integrity: 'broken',
+        targets: [{ id: '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d2e', ms: 'isms', targetType: 'catalogue_item', code: 'A.8.13' }],
+      },
+    ],
+    invalid: [
+      { ...EXAMPLE_EVIDENCE, integrity: 'broken' },
+      { ...EXAMPLE_EVIDENCE, ref: { ...EXAMPLE_REF, entityType: 'evidence', code: 'EV-0313', module: 'surveillance' }, integrity: 'broken', targets: [{ ms: 'isms', code: 'A.8.13' }] },
+    ],
+  },
 );
 export type EvidenceItem = z.infer<typeof EvidenceItem>;
 

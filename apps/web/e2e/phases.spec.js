@@ -137,13 +137,20 @@ test.describe('Phase board', () => {
     await expect(ui.drawer(page)).toContainText('Draft');
   });
 
-  test('Mark complete updates the activity and counts, and blocks self-verification', async ({ page }) => {
+  test('Mark complete updates the activity and counts, and blocks self-verification', async ({ page, dataSource }) => {
     await openPhases(page);
     await step(page, 'Improvement & audit readiness').click();
     await openRow(page, '9.4');
     await expect(drawerFact(page, 'Owner')).toHaveText('Dewi Anggraini, HR Manager');
     await drawerAction(page, 'Record blocker').click();
-    await expectToast(page, 'Blocker recorded and linked to the gate item');
+    if (dataSource === 'api') {
+      // API builds open the Record blocker form (M2-11, claim `phases.recordBlocker`); this test leaves it unsaved.
+      await expect(ui.modal(page)).toContainText('Record blocker for 9.4');
+      await page.keyboard.press('Escape');
+      await expect(ui.modal(page)).toHaveCount(0);
+    } else {
+      await expectToast(page, 'Blocker recorded and linked to the gate item');
+    }
     await drawerAction(page, 'Mark complete').click();
     await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
     await expect(listRow(page, '9.4').locator('td:nth-child(7)')).toHaveText('Complete, awaiting verification');

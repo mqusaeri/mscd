@@ -1,0 +1,18 @@
+/* Forms of M2-11 (controls, evidence and phases): tokens of src/styles.css only, text of 12px or more. */
+.mx-m11-panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.mx-m11-panel-title{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--tx2)}
+.mx-m11-list{margin:4px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.mx-m11-warn{font-size:12px;color:var(--warn);font-weight:500;line-height:1.45}
+.mx-m11-set{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mx-m11-set>legend{padding:0;margin-bottom:6px}
+.mx-m11-codes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.mx-m11-codes>li{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--sur2)}
+.mx-m11-code{font-weight:600;font-size:12px;color:var(--tx);flex:none}
+.mx-m11-code-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2);font-size:12px}
+.mx-m11-codes .mx-btn{height:28px}
+.mx-m11-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;min-width:0}
+.mx-m11-rows{display:flex;flex-direction:column;gap:10px}
+.mx-m11-row{border:1px solid var(--bd);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--sur)}
+.mx-m11-row-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.mx-m11-row-title{margin:0;font-size:inherit;font-weight:600;color:var(--tx)}
+.mx-m11-choice{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--sur2);color:var(--tx)}

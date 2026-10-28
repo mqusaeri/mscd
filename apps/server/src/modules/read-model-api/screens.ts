@@ -6,8 +6,9 @@
 import {
   type ActivityItem, type ApplicabilityItem, type ApplicabilityQuery, type BusinessRole, type ChainItem, type ChainNode, type ChainResponse,
   type ClauseMaturity, type CycleItem, type DocumentItem, type DocumentsQuery, type DriftPattern, type EvidenceItem, type EvidenceQuery,
-  type GateItemView, type ImplementationSummary, type NextAuditEvent, type Page, type PendingAggregate, type PendingPerson, type PendingRecord,
-  type RecordDisplayStatus, type RecordRef, type StageReadiness, type StageRecordsQuery, type SummaryCard, type SurveillanceEvent, type UiMsSnapshot,
+  type EvidenceTargetView, type GateItemView, type ImplementationSummary, type NextAuditEvent, type Page, type PendingAggregate, type PendingPerson,
+  type PendingRecord, type RecordDisplayStatus, type RecordRef, type StageReadiness, type StageRecordsQuery, type SummaryCard, type SurveillanceEvent,
+  type UiMsSnapshot,
   BUSINESS_ROLES,
 } from '@mscd/shared';
 import { diffDays } from '../../common/dates';
@@ -933,4 +934,33 @@ export function evidencePage(d: ScreenData, query: EvidenceQuery): Page<Evidence
     items.push({ ...e, ref, integrity: row ? integrityStatus(row.object, d.now) : null });
   }
   return paginate(items, query.page, query.pageSize);
+}
+
+/** Live targets of evidence records in every system (`evidence_target`), by evidence id, in target order. */
+export type EvidenceTargets = ReadonlyMap<string, readonly EvidenceTargetView[]>;
+
+/**
+ * Ids of the evidence on the page whose rows carry their targets: the records on which the caller may change targets.
+ * `manage` is the caller's grant of `evidence.manage` in the system: in full (MS Manager) every record, as an own grant
+ * (Domain and Risk Owners) the records the caller owns, as `evidence.targets.create` and `evidence.targets.remove`
+ * check. Programme Owners, Internal Auditors, Compliance Investigators, Top Management and external auditors (D-34)
+ * hold no grant and read evidence without targets.
+ */
+export function evidenceTargetIds(d: Pick<ScreenData, 'scope'>, page: Page<EvidenceItem>, manage: 'full' | 'own' | null): string[] {
+  if (!manage) return [];
+  return page.items.filter((item) => manage === 'full' || item.owner === d.scope.handle).map((item) => item.ref.id);
+}
+
+/**
+ * The evidence page with every live target of the records `ids` names (MILESTONE-2 M2-11: the ids
+ * `evidence.targets.remove` takes, in all systems the record serves, since that command removes a target in any of
+ * them and its "never the last target" rule counts them all, so a form shows Remove on each target and never on the
+ * last one). Rows of other records keep no `targets`.
+ */
+export function withEvidenceTargets(page: Page<EvidenceItem>, ids: readonly string[], targets: EvidenceTargets): Page<EvidenceItem> {
+  const shown = new Set(ids);
+  return {
+    ...page,
+    items: page.items.map((item) => (shown.has(item.ref.id) ? { ...item, targets: [...(targets.get(item.ref.id) ?? [])] } : item)),
+  };
 }
