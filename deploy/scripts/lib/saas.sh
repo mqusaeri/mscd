@@ -78,7 +78,7 @@ readonly SAAS_NOT_STARTED='^(postgres|objectstore|valkey|migrate|cli|storage-gat
 readonly SAAS_KEEP_RELEASES=3   # releases whose images stay on the server
 readonly SAAS_KEEP_SAVED=3      # saved settings of earlier releases (rollback points)
 readonly SAAS_KEEP_DUMPS=3      # pre-deploy database dumps
-readonly SAAS_KEEP_LOGS=20      # deploy and migrate logs of each kind
+readonly SAAS_KEEP_LOGS=20      # logs of each kind in LOG_DIR (saas_prune_logs)
 
 declare -gA SAAS_IN=()      # standard input: NAME -> base64 value
 declare -gA SAAS_VALUE=()   # settings of the new .env: NAME -> value
@@ -207,6 +207,33 @@ saas_prune_dir() {
     mapfile -t entries < <(find "$dir" -mindepth 1 -maxdepth 1 -name "$pattern" -printf '%f\n' | LC_ALL=C sort)
     for ((i = 0; i < ${#entries[@]} - keep; i++)); do
         rm -rf -- "${dir:?}/${entries[i]}"
+    done
+}
+
+# saas_prune_logs DIR KEEP: keeps the newest KEEP logs of each kind in DIR and deletes the
+# older ones. Each kind has its own count: the run log, the Compose log and the service
+# log of deploy and of rollback, the migrate log, and the log of the off-site copy of the
+# pre-deploy dump. The age is the time stamp of saas_stamp in the name, because a migrate
+# log name starts with the version, which does not sort by age.
+saas_prune_logs() {
+    local dir=$1 keep=$2 pattern name entries=() i re='([0-9]{8}T[0-9]{6}Z)'
+    [[ -d $dir ]] || return 0
+    for pattern in 'deploy-*Z.log' 'deploy-*Z-compose.log' 'deploy-*Z-services.log' \
+        'rollback-*Z.log' 'rollback-*Z-compose.log' 'rollback-*Z-services.log' \
+        'migrate-*Z.log' 'backup-pre-deploy-*Z.log'; do
+        mapfile -t entries < <(
+            find "$dir" -mindepth 1 -maxdepth 1 -type f -name "$pattern" -printf '%f\n' |
+                while IFS= read -r name; do
+                    if [[ $name =~ $re ]]; then
+                        printf '%s %s\n' "${BASH_REMATCH[1]}" "$name"
+                    else
+                        printf '0 %s\n' "$name"
+                    fi
+                done | LC_ALL=C sort | cut -d ' ' -f 2-
+        )
+        for ((i = 0; i < ${#entries[@]} - keep; i++)); do
+            rm -f -- "${dir:?}/${entries[i]}"
+        done
     done
 }
 

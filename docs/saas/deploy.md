@@ -227,7 +227,7 @@ The script never uses `ensure_secrets` or `ensure_anchor_key` of the installer, 
 | `/opt/mscd/releases/<tag>/` | The releases as the workflow copied them. A deploy keeps the folder of the running release, the folders of the saved releases (the rollback points, up to 3) and the folders of newer versions (copied for a later deploy), and removes the other older ones. A rollback removes none |
 | `/opt/mscd/state/` | `current.env` (running release and digests), `previous.env` (the rollback target), `history.log` (the start and the result of every deploy and rollback), `saved/` (the files of earlier releases), and `rollback-undo-<time>/` after a rollback that could not return |
 | `/opt/mscd/backup/pre-deploy/` | The last 3 pre-deploy dumps (mode 0600) |
-| `/opt/mscd/logs/` | Deploy, rollback and migrate logs |
+| `/opt/mscd/logs/` | The logs of deploy and rollback runs, with their Compose and service logs, the migrate logs and the logs of the off-site copy of the pre-deploy dump. A deploy keeps the newest 20 of each kind |
 | `/opt/mscd/bin/cosign` | The cosign of the last workflow run |
 
 `/opt/mscd/state/ssh-known-hosts` belongs to the bootstrap and stays as it is.

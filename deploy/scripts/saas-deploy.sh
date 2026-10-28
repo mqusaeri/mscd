@@ -747,9 +747,7 @@ record_state() {
             rm -rf -- "$dir"
         done < <(find "$INSTALL_DIR/releases" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
     fi
-    saas_prune_dir "$LOG_DIR" 'deploy-*.log' "$SAAS_KEEP_LOGS"
-    saas_prune_dir "$LOG_DIR" 'rollback-*.log' "$SAAS_KEEP_LOGS"
-    saas_prune_dir "$LOG_DIR" 'migrate-*.log' "$SAAS_KEEP_LOGS"
+    saas_prune_logs "$LOG_DIR" "$SAAS_KEEP_LOGS"
 }
 
 # current_release: CURRENT_* of state/current.env, or of the .env in place when the state
