@@ -43,7 +43,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-12 Document control screens | 3b | Next | Starts when a slot frees up (at most five packages at once on this host, the owner's rule) |
 | M2-S11 Organisation discovery at sign-in | 3b | After M2-S09 and M2-10 (shared files) | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
 | M2-S12, M2-13, M2-14, M2-15 | 3c | After 3b | |
-| M2-17 Terminology | 4 | Next after wave 3c (alone in its wave) | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (one name for every system); every other proposed label keeps its name. Indonesian wording: proposed "Titik periksa" and "Manajer Sistem Manajemen", waiting for the owner's confirmation |
+| M2-17 Terminology | 4 | Next after wave 3c (alone in its wave) | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (one name for every system); every other proposed label keeps its name. Indonesian screens use the same English words, "Checkpoint" and "Management System Manager" (owner, 2026-10-28; today "gate" and "Manajer SM") |
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | |
 
@@ -57,7 +57,6 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 - Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
-- Owner: confirm the Indonesian wording of the two renames of H.1 before M2-17 starts. H.6 is answered (both editions stay preview).
 
 ## Wave results
 
