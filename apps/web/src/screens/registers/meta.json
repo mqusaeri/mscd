@@ -1,0 +1,13 @@
+{
+  "id": "registers",
+  "label": ["Registers", "Register"],
+  "group": "impl",
+  "order": 50,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "owner", "auditor", "top"],
+  "nav": true,
+  "pageActions": [["Add record", "Tambah catatan"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

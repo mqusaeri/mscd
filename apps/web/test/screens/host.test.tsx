@@ -86,8 +86,9 @@ describe('visibility of host screens', () => {
     const top = hostNav([{ id: 'top', label: null, items: [{ id: 'portfolio', label: 'P' }] }], ctxOf({ lang: 'id' }), 'top');
     // Required documented information (M2-12) and the audit screens (M2-14) also open for Top Management.
     expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['audit', 'Audit'], ['admin', 'Administrasi']]);
-    // With no built-in entries, a Domain Owner gets Required documented information (M2-12) and Findings and actions (M2-14).
-    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info']], ['audit', ['findings']]]);
+    // With no built-in entries, a Domain Owner gets Required documented information (M2-12), Registers (M2-13) and
+    // Findings and actions (M2-14).
+    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info', 'registers']], ['audit', ['findings']]]);
     expect(GROUP_LABELS.ops).toEqual(['Operations', 'Operasi']);
   });
 

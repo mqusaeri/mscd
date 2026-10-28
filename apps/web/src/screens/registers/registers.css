@@ -1,0 +1,26 @@
+/* Registers screen (MILESTONE-2 M2-13, D2-01): tokens of src/styles.css through .mx- classes only; no text below 12px. */
+.mx-reg-about{max-width:900px;line-height:1.5}
+.mx-reg-list{display:flex;flex-direction:column;min-width:0}
+.mx-reg-tools{display:flex;align-items:center;gap:8px;padding:12px var(--pad);border-bottom:1px solid var(--bd)}
+.mx-reg-search{flex:1 1 auto;min-width:0}
+.mx-reg-pad{padding:var(--pad)}
+.mx-reg-table td{vertical-align:middle}
+.mx-reg-row:hover td,.mx-reg-row:focus-visible td{background:var(--sur2)}
+.mx-reg-row:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+.mx-reg-code{font-weight:600;white-space:nowrap}
+.mx-reg-wrap{overflow-wrap:anywhere;min-width:0}
+.mx-reg-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:360px;color:var(--tx2)}
+.mx-reg-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:8px var(--pad);border-top:1px solid var(--bd);font-size:12px;color:var(--tx2)}
+.mx-reg-foot .mx-row{padding:0!important}
+.mx-reg-foot-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;width:100%;padding-right:72px;box-sizing:border-box}
+.mx-reg-section{display:flex;flex-direction:column;gap:10px;padding-top:12px;border-top:1px solid var(--bd);min-width:0}
+.mx-reg-h{margin:0;font-size:inherit;font-weight:600;color:var(--tx)}
+.mx-reg-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.mx-reg-links li{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mx-reg-link-name{font-weight:600;color:var(--tx);min-width:56px}
+.mx-reg-treatments{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.mx-reg-treatment{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--sur);min-width:0}
+.mx-reg-treatment-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.mx-reg-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.mx-reg-proof{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin:0;display:flex;flex-direction:column;gap:10px;min-width:0}
+.mx-reg-proof legend{padding:0 4px}
