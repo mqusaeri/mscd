@@ -1,7 +1,8 @@
 import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow } from '../helpers.js';
 
 // The operator console of the sample build (MILESTONE-2 M2-16), as a multi tenancy service: health, jobs,
-// organisations with Create and Install licence, framework packs with Install pack, and the factor reset.
+// organisations with Create and Install licence, framework packs with Install pack, and the factor reset. The
+// organisation lifecycle of M2-S12 (status, plan, domains, entitlements) is in e2e/screens/ops-organizations.spec.js.
 // @sample-only: the API project covers the console of a single tenancy installation in e2e/api-only/ops.spec.js.
 const meta = metaById('ops');
 const dialog = (page) => ui.modal(page);
@@ -53,13 +54,14 @@ test.describe('Operator console @sample-only', () => {
     await expect(dialog(page).locator('[role="alert"]').first()).toContainText('An organisation with this slug exists');
     await inputs.nth(0).fill('klinik_sehat');
     await inputs.nth(1).fill('Klinik Sehat');
-    await dialog(page).locator('select').selectOption('Asia/Makassar');
+    await dialog(page).locator('select').first().selectOption('Asia/Makassar');
     await dialog(page).locator('button', { hasText: /^Create$/ }).click();
     await expect(dialog(page)).toContainText('Organisation created. The slug klinik_sehat cannot be changed.');
     await expect(dialog(page)).toContainText('The invitation was emailed to it.admin@nusantara.example.');
     await dialog(page).locator('button', { hasText: 'Close' }).click();
     await expect(page.locator('main table')).toContainText('klinik_sehat');
-    await expect(page.locator('main table tbody tr')).toHaveCount(4);
+    // The five organisations of the sample service (M2-S12) and the new one.
+    await expect(page.locator('main table tbody tr')).toHaveCount(6);
   });
 
   test('Install licence installs the licence of one organisation', async ({ page }) => {

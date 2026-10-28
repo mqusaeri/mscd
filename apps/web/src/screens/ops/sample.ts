@@ -1,20 +1,28 @@
-// Sample adapter of the operator console: a healthy installation, the queues of a quiet afternoon, the three sample
-// organisations of the snapshot and their licences, and the packs of the sample (ISO 9001 and ISO 37001 in their
-// newer editions). Created organisations, installed licences and packs stay for the browser session; an imported
-// bundle shows as "Installing" on the next read and as installed on the one after, as the worker would do it.
+// Sample adapter of the operator console: a healthy installation, the queues of a quiet afternoon, the organisations of
+// the sample service (the three of the snapshot and two more, sample-orgs.ts) with their status, plan, domains and
+// history, the D-S4 plan presets, and the packs of the sample (ISO 9001 and ISO 37001 in their newer editions). Created
+// organisations, status changes, domains, entitlements, licences and packs stay for the browser session; an imported
+// bundle shows as "Installing" on the next read and as installed on the one after, as the worker would do it. The
+// state belongs to the installation (the operator sees every organisation), so it is not kept per organisation.
 import type { ControllerData } from '../../data/types';
-import type { Health, OpsAdapter, OrgItem, PackItem, Result } from './model';
+import type { Health, LicenceState, OpsAdapter, OrgItem, PackItem, Result } from './model';
+import { NO_END, STATUS_MOVES, daysBetween, entitlementEtag, localIso, needsSlug, presetUntil } from './org-model';
+import type { Domain, Entitlement, EntitlementInput, OrgDetail } from './org-model';
+import { EXTRA_ORGS, FREE_MAIL, SAMPLE_PRESETS, cloneOrg, snapshotOrg } from './sample-orgs';
+import type { SampleEntitlement, SampleOrg } from './sample-orgs';
 
 const NO_SERVER: [string, string] = ['The sample build has no server to read diagnostics from.', 'Versi contoh tidak memiliki server untuk membaca diagnostik.'];
 
-const refuse = <T,>(status: number, message: readonly [string, string], extra: { messageKey?: string; rule?: string; errors?: { path: string; message: string }[] } = {}): Result<T> => ({
+type Extra = { messageKey?: string; rule?: string; slug?: string; errors?: { path: string; message: string }[] };
+const refuse = <T,>(status: number, message: readonly [string, string], extra: Extra = {}): Result<T> => ({
   ok: false,
   error: { status, message: [message[0], message[1]], ...extra },
 });
+/** A refusal whose server answer carries only the problem title (no `messages`). */
+const titled = <T,>(status: number, title: string, extra: Extra = {}): Result<T> => refuse<T>(status, [title, title], extra);
 
 interface State {
-  created: OrgItem[];
-  licences: Record<string, string>;
+  orgs: SampleOrg[] | null;
   packs: PackItem[];
   /** Imported packs still installing: the number of reads left until they are installed. */
   installing: Map<string, number>;
@@ -37,30 +45,134 @@ function initialPacks(): PackItem[] {
 }
 
 function current(): State {
-  state ??= { created: [], licences: {}, packs: initialPacks(), installing: new Map() };
+  state ??= { orgs: null, packs: initialPacks(), installing: new Map() };
   return state;
 }
 
-/** The organisations of the sample snapshot as the operator sees them. */
-function sampleOrgs(D: ControllerData | null): OrgItem[] {
-  const orgs = D?.orgs ?? [];
-  const members: Record<string, number> = { ndt: 86, bsd: 41, rmn: 23 };
-  const states: Record<string, { state: 'valid' | 'grace'; validUntil: string }> = {
-    ndt: { state: 'valid', validUntil: '2027-03-31' },
-    bsd: { state: 'grace', validUntil: '2026-09-15' },
-    rmn: { state: 'valid', validUntil: '2027-01-31' },
+/** The organisations of the sample service: those of the snapshot, then the two of the sample service only. */
+function orgsOf(D: ControllerData | null): SampleOrg[] {
+  const s = current();
+  s.orgs ??= [
+    ...(D?.orgs ?? []).map((o, i) => snapshotOrg(o.id, o.name, o.ms.length, i)),
+    ...EXTRA_ORGS.filter((x) => !(D?.orgs ?? []).some((o) => o.id === x.slug)).map(cloneOrg),
+  ];
+  return s.orgs;
+}
+
+/** The licence state of an entitlement on a day: valid until its last day, then grace, then read-only. */
+function licenceOf(e: SampleEntitlement | null, today: string): { state: LicenceState; validUntil: string } | null {
+  if (!e) return null;
+  const until = e.validUntil ?? NO_END;
+  const after = daysBetween(until, today);
+  return { state: after <= 0 ? 'valid' : after <= e.graceDays ? 'grace' : 'read_only', validUntil: until };
+}
+
+function itemOf(o: SampleOrg, today: string): OrgItem {
+  return {
+    slug: o.slug, name: o.name, status: o.status, licence: licenceOf(o.entitlement, today), memberCount: o.memberCount, systemCount: o.systemCount,
+    plan: o.entitlement?.plan ?? null, validUntil: o.entitlement?.validUntil ?? null,
+    verifiedDomains: o.domains.filter((d) => d.status === 'verified').map((d) => d.domain).sort(), maxUsers: o.entitlement?.maxUsers ?? null,
+    createdAt: o.createdAt,
   };
-  return orgs.map((o, i) => ({
-    slug: o.id, name: o.name, status: 'active', licence: states[o.id] ?? { state: 'valid', validUntil: '2027-03-31' },
-    memberCount: members[o.id] ?? 10, systemCount: o.ms.length, plan: i === 0 ? 'standard' : null, createdAt: `2026-0${i + 1}-15T03:00:00Z`,
-  }));
+}
+
+function detailOf(o: SampleOrg): OrgDetail {
+  const e = o.entitlement;
+  return {
+    slug: o.slug, name: o.name, status: o.status, region: o.region, createdAt: o.createdAt, memberCount: o.memberCount, systemCount: o.systemCount,
+    entitlement: e ? { plan: e.plan, source: e.source, maxUsers: e.maxUsers, maxManagementSystems: e.maxManagementSystems, validUntil: e.validUntil } : null,
+    domains: o.domains.map((d) => ({ domain: d.domain, status: d.status })).sort((a, b) => a.domain.localeCompare(b.domain)),
+    lastSignInAt: o.lastSignInAt,
+  };
+}
+
+function viewOf(e: SampleEntitlement, o: SampleOrg): Entitlement {
+  return {
+    plan: e.plan, source: e.source, maxUsers: e.maxUsers, maxManagementSystems: e.maxManagementSystems, frameworks: [...e.frameworks],
+    storageAdapters: [...e.storageAdapters], features: [...e.features], rateUserPerMinute: e.rateUserPerMinute, rateOrgPerMinute: e.rateOrgPerMinute,
+    graceDays: e.graceDays, validFrom: e.validFrom, validUntil: e.validUntil, version: e.version, updatedAt: e.updatedAt,
+    usage: { users: o.memberCount, managementSystems: o.systemCount },
+  };
+}
+
+const domainView = ({ checks: _checks, ...d }: Domain & { checks: number }): Domain => d;
+
+/** The domain of a typed name as the server stores it: the part after `@`, lower case, IDN in punycode; null when not one. */
+export function normaliseDomain(input: string): string | null {
+  let value = input.trim().replace(/\.$/, '');
+  if (value.includes('@')) value = value.slice(value.lastIndexOf('@') + 1);
+  try {
+    value = new URL(`http://${value}`).hostname;
+  } catch {
+    return null;
+  }
+  return /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value) ? value : null;
+}
+
+/** A token of 32 random bytes in base64url, as the server makes it. */
+function newToken(): string {
+  const bytes = new Uint8Array(32);
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  let text = '';
+  for (const b of bytes) text += String.fromCharCode(b);
+  return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Now on the sample's day: the sample's today at the current local time, so new records sit beside the sample's. */
+let sampleDay: string | null = null;
+const nowIso = () => {
+  const now = new Date();
+  if (!sampleDay) return now.toISOString();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const local = new Date(`${sampleDay}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
+  return Number.isNaN(local.getTime()) ? now.toISOString() : new Date(local.getTime() + now.getMilliseconds()).toISOString();
+};
+
+/** The row values of a preset starting on `validFrom` (the server's `presetValues`). */
+function presetValues(name: string, validFrom: string): Omit<SampleEntitlement, 'version' | 'updatedAt'> {
+  const p = SAMPLE_PRESETS.find((x) => x.name === name)!;
+  return {
+    plan: p.name, source: 'preset', maxUsers: p.maxUsers, maxManagementSystems: p.maxManagementSystems, frameworks: [...p.frameworks],
+    storageAdapters: [...p.storageAdapters], features: [...p.features], rateUserPerMinute: p.rateUserPerMinute, rateOrgPerMinute: p.rateOrgPerMinute,
+    graceDays: p.graceDays, validFrom, validUntil: presetUntil(p, validFrom),
+  };
+}
+
+/** The row values of an `ops.entitlements.set` body, or the refusal the server gives it. */
+function valuesOfInput(body: EntitlementInput, today: string): Result<Omit<SampleEntitlement, 'version' | 'updatedAt'>> {
+  if ('preset' in body) {
+    if (!SAMPLE_PRESETS.some((p) => p.name === body.preset)) {
+      return refuse(422, [`There is no plan preset ${body.preset} in license.plans`, `Tidak ada preset paket ${body.preset} di license.plans`], { slug: 'business-rule', messageKey: 'unknown_preset' });
+    }
+    return { ok: true, data: presetValues(body.preset, body.validFrom ?? today) };
+  }
+  if (body.validUntil !== null && body.validUntil < body.validFrom) {
+    return titled(400, 'Invalid request', { slug: 'validation', errors: [{ path: 'body.validUntil', message: 'must not be before validFrom' }] });
+  }
+  return {
+    ok: true,
+    data: {
+      plan: body.plan ?? null, source: 'manual', maxUsers: body.maxUsers, maxManagementSystems: body.maxManagementSystems, frameworks: [...body.frameworks],
+      storageAdapters: [...body.storageAdapters], features: [...body.features], rateUserPerMinute: body.rateUserPerMinute, rateOrgPerMinute: body.rateOrgPerMinute,
+      graceDays: body.graceDays, validFrom: body.validFrom, validUntil: body.validUntil,
+    },
+  };
 }
 
 export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapter {
-  const allOrgs = () => {
-    const s = current();
-    return [...sampleOrgs(getD()), ...s.created].map((o) => (s.licences[o.slug] ? { ...o, licence: { state: 'valid' as const, validUntil: s.licences[o.slug] } } : o));
+  const today = () => {
+    const day = (getD() as { TODAY_S?: unknown } | null)?.TODAY_S;
+    sampleDay = typeof day === 'string' ? day : null;
+    return sampleDay ?? localIso(new Date());
   };
+  const allOrgs = () => {
+    today();
+    return orgsOf(getD());
+  };
+  const find = (slug: string) => allOrgs().find((o) => o.slug === slug) ?? null;
+  const unknown = <T,>(slug: string) => titled<T>(404, `Organisation ${slug} was not found`, { slug: 'not-found' });
   return {
     async health() {
       const health: Health = {
@@ -78,7 +190,10 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
           { schema: 'tenant', latest: '0008_milestone2', expected: '0008_milestone2' },
         ],
         queues: [],
-        licences: allOrgs().filter((o) => o.licence).map((o) => ({ org: o.slug, state: o.licence!.state, validUntil: o.licence!.validUntil })),
+        licences: allOrgs().flatMap((o) => {
+          const licence = licenceOf(o.entitlement, today());
+          return licence ? [{ org: o.slug, state: licence.state, validUntil: licence.validUntil }] : [];
+        }),
       };
       return { ok: true, data: health };
     },
@@ -99,30 +214,199 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
     async diagnostics() {
       return refuse(0, NO_SERVER);
     },
-    async organizations({ page, pageSize, q }) {
+    async organizations({ page, pageSize, q, status }) {
       const words = (q ?? '').toLowerCase().trim();
-      const all = allOrgs().filter((o) => !words || o.slug.includes(words) || o.name.toLowerCase().includes(words));
-      return { ok: true, data: { items: all.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: all.length } };
+      const all = allOrgs().filter((o) => (!words || o.slug.includes(words) || o.name.toLowerCase().includes(words)) && (!status || o.status === status));
+      const items = all.slice((page - 1) * pageSize, page * pageSize).map((o) => itemOf(o, today()));
+      return { ok: true, data: { items, page, pageSize, total: all.length } };
     },
     async createOrganization(body) {
       if (allOrgs().some((o) => o.slug === body.slug)) {
         return refuse(409, ['An organisation with this slug exists.', 'Organisasi dengan slug ini sudah ada.'], { messageKey: 'org_exists', errors: [{ path: 'body.slug', message: 'An organisation with this slug exists' }] });
       }
-      current().created.push({ slug: body.slug, name: body.name, status: 'active', licence: null, memberCount: 1, systemCount: 0, plan: null, createdAt: new Date().toISOString() });
+      const preset = body.preset ? SAMPLE_PRESETS.find((p) => p.name === body.preset) : undefined;
+      if (body.preset && !preset) {
+        return refuse(422, [`There is no plan preset ${body.preset} in license.plans`, `Tidak ada preset paket ${body.preset} di license.plans`], { messageKey: 'unknown_preset' });
+      }
+      const from = today();
+      const entitlement: SampleEntitlement | null = preset ? { ...presetValues(preset.name, from), version: 1, updatedAt: nowIso() } : null;
+      allOrgs().push({
+        slug: body.slug, name: body.name, status: 'active', region: 'id', createdAt: nowIso(), memberCount: 0, systemCount: 0, tenantAdmins: 0,
+        entitlement, domains: [], events: [], lastSignInAt: null,
+      });
+      const plan: [string, string] = entitlement
+        ? [`The ${entitlement.plan} plan applies from ${entitlement.validFrom} to ${entitlement.validUntil}. `, `Paket ${entitlement.plan} berlaku sejak ${entitlement.validFrom} sampai ${entitlement.validUntil}. `]
+        : ['', ''];
       return {
         ok: true,
         data: {
           slug: body.slug, invitationSent: true, invitationUrl: null,
-          message: [`Organisation created. The slug ${body.slug} cannot be changed.`, `Organisasi dibuat. Slug ${body.slug} tidak dapat diubah.`],
+          message: [
+            `Organisation created. The slug ${body.slug} cannot be changed. ${plan[0]}The invitation was sent to ${body.firstAdmin.email}.`,
+            `Organisasi dibuat. Slug ${body.slug} tidak dapat diubah. ${plan[1]}Undangan dikirim ke ${body.firstAdmin.email}.`,
+          ],
         },
       };
+    },
+    async organization(slug) {
+      const o = find(slug);
+      return o ? { ok: true, data: detailOf(o) } : unknown(slug);
+    },
+    async changeStatus(slug, body) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const from = o.status;
+      const to = body.status;
+      if (!STATUS_MOVES[from].includes(to)) {
+        const allowed = STATUS_MOVES[from];
+        const en = from === to ? `Organisation ${slug} is already ${to}.` : `Organisation ${slug} is ${from} and cannot move to ${to}. ${allowed.length ? `From ${from} it can move to ${allowed.join(' or ')}.` : `${from} is final.`}`;
+        const id = from === to ? `Organisasi ${slug} sudah berstatus ${to}.` : `Organisasi ${slug} berstatus ${from} dan tidak dapat dipindahkan ke ${to}. ${allowed.length ? `Dari ${from} organisasi dapat dipindahkan ke ${allowed.join(' atau ')}.` : `${from} adalah status akhir.`}`;
+        return refuse(409, [en, id], { slug: 'transition-not-allowed', messageKey: 'invalid_status_transition' });
+      }
+      if (body.reason.trim().length < 3) return titled(400, 'Invalid request', { slug: 'validation', errors: [{ path: 'body.reason', message: 'Too small: expected string to have >=3 characters' }] });
+      if (needsSlug(to) && body.confirmSlug !== slug) {
+        return refuse(422, [`Moving organisation ${slug} to ${to} needs confirmSlug equal to the slug ${slug}.`, `Memindahkan organisasi ${slug} ke ${to} memerlukan confirmSlug yang sama dengan slug ${slug}.`], { slug: 'business-rule', messageKey: 'confirmation_mismatch' });
+      }
+      o.status = to;
+      o.events.unshift({ id: `ev-${slug}-${o.events.length + 1}-${Date.now().toString(36)}`, from, to, reason: body.reason.trim(), actor: { handle: 'ops.owner', displayName: 'Platform owner' }, at: nowIso() });
+      const sessionsRevoked = to === 'suspended' || to === 'archived' ? Math.ceil(o.memberCount / 3) : 0;
+      const admins = o.tenantAdmins;
+      return {
+        ok: true,
+        data: {
+          from, to, sessionsRevoked, tenantAdmins: admins, tenantAdminsEmailed: admins,
+          message: [
+            `Organisation ${slug} moved from ${from} to ${to}. ${sessionsRevoked} sessions were ended. ${admins} of ${admins} Tenant Admins were emailed.`,
+            `Organisasi ${slug} dipindahkan dari ${from} ke ${to}. ${sessionsRevoked} sesi diakhiri. ${admins} dari ${admins} Tenant Admin dikirimi email.`,
+          ],
+        },
+      };
+    },
+    async events(slug, page, pageSize) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      return { ok: true, data: { items: o.events.slice((page - 1) * pageSize, page * pageSize).map((e) => ({ ...e })), page, pageSize, total: o.events.length } };
+    },
+    async domains(slug) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      return { ok: true, data: [...o.domains].sort((a, b) => a.domain.localeCompare(b.domain)).map(domainView) };
+    },
+    async addDomain(slug, input) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const domain = normaliseDomain(input);
+      if (!domain) return titled(400, 'Invalid request', { slug: 'validation', errors: [{ path: 'body.domain', message: `${JSON.stringify(input.trim())} is not an email domain such as example.co.id` }] });
+      if (o.status === 'archived') return titled(409, 'Conflict', { slug: 'conflict', messageKey: 'organization_archived' });
+      if (FREE_MAIL.has(domain) || [...FREE_MAIL].some((f) => domain.endsWith(`.${f}`))) {
+        return refuse(422, [
+          `${input.trim()} is a free mail domain that anyone can use; only a domain the organisation owns can be verified.`,
+          `${input.trim()} adalah domain email gratis yang dapat dipakai siapa saja; hanya domain milik organisasi yang dapat diverifikasi.`,
+        ], { slug: 'business-rule', messageKey: 'domain_not_allowed' });
+      }
+      if (allOrgs().some((x) => x !== o && x.domains.some((d) => d.domain === domain && d.status === 'verified'))) {
+        return refuse(409, [
+          `The domain ${domain} is already verified for another organisation. A verified domain belongs to one organisation only; remove it there first.`,
+          `Domain ${domain} sudah diverifikasi untuk organisasi lain. Domain terverifikasi hanya dimiliki satu organisasi; hapus dulu di sana.`,
+        ], { slug: 'conflict', messageKey: 'domain_taken' });
+      }
+      const existing = o.domains.find((d) => d.domain === domain);
+      if (existing?.status === 'verified') {
+        return refuse(409, [`The domain ${domain} is already verified for ${slug}.`, `Domain ${domain} sudah diverifikasi untuk ${slug}.`], { slug: 'conflict', messageKey: 'domain_already_verified' });
+      }
+      const requestedAt = nowIso();
+      const row = {
+        domain, status: 'pending' as const, method: 'dns' as const, requestedAt, verifiedAt: null, lastCheckedAt: null,
+        pendingUntil: new Date(Date.parse(requestedAt) + 7 * 864e5).toISOString(), txtName: `_mscd-verify.${domain}`, checks: 0,
+      };
+      if (existing) Object.assign(existing, row);
+      else o.domains.push(row);
+      return { ok: true, data: { domain, txtName: row.txtName, txtValue: `mscd-verify=${newToken()}`, status: 'pending' } };
+    },
+    async verifyDomain(slug, domain) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const d = o.domains.find((x) => x.domain === domain);
+      if (!d) return titled(404, `The organisation ${slug} has no domain ${domain}`, { slug: 'not-found' });
+      if (o.status === 'archived') return titled(409, 'Conflict', { slug: 'conflict', messageKey: 'organization_archived' });
+      if (d.method === 'manual') {
+        return refuse(409, [
+          `The domain ${domain} was verified by the operator command without a DNS record, so there is nothing to check.`,
+          `Domain ${domain} diverifikasi dengan perintah operator tanpa catatan DNS, sehingga tidak ada yang diperiksa.`,
+        ], { slug: 'conflict', messageKey: 'domain_not_dns' });
+      }
+      const at = nowIso();
+      d.lastCheckedAt = at;
+      // The customer's record shows up from the second lookup on (the first check after "Add" finds nothing yet).
+      const found = d.status === 'verified' || (d.status === 'pending' && d.checks >= 1);
+      d.checks += 1;
+      if (found && d.status === 'pending') {
+        d.status = 'verified';
+        d.verifiedAt = at;
+        d.pendingUntil = null;
+      }
+      return { ok: true, data: { ...domainView(d), recordFound: found } };
+    },
+    async removeDomain(slug, domain) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const at = o.domains.findIndex((x) => x.domain === domain);
+      if (at < 0) return titled(404, `The organisation ${slug} has no domain ${domain}`, { slug: 'not-found' });
+      o.domains.splice(at, 1);
+      return { ok: true, data: null };
+    },
+    async entitlement(slug) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      if (!o.entitlement) return { ok: true, data: { entitlement: null, etag: '*' } };
+      const entitlement = viewOf(o.entitlement, o);
+      return { ok: true, data: { entitlement, etag: entitlementEtag(entitlement) } };
+    },
+    async setEntitlement(slug, body, ifMatch) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      if (!ifMatch) return titled(428, 'Precondition required', { slug: 'precondition-required' });
+      if (ifMatch !== '*' && (!o.entitlement || ifMatch !== entitlementEtag(o.entitlement))) return titled(412, 'Precondition failed', { slug: 'precondition-failed' });
+      const values = valuesOfInput(body, today());
+      if (!values.ok) return values;
+      const version = (o.entitlement?.version ?? 0) + 1;
+      o.entitlement = { ...values.data, version, updatedAt: nowIso() };
+      const entitlement = viewOf(o.entitlement, o);
+      const warnings: [string, string][] = [];
+      if (o.memberCount > entitlement.maxUsers) {
+        warnings.push([
+          `The organisation has ${o.memberCount} active members and the new limit is ${entitlement.maxUsers}. Nobody loses access, but no one can be added or invited until the number is below the limit.`,
+          `Organisasi ini memiliki ${o.memberCount} anggota aktif dan batas barunya ${entitlement.maxUsers}. Tidak ada yang kehilangan akses, tetapi tidak ada yang dapat ditambahkan atau diundang sampai jumlahnya di bawah batas.`,
+        ]);
+      }
+      if (o.systemCount > entitlement.maxManagementSystems) {
+        warnings.push([
+          `The organisation has ${o.systemCount} management systems and the new limit is ${entitlement.maxManagementSystems}. The systems stay as they are, but no new one can be created.`,
+          `Organisasi ini memiliki ${o.systemCount} sistem manajemen dan batas barunya ${entitlement.maxManagementSystems}. Sistem yang ada tetap seperti semula, tetapi sistem baru tidak dapat dibuat.`,
+        ]);
+      }
+      return { ok: true, data: { entitlement, etag: entitlementEtag(entitlement), warnings } };
+    },
+    async plans() {
+      return { ok: true, data: SAMPLE_PRESETS.map((p) => ({ ...p, frameworks: [...p.frameworks], storageAdapters: [...p.storageAdapters], features: [...p.features] })) };
     },
     async installLicence(org, licence) {
       const doc = licence && typeof licence === 'object' && !Array.isArray(licence) ? (licence as Record<string, unknown>) : null;
       if (!doc || typeof doc.license_id !== 'string' || typeof doc.signature !== 'string') {
         return refuse(400, ['This document is not a signed licence.', 'Dokumen ini bukan lisensi bertanda tangan.'], { errors: [{ path: 'body.licence', message: 'license_id and signature are required' }] });
       }
-      current().licences[org] = typeof doc.valid_until === 'string' ? doc.valid_until : '2027-12-31';
+      const o = find(org);
+      if (!o) return unknown(org);
+      const until = typeof doc.valid_until === 'string' ? doc.valid_until : '2027-12-31';
+      const number = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : fallback);
+      o.entitlement = {
+        plan: null, source: 'signed_licence',
+        maxUsers: number(doc.max_users, o.entitlement?.maxUsers ?? 50), maxManagementSystems: number(doc.max_management_systems, o.entitlement?.maxManagementSystems ?? 3),
+        frameworks: o.entitlement?.frameworks ?? [], storageAdapters: o.entitlement?.storageAdapters ?? ['managed_vault', 'm365', 'google_drive'],
+        features: o.entitlement?.features ?? ['integrated_mode', 'edition_transition', 'link_health_monitor', 'auditor_guest_access'],
+        rateUserPerMinute: null, rateOrgPerMinute: null, graceDays: 30, validFrom: today(), validUntil: until,
+        version: (o.entitlement?.version ?? 0) + 1, updatedAt: nowIso(),
+      };
       return { ok: true, data: null };
     },
     async packs() {

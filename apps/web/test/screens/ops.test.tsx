@@ -1,8 +1,9 @@
-// Operator console (MILESTONE-2 M2-16): routes against the shared table and the job allow-list, the API adapter over a
-// fake fetch (health, queues, Run job, diagnostics archive, organisations with the single tenancy answer, Create with
-// its idempotency key and one-time link, Install licence with {org, licence}, packs and the multipart import, factor
-// reset), the following of a pack installation, the multi tenancy rule, the page action, the console parts in both
-// languages and themes, and the sample adapter.
+// Operator console (MILESTONE-2 M2-16, M2-S12): routes against the shared table and the job allow-list, the API adapter
+// over a fake fetch (health, queues, Run job, diagnostics archive, organisations with the status filter, the user limit
+// of each row and the single tenancy answer, Create with its idempotency key, plan preset and one-time link, Install
+// licence with {org, licence}, packs and the multipart import, factor reset), the following of a pack installation,
+// the multi tenancy rule, the page action, the console parts in both languages and themes, and the sample adapter.
+// The organisation drawer (status, domains, entitlements, history) is tested in ops-organizations.test.tsx.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OPS_RUNNABLE_JOBS, routeById } from '@mscd/shared';
 import type { OpsHealth, OpsOrganizationItem, PackSummary } from '@mscd/shared';
@@ -159,14 +160,30 @@ describe('Operator console API adapter', () => {
     expect(stays).not.toHaveBeenCalled();
   });
 
-  it('lists organisations; single tenancy answers 409 single_tenancy', async () => {
-    const f = client({ 'GET /api/v1/ops/organizations': [json({ items: [ORG], page: 1, pageSize: 25, total: 1 }), problem(409, 'conflict', { messageKey: 'single_tenancy' })] });
+  it('lists organisations with the status filter and the user limit of each row; single tenancy answers 409 single_tenancy', async () => {
+    const other = { ...ORG, id: '00000000-0000-4000-8000-00000000a002', slug: 'bsd', name: 'PT Bank Sentosa Digital', plan: null, validUntil: null };
+    const detail = {
+      id: ORG.id, slug: 'ndt', name: ORG.name, status: 'active', region: 'id', createdAt: ORG.createdAt, memberCount: 86, systemCount: 4,
+      entitlement: { plan: 'standard', source: 'preset', maxUsers: 100, maxManagementSystems: 5, validUntil: '2027-03-31' }, domains: [], lastSignInAt: null,
+    };
+    const f = client({
+      'GET /api/v1/ops/organizations': [json({ items: [ORG, other], page: 1, pageSize: 25, total: 2 }), problem(409, 'conflict', { messageKey: 'single_tenancy' })],
+      'GET /api/v1/ops/organizations/ndt': json(detail),
+      'GET /api/v1/ops/organizations/bsd': problem(500, 'internal'),
+    });
     const adapter = createApiAdapter(f.client);
-    expect(await adapter.organizations({ page: 1, pageSize: 25, q: 'nusa' })).toEqual({ ok: true, data: { items: [fromOrg(ORG)], page: 1, pageSize: 25, total: 1 } });
-    expect(f.calls[0].url).toBe('/api/v1/ops/organizations?page=1&pageSize=25&q=nusa');
+    expect(await adapter.organizations({ page: 1, pageSize: 25, q: 'nusa', status: 'active' })).toEqual({
+      ok: true,
+      data: { items: [fromOrg(ORG, 100), fromOrg(other)], page: 1, pageSize: 25, total: 2 },
+    });
+    expect(f.calls[0].url).toBe('/api/v1/ops/organizations?page=1&pageSize=25&q=nusa&status=active');
+    expect(f.calls.slice(1).map((c) => c.path).sort()).toEqual(['/api/v1/ops/organizations/bsd', '/api/v1/ops/organizations/ndt']);
+    expect(fromOrg(ORG, 100)).toMatchObject({ status: 'active', plan: 'standard', validUntil: '2027-03-31', verifiedDomains: [], maxUsers: 100 });
     const single = await adapter.organizations({ page: 1, pageSize: 25 });
     expect(single.ok).toBe(false);
     if (!single.ok) expect(isSingleTenancy(single.error)).toBe(true);
+    // No detail reads after a refusal of the list.
+    expect(f.calls.filter((c) => c.path.startsWith('/api/v1/ops/organizations/'))).toHaveLength(2);
   });
 
   it('creates an organisation with an idempotency key; the one-time link only when the answer carries one', async () => {
@@ -179,6 +196,9 @@ describe('Operator console API adapter', () => {
     expect(await adapter.createOrganization(body, 'key-2')).toEqual({ ok: true, data: { slug: 'bank_sentosa', invitationSent: false, invitationUrl: 'http://localhost/invite#token=abc', message: created.message } });
     expect(f.calls[0].body).toEqual({ slug: 'bank_sentosa', name: 'PT Bank Sentosa', timeZone: 'Asia/Jakarta', siteCount: 1, firstAdmin: { email: 'it.admin@banksentosa.co.id', displayName: 'Andi Wijaya' } });
     expect(f.calls.map((c) => c.headers['idempotency-key'])).toEqual(['key-1', 'key-2']);
+    // The plan preset goes with the body when one is chosen (M2-S09 applies it before the invitation).
+    expect(createBody({ ...EMPTY_CREATE, slug: 'bank_sentosa', name: 'PT Bank Sentosa', email: 'a@b.co', displayName: 'A', preset: 'trial' }).preset).toBe('trial');
+    expect('preset' in createBody({ ...EMPTY_CREATE, slug: 'bank_sentosa', name: 'PT Bank Sentosa', email: 'a@b.co', displayName: 'A' })).toBe(false);
   });
 
   it('installs a licence for an organisation as {org, licence}', async () => {
@@ -221,7 +241,7 @@ describe('Operator console model', () => {
   it('checks the create form before sending, with the paths of the server', () => {
     expect(createErrors(EMPTY_CREATE)).toEqual({ slug: TEXT.slugInvalid, name: TEXT.nameRequired, 'firstAdmin.email': TEXT.emailInvalid, 'firstAdmin.displayName': TEXT.nameRequired });
     expect(createErrors({ ...EMPTY_CREATE, slug: 'Bank-1' }).slug).toBe(TEXT.slugInvalid);
-    expect(createErrors({ slug: 'bank_sentosa', name: 'A', timeZone: 'UTC', siteCount: '3', email: 'a@b.co', displayName: 'A' })).toEqual({});
+    expect(createErrors({ slug: 'bank_sentosa', name: 'A', timeZone: 'UTC', siteCount: '3', email: 'a@b.co', displayName: 'A', preset: '' })).toEqual({});
     expect(validJobOrg('')).toBe(true);
     expect(validJobOrg('NDT')).toBe(false);
   });
@@ -333,7 +353,8 @@ describe('Operator console sample adapter', () => {
   it('creates an organisation once, installs its licence, imports a pack and resets a factor', async () => {
     const adapter = createSampleAdapter(() => sampleD());
     const before = await adapter.organizations({ page: 1, pageSize: 25 });
-    expect(before.ok && before.data.items.map((o) => o.slug)).toEqual(sampleD().orgs.map((o) => o.id));
+    // The organisations of the snapshot, then the two of the sample service only (M2-S12).
+    expect(before.ok && before.data.items.map((o) => o.slug)).toEqual([...sampleD().orgs.map((o) => o.id), 'mitra_logistik', 'sinar_farma']);
     const body = createBody({ ...EMPTY_CREATE, slug: 'klinik_sehat', name: 'Klinik Sehat', email: 'admin@kliniksehat.id', displayName: 'Sari Dewi' });
     expect((await adapter.createOrganization(body, 'k')).ok).toBe(true);
     const again = await adapter.createOrganization(body, 'k2');

@@ -1,7 +1,12 @@
-// The model of the operator console (MILESTONE-2 M2-16) and the interface both adapters implement (api.ts in API
-// builds, sample.ts in the sample build). M2-S12 extends the organisations with status, plan, domains and entitlements.
+// The model of the operator console (MILESTONE-2 M2-16, M2-S12) and the interface both adapters implement (api.ts in
+// API builds, sample.ts in the sample build). M2-S12 adds the organisation lifecycle: status, plan, domains and
+// entitlements (org-model.ts).
 import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext, TextPair } from '../types';
+import type {
+  Domain, DomainAdded, DomainCheck, EntitlementInput, EntitlementRead, EntitlementSaved, EventPage, OrgDetail, OrgStatus, PlanPreset,
+  StatusChange, StatusChanged,
+} from './org-model';
 import { TEXT } from './text';
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: ApiError };
@@ -27,12 +32,24 @@ export interface Health {
 export interface OrgItem {
   slug: string;
   name: string;
-  status: string;
+  status: OrgStatus;
   licence: { state: LicenceState; validUntil: string } | null;
   memberCount: number;
   systemCount: number;
   plan: string | null;
+  /** The last day of the entitlement; null without one or without an end date. */
+  validUntil: string | null;
+  verifiedDomains: string[];
+  /** The user limit of the entitlement; null without one or when it could not be read. */
+  maxUsers: number | null;
   createdAt: string;
+}
+
+export interface OrgQuery {
+  page: number;
+  pageSize: number;
+  q?: string;
+  status?: OrgStatus;
 }
 
 export interface OrgPage {
@@ -48,6 +65,8 @@ export interface OrgCreate {
   timeZone: string;
   siteCount: number;
   firstAdmin: { email: string; displayName: string };
+  /** A preset of `license.plans`, written before the invitation (M2-S09); left out for no plan. */
+  preset?: string;
 }
 
 export interface Created {
@@ -82,8 +101,24 @@ export interface OpsAdapter {
   runJob(name: string, org: string | null): Promise<Result<string>>;
   /** `POST /ops/diagnostics`: the archive and its file name. */
   diagnostics(): Promise<Result<{ blob: Blob; fileName: string }>>;
-  organizations(query: { page: number; pageSize: number; q?: string }): Promise<Result<OrgPage>>;
+  organizations(query: OrgQuery): Promise<Result<OrgPage>>;
   createOrganization(body: OrgCreate, idempotencyKey: string): Promise<Result<Created>>;
+  /** `ops.organizations.get`. */
+  organization(slug: string): Promise<Result<OrgDetail>>;
+  /** `ops.organizations.status`. */
+  changeStatus(slug: string, body: StatusChange): Promise<Result<StatusChanged>>;
+  /** `ops.organizations.events`, newest first. */
+  events(slug: string, page: number, pageSize: number): Promise<Result<EventPage>>;
+  domains(slug: string): Promise<Result<Domain[]>>;
+  addDomain(slug: string, domain: string): Promise<Result<DomainAdded>>;
+  verifyDomain(slug: string, domain: string): Promise<Result<DomainCheck>>;
+  removeDomain(slug: string, domain: string): Promise<Result<null>>;
+  /** `ops.entitlements.get`; an organisation without one answers `entitlement: null` with the ETag `*`. */
+  entitlement(slug: string): Promise<Result<EntitlementRead>>;
+  /** `ops.entitlements.set` with `If-Match`. */
+  setEntitlement(slug: string, body: EntitlementInput, ifMatch: string): Promise<Result<EntitlementSaved>>;
+  /** `ops.plans.list`. */
+  plans(): Promise<Result<PlanPreset[]>>;
   /** `PUT /admin/license` with `{org, licence}` (multi tenancy). */
   installLicence(org: string, licence: unknown): Promise<Result<null>>;
   packs(): Promise<Result<PackItem[]>>;
@@ -143,9 +178,11 @@ export interface CreateForm {
   siteCount: string;
   email: string;
   displayName: string;
+  /** A preset name, or '' for no plan. */
+  preset: string;
 }
 
-export const EMPTY_CREATE: CreateForm = { slug: '', name: '', timeZone: 'Asia/Jakarta', siteCount: '1', email: '', displayName: '' };
+export const EMPTY_CREATE: CreateForm = { slug: '', name: '', timeZone: 'Asia/Jakarta', siteCount: '1', email: '', displayName: '', preset: '' };
 
 /** Field errors of the create form before it is sent; keys as the server's paths (`firstAdmin.email`). */
 export function createErrors(form: CreateForm): Record<string, TextPair> {
@@ -165,6 +202,7 @@ export function createBody(form: CreateForm): OrgCreate {
     timeZone: form.timeZone,
     siteCount: Number(form.siteCount.trim()),
     firstAdmin: { email: form.email.trim(), displayName: form.displayName.trim() },
+    ...(form.preset ? { preset: form.preset } : {}),
   };
 }
 

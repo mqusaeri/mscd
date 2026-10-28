@@ -45,7 +45,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-14 Audit registers screens | 3c | Done | Internal audit (programme, events with scope and report, activities, AUD-INDEP warnings), Findings and actions (root cause, systemic check, corrective action steps, effectiveness check with the `no-findings` scene), Management review (inputs, outputs, joint reviews) |
 | M2-15 Certification timeline and auditor workspace | 3c | Done | Timeline forms (audit events, results, activities, preparation tasks, cycle items, the certification cycle and its certificate with suspend, reinstate and withdrawal), Auditor access (guest grants, evidence packs), Audit trail per system and for the organisation |
 | M2-13 Registers | 3c | Done | Registers screen with seven tabs (context issues, interested parties, assets, risks with treatments and residual acceptance, metrics with values, objectives, competence with proof files), links to other systems, H.5 visibility of competence records |
-| M2-S12 Operator console screens | 3c | Next | After M2-S11 (and M2-16, done) |
+| M2-S12 Operator console screens | 3c | Done | Organisations list (status, plan, users against the limit, valid until, licence state, verified domains), create with a plan preset, Manage drawer with Overview, Status (J.8 moves with effects, reason and slug confirmation), Domains (TXT shown once), Entitlements (preset or custom, If-Match, over-limit warnings) and History |
 | M2-17 Terminology | 4 | Next after wave 3c (alone in its wave) | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (one name for every system); every other proposed label keeps its name. Indonesian screens use the same English words, "Checkpoint" and "Management System Manager" (owner, 2026-10-28; today "gate" and "Manajer SM") |
 | M2-18 Fresh-organisation journey | 5 | After wave 3 | |
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | After M2-18 | Also assigned by the orchestrator: pass `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` to the server as `MSCD__LEGAL__*` (M2-S11 follow-up 8) and start the mock DNS responder in `apps/web/e2e-api/stack.mjs` for the multi-tenant stack (M2-S11 deviation 4) |
@@ -62,6 +62,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 - Backlog from M2-11: the sample data source could take activity changes (Start, Record blocker in the sample build); `applicability.targets` could give each row's default frequency; the entry form cannot show the stored reason or operating description (the snapshot lacks them).
 - Backlog from M2-10 (contract): the requester and approver of a grant in `UserView.roles` (read from the audit trail today), and a last test date of an identity provider.
 - Backlog from M2-15 (contract): action and person filters of `audit-trail.list` on the server; the preparation window of every audit event.
+- Backlog from M2-S12 (contract): `maxManagementSystems` in the organisation list item.
 - Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 

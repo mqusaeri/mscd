@@ -63,14 +63,10 @@ export const TEXT = {
   slugInvalid: ['Lower case letters, digits and underscores, 2 to 40, starting with a letter.', 'Huruf kecil, angka dan garis bawah, 2 sampai 40, diawali huruf.'],
   // Organisations
   orgs: ['Organisations', 'Organisasi'],
-  orgsSub: ['Every customer organisation of this service with its licence, members and systems.', 'Setiap organisasi pelanggan layanan ini dengan lisensi, anggota dan sistemnya.'],
+  orgsSub: ['Every customer organisation of this service with its status, plan, users and verified domains. Manage opens its overview, status, domains, entitlements and history.', 'Setiap organisasi pelanggan layanan ini dengan status, paket, pengguna dan domain terverifikasinya. Kelola membuka ringkasan, status, domain, hak pakai dan riwayatnya.'],
   search: ['Search by slug or name', 'Cari berdasarkan slug atau nama'],
   colName: ['Organisation', 'Organisasi'],
   colLicence: ['Licence', 'Lisensi'],
-  colPlan: ['Plan', 'Paket'],
-  colMembers: ['Members', 'Anggota'],
-  colSystems: ['Systems', 'Sistem'],
-  colCreated: ['Created', 'Dibuat'],
   colActions: ['Actions', 'Tindakan'],
   noLicence: ['No licence', 'Tanpa lisensi'],
   noOrgs: ['No organisation yet', 'Belum ada organisasi'],
@@ -148,6 +144,6 @@ export const TEXT = {
   resetDone: ['The sign-in factor of {email} was reset', 'Faktor masuk {email} telah diatur ulang'],
   teraWhat: ['The console of the platform operator: health of the installation, queues and jobs, customer organisations, framework packs and account recovery.', 'Konsol operator platform: kesehatan instalasi, antrean dan pekerjaan, organisasi pelanggan, paket framework dan pemulihan akun.'],
   teraHow1: ['Check Health first: every component should be OK and every migration applied', 'Periksa Kesehatan terlebih dahulu: setiap komponen harus Baik dan setiap migrasi diterapkan'],
-  teraHow2: ['Create an organisation and install its licence in Organisations', 'Buat organisasi dan pasang lisensinya di Organisasi'],
+  teraHow2: ['Create an organisation with its plan in Organisations; Manage changes its status, domains and limits', 'Buat organisasi beserta paketnya di Organisasi; Kelola mengubah status, domain dan batasnya'],
   teraHow3: ['Install new pack versions in Framework packs; download diagnostics for support', 'Pasang versi paket baru di Paket framework; unduh diagnostik untuk dukungan'],
 } as const satisfies Record<string, readonly [string, string]>;
