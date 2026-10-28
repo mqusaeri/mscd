@@ -1,6 +1,8 @@
 // Operations routes of the platform operator (D.3 "Operations", WP-34). Every route needs a platform permission
 // (`ops.read`, `ops.jobs.run`, `ops.tenants.manage` or `ops.users.manage`), which only the `platform_operator` role
 // grants (F.6). Milestone 2 (D.1, M2-06): the organisation list and creation and the second-factor reset by email.
+// Milestone 2 (D.1, K.6, M2-S09): the organisation detail, its status changes along the machine of J.8 and its status
+// history.
 import { Controller, Inject, Res } from '@nestjs/common';
 import {
   opsDiagnosticsRoute,
@@ -19,21 +21,28 @@ import {
   type OpsHealth,
   type OpsOrganizationCreate,
   type OpsOrganizationCreateResult,
+  type OpsOrganizationDetail,
   type OpsOrganizationItem,
   type OpsOrganizationListQuery,
   type OpsResetMfaRequest,
+  type OrganizationEventsQuery,
+  type OrganizationStatusChange,
+  type OrganizationStatusChangeResult,
+  type OrganizationStatusEventItem,
+  type OrgParams,
   type Page,
   type QueueStats,
 } from '@mscd/shared';
 import type { FastifyReply } from 'fastify';
 import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
 import { FILE_CONTENT_SECURITY_POLICY, contentDisposition } from '../../common/file-response';
-import { UnauthenticatedError, routeStub } from '../../common/problems';
+import { UnauthenticatedError } from '../../common/problems';
 import { AUDIT_WRITER, type AuditWriter, type Principal } from '../../common/tokens';
 import { DiagnosticsService } from './diagnostics.service';
 import { OperatorAccountsService } from './operator-accounts.service';
 import { OpsService } from './ops.service';
-import { OpsOrganizationsService } from './organizations.service';
+import { OrganizationStatusService } from './organization-status.service';
+import { OpsOrganizationsService, operatorOf } from './organizations.service';
 
 function required(principal: Principal | null): Principal {
   if (!principal) throw new UnauthenticatedError();
@@ -47,6 +56,7 @@ export class OpsController {
     private readonly diagnostics: DiagnosticsService,
     private readonly organizations: OpsOrganizationsService,
     private readonly accounts: OperatorAccountsService,
+    private readonly statuses: OrganizationStatusService,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
   ) {}
 
@@ -104,7 +114,7 @@ export class OpsController {
 
   @ApiRoute(opsOrganizationsCreateRoute)
   createOrganization(@CurrentPrincipal() principal: Principal | null, @RouteInputParam('body') body: OpsOrganizationCreate): Promise<OpsOrganizationCreateResult> {
-    return this.organizations.create(required(principal), body);
+    return this.organizations.create(operatorOf(required(principal)), body);
   }
 
   @ApiRoute(opsUsersResetMfaRoute)
@@ -112,20 +122,24 @@ export class OpsController {
     return this.accounts.resetMfa(required(principal), body);
   }
 
-  // Milestone 2 D.1 stubs (M2-02): M2-S09 builds the detail, the status changes and the status history.
+  // Milestone 2 D.1, K.6 (M2-S09): the organisation detail, its status changes and its status history.
 
   @ApiRoute(opsOrganizationsGetRoute)
-  organization(): never {
-    return routeStub(opsOrganizationsGetRoute);
+  organization(@RouteInputParam('params') params: OrgParams): Promise<OpsOrganizationDetail> {
+    return this.organizations.detail(params.org);
   }
 
   @ApiRoute(opsOrganizationsStatusRoute)
-  organizationStatus(): never {
-    return routeStub(opsOrganizationsStatusRoute);
+  async organizationStatus(
+    @CurrentPrincipal() principal: Principal | null,
+    @RouteInputParam('params') params: OrgParams,
+    @RouteInputParam('body') body: OrganizationStatusChange,
+  ): Promise<OrganizationStatusChangeResult> {
+    return (await this.statuses.change(operatorOf(required(principal)), params.org, body)).result;
   }
 
   @ApiRoute(opsOrganizationsEventsRoute)
-  organizationEvents(): never {
-    return routeStub(opsOrganizationsEventsRoute);
+  organizationEvents(@RouteInputParam('params') params: OrgParams, @RouteInputParam('query') query: OrganizationEventsQuery): Promise<Page<OrganizationStatusEventItem>> {
+    return this.organizations.events(params.org, query);
   }
 }

@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { DomainStatus, EntitlementSource, OpsRunnableJob, OrganizationStatus } from '../enums.js';
 import {
-  BinaryBody, CommandResult, Instant, IsoDate, NoBody, OrgSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
+  BinaryBody, Instant, IsoDate, NoBody, OrgSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
 import { LicenceState } from './license.js';
@@ -140,10 +140,15 @@ export const OpsOrganizationCreateResult = named(
     invitationSent: z.boolean(),
     /** Only when mail.required is false and mail is off: the one-time invitation link (never on SaaS). */
     invitationUrl: z.url().optional(),
+    /** The entitlement written from `preset` (Milestone 2 D.2, M2-S09); absent without a preset. */
+    plan: z.object({ name: z.string().nullable(), validFrom: IsoDate, validUntil: IsoDate.nullable() }).optional(),
   })),
   'Result of POST /ops/organizations: the new organisation, whether the invitation was emailed, and the message that the slug is permanent (Milestone 2 D.2)',
   {
-    valid: [{ ok: true, changed: [], message: ['Organisation created. The slug bank_sentosa cannot be changed.', 'Organisasi dibuat. Slug bank_sentosa tidak dapat diubah.'], data: { id: '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e', slug: 'bank_sentosa', invitationSent: true } }],
+    valid: [
+      { ok: true, changed: [], message: ['Organisation created. The slug bank_sentosa cannot be changed.', 'Organisasi dibuat. Slug bank_sentosa tidak dapat diubah.'], data: { id: '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e', slug: 'bank_sentosa', invitationSent: true } },
+      { ok: true, changed: [], data: { id: '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e', slug: 'klinik_sehat', invitationSent: true, plan: { name: 'trial', validFrom: '2026-10-28', validUntil: '2026-11-26' } } },
+    ],
     invalid: [{ ok: true, changed: [], data: { slug: 'bank_sentosa' } }],
   },
 );
@@ -200,6 +205,34 @@ export const OrganizationStatusChange = named(
 );
 export type OrganizationStatusChange = z.infer<typeof OrganizationStatusChange>;
 
+const EXAMPLE_STATUS_RESULT = {
+  ok: true,
+  changed: [],
+  message: ['Organisation ndt moved from active to suspended. 12 sessions were ended. 2 of 2 Tenant Admins were emailed.', 'Organisasi ndt dipindahkan dari active ke suspended. 12 sesi diakhiri. 2 dari 2 Tenant Admin dikirimi email.'],
+  data: { slug: 'ndt', from: 'active', to: 'suspended', sessionsRevoked: 12, tenantAdmins: 2, tenantAdminsEmailed: 2 },
+} as const;
+
+export const OrganizationStatusChangeResult = named(
+  'OrganizationStatusChangeResult',
+  commandResultWith(z.object({
+    slug: OrgSlug,
+    from: OrganizationStatus,
+    to: OrganizationStatus,
+    /** Sessions whose current organisation was this one, ended by `suspended` and `archived` (0 for other moves). */
+    sessionsRevoked: z.int().min(0),
+    /** Active Tenant Admins of the organisation, who get the `organization_status_changed` notice. */
+    tenantAdmins: z.int().min(0),
+    /** Tenant Admins whose email went out (fewer than `tenantAdmins` when mail failed). */
+    tenantAdminsEmailed: z.int().min(0),
+  })),
+  'Result of POST /ops/organizations/{org}/status: the move, the sessions it ended and the Tenant Admins told by email (Milestone 2 J.8, K.6)',
+  {
+    valid: [EXAMPLE_STATUS_RESULT, { ...EXAMPLE_STATUS_RESULT, data: { slug: 'ndt', from: 'suspended', to: 'active', sessionsRevoked: 0, tenantAdmins: 1, tenantAdminsEmailed: 0 } }],
+    invalid: [{ ...EXAMPLE_STATUS_RESULT, data: { ...EXAMPLE_STATUS_RESULT.data, to: 'paused' } }, { ok: true, changed: [], data: { slug: 'ndt' } }],
+  },
+);
+export type OrganizationStatusChangeResult = z.infer<typeof OrganizationStatusChangeResult>;
+
 export const OrganizationStatusEventItem = named(
   'OrganizationStatusEventItem',
   z.object({
@@ -222,6 +255,7 @@ export const OrganizationEventsQuery = named('OrganizationEventsQuery', z.strict
   valid: [{}, { page: '2' }],
   invalid: [{ status: 'active' }],
 });
+export type OrganizationEventsQuery = z.infer<typeof OrganizationEventsQuery>;
 
 const op = { owner: 'WP-34' as const, auth: 'session' as const, scope: 'platform' as const };
 
@@ -261,8 +295,9 @@ export const opsOrganizationsGetRoute = defineRoute({
 });
 export const opsOrganizationsStatusRoute = defineRoute({
   ...opM2, owner: 'M2-S09', id: 'ops.organizations.status', method: 'POST', path: '/api/v1/ops/organizations/:org/status',
-  summary: 'Move the organisation along the status machine of J.8 with a reason (audited ops.organization_status_changed)',
-  permission: 'ops.tenants.manage', params: OrgParams, body: OrganizationStatusChange, response: CommandResult, errors: [404, 409, 422],
+  summary:
+    'Move the organisation along the status machine of J.8 with a reason (409 transition-not-allowed invalid_status_transition, 422 confirmation_mismatch); suspended and archived end the sessions of the organisation; the Tenant Admins are told by email (audited ops.organization_status_changed)',
+  permission: 'ops.tenants.manage', params: OrgParams, body: OrganizationStatusChange, response: OrganizationStatusChangeResult, errors: [404, 409, 422],
 });
 export const opsOrganizationsEventsRoute = defineRoute({
   ...opM2, owner: 'M2-S09', id: 'ops.organizations.events', method: 'GET', path: '/api/v1/ops/organizations/:org/events',

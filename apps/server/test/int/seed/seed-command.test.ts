@@ -137,6 +137,20 @@ describe('seed demo command (G.1, G.3)', () => {
           .values({ organization_id: ORG_IDS.ndt, source: 'manual', max_users: 50, max_management_systems: 4, valid_from: '2030-01-01' })
           .execute(),
       );
+      // The operator suspended a demo organisation and made it active again (Milestone 2 J.8, M2-S09): its status
+      // history is append-only, and the reset removes it with the organisation.
+      const operator = usersBefore.find((u) => u.handle === 'ops') ?? usersBefore[0]!;
+      await inPlatform(db.migrator, (trx) =>
+        trx
+          .insertInto('platform.organization_status_event')
+          .values([
+            { organization_id: ORG_IDS.bsd, from_status: 'active', to_status: 'suspended', reason: 'Demo suspension', actor_user_id: operator.id },
+            { organization_id: ORG_IDS.bsd, from_status: 'suspended', to_status: 'active', reason: 'Demo reactivation', actor_user_id: operator.id },
+          ])
+          .execute(),
+      );
+      const statusEvents = () => inPlatform(db.migrator, (trx) => trx.selectFrom('platform.organization_status_event').select('organization_id').execute());
+      expect(await statusEvents()).toHaveLength(2);
       gateway = await startGateway(db.config({}, 'storage-gateway'));
       // demo.keycloak names a secret file this host does not have (the Compose path of demo.yaml): no provider.
       const missingSecret = path.join(SECRETS, 'no-such-keycloak-client.secret');
@@ -154,6 +168,17 @@ describe('seed demo command (G.1, G.3)', () => {
       expect(await counts()).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 90, memberships: 3 * 86 + 12, licences: 4, packs: 6 });
       expect(await ledgerOrgs()).toEqual([]);
       expect(await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.entitlement').select('organization_id').execute())).toEqual([]);
+      expect(await statusEvents()).toEqual([]);
+      // The table is append-only again after the reset.
+      await expect(
+        inPlatform(db.migrator, async (trx) => {
+          await trx
+            .insertInto('platform.organization_status_event')
+            .values({ organization_id: ORG_IDS.bsd, from_status: 'active', to_status: 'suspended', reason: 'After the reset' })
+            .execute();
+          await trx.deleteFrom('platform.organization_status_event').execute();
+        }),
+      ).rejects.toThrow(/append-only/);
       const usersAfter = await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.app_user').select(['id', 'handle']).where('is_demo', '=', true).execute());
       expect(usersAfter.map((u) => u.handle).sort()).toEqual(usersBefore.map((u) => u.handle).sort());
       expect(usersAfter.some((u) => usersBefore.some((b) => b.id === u.id))).toBe(false);

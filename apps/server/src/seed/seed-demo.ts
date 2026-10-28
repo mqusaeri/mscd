@@ -286,6 +286,17 @@ export async function resetDemo(db: Kysely<DB>, orgs: readonly DemoOrg[], log: (
   try {
     return await db.transaction().execute(async (trx) => {
       await sql`select set_config('app.platform_scope', 'on', true)`.execute(trx);
+      // The status history of the demo organisations (Milestone 2 J.8, M2-S09): append-only for every organisation,
+      // but a demo organisation and its history are removed together, so a reset works after an operator changed a
+      // demo organisation's status. The append-only trigger is off for this one statement of the reset transaction
+      // (the migrator owns the table; ALTER TABLE is transactional, so a failed reset leaves it on). The audit
+      // entries of the changes stay in platform.audit_log. Events of other organisations stay, and when one of them
+      // names a demo user as its actor, the reset stops with the message below.
+      if (found.length > 0) {
+        await sql`alter table platform.organization_status_event disable trigger organization_status_event_append_only`.execute(trx);
+        await trx.deleteFrom('platform.organization_status_event').where('organization_id', 'in', found.map((o) => o.id)).execute();
+        await sql`alter table platform.organization_status_event enable trigger organization_status_event_append_only`.execute(trx);
+      }
       for (const org of found) {
         const providers = (await trx.selectFrom('platform.identity_provider').select('id').where('organization_id', '=', org.id).execute()).map((p) => p.id);
         if (providers.length > 0) {

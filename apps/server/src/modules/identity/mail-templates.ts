@@ -1,7 +1,10 @@
 // Texts of the `account` and `security` emails (build plan E.6, F.4, F.5, F.8, F.14, Milestone 2 D.1 and D.2) in English
 // and Indonesian. Milestone 2 J.3 (M2-S10): `entitlement_expiring`, the notice of `entitlement.expiry` to the platform
 // operators that an organisation's plan or licence ends soon (Tenant Admins get the in-app `licence_expiring` notice,
-// which `notifications.dispatch` emails).
+// which `notifications.dispatch` emails). Milestone 2 J.4 (M2-S09): `organization_status_changed`, the email to the
+// Tenant Admins of an organisation whose status the platform operator changed, with the new status, what it means
+// for the members and the operator's reason. It names no person (the repository and its tests are public, and the
+// email goes to several people): only the organisation, the status and the reason.
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
 // `http.public_url`. Security messages end with the same advice, so a user who did not act knows what to do.
 import { fmtDay } from '../../common/dates';
@@ -33,7 +36,55 @@ export type AccountTemplate =
       validUntil: string;
       days: number;
       graceDays: number;
-    };
+    }
+  /**
+   * The platform operator changed the status of the organisation (`ops.organizations.status`, `tenant set-status`,
+   * Milestone 2 J.4, J.8, M2-S09): to each Tenant Admin, with what the new status means and the operator's reason.
+   */
+  | { name: 'organization_status_changed'; link: string; organisation: string; status: OrganisationStatusName; reason: string };
+
+/** The four statuses of an organisation (J.8 `organization.status`). */
+export type OrganisationStatusName = 'active' | 'suspended' | 'offboarding' | 'archived';
+
+/**
+ * The texts of a status change (Milestone 2 J.4): the title and what the status means for the members, in one
+ * language. The email and the in-app notice `organization_status_changed` share them.
+ */
+export function organisationStatusTexts(status: OrganisationStatusName, organisation: string, language: MailLanguage): { title: string; label: string; meaning: string } {
+  const en = language === 'en';
+  switch (status) {
+    case 'active':
+      return {
+        title: en ? `${organisation} is active again on MSCD` : `${organisation} aktif kembali di MSCD`,
+        label: en ? 'active' : 'aktif',
+        meaning: en ? 'Members can sign in and work in the organisation as before.' : 'Anggota dapat masuk dan bekerja di organisasi seperti biasa.',
+      };
+    case 'suspended':
+      return {
+        title: en ? `${organisation} is suspended on MSCD` : `${organisation} ditangguhkan di MSCD`,
+        label: en ? 'suspended' : 'ditangguhkan',
+        meaning: en
+          ? 'Members cannot open the data of the organisation or change anything until it is active again, and everyone was signed out of it. Nothing is deleted.'
+          : 'Anggota tidak dapat membuka data organisasi atau mengubah apa pun sampai organisasi aktif kembali, dan semua orang telah dikeluarkan dari organisasi ini. Tidak ada data yang dihapus.',
+      };
+    case 'offboarding':
+      return {
+        title: en ? `${organisation} is read-only on MSCD` : `${organisation} hanya dapat dibaca di MSCD`,
+        label: en ? 'offboarding (read-only before it closes)' : 'offboarding (hanya dapat dibaca sebelum ditutup)',
+        meaning: en
+          ? 'Members can still sign in, read and export the data, but nobody can change anything. Export what you need to keep before the read-only period ends (normally 30 days). After that the organisation is closed.'
+          : 'Anggota masih dapat masuk, membaca, dan mengekspor data, tetapi tidak ada yang dapat mengubah apa pun. Ekspor data yang perlu Anda simpan sebelum masa hanya-baca berakhir (biasanya 30 hari). Setelah itu organisasi ditutup.',
+      };
+    case 'archived':
+      return {
+        title: en ? `${organisation} is closed on MSCD` : `${organisation} ditutup di MSCD`,
+        label: en ? 'archived (closed)' : 'diarsipkan (ditutup)',
+        meaning: en
+          ? 'Members can no longer open the organisation, and everyone was signed out of it. Its data is kept only as long as your contract says.'
+          : 'Anggota tidak dapat membuka organisasi ini lagi, dan semua orang telah dikeluarkan dari organisasi ini. Datanya hanya disimpan selama yang ditetapkan dalam kontrak Anda.',
+      };
+  }
+}
 
 export type SecurityTemplate =
   | { name: 'mfa_enrolled'; link: string }
@@ -215,6 +266,26 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
               'Untuk memperpanjangnya, tetapkan paket di konsol operator atau dengan "mscd-server license entitlements set". Jika kontrak berakhir, sepakati langkah berikutnya dengan pelanggan.',
             ],
         link: { href: template.link, label: en ? 'Open the operator console' : 'Buka konsol operator' },
+      };
+    }
+    case 'organization_status_changed': {
+      const texts = organisationStatusTexts(template.status, template.organisation, language);
+      return {
+        title: texts.title,
+        paragraphs: en
+          ? [
+              `Your MSCD service provider changed the status of ${template.organisation} to ${texts.label}.`,
+              texts.meaning,
+              `Reason given: ${template.reason}`,
+              'If you have questions, contact your MSCD service provider.',
+            ]
+          : [
+              `Penyedia layanan MSCD Anda mengubah status ${template.organisation} menjadi ${texts.label}.`,
+              texts.meaning,
+              `Alasan yang diberikan: ${template.reason}`,
+              'Jika ada pertanyaan, hubungi penyedia layanan MSCD Anda.',
+            ],
+        link: { href: template.link, label: OPEN_APP[language] },
       };
     }
     case 'mfa_enrolled':

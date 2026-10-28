@@ -1,3 +1,4 @@
 # tenancy module
 `TenantScope` (`withTenant`, `withPlatform`, after-commit hooks, F.10), `TenantResolver` (60 second cache, `invalidate`), the C.3 readiness checks (migrations, schema privileges) and the PostgreSQL stores of rate limits (F.3) and idempotency keys (D.1; a claim without a stored response is in progress for a lease of five minutes, then the same request may take it over). Imports `CommonModule` (clock, job queue, notification writer, file responder).
 Owner: WP-08.
+Milestone 2 (M2-S09): `TenantResolver` subscribes to `TenantChangeListener` of the licence module and drops an organisation on its change notice `mscd_tenant_changed` (every entry after the listener reconnects), so a status change made in any api process or command counts in every api and worker process of multi tenancy within moments.

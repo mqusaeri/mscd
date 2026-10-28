@@ -1,8 +1,0 @@
-{
-  "workPackage": "M2-S09",
-  "routes": [
-    "ops.organizations.get",
-    "ops.organizations.status",
-    "ops.organizations.events"
-  ]
-}

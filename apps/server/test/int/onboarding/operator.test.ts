@@ -80,7 +80,8 @@ describe('platform operator (Milestone 2 D.1, D.2)', () => {
       expect(call.violations).toEqual([]);
       expect(call.status, call.text).toBe(201);
       expect(OpsOrganizationCreateResult.safeParse(call.body).success).toBe(true);
-      expect(call.body.data).toEqual({ id: expect.any(String), slug: 'bank_sentosa', invitationSent: true });
+      // M2-S09 applies the preset (applyPreset of M2-S10): the trial plan from the fixed today of the test profile.
+      expect(call.body.data).toEqual({ id: expect.any(String), slug: 'bank_sentosa', invitationSent: true, plan: { name: 'trial', validFrom: '2026-09-29', validUntil: '2026-10-28' } });
       expect(call.body.message?.[0]).toContain('The slug bank_sentosa cannot be changed.');
       expect(call.body.message?.[0]).toContain('The invitation was sent to andi@banksentosa.test.');
 
@@ -170,11 +171,12 @@ describe('platform operator (Milestone 2 D.1, D.2)', () => {
           slug: 'bank_sentosa',
           name: 'PT Bank Sentosa',
           status: 'active',
-          licence: null,
+          // The trial preset applied at creation (M2-S09).
+          licence: { state: 'valid', validUntil: '2026-10-28' },
           memberCount: 0,
           systemCount: 0,
-          plan: null,
-          validUntil: null,
+          plan: 'trial',
+          validUntil: '2026-10-28',
           verifiedDomains: [],
           createdAt: expect.any(String),
         },

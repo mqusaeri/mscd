@@ -37,8 +37,9 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-08 Bulk import | 3a | Done | Import screen (Implementation group) and `imports.*` routes for applicability, documents, risks and evidence, CSV or XLSX up to 5,000 rows, checked first and committed in one transaction. The "Import" page action shows in API builds only until `e2e/shell.spec.js` counts package page actions (open item below) |
 | M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28) |
 | M2-10 People, roles and sign-in | 3a | Running | |
-| M2-S09 Operator commands and organisation lifecycle | 3a | Running | Started after M2-S10 was committed |
-| M2-11, M2-12, M2-16 | 3b | Next | Web packages of wave 3b; they start as slots free up (at most five packages at once on this host, the owner's rule) |
+| M2-S09 Operator commands and organisation lifecycle | 3a | Done | Organisation statuses (J.8) with session revocation and Tenant Admin emails, `tenant list|show|set-status|onboard`, offline `diagnostics`, `ops-cli.yml` with the `saas-ops.sh` allow-list (masked job summary). M2-16 and M2-S12 use `ops.organizations.get|status|events` (its follow-up 2). After the first deploy the owner creates the first operator with `ops-cli.yml` |
+| M2-16 Getting started, account, notifications and operator console, M2-11 Controls, evidence and phases forms | 3b | Running | Started early (owner's approval) |
+| M2-12 Document control screens | 3b | Next | Starts when a slot frees up (at most five packages at once on this host, the owner's rule) |
 | M2-S11 Organisation discovery at sign-in | 3b | After M2-S09 and M2-10 (shared files) | M2-S11: generic email placeholder on the sign-in page. M2-16: use the MOT-03 scenes for Getting started |
 | M2-S12, M2-13, M2-14, M2-15 | 3c | After 3b | |
 | M2-17 Terminology | 4 | Waits for the owner's approval of H.1 | |
@@ -50,6 +51,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 - After M2-S07: run the M2-S05 rehearsal once more with the default overlays (`repo`), so it deploys the backup overlay too (M2-S05 handoff, follow-ups).
 - After M2-09: add the Administration entries `systems` and `routing` to the expectations of the shared tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` (owned by M2-01; MOT-03 found them).
 - Before the end of wave 3: let `apps/web/e2e/shell.spec.js` count the page actions that packages add to built-in screens, then show M2-08's "Import" action in the sample build too (M2-08 follow-up 1).
+- Backlog from M2-S09: the worker could skip queued tenant jobs of organisations that are not active (follow-up 6); `SessionRevokeReason` in `identity/session.service.ts` could list `organisation_suspended` and `organisation_archived` (follow-up 7); nothing moves an organisation to `archived` at the end of the 30 days of D-S5 yet (follow-up 8). For M2-S13: `test/int/saas-ops` in `test:int:saas`, `saas-ops.sh` in the shellcheck step and `jq` on the runner (follow-ups 3 and 10); `docs/saas/README.md` lists `operator.md` and `entitlements.md` (follow-up 4 here and of M2-S10).
 - Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).

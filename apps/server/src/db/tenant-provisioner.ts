@@ -9,11 +9,14 @@ import type { DB } from './types';
 
 // Tenant provisioning (build plan C.8) and the platform operator's domain verification (D-25). Both run as
 // mscd_migrator on a dedicated connection (never the application pool) with platform scope, in one transaction:
-// a failure leaves no organisation row, no schema, no key and no audit entry behind.
+// a failure leaves no organisation row, no schema, no key and no audit entry behind. Milestone 2 (M2-S09): a new
+// organisation gets the region its creator passes (`tenancy.default_region` for the operator routes and commands).
 
 /** Organisation slug: also the schema name suffix (`org_<slug>`), so it is restricted like the C.4 CHECK. */
 export const ORG_SLUG = /^[a-z][a-z0-9_]{1,39}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A region code as `tenancy.default_region` accepts it (`platform.organization.region` is varchar(40)). */
+const REGION = /^[a-z][a-z0-9-]{1,39}$/;
 /** Actor id of jobs and of commands without a signed-in user (C.1). */
 export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -55,6 +58,11 @@ export interface CreateTenantInput {
   siteCount: number;
   /** Demo installs only (D-20): shows the organisation as SaaS or on-premise. */
   demoDeployLabel?: 'saas' | 'onprem' | null;
+  /**
+   * `platform.organization.region` (Milestone 2 K.3 D-S2, K.8): where the organisation's data lives. The operator
+   * routes and commands pass `tenancy.default_region` of the profile; left out, the column stays empty (the seed).
+   */
+  region?: string | null;
   actor?: ProvisioningActor;
 }
 
@@ -85,6 +93,7 @@ interface CheckedInput {
   timeZone: string;
   siteCount: number;
   demoDeployLabel: 'saas' | 'onprem' | null;
+  region: string | null;
   actor: ProvisioningActor;
 }
 
@@ -126,6 +135,7 @@ export class TenantProvisioner {
             time_zone: checked.timeZone,
             site_count: checked.siteCount,
             demo_deploy_label: checked.demoDeployLabel,
+            region: checked.region,
           })
           .execute();
 
@@ -174,6 +184,7 @@ export class TenantProvisioner {
             timeZone: checked.timeZone,
             siteCount: checked.siteCount,
             demoDeployLabel: checked.demoDeployLabel,
+            ...(checked.region !== null ? { region: checked.region } : {}),
             kekId: key.kekId,
             vaultRepositoryId: vault.id,
           },
@@ -416,6 +427,10 @@ function checkCreateInput(input: CreateTenantInput): CheckedInput {
   if (label !== null && label !== 'saas' && label !== 'onprem') {
     throw new TenantProvisioningError('The demo deployment label must be saas or onprem');
   }
+  const region = input.region ?? null;
+  if (region !== null && !REGION.test(region)) {
+    throw new TenantProvisioningError(`Region ${JSON.stringify(region)} is invalid: a region code such as id (tenancy.default_region)`);
+  }
   return {
     id,
     slug: input.slug,
@@ -424,6 +439,7 @@ function checkCreateInput(input: CreateTenantInput): CheckedInput {
     timeZone: input.timeZone,
     siteCount: input.siteCount,
     demoDeployLabel: label,
+    region,
     actor: input.actor ?? { kind: 'operator' },
   };
 }

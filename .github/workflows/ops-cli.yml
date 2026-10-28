@@ -1,0 +1,379 @@
+# Runs one operator command on the staging or production server (Milestone 2 plan K.6,
+# M2-S09; docs/saas/operator.md). The owner starts it by hand, or an agent starts it when
+# the owner asks (rule S-1), and the owner approves each run in the environment:
+#   gh workflow run ops-cli.yml -f target=staging -f command=create-operator -f email=owner@example.com
+#   gh workflow run ops-cli.yml -f target=production -f command=tenant-set-status \
+#     -f org=bank_sentosa -f status=suspended -f reason="Invoice overdue by 60 days"
+# The first platform operator is created with command create-operator and the owner's own
+# email address; every later organisation is onboarded in the operator console.
+#
+# The job checks every value against its pattern, opens one SSH connection with the pinned
+# host key (as deploy-prod.yml does) and runs deploy/scripts/saas-ops.sh of the installed
+# release on the server. saas-ops.sh accepts only its allow-list of commands and turns each
+# into one "docker compose run --rm cli <mscd-server command>". The values go on standard
+# input (NAME=<base64>), never on a command line.
+#
+# The repository is public, so the log and the job summary of a run are public (GL-50 of
+# the go-live checklist). The personal fields (email, person_name, org, org_name, reason,
+# confirm) never pass through env, which the runner prints at the top of a step's log: the
+# first step reads them from the run's event file and masks them before it prints anything.
+# saas-ops.sh runs with --public, which replaces every value given (emails, names, slugs,
+# the reason) with a placeholder, hides the user handle made from an email, link tokens and
+# other email addresses, and prints counts only for tenant-list and tenant-show. The full
+# output stays on the server in /opt/mscd/logs/ops-<time>-<command>.log for 90 days. The
+# values typed into the form are part of the run's event, so prefer the operator console
+# for customer data and keep personal data out of the reason.
+#
+# Environment staging or production (Settings > Environments), the same values as
+# deploy-prod.yml uses:
+#   secrets    DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_SSH_KNOWN_HOSTS
+#   variables  DEPLOY_SSH_PORT
+name: Operator command
+
+run-name: ops ${{ inputs.command }} on ${{ inputs.target }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Server
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      command:
+        description: Operator command (docs/saas/operator.md)
+        type: choice
+        required: true
+        options:
+          - create-operator
+          - revoke-operator
+          - tenant-list
+          - tenant-show
+          - tenant-onboard
+          - tenant-set-status
+          - admin-create-user
+          - license-entitlements-show
+          - license-entitlements-set
+          - diagnostics
+      email:
+        description: Email address (create-operator, revoke-operator, admin-create-user; the first administrator for tenant-onboard)
+        type: string
+        required: false
+      person_name:
+        description: Display name of that person (optional; required for tenant-onboard)
+        type: string
+        required: false
+      org:
+        description: Organisation slug (tenant-show, tenant-set-status, admin-create-user, license-entitlements-*; the new slug for tenant-onboard)
+        type: string
+        required: false
+      org_name:
+        description: Organisation name (tenant-onboard)
+        type: string
+        required: false
+      time_zone:
+        description: IANA time zone of the organisation (tenant-onboard)
+        type: string
+        required: false
+        default: Asia/Jakarta
+      site_count:
+        description: Number of sites (tenant-onboard)
+        type: string
+        required: false
+        default: '1'
+      preset:
+        description: Plan preset of license.plans, such as trial or standard (tenant-onboard, license-entitlements-set)
+        type: string
+        required: false
+      status:
+        description: New status (tenant-set-status), or a filter for tenant-list
+        type: choice
+        required: false
+        default: '-'
+        options:
+          - '-'
+          - active
+          - suspended
+          - offboarding
+          - archived
+      reason:
+        description: Reason for the status change (tenant-set-status); the Tenant Admins get it by email, so name no person
+        type: string
+        required: false
+      confirm:
+        description: The slug again, for offboarding and archived (tenant-set-status)
+        type: string
+        required: false
+      tenant_admin:
+        description: Grant tenant_admin (admin-create-user)
+        type: boolean
+        required: false
+        default: false
+      max_users:
+        description: Users limit (license-entitlements-set without a preset)
+        type: string
+        required: false
+      max_systems:
+        description: Management systems limit (license-entitlements-set without a preset)
+        type: string
+        required: false
+      valid_until:
+        description: Last valid day YYYY-MM-DD or none (license-entitlements-set without a preset)
+        type: string
+        required: false
+      valid_from:
+        description: First valid day YYYY-MM-DD (license-entitlements-set, optional)
+        type: string
+        required: false
+      grace_days:
+        description: Days of grace after the last valid day (license-entitlements-set, optional)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  INSTALL_DIR: /opt/mscd
+
+jobs:
+  ops:
+    name: ${{ inputs.command }} on ${{ inputs.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ inputs.target }}
+    # The group of deploy-prod.yml and bootstrap-prod.yml: a command never runs while the
+    # same server is deployed, and a running command is never cancelled.
+    concurrency:
+      group: deploy-${{ inputs.target }}
+      cancel-in-progress: false
+    steps:
+      - name: Check the inputs
+        # The personal fields (email, person_name, org, org_name, reason, confirm) are read
+        # from the run's event file and masked before anything else is printed. They never go
+        # through env: the runner prints the env of a step at the top of its log, before the
+        # step can mask anything (actions/runner issue 475), and that log is public.
+        env:
+          TARGET: ${{ inputs.target }}
+          COMMAND: ${{ inputs.command }}
+          IN_TIME_ZONE: ${{ inputs.time_zone }}
+          IN_SITE_COUNT: ${{ inputs.site_count }}
+          IN_PRESET: ${{ inputs.preset }}
+          IN_STATUS: ${{ inputs.status }}
+          IN_TENANT_ADMIN: ${{ inputs.tenant_admin }}
+          IN_MAX_USERS: ${{ inputs.max_users }}
+          IN_MAX_SYSTEMS: ${{ inputs.max_systems }}
+          IN_VALID_UNTIL: ${{ inputs.valid_until }}
+          IN_VALID_FROM: ${{ inputs.valid_from }}
+          IN_GRACE_DAYS: ${{ inputs.grace_days }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          trim() { local v=$1; v=${v#"${v%%[![:space:]]*}"}; printf '%s' "${v%"${v##*[![:space:]]}"}"; }
+          # mask VALUE: hides each line of VALUE, as typed and in lower case, in this job's log
+          # from here on (% and CR escaped, as the runner reads them in a command).
+          mask() {
+            local line form
+            while IFS= read -r line; do
+              line=$(trim "$line")
+              [[ -n $line ]] || continue
+              for form in "$line" "${line,,}"; do
+                form=${form//%/%25}
+                printf '::add-mask::%s\n' "${form//$'\r'/%0D}"
+                [[ ${line,,} != "$line" ]] || break
+              done
+            done <<<"$1"
+          }
+          # The personal fields, from the event of this run (empty when not filled in).
+          declare -A IN=()
+          for name in email person_name org org_name reason confirm; do
+            IN[$name]=$(jq -r --arg name "$name" '(.inputs[$name] // "") | tostring' "$GITHUB_EVENT_PATH")
+            mask "${IN[$name]}"
+          done
+          # The part of the email before @, which mscd-server turns into the person's user
+          # handle; saas-ops.sh --public hides it too, this is a second guard.
+          local_part=$(trim "${IN[email]}")
+          local_part=${local_part%%@*}
+          if ((${#local_part} >= 4)); then mask "$local_part"; fi
+          case $TARGET in staging | production) ;; *) fail "target must be staging or production." ;; esac
+          email=$(trim "${IN[email]}") person=$(trim "${IN[person_name]}") org=$(trim "${IN[org]}") org_name=$(trim "${IN[org_name]}")
+          zone=$(trim "$IN_TIME_ZONE") sites=$(trim "$IN_SITE_COUNT") preset=$(trim "$IN_PRESET") reason=$(trim "${IN[reason]}")
+          confirm=$(trim "${IN[confirm]}") max_users=$(trim "$IN_MAX_USERS") max_systems=$(trim "$IN_MAX_SYSTEMS")
+          valid_until=$(trim "$IN_VALID_UNTIL") valid_from=$(trim "$IN_VALID_FROM") grace=$(trim "$IN_GRACE_DAYS")
+          status=$IN_STATUS
+          [[ $status != - ]] || status=''
+          email_re='^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$'
+          slug_re='^[a-z][a-z0-9_]{1,39}$'
+          text_ok() { local v=$1 min=$2 max=$3; ((${#v} >= min && ${#v} <= max)) && [[ $v != -* && ! $v =~ [[:cntrl:]] ]]; }
+          need() { [[ -n $2 ]] || fail "$COMMAND needs the input $1."; }
+          [[ -z $email ]] || { [[ $email =~ $email_re ]] && ((${#email} <= 254)); } || fail "email is not an email address."
+          [[ -z $person ]] || text_ok "$person" 1 150 || fail "person_name must have 1 to 150 characters and not start with -."
+          [[ -z $org ]] || [[ $org =~ $slug_re ]] || fail "org must be a slug: a lower-case letter, then 1 to 39 lower-case letters, digits or _."
+          [[ -z $confirm ]] || [[ $confirm =~ $slug_re ]] || fail "confirm must be the organisation slug."
+          [[ -z $org_name ]] || text_ok "$org_name" 1 200 || fail "org_name must have 1 to 200 characters and not start with -."
+          [[ -z $zone ]] || [[ $zone =~ ^[A-Za-z][A-Za-z0-9_+/-]{1,63}$ ]] || fail "time_zone must be an IANA name such as Asia/Jakarta."
+          [[ -z $sites ]] || [[ $sites =~ ^[0-9]{1,5}$ ]] || fail "site_count must be a whole number."
+          [[ -z $preset ]] || [[ $preset =~ ^[a-z][a-z0-9_-]{0,39}$ ]] || fail "preset must be a plan preset name such as trial or standard."
+          [[ -z $reason ]] || text_ok "$reason" 3 500 || fail "reason must have 3 to 500 characters and not start with -."
+          [[ -z $max_users ]] || [[ $max_users =~ ^[0-9]{1,9}$ ]] || fail "max_users must be a whole number."
+          [[ -z $max_systems ]] || [[ $max_systems =~ ^[0-9]{1,9}$ ]] || fail "max_systems must be a whole number."
+          [[ -z $grace ]] || [[ $grace =~ ^[0-9]{1,3}$ ]] || fail "grace_days must be a whole number."
+          [[ -z $valid_from ]] || [[ $valid_from =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "valid_from must be a date YYYY-MM-DD."
+          [[ -z $valid_until ]] || [[ $valid_until =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}|none)$ ]] || fail "valid_until must be a date YYYY-MM-DD or none."
+          # The values each command takes, under the names saas-ops.sh reads on standard input.
+          declare -A send=()
+          case $COMMAND in
+            create-operator) need email "$email"; send=([EMAIL]=$email [NAME]=$person) ;;
+            revoke-operator) need email "$email"; send=([EMAIL]=$email) ;;
+            tenant-list) send=([STATUS]=$status) ;;
+            tenant-show) need org "$org"; send=([ORG]=$org) ;;
+            tenant-onboard)
+              need org "$org"; need org_name "$org_name"; need time_zone "$zone"; need site_count "$sites"
+              need email "$email"; need person_name "$person"
+              send=([SLUG]=$org [NAME]=$org_name [TIME_ZONE]=$zone [SITE_COUNT]=$sites [ADMIN_EMAIL]=$email [ADMIN_NAME]=$person [PRESET]=$preset)
+              ;;
+            tenant-set-status)
+              need org "$org"; need status "$status"; need reason "$reason"
+              send=([ORG]=$org [STATUS]=$status [REASON]=$reason [CONFIRM]=$confirm)
+              ;;
+            admin-create-user) need org "$org"; need email "$email"; send=([ORG]=$org [EMAIL]=$email [NAME]=$person [TENANT_ADMIN]=$IN_TENANT_ADMIN) ;;
+            license-entitlements-show) need org "$org"; send=([ORG]=$org) ;;
+            license-entitlements-set)
+              need org "$org"
+              if [[ -n $preset && -n $max_users$max_systems$valid_until$grace ]]; then fail "Give a preset or limits, not both."; fi
+              if [[ -z $preset && -z $max_users$max_systems$valid_until$grace ]]; then fail "Give a preset, or max_users, max_systems and valid_until."; fi
+              send=([ORG]=$org [PRESET]=$preset [MAX_USERS]=$max_users [MAX_SYSTEMS]=$max_systems [VALID_UNTIL]=$valid_until [VALID_FROM]=$valid_from [GRACE_DAYS]=$grace)
+              ;;
+            diagnostics) ;;
+            *) fail "command $COMMAND is not on the allow-list." ;;
+          esac
+          # The values for the next step, through a file of this job (never the log). Empty values are left out.
+          install -d -m 0700 "$RUNNER_TEMP/mscd-ops"
+          values=$RUNNER_TEMP/mscd-ops/values
+          : >"$values"
+          chmod 0600 "$values"
+          for name in "${!send[@]}"; do
+            if [[ -n ${send[$name]} ]]; then printf '%s=%s\n' "$name" "$(printf '%s' "${send[$name]}" | base64 -w0)" >>"$values"; fi
+          done
+          {
+            echo "WORK=$RUNNER_TEMP/mscd-ops"
+            echo "SSH_DIR=$RUNNER_TEMP/mscd-ssh"
+            echo "STARTED=$(date +%s)"
+          } >>"$GITHUB_ENV"
+          echo "Inputs are valid: $COMMAND on $TARGET with $(wc -l <"$values") value(s)."
+
+      - name: Open the SSH connection
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ -n $DEPLOY_HOST ]] || fail "The secret DEPLOY_HOST is not set in the environment $TARGET."
+          [[ $DEPLOY_HOST =~ ^[A-Za-z0-9.:-]+$ ]] || fail "DEPLOY_HOST must be a host name or an IP address."
+          user=${DEPLOY_USER:-deploy}
+          [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "DEPLOY_USER must be an account name such as deploy."
+          port=${DEPLOY_SSH_PORT:-22}
+          [[ $port =~ ^[0-9]{1,5}$ ]] || fail "The variable DEPLOY_SSH_PORT must be a port number."
+          [[ -n $DEPLOY_SSH_KEY ]] || fail "The secret DEPLOY_SSH_KEY is not set in the environment $TARGET."
+          [[ -n $DEPLOY_SSH_KNOWN_HOSTS ]] || fail "The secret DEPLOY_SSH_KNOWN_HOSTS is not set (the lines that bootstrap-prod.yml printed)."
+          install -d -m 0700 "$SSH_DIR"
+          printf '%s\n' "$DEPLOY_SSH_KEY" >"$SSH_DIR/deploy_key"
+          chmod 0600 "$SSH_DIR/deploy_key"
+          ssh-keygen -y -f "$SSH_DIR/deploy_key" >/dev/null 2>&1 || fail "DEPLOY_SSH_KEY is not a private SSH key without a passphrase."
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" >"$SSH_DIR/known_hosts"
+          # bootstrap-prod.yml prints lines for port 22. For another port, lines made for
+          # [host]:port are used when present; otherwise the port-22 lines through HostKeyAlias.
+          alias_line=''
+          if [[ $port != 22 ]] && ssh-keygen -F "[$DEPLOY_HOST]:$port" -f "$SSH_DIR/known_hosts" >/dev/null 2>&1; then
+            :
+          elif ssh-keygen -F "$DEPLOY_HOST" -f "$SSH_DIR/known_hosts" >/dev/null 2>&1; then
+            [[ $port == 22 ]] || alias_line="HostKeyAlias $DEPLOY_HOST"
+          else
+            fail "DEPLOY_SSH_KNOWN_HOSTS holds no host key for the server. Use the lines that bootstrap-prod.yml printed."
+          fi
+          cat >"$SSH_DIR/config" <<EOF
+          Host mscd-target
+            HostName $DEPLOY_HOST
+            Port $port
+            User $user
+            IdentityFile $SSH_DIR/deploy_key
+            IdentitiesOnly yes
+            BatchMode yes
+            RequestTTY no
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $SSH_DIR/known_hosts
+            GlobalKnownHostsFile /dev/null
+            CheckHostIP no
+            $alias_line
+            ControlMaster auto
+            ControlPath $SSH_DIR/control-%C
+            ControlPersist 20m
+            ServerAliveInterval 30
+            ServerAliveCountMax 6
+            ConnectTimeout 20
+          EOF
+          ssh -F "$SSH_DIR/config" mscd-target true
+          echo "Connected with the pinned host key."
+
+      - name: Run the command on the server
+        env:
+          COMMAND: ${{ inputs.command }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          ssh_cmd=(ssh -F "$SSH_DIR/config" mscd-target)
+          script=$INSTALL_DIR/deploy/scripts/saas-ops.sh
+          "${ssh_cmd[@]}" "test -f $script" ||
+            fail "$script is not on the server: deploy a release that has it with deploy-prod.yml (docs/saas/operator.md)."
+          out=$WORK/output
+          # Lines printed by the server are never read as workflow commands.
+          token=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+          echo "::stop-commands::$token"
+          status=0
+          "${ssh_cmd[@]}" "NO_COLOR=1 bash $script $(printf '%q' "$COMMAND") --input-stdin --public" <"$WORK/values" |
+            sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g' | tee "$out" || status=${PIPESTATUS[0]}
+          echo "::$token::"
+          echo "STATUS=$status" >>"$GITHUB_ENV"
+          if [[ $status == 255 ]]; then
+            fail "The SSH connection failed or ended before saas-ops.sh finished (exit code 255). The server keeps the output in $INSTALL_DIR/logs."
+          elif [[ $status != 0 ]]; then
+            fail "saas-ops.sh $COMMAND stopped with exit code $status. The lines above say why; the server keeps the full output in $INSTALL_DIR/logs."
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          COMMAND: ${{ inputs.command }}
+          TARGET: ${{ inputs.target }}
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## $COMMAND on $TARGET: $RESULT"
+            echo
+            echo "Duration: $(( $(date +%s) - ${STARTED:-$(date +%s)} )) seconds. Values are masked; the full output is in $INSTALL_DIR/logs on the server."
+            if [[ -s ${WORK:-/nonexistent}/output ]]; then
+              echo
+              echo '```text'
+              sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g; s/```/` ` `/g' "$WORK/output" | tail -n 200
+              echo '```'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Close the connection and remove the key
+        if: always()
+        run: |
+          if [[ -f ${SSH_DIR:-/nonexistent}/config ]]; then
+            ssh -F "$SSH_DIR/config" -O exit mscd-target 2>/dev/null || true
+          fi
+          rm -rf "${SSH_DIR:-/nonexistent}" "${WORK:-/nonexistent}"

@@ -93,7 +93,15 @@ export class OpsService {
       components.push({ name: 'licences', status: 'down', detail: (error as Error).message });
     }
 
-    return { components, migrations: await this.migrations(), queues, licences };
+    // The migration state needs the database; without it the report still lists the other components (the offline
+    // `mscd-server diagnostics` of M2-S09 builds this report when the database may be down).
+    let migrations: MigrationState[] = [];
+    try {
+      migrations = await this.migrations();
+    } catch (error) {
+      components.push({ name: 'migrations', status: 'down', detail: (error as Error).message });
+    }
+    return { components, migrations, queues, licences };
   }
 
   /** `GET /ops/queues`. */

@@ -4,3 +4,5 @@ export { OpsController } from './ops.controller';
 export { OpsModule } from './ops.module';
 export { OpsService, manualRunKey, retryLimitOf } from './ops.service';
 export { SecretScrubber, redactQueryValues, secretFilesOf } from './secret-scrubber';
+export { OrganizationStatusService, allowedMoves, confirmationMismatch, invalidStatusTransition, type StatusChangeOutcome } from './organization-status.service';
+export { CLI_OPERATOR, OpsOrganizationsService, operatorOf, singleTenancyRefusal, type OperatorActor } from './organizations.service';

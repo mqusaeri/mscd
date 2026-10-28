@@ -3,6 +3,13 @@
 // have a handler in this build are enqueued, so a job of a later work package starts being scheduled when its
 // handler exists.
 //
+// Organisation status (Milestone 2 J.8, K.6, M2-S09): only organisations whose status is `active` get daily runs. A
+// `suspended`, `offboarding` or `archived` organisation gets none (no reminders, sweeps, alerts or licence checks for
+// people who cannot act on them) and writes no ledger rows. The tick reads the status in its own transaction, so a
+// status change counts from the next tick in every worker, whatever the organisation caches hold. When the operator
+// makes the organisation active again, the next tick plans its runs as before, with the catch-up of the current and the
+// previous local date of the ledger rules below.
+//
 // Run ledger (Milestone 2 D.2, risk table I; orchestrator decision between waves 2a and 2b, migration
 // `platform/0006_daily_job_run.sql`): a run is one organisation, one daily job and one local date. The tick reads each
 // organisation's current time zone with a plain read (no row lock on organisation rows) and its ledger rows, and
@@ -132,6 +139,7 @@ export class SchedulerTickJob implements JobHandlerInstance<'scheduler.tick'> {
           .deleteFrom('platform.daily_job_run')
           .where('local_date', '<', addDays(utcDate, -LEDGER_RETENTION_DAYS))
           .executeTakeFirst();
+        // Active organisations only (see "Organisation status" above).
         const orgs = await trx
           .selectFrom('platform.organization')
           .select(['id', 'time_zone', 'created_at'])

@@ -109,8 +109,8 @@ The facts behind each record, with the field names from the code, are in [legal-
 | Specific personal data (Article 4) | None by design |
 | Source | Customers, users, the service |
 | Recipients | Platform operators; GitHub (job summaries and logs of operator commands, which can hold organisation names and invited emails, and which anyone can read while the repository is public: go-live checklist GL-50); the lawyer when an incident or request needs advice |
-| Location | Production server; GitHub; the provider's mailbox |
-| Retention | Operator actions in the audit log for the life of the installation; GitHub workflow logs for the repository's log retention period (90 days by default, adjustable by the owner); support emails and the incident and request logs as the provider decides (the owner fills in: `____`) |
+| Location | Production server (operator command logs and diagnostics archives in `/opt/mscd/logs`); GitHub; the provider's mailbox |
+| Retention | Operator actions in the audit log for the life of the installation; operator command logs on the server 90 days and diagnostics archives 14 days, removed by the next operator command after that; GitHub workflow logs for the repository's log retention period (90 days by default, adjustable by the owner); support emails and the incident and request logs as the provider decides (the owner fills in: `____`) |
 | Safeguards | Named operators with TOTP, every operator action in the audit log, operators cannot read business records or files in the app, operator commands only through an approved workflow with an allow-list, owner approval for every production run |
 | Transfer abroad | GitHub (job summaries and logs) |
 
@@ -141,8 +141,9 @@ Times are what the code and the plan do today. "Gap" marks a place where data st
 | Pre-deploy database copies on the server | The last 3 deploys | Planned (M2-S05) | |
 | Restore test copy | Removed when the weekly GitHub job ends | Planned (M2-S07) | |
 | GitHub workflow logs and job summaries | The repository's log retention period (90 days by default) | GitHub setting | The owner may shorten it in Settings, Actions |
+| Operator command logs and diagnostics archives on the server (emails and names of first administrators, organisation names, reasons) | Run logs 90 days, diagnostics archives 14 days; removed by the next operator command after that | Built (M2-S09, `saas-ops.sh`) | Removed only when a later command runs |
 | Mail provider delivery logs | The provider's setting: `____` | Owner | |
-| After a contract ends | 30 days read-only (`offboarding`), then `archived`. The data stays in the database and backups | Planned (M2-S09, decision D-S5) | Full export and verified deletion not built (K.8) |
+| After a contract ends | 30 days read-only (`offboarding`), then `archived`. The data stays in the database and backups | Built (M2-S09, decision D-S5): the operator moves the organisation to `archived` by hand at the end of the 30 days | No automatic move at the end of the 30 days; full export and verified deletion not built (K.8) |
 
 ## Requests from data subjects
 
