@@ -1,0 +1,13 @@
+{
+  "id": "documented-info",
+  "label": ["Required documented information", "Informasi terdokumentasi wajib"],
+  "group": "impl",
+  "order": 45,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "owner", "auditor", "top"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

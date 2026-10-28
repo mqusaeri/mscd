@@ -94,7 +94,9 @@ test.describe('Display settings', () => {
       for (const label of SCREENS_ID) {
         await go(page, label);
         const text = await page.locator('main').innerText();
-        expect(text, label).not.toMatch(/\bshowing\b|\bundefined\b|\bNaN\b|\[object/);
+        // A leftover key shows as "showing <count>" in a list footer; pack titles may use the English word
+        // ("Records showing processes were carried out as planned", ISO 27001 and ISO 9001, M2-12).
+        expect(text, label).not.toMatch(/\bshowing\s+\d|\bundefined\b|\bNaN\b|\[object/);
         if (await list(page).count()) await expect(list(page)).toContainText(/Menampilkan \d+ item/);
       }
       await visitAll(page, SCREENS_ID);

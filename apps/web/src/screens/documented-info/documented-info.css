@@ -1,0 +1,19 @@
+/* Required documented information (M2-12): tokens of src/styles.css only, text of 12px or more, AA contrast. */
+.mx-di-scope{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--pad)}
+.mx-di-col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.mx-di-label{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--tx2)}
+.mx-di-scopetext{margin:0;color:var(--tx);line-height:1.5;overflow-wrap:anywhere;white-space:pre-line}
+.mx-di-doc{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mx-di-doc-title{color:var(--tx);overflow-wrap:anywhere}
+.mx-di-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mx-di-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.mx-di-actions .mx-btn,.mx-di-doc .mx-btn{white-space:normal;text-align:left}
+.mx-di-evidence{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.mx-di-evidence li{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.mx-di-table .mx-table{table-layout:fixed}
+.mx-di-table .mx-table td{overflow-wrap:anywhere}
+.mx-di-table .mx-table th{white-space:normal}
+.mx-di-table .mx-badge{white-space:normal;max-width:100%}
+.mx-di-code{font-family:var(--ffm);font-weight:600;font-size:12px;color:var(--tx);white-space:nowrap}
+@media (max-width:900px){.mx-di-scope{grid-template-columns:minmax(0,1fr)}}
+.mx-di-template{margin-top:6px;padding-top:6px;border-top:1px solid var(--bd)}

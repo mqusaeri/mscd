@@ -1,0 +1,17 @@
+/* Document control forms of M2-12: tokens of src/styles.css only, text of 12px or more, AA contrast in both themes. */
+.mx-de-panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.mx-de-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.mx-de-title{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--tx2)}
+.mx-de-text{margin:0;font-size:12px;color:var(--tx2);line-height:1.5}
+.mx-de-quote{margin:0;padding:8px 10px;border-left:3px solid var(--bd);background:var(--sur2);border-radius:0 8px 8px 0;color:var(--tx);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.mx-de-versions{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.mx-de-version{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--sur);min-width:0}
+.mx-de-version-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.mx-de-version-label{font-family:var(--ffm);font-weight:600;color:var(--tx);font-size:12px}
+.mx-de-meta{margin:0;font-size:12px;color:var(--tx2);line-height:1.5;overflow-wrap:anywhere}
+.mx-de-version .mx-btn{height:28px}
+.mx-de-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.mx-de-set{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.mx-de-set>legend{padding:0;margin-bottom:6px}
+.mx-de-warn{margin:0;font-size:12px;color:var(--warn);font-weight:500;line-height:1.5}
+@media (max-width:640px){.mx-de-grid{grid-template-columns:minmax(0,1fr)}}

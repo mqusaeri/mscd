@@ -84,8 +84,10 @@ describe('visibility of host screens', () => {
     expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'admin', 'ops']);
     // A persona without the Administration group gets it when a host screen of the group is visible.
     const top = hostNav([{ id: 'top', label: null, items: [{ id: 'portfolio', label: 'P' }] }], ctxOf({ lang: 'id' }), 'top');
-    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['admin', 'Administrasi']]);
-    expect(hostNav([], ctxOf(), 'owner')).toEqual([]);
+    // Required documented information (M2-12) also opens for Top Management, so the Implementation group appears too.
+    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['admin', 'Administrasi']]);
+    // With no built-in entries, a Domain Owner gets only the Implementation group of Required documented information (M2-12).
+    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info']]]);
     expect(GROUP_LABELS.ops).toEqual(['Operations', 'Operasi']);
   });
 
