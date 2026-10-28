@@ -241,6 +241,9 @@ export function withLocVisuals(loc: Record<string, readonly unknown[]>): Snapsho
     const v = (LOC_VISUALS as Record<string, { color: string; icon: string }>)[kind] ?? { color: '#6b655a', icon: '' };
     out[slug] = [name, kind, short, colour ?? v.color, icon ?? v.icon];
   }
+  // Evidence without a file yet (new evidence, M2-11; an evidence import, M2-08) has the repository slug '' (G.5 `loc`).
+  // The screens look the slug up in LOC, so it gets an entry that shows "-" where the repository goes.
+  if (!out['']) out[''] = ['-', 'none', '-', '#6b655a', ''];
   return out;
 }
 
