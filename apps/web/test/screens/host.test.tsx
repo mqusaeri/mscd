@@ -79,9 +79,9 @@ describe('visibility of host screens', () => {
   it('the sidebar inserts host screens into their group by order and drops empty groups', () => {
     const nav = hostNav(NAV, ctxOf(), 'manager');
     const admin = nav.find((g) => g.id === 'admin')!;
-    expect(admin.items.map((i) => i.id)).toEqual(['fw', 'storage', 'license', 'systems', 'routing']);
-    expect(admin.items[2]).toMatchObject({ host: true, label: 'Licence', order: 30 });
-    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'admin']);
+    expect(admin.items.map((i) => i.id)).toEqual(['getting-started', 'fw', 'storage', 'organization', 'license', 'systems', 'routing']);
+    expect(admin.items[4]).toMatchObject({ host: true, label: 'Licence', order: 30 });
+    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'admin', 'ops']);
     // A persona without the Administration group gets it when a host screen of the group is visible.
     const top = hostNav([{ id: 'top', label: null, items: [{ id: 'portfolio', label: 'P' }] }], ctxOf({ lang: 'id' }), 'top');
     expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['admin', 'Administrasi']]);
@@ -90,7 +90,7 @@ describe('visibility of host screens', () => {
   });
 
   it('administration and platform landings pick the first screen the session may open (C.3)', () => {
-    expect(firstAdminScreen(ctxOf(), 'manager')).toBe('license');
+    expect(firstAdminScreen(ctxOf(), 'manager')).toBe('getting-started');
     expect(firstAdminScreen(ctxOf({ mode: 'api', perms: { org: [], ms: {} } }), null)).toBeNull();
     expect(firstPlatformScreen(ctxOf({ mode: 'api', perms: { org: ['ops.read'], ms: {} } }))).toBe(HOST_SCREENS.find((d) => d.scope === 'platform')?.id ?? null);
   });
@@ -125,9 +125,11 @@ describe('header values of an open host screen', () => {
     expect(html).toContain('Halo');
   });
 
-  it('extensions and shell slots render nothing when no package adds one', () => {
+  it('extensions render nothing when no package adds one; the top bar slot needs a session (M2-16)', () => {
     expect(detailNode('req', ctxOf(), { ms: 'isms', recordKey: 'isms:req:A.5.1', record: {}, close: () => undefined })).toBeNull();
-    expect(slotNode('topbar', ctxOf())).toBeNull();
+    // M2-16 puts the notification bell and "My account" in the top bar; in API mode they need a signed-in person.
+    expect(slotNode('topbar', ctxOf())).not.toBeNull();
+    expect(slotNode('topbar', ctxOf({ mode: 'api', me: null }))).toBeNull();
     expect(hostExtraActions('fw', ctxOf())).toEqual([]);
   });
 });

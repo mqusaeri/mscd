@@ -20,7 +20,20 @@ export interface LicenceModel {
   features: (string | readonly [string, string])[];
   signature: { alg: string; keyId: string; verified: boolean } | null;
   clockRollback: boolean;
+  /**
+   * Multi tenancy only (M2-S10): where the effective licence comes from, the entitlement row's source; a plan preset
+   * or limits the operator set carry no signature. Absent (null) in single tenancy.
+   */
+  source?: 'preset' | 'manual' | 'signed_licence' | null;
+  /** Multi tenancy only: the plan preset of the entitlement row. */
+  plan?: string | null;
   sample?: boolean;
+}
+
+/** The installation id for licence requests and the tenancy mode, from `GET /admin/organization` (M2-16). */
+export interface InstallationInfo {
+  installationId: string;
+  tenancyMode: 'single' | 'multi';
 }
 
 export type Loaded = { ok: true; licence: LicenceModel | null } | { ok: false; error: ApiError };
@@ -31,6 +44,21 @@ export interface LicenceAdapter {
   load(): Promise<Loaded>;
   /** Installs a parsed licence document (`PUT /admin/license`). */
   install(document: unknown): Promise<Installed>;
+  /** The installation id panel's data; null when it cannot be read (the session lacks `org.settings.manage`). */
+  installation(): Promise<InstallationInfo | null>;
+}
+
+/** `valid_until` of an entitlement without an end date (M2-S10 `NO_END_DATE`). */
+export const NO_END_DATE = '9999-12-31';
+
+/** True when the licence is the entitlement of a multi tenancy service (it names its source). */
+export function isMultiTenancy(licence: LicenceModel): boolean {
+  return Boolean(licence.source);
+}
+
+/** True when the licence carries a signature to show: not for a plan preset or limits set by the operator. */
+export function hasSignature(licence: LicenceModel): boolean {
+  return Boolean(licence.signature) && licence.source !== 'preset' && licence.source !== 'manual';
 }
 
 /** Display names of the framework codes of a licence. */
@@ -61,5 +89,5 @@ export const FEATURE_NAMES: Readonly<Record<string, readonly [string, string]>> 
 
 /** True when the licence end date lies before `today` (both YYYY-MM-DD). */
 export function isExpired(licence: LicenceModel, today: string | null | undefined): boolean {
-  return Boolean(licence.validUntil && today && licence.validUntil < today);
+  return Boolean(licence.validUntil && licence.validUntil !== NO_END_DATE && today && licence.validUntil < today);
 }

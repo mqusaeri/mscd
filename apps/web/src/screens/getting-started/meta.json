@@ -1,0 +1,13 @@
+{
+  "id": "getting-started",
+  "label": ["Getting started", "Mulai di sini"],
+  "group": "admin",
+  "order": 5,
+  "scope": "org",
+  "perm": "ms.admin",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

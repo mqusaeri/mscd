@@ -1,0 +1,13 @@
+{
+  "id": "account",
+  "label": ["My account", "Akun saya"],
+  "group": "top",
+  "order": 900,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "owner", "auditor", "top"],
+  "nav": false,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "query"
+}

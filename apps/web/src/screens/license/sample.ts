@@ -1,6 +1,8 @@
 // Sample adapter of the Licence screen: the sample organisation's licence card (`LICENCE` of the sample snapshot,
 // G.5) in the screen's model. Installing checks that the text is a licence document and keeps it for this session.
-import type { ControllerData } from '../../data/types';
+// The installation id panel takes the id and the tenancy mode of the Organisation screen's sample adapter.
+import type { ControllerData, Organisation } from '../../data/types';
+import { SAMPLE_INSTALLATION_ID, sampleTenancyMode } from '../organization/sample';
 import type { LicenceAdapter, LicenceModel } from './model';
 import { FRAMEWORK_NAMES } from './model';
 
@@ -80,8 +82,13 @@ export function resetSampleLicence(): void {
   installed = null;
 }
 
-export function createSampleAdapter(getD: () => ControllerData | null): LicenceAdapter {
+export { SAMPLE_INSTALLATION_ID };
+
+export function createSampleAdapter(getD: () => ControllerData | null, getOrg: () => Organisation | null = () => null): LicenceAdapter {
   return {
+    async installation() {
+      return { installationId: SAMPLE_INSTALLATION_ID, tenancyMode: sampleTenancyMode(getOrg()) };
+    },
     async load() {
       return { ok: true, licence: installed ?? fromSample(getD()) };
     },

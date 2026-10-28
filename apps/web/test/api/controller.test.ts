@@ -412,8 +412,8 @@ describe('screen host in sample mode', () => {
     expect(v.hostLayer).toBeTruthy();
     expect([v.isPortfolio, v.isDrill, v.isFw, v.showList]).toEqual([false, false, false, false]);
     const admin = v.nav.find((g: AnyRecord) => g.label === 'Administration');
-    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Framework library', 'Storage repositories', 'Licence', 'Management systems', 'Routing rules']);
-    expect(admin.items[2].fw).toBe(600);
+    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Getting started', 'Framework library', 'Storage repositories', 'Organisation', 'Licence', 'Management systems', 'Routing rules']);
+    expect(admin.items[4].fw).toBe(600);
     v.pageActions[0].go();
     expect(app.state.screen).toBe('license');
     expect(app.state.params.install).toEqual(expect.any(Number));
@@ -605,7 +605,7 @@ describe('screen host in API mode', () => {
     expect(shown.size).toBe(8);
   });
 
-  it('no-system path: a Tenant Admin without a business role lands on Licence with the Administration group', async () => {
+  it('no-system path: a Tenant Admin without a business role lands on Getting started with the Administration group', async () => {
     const fx = await wireOf();
     const me = personMe({ handle: 'tenant.admin', adminRoles: ['tenant_admin'], org: { id: uuidOf('org:ndt'), slug: 'ndt', name: 'PT Nusantara Digital Teknologi' }, orgs: [{ id: 'ndt', name: 'PT Nusantara Digital Teknologi', ms: [], deploy: 'saas', sites: 3 }], perms: { org: ['license.read', 'license.manage', 'storage.repository.read', 'pack.read', 'ms.admin'], ms: {} } });
     const org = { ...fx.org, orgs: me.orgs, permissions: me.permissions };
@@ -613,12 +613,13 @@ describe('screen host in API mode', () => {
     expect(app.MSL).toEqual([]);
     expect(calls.filter((c) => c.path.startsWith('/api/v1/ui/ms/'))).toHaveLength(0);
     app.afterFirstLoad();
-    expect(app.state.screen).toBe('license');
+    // M2-16: Getting started is the first Administration screen (order 5), so it is the landing.
+    expect(app.state.screen).toBe('getting-started');
     expect(app.shellWithoutSystem()).toBe(true);
     const v = app.renderVals();
     expect(v.msSwitch).toBe(false);
-    expect(v.nav.map((g: AnyRecord) => [g.label, g.items.map((i: AnyRecord) => i.label)])).toEqual([['Administration', ['Framework library', 'Storage repositories', 'Licence', 'Management systems', 'Routing rules']]]);
-    expect(v.title).toBe('Licence');
+    expect(v.nav.map((g: AnyRecord) => [g.label, g.items.map((i: AnyRecord) => i.label)])).toEqual([['Administration', ['Getting started', 'Framework library', 'Storage repositories', 'Licence', 'Management systems', 'Routing rules']]]);
+    expect(v.title).toBe('Getting started');
     expect(v.me.role).toMatch(/^Tenant Admin, /);
     expect(v.pack).toBe('-');
     // The built-in Administration screens render without a system; the others show the notice in the shell.

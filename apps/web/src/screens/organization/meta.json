@@ -1,0 +1,13 @@
+{
+  "id": "organization",
+  "label": ["Organisation", "Organisasi"],
+  "group": "admin",
+  "order": 28,
+  "scope": "org",
+  "perm": "org.settings.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

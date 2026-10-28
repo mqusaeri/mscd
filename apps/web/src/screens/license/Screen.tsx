@@ -1,17 +1,21 @@
 // Licence screen (MILESTONE-2 M2-01, reference screen of the host): the state of the organisation's licence, its
 // dates, the seats and management systems in use against their limits, what it includes, and "Install licence"
 // for whoever holds `license.manage` (a Tenant Admin with single tenancy; the platform operator with multi tenancy).
+// M2-16 adds the installation id panel for licence requests (Tenant Admin) and, for the entitlement of a multi tenancy
+// service (M2-S10), its source and plan, "No end date", no signature row for a plan or operator limits, and alerts that
+// send the reader to the MSCD service provider.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { ApiClient, ApiError } from '../../data/api/ApiClient';
-import type { ControllerData } from '../../data/types';
+import type { ControllerData, Organisation } from '../../data/types';
 import type { HostContext, ScreenProps } from '../types';
 import { fieldErrors } from '../api';
 import { Alert, Badge, Button, Card, EmptyState, Facts, Field, FileInput, Meter, Modal, Textarea, UI_TEXT } from '../ui';
 import type { Tone } from '../ui';
+import { InstallationPanel } from '../organization/InstallationPanel';
 import { createApiAdapter } from './api';
-import { ADAPTER_NAMES, FEATURE_NAMES, FRAMEWORK_NAMES, isExpired } from './model';
-import type { LicenceAdapter, LicenceModel } from './model';
+import { ADAPTER_NAMES, FEATURE_NAMES, FRAMEWORK_NAMES, NO_END_DATE, hasSignature, isExpired, isMultiTenancy } from './model';
+import type { InstallationInfo, LicenceAdapter, LicenceModel } from './model';
 import { TEXT } from './text';
 
 /** An adapter whose module is loaded on first use; a failed load keeps the next call free to try again. */
@@ -27,6 +31,7 @@ export function deferredAdapter(load: () => Promise<LicenceAdapter>): LicenceAda
   return {
     load: () => get().then((a) => a.load()),
     install: (document) => get().then((a) => a.install(document)),
+    installation: () => get().then((a) => a.installation()),
   };
 }
 
@@ -36,10 +41,10 @@ export function deferredAdapter(load: () => Promise<LicenceAdapter>): LicenceAda
  * comes through a dynamic import, so an api build holds no sample code or data (R-13). Unit tests call
  * `createApiAdapter` and `createSampleAdapter` directly.
  */
-export function adapterFor(client: ApiClient | null, getD: () => ControllerData | null): LicenceAdapter {
+export function adapterFor(client: ApiClient | null, getD: () => ControllerData | null, getOrg: () => Organisation | null = () => null): LicenceAdapter {
   return import.meta.env.VITE_DATA_SOURCE === 'api'
     ? createApiAdapter(client)
-    : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(getD)));
+    : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(getD, getOrg)));
 }
 
 /** What the screen shows: a load in progress, the licence (null when none is installed) or the error of the last load. */
@@ -66,17 +71,24 @@ export function stateBadges(licence: LicenceModel, today: string | null | undefi
   return out;
 }
 
+const SOURCE_TEXT: Readonly<Record<'preset' | 'manual' | 'signed_licence', readonly [string, string]>> = {
+  preset: TEXT.sourcePreset,
+  manual: TEXT.sourceManual,
+  signed_licence: TEXT.sourceSigned,
+};
+
 /** The page body of a loaded licence. */
 export function LicenceView({ ctx, licence }: { ctx: HostContext; licence: LicenceModel }) {
   const D = ctx.D;
-  const day = (iso: string | null) => (iso ? (D ? D.fmt(iso, ctx.lang) : iso) : '-');
+  const day = (iso: string | null) => (iso === NO_END_DATE ? ctx.li(TEXT.noEndDate) : iso ? (D ? D.fmt(iso, ctx.lang) : iso) : '-');
+  const multi = isMultiTenancy(licence);
   const today = D?.TODAY_S ?? null;
   const bind = licence.binding === 'organization' ? TEXT.bindingOrg : licence.binding === 'installation' ? TEXT.bindingInstall : licence.binding === 'trial' ? TEXT.bindingTrial : null;
   const features = licence.features.map((f) => (typeof f === 'string' ? ctx.li(FEATURE_NAMES[f] ?? [f, f]) : ctx.li(f)));
   return (
     <>
-      {licence.state === 'grace' ? <Alert tone="warn">{ctx.li(TEXT.graceAlert)}</Alert> : null}
-      {licence.state === 'read_only' ? <Alert tone="bad">{ctx.li(TEXT.readOnlyAlert)}</Alert> : null}
+      {licence.state === 'grace' ? <Alert tone="warn">{ctx.li(multi ? TEXT.graceAlertMulti : TEXT.graceAlert)}</Alert> : null}
+      {licence.state === 'read_only' ? <Alert tone="bad">{ctx.li(multi ? TEXT.readOnlyAlertMulti : TEXT.readOnlyAlert)}</Alert> : null}
       {licence.clockRollback ? <Alert tone="warn">{ctx.li(TEXT.rollbackAlert)}</Alert> : null}
       <Card
         title={TEXT.details}
@@ -89,13 +101,15 @@ export function LicenceView({ ctx, licence }: { ctx: HostContext; licence: Licen
             { label: TEXT.validFrom, value: day(licence.validFrom) },
             { label: TEXT.validUntil, value: day(licence.validUntil) },
             { label: TEXT.graceDays, value: licence.graceDays === null ? '-' : ctx.fill(TEXT.days, { n: licence.graceDays }) },
-            ...(bind ? [{ label: TEXT.binding, value: ctx.li(bind) }] : []),
-            {
+            ...(licence.source ? [{ label: TEXT.source, value: ctx.li(SOURCE_TEXT[licence.source]) }] : []),
+            ...(licence.plan ? [{ label: TEXT.plan, value: licence.plan }] : []),
+            ...(bind && (!multi || licence.source === 'signed_licence') ? [{ label: TEXT.binding, value: ctx.li(bind) }] : []),
+            ...(hasSignature(licence) || !licence.signature ? [{
               label: TEXT.signature,
               value: licence.signature
                 ? ctx.fill(TEXT.signatureValue, { alg: licence.signature.alg, key: licence.signature.keyId, state: ctx.li(licence.signature.verified ? TEXT.verified : TEXT.notVerified) })
                 : '-',
-            },
+            }] : []),
           ]}
         />
       </Card>
@@ -224,10 +238,21 @@ export function InstallDialog({ ctx, open, adapter, onClose, onInstalled }: {
 export default function LicenceScreen({ ctx }: ScreenProps) {
   const data = useRef(ctx.D);
   data.current = ctx.D;
+  const org = useRef(ctx.org);
+  org.current = ctx.org;
   const { client } = ctx;
-  const adapter = useMemo(() => adapterFor(client, () => data.current), [client]);
+  const adapter = useMemo(() => adapterFor(client, () => data.current, () => org.current), [client]);
   const [state, setState] = useState<LoadState>({ loading: true, licence: null, error: null });
   const [open, setOpen] = useState(false);
+  const [installation, setInstallation] = useState<InstallationInfo | null>(null);
+  // The installation id panel (M2-16): for whoever reads the organisation settings (Tenant Admin).
+  const readsSettings = ctx.orgCan('org.settings.manage');
+  useEffect(() => {
+    if (!readsSettings) return undefined;
+    let live = true;
+    adapter.installation().then((info) => { if (live) setInstallation(info); }, () => undefined);
+    return () => { live = false; };
+  }, [adapter, readsSettings]);
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true, error: null }));
     loadLicence(adapter).then(setState);
@@ -249,11 +274,12 @@ export default function LicenceScreen({ ctx }: ScreenProps) {
       </Alert>
     );
   } else if (!state.licence) {
+    const ask = installation?.tenancyMode === 'multi' ? TEXT.noneAskMulti : TEXT.noneAsk;
     body = (
       <Card>
         <EmptyState
           title={TEXT.none}
-          text={canInstall ? TEXT.noneText : [`${TEXT.noneText[0]} ${TEXT.noneAsk[0]}`, `${TEXT.noneText[1]} ${TEXT.noneAsk[1]}`]}
+          text={canInstall ? TEXT.noneText : [`${TEXT.noneText[0]} ${ask[0]}`, `${TEXT.noneText[1]} ${ask[1]}`]}
           action={canInstall ? <Button variant="primary" onClick={() => setOpen(true)}>{ctx.li(TEXT.install)}</Button> : null}
         />
       </Card>
@@ -262,6 +288,7 @@ export default function LicenceScreen({ ctx }: ScreenProps) {
   return (
     <>
       {body}
+      {installation && !state.loading ? <InstallationPanel ctx={ctx} installationId={installation.installationId} tenancyMode={installation.tenancyMode} /> : null}
       {canInstall ? (
         <InstallDialog
           ctx={ctx}

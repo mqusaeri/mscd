@@ -1,0 +1,8 @@
+/* Top bar entries of the host (MILESTONE-2 M2-16): the notification bell and "My account", in the size and colours of
+   the generated theme button. With unread notifications the bell widens to hold its count, so nothing leaves its box.
+   Tokens of src/styles.css only; the count is 12px text on the accent. */
+.mx-topbtn{position:relative;box-sizing:border-box;height:30px;min-width:30px;flex:none;border-radius:999px;border:1px solid var(--bd);background:var(--sur2);color:var(--tx2);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;font-family:var(--ff)}
+.mx-topbtn:hover{color:var(--tx)}
+.mx-topbtn[aria-current="page"],.mx-topbtn[aria-expanded="true"]{border-color:var(--acc);color:var(--acc)}
+.mx-topbtn svg{flex:none}
+.mx-topbtn-count{box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--acc);color:var(--onacc);font-size:12px;font-weight:700;line-height:18px;text-align:center}

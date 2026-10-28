@@ -10,12 +10,15 @@ import type { ApiError } from '../../src/data/api/ApiClient';
 import screen from '../../src/screens/license/index';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/license/routes';
 import { createApiAdapter, fromView } from '../../src/screens/license/api';
-import { createSampleAdapter, fromSample, isoOfDay, resetSampleLicence, usageOf } from '../../src/screens/license/sample';
+import { SAMPLE_INSTALLATION_ID, createSampleAdapter, fromSample, isoOfDay, resetSampleLicence, usageOf } from '../../src/screens/license/sample';
+import { createSampleAdapter as createOrgSampleAdapter } from '../../src/screens/organization/sample';
+import { ORGS } from '../../src/data/sample-orgs.js';
+import { NO_END_DATE, hasSignature, isExpired, isMultiTenancy } from '../../src/screens/license/model';
 import { InstallDialog, LicenceView, adapterFor, deferredAdapter, installError, loadLicence, stateBadges } from '../../src/screens/license/Screen';
 import { TEXT } from '../../src/screens/license/text';
 import { HostCtx } from '../../src/screens/ui';
 import type { HostContext, Lang } from '../../src/screens/types';
-import type { ControllerData } from '../../src/data/types';
+import type { ControllerData, Organisation } from '../../src/data/types';
 import { LICENCE, MS, TODAY_S } from '../../src/data/mscd-data.js';
 import { makeDates } from '../../src/data/dates.js';
 import { fakeFetch, json, problem } from '../auth/helpers';
@@ -53,6 +56,75 @@ describe('Licence routes', () => {
     }
     expect(routeById(ROUTE_IDS.licenseGet).permission).toBe('license.read');
     expect(routeById(ROUTE_IDS.licensePut).permission).toBe('license.manage');
+    expect(routeById(ROUTE_IDS.organizationGet).permission).toBe('org.settings.manage');
+  });
+});
+
+describe('Licence of a multi tenancy service and the installation id (M2-16, M2-S10 follow-up 3)', () => {
+  const PRESET: WireLicence = { ...VIEW, licenseId: 'standard', validUntil: NO_END_DATE, source: 'preset', plan: 'standard', signature: { alg: 'Ed25519', keyId: '-', verified: true, offline: false } };
+
+  it('maps source and plan; a plan or operator limits carry no signature; no end date never expires', () => {
+    const lic = fromView(PRESET);
+    expect(lic).toMatchObject({ source: 'preset', plan: 'standard', validUntil: NO_END_DATE });
+    expect(isMultiTenancy(lic)).toBe(true);
+    expect(hasSignature(lic)).toBe(false);
+    expect(hasSignature(fromView({ ...PRESET, source: 'manual' }))).toBe(false);
+    expect(hasSignature(fromView({ ...PRESET, source: 'signed_licence' }))).toBe(true);
+    expect(hasSignature(fromView(VIEW))).toBe(true);
+    expect(isMultiTenancy(fromView(VIEW))).toBe(false);
+    expect(isExpired(lic, '2030-01-01')).toBe(false);
+    expect(stateBadges(lic, '2030-01-01').map((b) => b.label[0])).toEqual(['Valid']);
+  });
+
+  for (const lang of ['en', 'id'] as Lang[]) {
+    it(`shows No end date, the source and the plan, without a signature or binding row, in ${lang}`, () => {
+      const ctx = ctxOf(lang);
+      const t = (p: readonly [string, string]) => p[lang === 'id' ? 1 : 0];
+      const html = render(<LicenceView ctx={ctx} licence={fromView(PRESET)} />, ctx);
+      expect(html).toContain(t(TEXT.noEndDate));
+      expect(html).toContain(t(TEXT.sourcePreset));
+      expect(html).toContain(`>${t(TEXT.plan)}</dt>`);
+      expect(html).not.toContain(`>${t(TEXT.signature)}</dt>`);
+      expect(html).not.toContain(`>${t(TEXT.binding)}</dt>`);
+      expect(html).not.toContain('9999');
+    });
+  }
+
+  it('in grace and read-only the multi tenancy alerts send the reader to the service provider', () => {
+    const ctx = ctxOf('en');
+    const grace = render(<LicenceView ctx={ctx} licence={fromView({ ...PRESET, validUntil: '2026-09-01', state: 'grace' })} />, ctx);
+    expect(grace).toContain(TEXT.graceAlertMulti[0]);
+    expect(grace).not.toContain(TEXT.graceAlert[0]);
+    const ro = render(<LicenceView ctx={ctx} licence={fromView({ ...PRESET, state: 'read_only', source: 'signed_licence', signature: VIEW.signature })} />, ctx);
+    expect(ro).toContain(TEXT.readOnlyAlertMulti[0]);
+    expect(ro).toContain(`>${TEXT.signature[0]}</dt>`);
+  });
+
+  it('reads the installation id of GET /admin/organization; none without the right', async () => {
+    const settings = { slug: 'ndt', name: 'N', timeZone: 'Asia/Jakarta', siteCount: 1, localLogin: 'allowed', installationId: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', tenancyMode: 'single', activeAdminCount: 2, etag: 'W/"1"' };
+    const f = fakeFetch({ 'GET /api/v1/admin/organization': [json(settings), problem(403, 'forbidden')] });
+    const adapter = createApiAdapter(new ApiClient({ fetch: f.fetch }));
+    expect(await adapter.installation()).toEqual({ installationId: settings.installationId, tenancyMode: 'single' });
+    expect(await adapter.installation()).toBeNull();
+    expect(await createSampleAdapter(() => D).installation()).toEqual({ installationId: SAMPLE_INSTALLATION_ID, tenancyMode: 'single' });
+    expect(await deferredAdapter(async () => createSampleAdapter(() => D)).installation()).toEqual({ installationId: SAMPLE_INSTALLATION_ID, tenancyMode: 'single' });
+  });
+
+  it('the sample installation id panel uses the tenancy rule of the Organisation screen', async () => {
+    for (const org of ORGS as Organisation[]) {
+      const licence = await createSampleAdapter(() => D, () => org).installation();
+      const settings = await createOrgSampleAdapter(() => org).load();
+      expect(settings.ok).toBe(true);
+      if (!settings.ok) continue;
+      expect(licence, org.id).toEqual({ installationId: settings.settings.installationId, tenancyMode: settings.settings.tenancyMode });
+      expect(licence?.tenancyMode, org.id).toBe(org.deploy === 'saas' ? 'multi' : 'single');
+    }
+  });
+
+  it('the texts of M2-16 have both languages and differ', () => {
+    for (const key of ['graceAlertMulti', 'readOnlyAlertMulti', 'noneAskMulti', 'noEndDate', 'source', 'sourcePreset', 'sourceManual', 'sourceSigned', 'plan'] as const) {
+      expect(TEXT[key][1], key).not.toBe(TEXT[key][0]);
+    }
   });
 });
 
@@ -190,7 +262,7 @@ describe('Licence sample adapter', () => {
     expect(await loadLicence(adapter)).toMatchObject({ loading: false, error: null, licence: { licenseId: 'LIC-SAMPLE' } });
     expect(load).toHaveBeenCalledTimes(2);
     const refused: ApiError = { status: 403, message: ['No access', 'Tanpa akses'] };
-    expect(await loadLicence({ load: async () => ({ ok: false, error: refused }), install: async () => ({ ok: false, error: refused }) }))
+    expect(await loadLicence({ load: async () => ({ ok: false, error: refused }), install: async () => ({ ok: false, error: refused }), installation: async () => null }))
       .toEqual({ loading: false, licence: null, error: refused });
   });
 });

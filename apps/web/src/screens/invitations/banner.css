@@ -1,0 +1,7 @@
+/* The invitation banner of the host layer (MILESTONE-2 M2-16): a card at the bottom right of the window, left of the
+   Tera button (fixed at 24px from the right, 56px wide), under the drawers and dialogs (z-index 35) and above the
+   page. Tokens of src/styles.css only; no text under 12px. */
+.mx-invite{position:fixed;right:96px;bottom:24px;z-index:35;box-sizing:border-box;width:440px;max-width:calc(100vw - 120px);display:flex;flex-direction:column;gap:8px;padding:16px 18px;background:var(--sur);color:var(--tx);border:1px solid var(--bd);border-left:4px solid var(--acc);border-radius:var(--r);box-shadow:var(--sh);font-family:var(--ff);font-size:var(--fs);line-height:1.45}
+.mx-invite-title{margin:0;font-size:15px;font-weight:600;color:var(--tx)}
+.mx-invite-text{color:var(--tx2)}
+@media (prefers-reduced-motion:no-preference){.mx-invite{animation:drawerIn .22s ease}}

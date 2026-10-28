@@ -1,0 +1,13 @@
+{
+  "id": "ops",
+  "label": ["Operator console", "Konsol operator"],
+  "group": "ops",
+  "order": 10,
+  "scope": "platform",
+  "perm": "ops.read",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Create organisation", "Buat organisasi"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

@@ -1,5 +1,6 @@
-// API adapter of the Licence screen: `GET /license` and `PUT /admin/license` through the host's client (R-17).
-import type { LicenceView } from '@mscd/shared';
+// API adapter of the Licence screen: `GET /license`, `PUT /admin/license` and the installation id of
+// `GET /admin/organization` (M2-16) through the host's client (R-17).
+import type { LicenceView, OrganizationSettings } from '@mscd/shared';
 import type { ApiClient } from '../../data/api/ApiClient';
 import { call } from '../api';
 import type { LicenceAdapter, LicenceModel } from './model';
@@ -23,6 +24,8 @@ export function fromView(view: LicenceView): LicenceModel {
     features: [...view.features],
     signature: { alg: view.signature.alg, keyId: view.signature.keyId, verified: view.signature.verified },
     clockRollback: view.clockRollback,
+    source: view.source ?? null,
+    plan: view.plan ?? null,
   };
 }
 
@@ -38,6 +41,10 @@ export function createApiAdapter(client: ApiClient | null): LicenceAdapter {
       const res = await call<LicenceView>(client, ROUTES.licensePut, { body: document });
       if (res.ok) return { ok: true, licence: fromView(res.data) };
       return { ok: false, error: res.error };
+    },
+    async installation() {
+      const res = await call<OrganizationSettings>(client, ROUTES.organizationGet);
+      return res.ok ? { installationId: res.data.installationId, tenancyMode: res.data.tenancyMode } : null;
     },
   };
 }
