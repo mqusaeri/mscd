@@ -34,7 +34,8 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-S05 Deploy script and deploy workflow | 2b | Done | The deploy rehearsal passed 78 checks. Deploys run only through `.github/workflows/deploy-prod.yml` with the owner's approval |
 | M2-S10 Per-organisation entitlements | 2b | Done | Each organisation's licence is its `platform.entitlement` row in multi tenancy (presets `trial` and `standard` in `saas.yaml`), cached 60 s and refreshed across processes by `NOTIFY mscd_tenant_changed`. Operator routes `ops.entitlements.*` and `ops.plans.list`, CLI `license entitlements show|set`, daily `entitlement.expiry` at 06:15 through the run ledger. M2-S09 reuses `publishTenantChange` and `EntitlementService.applyPreset` |
 | M2-S07 Backups and restore test | 2b | Running | The backup values come from `deploy-prod.yml` of M2-S05 |
-| M2-08 Bulk import, M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28): they share no file with the open packages of 2b |
+| M2-08 Bulk import | 3a | Done | Import screen (Implementation group) and `imports.*` routes for applicability, documents, risks and evidence, CSV or XLSX up to 5,000 rows, checked first and committed in one transaction. The "Import" page action shows in API builds only until `e2e/shell.spec.js` counts package page actions (open item below) |
+| M2-09 Storage and management system administration | 3a | Running | Started early with the owner's approval (2026-10-28) |
 | M2-10 People, roles and sign-in | 3a | Running | |
 | M2-S09 Operator commands and organisation lifecycle | 3a | Running | Started after M2-S10 was committed |
 | M2-11, M2-12, M2-16 | 3b | Next | Web packages of wave 3b; they start as slots free up (at most five packages at once on this host, the owner's rule) |
@@ -48,6 +49,8 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 
 - After M2-S07: run the M2-S05 rehearsal once more with the default overlays (`repo`), so it deploys the backup overlay too (M2-S05 handoff, follow-ups).
 - After M2-09: add the Administration entries `systems` and `routing` to the expectations of the shared tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` (owned by M2-01; MOT-03 found them).
+- Before the end of wave 3: let `apps/web/e2e/shell.spec.js` count the page actions that packages add to built-in screens, then show M2-08's "Import" action in the sample build too (M2-08 follow-up 1).
+- Backlog from M2-08: `enqueueFreshness` keeps only the first job of several commands within 5 seconds; nothing deletes old `import_run` rows (M2-08 follow-ups 3 and 4).
 - Later: make `test/int/jobs/freshness.test.ts` and `tasks-overdue.test.ts` pass in any host time zone.
 - M2-S13: run `deploy/ops/test-ops.sh` with `MSCD_OPS_TEST_GRAFANA=true` in the `saas-smoke` job (note in its brief).
 - Owner: H.1 (terminology, gates M2-17) and H.6 (ISO 9001:2026 and ISO 37001:2025 trees) are still open.

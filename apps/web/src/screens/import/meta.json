@@ -1,0 +1,13 @@
+{
+  "id": "import",
+  "label": ["Import", "Impor"],
+  "group": "impl",
+  "order": 60,
+  "scope": "ms",
+  "perm": ["applicability.manage", "document.manage", "risk.manage", "evidence.manage"],
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}
