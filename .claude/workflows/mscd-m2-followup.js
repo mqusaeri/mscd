@@ -22,6 +22,7 @@ CONCURRENCY RULES (several agents work in this repo at the same time, on other w
 - Server integration tests: set MSCD_TEST_CONTAINER_PREFIX=${WP.toLowerCase()}- .
 - Docker: name every container, network, volume and compose project you create with the prefix "${WP.toLowerCase()}-". Never stop or remove containers you did not start; never prune. Remove your own containers at the end. If Docker is not running, say so in the report instead of skipping tests.
 - Never run "pkill -f" with a pattern that can match your own shell; kill by PID.
+- MEMORY: the build host has 16 GB shared with other tools. Run at most one Compose stack at a time (SaaS stack, smoke test, journey or the API E2E stack), never next to another one, and take it down as soon as its run ends. Two SaaS stacks at once terminated WSL on 2026-10-29.
 - Temporary files and logs: use your own subfolder of the scratchpad or of /var/tmp named after your work package (for example "${WP.toLowerCase()}/"); several packages share those folders, so never reuse a generic file name such as e2e-api.log.
 - Writing rules for any document or UI text: plain English, no em dash (U+2014), no centre dot (U+00B7), no meta commentary.
 - SPEED RULE: the machine is shared by up to four packages. Do not run the full web E2E suite (all of apps/web/e2e) or the full server integration suite; run your package's acceptance commands, the targeted specs and tests of the files you touch, and the reduced common acceptance of section G.1. The orchestrator runs the full suites once per wave.
