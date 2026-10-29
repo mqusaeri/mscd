@@ -228,6 +228,24 @@ services:
         max-size: "20m"
         max-file: "10"
 EOF
+    # A Docker without the containerd image store finds a locally built image by its tag only, never
+    # by the digest that digests.json names (it keeps no digest for an image that was never pushed),
+    # so Compose would try to pull the release images. The test stack then names them by tag, as the
+    # test shim of deploy/backup/restore-test.sh does.
+    if ! docker info --format '{{json .DriverStatus}}' 2>/dev/null | grep -q 'io.containerd.snapshotter.v1'; then
+        local version server web
+        version=$(json_field version) server=$(json_field serverImage) web=$(json_field webImage)
+        cat >>"$STATE/compose.test.yml" <<EOF
+
+  # Classic image store: the local release images by tag (see write_test_overlay).
+  migrate: { image: "$server:$version" }
+  storage-gateway: { image: "$server:$version" }
+  api: { image: "$server:$version" }
+  worker: { image: "$server:$version" }
+  cli: { image: "$server:$version" }
+  web: { image: "$web:$version" }
+EOF
+    fi
 }
 
 # write_env MSCD_OCTET EDGE_OCTET VERSION
