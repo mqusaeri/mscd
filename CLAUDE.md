@@ -108,6 +108,10 @@ Decided by the product owner on 2026-10-28:
 10. Terminology (plan question H.1): "Gate" becomes "Checkpoint" (with its forms: Checkpoint item, Open checkpoint items, Critical checkpoint, Next checkpoint), and "MS Manager" becomes "Management System Manager". The per-system titles of the packs (ISMS Manager, QMS Manager, BCMS Manager, Anti-Bribery Compliance Function) keep their names. Every other label proposed in `docs/product/USER-FLOWS.md` keeps its current name. M2-17 does only these two renames. The Indonesian screens use the same English words: "Checkpoint" and "Management System Manager" (today "gate" and "Manajer SM").
 11. ISO 9001:2026 and ISO 37001:2025 stay marked as preview (plan question H.6).
 
+Decided by the product owner on 2026-10-29:
+
+12. Until a lead auditor signs the packs off (`packs/README.md`, E.2), a release candidate (`vX.Y.Z-rc.N`) may carry unsigned packs and go to staging; `deploy-prod.yml` refuses such a release for production, and a final version needs every sign-off.
+
 ## Open follow-ups
 
 - Installer scripts: save the Compose project name so an install made with `COMPOSE_PROJECT_NAME` can be removed without it; optionally accept a default organisation with `install.sh --yes`.

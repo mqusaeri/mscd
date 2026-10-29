@@ -55,7 +55,7 @@ The owner does this once. [owner-inputs.md](owner-inputs.md) sections 1 and 2 ho
    ```
 
 3. Open the run of **Release** in the Actions tab and approve the `release` environment. Nothing is built before the approval.
-4. The job builds, checks, pushes and signs the images (about 30 minutes) and creates the GitHub Release `v1.1.0-rc.1`. A tag with `-rc.N` becomes a pre-release.
+4. The job builds, checks, pushes and signs the images (about 30 minutes) and creates the GitHub Release `v1.1.0-rc.1`. A tag with `-rc.N` becomes a pre-release. A release candidate may carry packs that no lead auditor has signed off yet (`packs/README.md`, E.2): its `digests.json` then says `"packsSignedOff": false`, the run shows a warning, and `deploy-prod.yml` deploys it to staging only. A final version (`v1.1.0`) needs the sign-off of every pack; without it the release check stops the run.
 5. The release page lists both digests and holds `digests.json` and the SBOM files. `deploy-prod.yml` reads the digests from there.
 
 Each version is released once. When a release run fails before the GitHub Release exists, fix the cause and start the run again from the same tag. When the GitHub Release exists, publish a new version (for example `v1.1.0-rc.2`) instead of changing it.

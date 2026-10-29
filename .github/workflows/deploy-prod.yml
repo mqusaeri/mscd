@@ -137,6 +137,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+          TARGET: ${{ inputs.target }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
           install -d -m 0700 "$WORK"
@@ -151,6 +152,11 @@ jobs:
             [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digests.json holds no $name digest."
             [[ $(jq -r ".${name}Ref" "$d") == "$REGISTRY/mscd-$name@$digest" ]] || fail "${name}Ref of digests.json does not match."
           done
+          # A release candidate may carry packs without a lead auditor sign-off (release.yml, E.2):
+          # staging takes it, production never does.
+          if [[ $TARGET == production && $(jq -r '.packsSignedOff' "$d") != true ]]; then
+            fail "$VERSION carries packs without a lead auditor sign-off (packsSignedOff in digests.json), so it can go to staging only. Release a version whose packs are signed off in packs/README.md."
+          fi
           echo "server $(jq -r .server "$d")"
           echo "web    $(jq -r .web "$d")"
 

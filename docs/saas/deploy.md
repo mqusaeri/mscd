@@ -107,7 +107,7 @@ Every release goes through these steps, each one started by an agent or the owne
 
 1. **Staging.** `deploy-prod.yml` with `target=staging`. Check the app on staging.
 2. **Migration rehearsal.** `restore-test.yml` with `target_version` set to the new version (M2-S07): it restores last night's production backup on a GitHub runner and runs the new migrations against it. This finds a slow or broken migration on real data before customers feel it.
-3. **Production.** `deploy-prod.yml` with `target=production`, best in the maintenance window (Sunday 22:00 to 24:00 WIB, D-S7).
+3. **Production.** `deploy-prod.yml` with `target=production`, best in the maintenance window (Sunday 22:00 to 24:00 WIB, D-S7). The workflow refuses a release whose `digests.json` does not say `"packsSignedOff": true`: a release candidate with packs that no lead auditor has signed off goes to staging only ([release.md](release.md#cutting-a-release)).
 
 ## What users see during a deploy
 

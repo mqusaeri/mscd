@@ -170,13 +170,28 @@ jobs:
         id: images
         env:
           VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
           SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
+          # A release candidate (vX.Y.Z-rc.N) may carry packs that no lead auditor has signed off yet
+          # (packs/README.md, E.2): it can go to staging, and deploy-prod.yml refuses it for production.
+          # A final release needs every sign-off. digests.json records which case this is (packsSignedOff).
+          case $TAG in
+            *-rc.*) export MSCD_ALLOW_UNSIGNED_PACKS=1 ;;
+            *) unset MSCD_ALLOW_UNSIGNED_PACKS ;;
+          esac
           bash deploy/scripts/build-release-images.sh --version "$VERSION" \
             --trusted-keys-dir "$RUNNER_TEMP/trusted-keys" --pack-signing-key "$RUNNER_TEMP/pack-signing.key" \
             --build-ca "$MSCD_BUILD_CA" --registry "$REGISTRY" --push \
-            --digest-file "$RUNNER_TEMP/digests.json" --source-url "$SOURCE_URL"
+            --digest-file "$RUNNER_TEMP/digests.json" --source-url "$SOURCE_URL" 2>&1 | tee "$RUNNER_TEMP/build-release-images.log"
+          signed=true
+          if grep -q 'has no lead auditor sign-off row' "$RUNNER_TEMP/build-release-images.log"; then
+            signed=false
+            echo "::warning::$TAG carries packs without a lead auditor sign-off: deploy it to staging only."
+          fi
+          jq --argjson signed "$signed" '. + {packsSignedOff: $signed}' "$RUNNER_TEMP/digests.json" > "$RUNNER_TEMP/digests.tmp"
+          mv "$RUNNER_TEMP/digests.tmp" "$RUNNER_TEMP/digests.json"
           cat "$RUNNER_TEMP/digests.json"
           echo "server=$(jq -r .server "$RUNNER_TEMP/digests.json")" >> "$GITHUB_OUTPUT"
           echo "web=$(jq -r .web "$RUNNER_TEMP/digests.json")" >> "$GITHUB_OUTPUT"

@@ -19,8 +19,10 @@
 #
 # The development bundles of the journey, the smoke test and the test suites
 # are not release runs and do not use this check. A rehearsal build (CI, the
-# deploy rehearsal) may set MSCD_ALLOW_UNSIGNED_PACKS=1: a pack without its
-# sign-off row is then reported as a warning. Never set it for a release.
+# deploy rehearsal) and the build of a release candidate (vX.Y.Z-rc.N, which
+# release.yml marks and deploy-prod.yml keeps off production) may set
+# MSCD_ALLOW_UNSIGNED_PACKS=1: a pack without its sign-off row is then reported
+# as a warning. Never set it for a final release.
 #
 # Arguments:
 #   a directory      every file in it (an extracted bundle, for example)
@@ -76,9 +78,10 @@ of MILESTONE-2 E.4, and their pack id and version need a lead auditor sign-off
 row in packs/README.md (E.2).
 
 Environment:
-  MSCD_ALLOW_UNSIGNED_PACKS=1   rehearsal builds only (CI, the deploy rehearsal):
-                                report a pack without its sign-off row as a
-                                warning. Never set it for a release.
+  MSCD_ALLOW_UNSIGNED_PACKS=1   rehearsal builds and release candidates for
+                                staging only: report a pack without its
+                                sign-off row as a warning. Never set it for a
+                                final release.
 
 Exit codes: 0 clean, 1 something forbidden was found, 2 usage or tool error.
 EOF
@@ -202,7 +205,7 @@ check_pack() {
     # 6. Lead auditor sign-off (E.2).
     if ! grep -qxF -- "$pack $version" "$SIGNOFFS_FILE"; then
         if [[ ${MSCD_ALLOW_UNSIGNED_PACKS:-} == 1 ]]; then
-            warning "$label" "$pack $version has no lead auditor sign-off row in $SIGNOFF_FILE (allowed by MSCD_ALLOW_UNSIGNED_PACKS=1, never in a release)"
+            warning "$label" "$pack $version has no lead auditor sign-off row in $SIGNOFF_FILE (allowed by MSCD_ALLOW_UNSIGNED_PACKS=1: a rehearsal build, or a release candidate for staging only)"
         else
             finding "$label" "$pack $version has no lead auditor sign-off row in $SIGNOFF_FILE (MILESTONE-2 E.2): a lead auditor signs the version off before it is released"
         fi
@@ -378,7 +381,7 @@ main() {
         exit 1
     fi
     if ((WARNINGS > 0)); then
-        printf '%s%s warning(s)%s: see above. A release build must not need MSCD_ALLOW_UNSIGNED_PACKS.\n' "$C_YELLOW$C_BOLD" "$WARNINGS" "$C_RESET"
+        printf '%s%s warning(s)%s: see above. A final release must not need MSCD_ALLOW_UNSIGNED_PACKS.\n' "$C_YELLOW$C_BOLD" "$WARNINGS" "$C_RESET"
     fi
     printf '%sPASSED%s: the artefacts carry no development key, development secret, demo or test profile, seed data, demo pack text or pack without sign-off.\n' \
         "$C_GREEN$C_BOLD" "$C_RESET"
