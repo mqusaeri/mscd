@@ -3,7 +3,7 @@
 // then `node apps/site/check.mjs`, which fails when a page still carries an old value.
 
 /** Address of the MSCD web app. Every "Sign in" link points here (the app host's root). */
-export const APP_URL = 'https://app.example.com/';
+export const APP_URL = 'https://app.mscd.cyberlentera.cloud/';
 
 /** Address that receives demo requests. Shown as text and used by every "Request a demo" link. */
-export const DEMO_EMAIL = 'sales@example.com';
+export const DEMO_EMAIL = 'cyberlentera@gmail.com';
