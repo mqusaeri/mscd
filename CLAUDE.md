@@ -95,7 +95,7 @@ Confirmed by the product owner on 2026-10-27 (the defaults that were already bui
 1. Google Drive repositories in a personal My Drive are allowed, as well as Shared Drives.
 2. Pending work per person: MS Manager and Programme Owner see the detail; Top Management sees totals only.
 3. Internal Auditors do not verify items and do not see everyone's pending list.
-4. Phases are shown in order; the hard block applies only at critical gates.
+4. Phases are shown in order; the hard block applies only at critical gates (shown as critical checkpoints).
 5. The licence user count is active members, without guests.
 6. The Programme Owner keeps verify and approve rights.
 7. New SaaS organisations do not default to SSO-only sign-in.
@@ -105,7 +105,7 @@ Confirmed by the product owner on 2026-10-27 (the defaults that were already bui
 
 Decided by the product owner on 2026-10-28:
 
-10. Terminology (plan question H.1): "Gate" becomes "Checkpoint" (with its forms: Checkpoint item, Open checkpoint items, Critical checkpoint, Next checkpoint), and "MS Manager" becomes "Management System Manager" (one name for every system). Every other label proposed in `docs/product/USER-FLOWS.md` keeps its current name. M2-17 does only these two renames. The Indonesian screens use the same English words: "Checkpoint" and "Management System Manager" (today "gate" and "Manajer SM").
+10. Terminology (plan question H.1): "Gate" becomes "Checkpoint" (with its forms: Checkpoint item, Open checkpoint items, Critical checkpoint, Next checkpoint), and "MS Manager" becomes "Management System Manager". The per-system titles of the packs (ISMS Manager, QMS Manager, BCMS Manager, Anti-Bribery Compliance Function) keep their names. Every other label proposed in `docs/product/USER-FLOWS.md` keeps its current name. M2-17 does only these two renames. The Indonesian screens use the same English words: "Checkpoint" and "Management System Manager" (today "gate" and "Manajer SM").
 11. ISO 9001:2026 and ISO 37001:2025 stay marked as preview (plan question H.6).
 
 ## Open follow-ups
