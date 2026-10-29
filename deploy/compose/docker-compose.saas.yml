@@ -171,7 +171,7 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
     init: true
     environment:
       MSCD_DOMAIN: ${MSCD_DOMAIN:?set MSCD_DOMAIN (app.<domain>)}

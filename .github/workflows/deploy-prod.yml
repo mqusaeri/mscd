@@ -276,6 +276,9 @@ jobs:
           # Optional: a host port for Caddy's HTTP side when another web server holds port 80 (a shared
           # staging host whose proxy forwards the MSCD host names, including the ACME challenge, to it).
           MSCD_HTTP_PORT: ${{ vars.MSCD_HTTP_PORT }}
+          # Optional, staging only: false when the server's Docker refuses no-new-privileges (the snap
+          # package of Docker). saas-deploy.sh refuses false for production.
+          MSCD_NO_NEW_PRIVILEGES: ${{ vars.MSCD_NO_NEW_PRIVILEGES }}
           BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
           BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
           BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
@@ -302,6 +305,7 @@ jobs:
           # Optional values that are not set are left out, so the server keeps its default.
           [[ -n $ACME_CA ]] || unset ACME_CA
           [[ -n $MSCD_HTTP_PORT ]] || unset MSCD_HTTP_PORT
+          [[ -n $MSCD_NO_NEW_PRIVILEGES ]] || unset MSCD_NO_NEW_PRIVILEGES
           # This file runs from the default branch, the scripts from the tag. Only the names
           # that the tag's saas-deploy.sh takes are sent (saas_input_names of its lib/saas.sh),
           # so a rollback to an older release, or a hotfix tag cut before a name was added
@@ -310,7 +314,7 @@ jobs:
           names=()
           for name in PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
             MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
-            ACME_EMAIL ACME_CA MSCD_HTTP_PORT "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"; do
+            ACME_EMAIL ACME_CA MSCD_HTTP_PORT MSCD_NO_NEW_PRIVILEGES "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"; do
             if [[ $accepted == *" $name "* ]]; then
               names+=("$name")
             else

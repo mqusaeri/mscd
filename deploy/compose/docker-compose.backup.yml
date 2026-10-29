@@ -58,7 +58,7 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
     init: true
     environment:
       HOME: /tmp

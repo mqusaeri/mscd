@@ -741,7 +741,7 @@ tls_config_test() {
     local dir=$1 image=$2 uid=$3 gid=$4
     docker run --rm --network none --user "$uid:$gid" \
         --read-only --tmpfs /tmp:size=16m,mode=1777 \
-        --cap-drop ALL --security-opt no-new-privileges:true \
+        --cap-drop ALL --security-opt "no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}" \
         -e MSCD_API_UPSTREAM=none \
         -v "$dir:/etc/nginx/tls:ro,z" --entrypoint sh "$image" \
         -c '/docker-entrypoint.d/40-mscd-runtime.sh >/dev/null && nginx -t -q' 2>&1
@@ -1096,7 +1096,7 @@ ensure_anchor_key() {
     work=$(mktemp -d "$dir/.keys.XXXXXX")
     chmod 0777 "$work"
     if ! out=$(docker run --rm --network none --read-only --cap-drop ALL \
-        --security-opt no-new-privileges:true --user "$(container_user_for_host_files)" \
+        --security-opt "no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}" --user "$(container_user_for_host_files)" \
         -v "$work:/out:z" "$image" keys generate --out /out/keys 2>&1); then
         rm -rf -- "$work"
         printf '%s\n' "$out" | sed 's/^/        /'

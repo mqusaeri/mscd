@@ -32,7 +32,7 @@ x-app: &app
   cap_drop:
     - ALL
   security_opt:
-    - no-new-privileges:true
+    - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
   init: true
   stop_grace_period: 30s
   logging: *logging
@@ -75,7 +75,7 @@ x-infra: &infra
   pull_policy: missing
   restart: unless-stopped
   security_opt:
-    - no-new-privileges:true
+    - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
   logging: *logging
   networks:
     - mscd
@@ -318,7 +318,7 @@ services:
     cap_drop:
       - ALL
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
     init: true
     environment:
       MSCD_HTTP_REDIRECT: ${MSCD_HTTP_REDIRECT:-true}

@@ -54,7 +54,7 @@ readonly SAAS_OPS_INPUTS=(HEARTBEAT_WATCHDOG_URL TELEGRAM_BOT_TOKEN TELEGRAM_CHA
 readonly SAAS_SETTINGS=(
     MSCD_DOMAIN MSCD_SITE_DOMAIN MSCD_TLS_MODE ACME_EMAIL ACME_CA
     MSCD_MAIL_FROM MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_SMTP_SECURE MSCD_SMTP_USER
-    MSCD_HTTP_PORT MSCD_HTTPS_PORT MSCD_LOG_LEVEL
+    MSCD_HTTP_PORT MSCD_HTTPS_PORT MSCD_LOG_LEVEL MSCD_NO_NEW_PRIVILEGES
     MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS MSCD_EDGE_SUBNET6
 )
 # The mail settings of .env, which go with the secret file smtp.password (MSCD_SMTP_USER
@@ -542,6 +542,8 @@ saas_resolve_settings() {
     for name in "${SAAS_SETTINGS[@]}" "${SAAS_FILE_SETTINGS[@]}"; do
         saas_setting_from "$name" "$current" "$example"
     done
+    # The containers this script starts itself follow the same setting as the stack.
+    export MSCD_NO_NEW_PRIVILEGES=${SAAS_VALUE[MSCD_NO_NEW_PRIVILEGES]:-true}
     if saas_given MSCD_EDGE_IPV6; then
         saas_setting_from MSCD_EDGE_IPV6 "" "$example"
     elif saas_host_has_ipv6; then
@@ -639,6 +641,18 @@ saas_validate_settings() {
     case "${v[MSCD_EDGE_IPV6]:-}" in
         true | false) ;;
         *) fail "MSCD_EDGE_IPV6 must be true or false, got '${v[MSCD_EDGE_IPV6]:-}'" ;;
+    esac
+    # false only on a staging host whose Docker refuses the option (the snap package of
+    # Docker: "exec ...: operation not permitted"); production keeps it.
+    case "${v[MSCD_NO_NEW_PRIVILEGES]:-true}" in
+        true) ;;
+        false)
+            if [[ $target == production ]]; then
+                fail "MSCD_NO_NEW_PRIVILEGES false is refused for production" \
+                    "Run production on a server whose Docker accepts no-new-privileges (Docker CE from Docker's apt repository, as bootstrap-host.sh installs it)"
+            fi
+            ;;
+        *) fail "MSCD_NO_NEW_PRIVILEGES must be true or false, got '${v[MSCD_NO_NEW_PRIVILEGES]:-}'" ;;
     esac
     case "${v[MSCD_LOG_LEVEL]:-info}" in
         fatal | error | warn | info | debug | trace) ;;
@@ -786,7 +800,7 @@ saas_check_server_image() {
             return 1
             ;;
     esac
-    if docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    if docker run --rm --network none --read-only --cap-drop ALL --security-opt "no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}" \
         "$ref" --help >>"$log" 2>&1; then
         pass "The new server image starts (mscd-server --help)"
         return 0
@@ -851,7 +865,7 @@ saas_read_secret() {
     # none, the Docker daemon writes none of it to its log store (the local driver of the
     # server writes container output to disk, journald or syslog would keep it).
     docker run --rm --log-driver none --network none --read-only --cap-drop ALL \
-        --security-opt no-new-privileges:true --user "$owner" --entrypoint cat \
+        --security-opt "no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}" --user "$owner" --entrypoint cat \
         -v "$dir/$name:/run/mscd-secret:ro,z" "$image" /run/mscd-secret
 }
 

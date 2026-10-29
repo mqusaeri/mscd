@@ -50,7 +50,7 @@ x-ops: &ops
   cap_drop:
     - ALL
   security_opt:
-    - no-new-privileges:true
+    - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
   init: true
   stop_grace_period: 20s
   logging: *logging
@@ -75,7 +75,7 @@ services:
       - DAC_OVERRIDE
       - FOWNER
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:${MSCD_NO_NEW_PRIVILEGES:-true}
     environment:
       MSCD_DOMAIN: ${MSCD_DOMAIN:?set MSCD_DOMAIN (app.<domain>)}
       MSCD_PUBLIC_URL: ${MSCD_PUBLIC_URL:?set MSCD_PUBLIC_URL (https://app.<domain>)}
