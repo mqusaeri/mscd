@@ -306,8 +306,20 @@ make_secrets() {
     # The rest as install.sh makes them; the files copied above are kept.
     # shellcheck disable=SC2034  # read by lib/common.sh
     DOCKER_OK=true
-    ensure_secrets "$dir" "$(env_value MSCD_SERVER_IMAGE)@$(env_value MSCD_SERVER_DIGEST)" ||
+    ensure_secrets "$dir" "$(local_server_ref)" ||
         die "The secrets could not be created in $dir"
+}
+
+# local_server_ref: the server image as this Docker finds it locally. A Docker without the
+# containerd image store keeps no digest for an image that was never pushed (see
+# write_test_overlay), so the helper containers of ensure_secrets (a runner that is not root
+# starts one to set the owners) take the tag there.
+local_server_ref() {
+    if docker info --format '{{json .DriverStatus}}' 2>/dev/null | grep -q 'io.containerd.snapshotter.v1'; then
+        printf '%s@%s' "$(env_value MSCD_SERVER_IMAGE)" "$(env_value MSCD_SERVER_DIGEST)"
+    else
+        printf '%s:%s' "$(json_field serverImage)" "$(json_field version)"
+    fi
 }
 
 copy_root_certificate() {
