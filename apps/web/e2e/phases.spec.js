@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, search, expectShown, drawerAction, drawerFact, drawerLinks,
-  openRow, expectToast, switchMs, closeDrawer, activeTab,
+  openRow, expectToast, switchMs, closeDrawer, activeTab, clickClaimable,
 } from './helpers.js';
 
 const steps = (page) => page.locator('main button[title][style*="flex-direction: column"][style*="align-items: center"]');
@@ -137,20 +137,16 @@ test.describe('Phase board', () => {
     await expect(ui.drawer(page)).toContainText('Draft');
   });
 
-  test('Mark complete updates the activity and counts, and blocks self-verification', async ({ page, dataSource }) => {
+  test('Mark complete updates the activity and counts, and blocks self-verification', async ({ page }) => {
     await openPhases(page);
     await step(page, 'Improvement & audit readiness').click();
     await openRow(page, '9.4');
     await expect(drawerFact(page, 'Owner')).toHaveText('Dewi Anggraini, HR Manager');
-    await drawerAction(page, 'Record blocker').click();
-    if (dataSource === 'api') {
-      // API builds open the Record blocker form (M2-11, claim `phases.recordBlocker`); this test leaves it unsaved.
-      await expect(ui.modal(page)).toContainText('Record blocker for 9.4');
-      await page.keyboard.press('Escape');
-      await expect(ui.modal(page)).toHaveCount(0);
-    } else {
-      await expectToast(page, 'Blocker recorded and linked to the gate item');
-    }
+    // A package may claim Record blocker (MILESTONE-2 C.5): its form replaces the Milestone 1 toast, and this test
+    // leaves it unsaved.
+    await clickClaimable(page, drawerAction(page, 'Record blocker'), {
+      id: 'phases.recordBlocker', toast: 'Blocker recorded and linked to the gate item', form: 'Record blocker for 9.4',
+    });
     await drawerAction(page, 'Mark complete').click();
     await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
     await expect(listRow(page, '9.4').locator('td:nth-child(7)')).toHaveText('Complete, awaiting verification');

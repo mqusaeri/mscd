@@ -3,9 +3,8 @@ import { test, expect, ui, openApp, go, openRow, listRow, listRows, search, tab,
 // The evidence forms of the sample build (MILESTONE-2 M2-11): "Define evidence" of a control opens New evidence, which
 // creates the record and attaches its first file through the repository picker; the evidence panel edits the record,
 // adds a target in another system (BR-23 warning) and removes it again, never the last one; the freshness limits are
-// set and reset to the default. The sample build keeps the page actions of Evidence freshness as Milestone 1 counts
-// them (e2e/shell.spec.js); the API project covers "New evidence" and "Freshness limits" as page actions in
-// e2e/api-only/evidence-edit.spec.js. @sample-only.
+// set and reset to the default. "New evidence" and "Freshness limits" are page actions of Evidence freshness in both
+// builds; the API project covers them in e2e/api-only/evidence-edit.spec.js. @sample-only.
 const panel = (page) => ui.drawer(page).locator('[data-m11="evidence"]');
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -20,10 +19,20 @@ async function inBothThemes(page, check) {
 }
 
 test.describe('Evidence forms @sample-only', () => {
-  test('Evidence freshness keeps its Milestone 1 page action in the sample build', async ({ page }) => {
+  test('Evidence freshness offers New evidence and Freshness limits as page actions', async ({ page }) => {
     await openApp(page);
     await go(page, 'Evidence freshness');
-    await expect(page.locator('main > div > div:first-child button[title]')).toHaveText(['Run integrity check']);
+    await expect(page.locator('main > div > div:first-child button[title]')).toHaveText(['Run integrity check', 'New evidence', 'Freshness limits']);
+    await ui.pageAction(page, 'New evidence').click();
+    await expect(dialog(page)).toContainText('New evidence');
+    await expectOverlayReadable(page);
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toHaveCount(0);
+    await ui.pageAction(page, 'Freshness limits').click();
+    await expect(dialog(page)).toContainText('Freshness limits');
+    await expectOverlayReadable(page);
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toHaveCount(0);
   });
 
   test('Define evidence creates a record for a control and attaches its first file', async ({ page }) => {

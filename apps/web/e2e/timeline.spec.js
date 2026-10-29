@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, openRow, drawerAction, drawerFact, expectToast, switchMs, closeDrawer,
-  contrastProblems,
+  contrastProblems, clickClaimable, expectPageActions, runExtraPageAction,
 } from './helpers.js';
 
 const lanes = (page) => page.locator('main div[style*="height: 58px"]');
@@ -106,22 +106,24 @@ test.describe('Certification timeline', () => {
     await expect(cycleRows(page)).toHaveCount(4);
   });
 
-  test('Add audit event from the empty lane and the page action', async ({ page, dataSource }) => {
+  test('Add audit event from the empty lane and the page action', async ({ page }) => {
     await openTimeline(page);
-    // API builds open the Add audit event form (M2-15, claim `timeline.addEvent`); this test leaves it unsaved.
-    const opened = async () => {
-      if (dataSource === 'api') {
-        await expect(ui.modal(page)).toContainText('Add audit event');
-        await page.keyboard.press('Escape');
-        await expect(ui.modal(page)).toHaveCount(0);
-      } else {
-        await expectToast(page, 'Audit event form opened');
-      }
-    };
-    await lane(page, 'ABMS').locator('button', { hasText: 'Add audit event' }).click();
-    await opened();
-    await ui.pageAction(page, 'Add audit event').click();
-    await opened();
+    // A package may claim Add audit event (MILESTONE-2 C.5): its form replaces the Milestone 1 toast, and this test
+    // leaves it unsaved.
+    const claim = { id: 'timeline.addEvent', toast: 'Audit event form opened', form: 'Add audit event' };
+    await clickClaimable(page, lane(page, 'ABMS').locator('button', { hasText: 'Add audit event' }), claim);
+    await clickClaimable(page, ui.pageAction(page, 'Add audit event'), claim);
+  });
+
+  test('page actions: Add audit event, then the ones packages add', async ({ page }) => {
+    await openTimeline(page);
+    // The certification cycle actions of M2-15 follow the cycles of the system, which the panel of the selected audit
+    // shows once they are in. They exclude each other, and no seeded or sample certificate is suspended, so one shows.
+    await expect(eventCard(page)).toContainText('Surveillance 1');
+    await expect(page.locator('main [data-tl-cycle]')).toBeVisible();
+    const added = await expectPageActions(page, 'timeline', ['Add audit event']);
+    expect(added).toHaveLength(1);
+    for (const action of added) await runExtraPageAction(page, action, 'Certification timeline');
   });
 
   test('regression detector lists the affected records and toggles off', async ({ page }) => {

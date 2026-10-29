@@ -4,8 +4,8 @@ import {
 
 // Auditor access of the sample build (MILESTONE-2 M2-15): the guest auditor grants of the ISMS with "Grant access"
 // (email and 1 to 30 days) and "Revoke", the evidence packs with their CSV manifest, the read-only view of the Internal
-// Auditor persona, and "Auditor access" on Audit readiness, which keeps its Milestone 1 toast in the sample build
-// (e2e/audit.spec.js pins it). @sample-only: the API project covers the screen in e2e/api-only/auditor-access.spec.js.
+// Auditor persona, and "Auditor access" on Audit readiness, which opens the "Grant auditor access" form in the sample
+// build too. @sample-only: the API project covers the screen in e2e/api-only/auditor-access.spec.js.
 const meta = metaById('auditor-access');
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -71,7 +71,7 @@ test.describe('Auditor access @sample-only', () => {
     await expectReadableText(page, 4.5);
   });
 
-  test('the Internal Auditor reads the evidence packs only; Audit readiness keeps its Milestone 1 toast', async ({ page }) => {
+  test('the Internal Auditor reads the evidence packs only; Auditor access of Audit readiness opens the grant form', async ({ page }) => {
     await page.goto(`/?screen=auditor-access&persona=auditor`);
     await expect(page.locator('main [data-screen="auditor-access"]')).toBeVisible();
     await expect(page.locator('main [role="tab"]')).toHaveCount(0);
@@ -81,7 +81,8 @@ test.describe('Auditor access @sample-only', () => {
     await openApp(page);
     await go(page, 'Audit readiness');
     await ui.pageAction(page, 'Auditor access').click();
-    await expectToast(page, 'Guest access link created, valid 14 days');
+    await expect(dialog(page)).toContainText('Grant auditor access');
+    await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
   });
 

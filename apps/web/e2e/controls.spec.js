@@ -1,6 +1,7 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, chips, chip, chipCount, expectShown, moreButton, search,
   tab, tabs, tabCount, activeTab, drawerAction, drawerFact, drawerLinks, openRow, expectToast, switchRole, switchMs, closeDrawer,
+  clickClaimable, expectPageActions, runExtraPageAction,
 } from './helpers.js';
 
 const heads = (page) => list(page).locator('thead th');
@@ -21,6 +22,17 @@ async function openControls(page, query = '') {
 }
 
 test.describe('Controls & requirements', () => {
+  // The page actions of the generated view, then the ones packages add (MILESTONE-2 C.5), read from the screen host.
+  // Export SoA calls the api in API builds (H.4), so this test leaves it to e2e/shell.spec.js.
+  test('page actions: Add control and the ones packages add', async ({ page }) => {
+    await openControls(page);
+    const added = await expectPageActions(page, 'controls', ['Export SoA', 'Add control']);
+    await clickClaimable(page, ui.pageAction(page, 'Add control'), {
+      id: 'controls.add', toast: 'New custom control form opened', form: 'Add control or requirement',
+    });
+    for (const action of added) await runExtraPageAction(page, action, 'Controls & requirements');
+  });
+
   test('five summary tabs show counts and switch the table', async ({ page }) => {
     await openControls(page);
     await expect(tabs(page)).toHaveCount(5);
@@ -420,8 +432,10 @@ test.describe('Controls & requirements', () => {
     await openRow(page, 'PRC-07');
     await expect(ui.drawer(page)).toContainText('In review');
     await expect(drawerAction(page, 'Open review')).toHaveCount(1);
-    await drawerAction(page, 'Open review').click();
-    await expectToast(page, 'Opening PRC-07 v3.2: review workflow');
+    // A package may claim Open review (MILESTONE-2 C.5): the review form replaces the Milestone 1 toast.
+    await clickClaimable(page, drawerAction(page, 'Open review'), {
+      id: 'docs.openReview', toast: 'Opening PRC-07 v3.2: review workflow', form: 'PRC-07',
+    });
   });
 
   // @sample-only: the API picker lists the Documents folder (WP-25 deviation 3) and a new version goes to in_review instead of approved (A.4 5.7).

@@ -1,4 +1,4 @@
-import { test, expect, openApp, go, ui, switchOrg, expectToast } from './helpers.js';
+import { test, expect, openApp, go, ui, switchOrg, expectToast, expectPageActions, runExtraPageAction } from './helpers.js';
 
 const rows = (page) => page.locator('main table tbody > tr');
 const row = (page, code) => rows(page).filter({ hasText: code });
@@ -61,6 +61,14 @@ test.describe('Framework library', () => {
     await expect(ui.title(page)).toHaveText('Phase board');
     await expect(ui.msSwitch(page)).toContainText('QMS');
     await expect(page.locator('main')).toContainText('9. ISO 9001:2026 transition');
+  });
+
+  // The page action of the deployment (the API test profile is on-premise, I.1), then the ones packages add
+  // (MILESTONE-2 C.5) as the screen host shows them to the session, each opening its form.
+  test('page actions follow the deployment, then the ones packages add', async ({ page, dataSource }) => {
+    await openFw(page);
+    const added = await expectPageActions(page, 'fw', [dataSource === 'api' ? 'Import offline bundle' : 'Check for updates']);
+    for (const action of added) await runExtraPageAction(page, action, 'Framework library');
   });
 
   test('licence meters show usage against the entitlement', async ({ page }) => {

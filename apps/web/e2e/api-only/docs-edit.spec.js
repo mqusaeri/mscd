@@ -161,7 +161,6 @@ test.describe('Document control forms against the api @api-only', () => {
       await expect(page.locator('.mscd').first()).toHaveAttribute('data-theme', theme);
       await go(page, 'Document register');
       await ui.pageAction(page, 'New document').click();
-      await expectToast(page, 'New document form opened');
       await expect(ui.drawer(page)).toContainText('Start from a template');
       await expectOverlayReadable(page);
       await page.keyboard.press('Escape');

@@ -105,7 +105,6 @@ export const TEXT = {
   reasonTooLong: ['Use at most 500 characters.', 'Gunakan paling banyak 500 karakter.'],
   notFound: ['This entry was not found. Load the page again and try again.', 'Entri ini tidak ditemukan. Muat ulang halaman lalu coba lagi.'],
   // Sample build
-  sampleAddToast: ['New custom control form opened', 'Formulir kontrol kustom dibuka'],
   sampleNoDelete: [
     'The sample data keeps every entry. On a live installation the entry is removed and the audit trail keeps it.',
     'Data contoh mempertahankan setiap entri. Pada instalasi sungguhan entri dihapus dan jejak audit menyimpannya.',

@@ -3,12 +3,6 @@
 type Pair = readonly [string, string];
 
 export const TEXT = {
-  // Toasts of the Milestone 1 actions this package claims (kept word for word, so the Milestone 1 specs still pass).
-  newFormOpened: ['New document form opened', 'Formulir dokumen baru dibuka'],
-  opening: ['Opening', 'Membuka'],
-  reviewWorkflow: [': review workflow', ': alur kerja review'],
-  draftEditor: [': draft editor', ': editor draf'],
-
   // Detail extension of a document
   panelTitle: ['Document control', 'Pengendalian dokumen'],
   tabActions: ['Actions', 'Tindakan'],

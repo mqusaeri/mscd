@@ -364,3 +364,201 @@ export async function expectOverlayReadable(page) {
   }, OVERLAY);
   expect(small, 'overlay text under 12px').toEqual([]);
 }
+
+// ---- page actions and claims of the screen host (MILESTONE-2 C.5) ----
+const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let screenHostModules = null;
+/**
+ * The screen host's own modules, read the way the app reads them: Vite loads `src/screens/host.tsx` in Node, and its
+ * `actions.ts` collects every `src/screens/<folder>/actions.ts` with `import.meta.glob` and checks the claims and the
+ * page actions packages add to built-in screens. Loaded once per worker, in about a second.
+ */
+function screenHost() {
+  screenHostModules ??= (async () => {
+    const { createServer } = await import('vite');
+    const server = await createServer({
+      root: WEB_DIR,
+      configFile: path.join(WEB_DIR, 'vite.config.js'),
+      logLevel: 'error',
+      appType: 'custom',
+      server: { middlewareMode: true, hmr: false, ws: false, watch: null },
+      optimizeDeps: { noDiscovery: true, include: [] },
+    });
+    try {
+      const host = await server.ssrLoadModule('/src/screens/host.tsx');
+      const actions = await server.ssrLoadModule('/src/screens/actions.ts');
+      return { host, actions };
+    } finally {
+      await server.close();
+    }
+  })();
+  return screenHostModules;
+}
+
+/** True when a package claims the action id (C.5): the controller then runs the package's handler. */
+export async function isClaimed(id) {
+  const { actions } = await screenHost();
+  if (!Object.hasOwn(actions.ACTION_IDS, id)) throw new Error(`${id} is not an action id of src/screens/actions.ts`);
+  return Boolean(actions.claimFor(id));
+}
+
+/**
+ * The claimable page actions of the built-in screens, from the host's list of action ids, which names the screen and
+ * the page action of each: { 'Controls & requirements': { 'Add control': 'controls.add' }, ... }.
+ */
+export async function claimablePageActions() {
+  const { actions } = await screenHost();
+  const out = {};
+  for (const [id, place] of Object.entries(actions.ACTION_IDS)) {
+    const m = place.match(/^(.+?), page action "([^"]+)"/);
+    if (m) (out[m[1]] ??= {})[m[2]] = id;
+  }
+  return out;
+}
+
+/** What `createHostContext` reads of the controller, for the session of the test (sample persona or api session). */
+async function hostApp(page, { role, ms, lang, screen }) {
+  const none = () => undefined;
+  const app = {
+    L: lang ? 'id' : 'en', api: false, D: {}, ds: null, me: '', MSL: [{ id: ms }], msObj: { id: ms }, org: undefined,
+    state: { role, screen, theme: 'light', params: {} }, props: {}, personOf: () => ['', ''], toast: none, go: none,
+    track: (p) => p, reloadSystems: async () => undefined, command: none, pickFileFor: async () => null, layerElement: () => null,
+  };
+  if (dataSourceOf() !== 'api') return app;
+  const me = await apiMe(page, new URL(page.url()).origin);
+  const org = me && me.org ? (me.orgs || []).find((o) => o.id === me.org.slug) : null;
+  const systems = (org && org.ms) || [];
+  const id = systems.includes(ms) ? ms : systems[0];
+  const uiRole = (me && me.uiRoleByMs && me.uiRoleByMs[id]) || role;
+  return {
+    ...app, api: true, D: { me, permissions: me && me.permissions, MS: systems.map((s) => ({ id: s })) },
+    MSL: id ? [{ id }] : [], msObj: id ? { id } : undefined, state: { ...app.state, role: uiRole },
+  };
+}
+
+/**
+ * Added page actions whose rule also reads data the screen loads after it opens, from a store of the package (C.5
+ * `visible` is synchronous): "Start certification cycle" and "Record certificate" follow the loaded cycles of the
+ * system (M2-15). Node has none of that data, so there the host's rule hides them; the app shows them once the data is
+ * in. Every other added action must show exactly as the host's rule decides for the session of the test.
+ */
+const WAITS_FOR_DATA = ['timeline.startCycle', 'timeline.recordCertificate'];
+
+/**
+ * The page actions packages add to a built-in screen (C.5 `extraPageActions`), as the screen host lists them: `all`
+ * holds every label in the order the app shows them, `expected` the ones whose own rule shows them to the session of
+ * the test (the host's `hostExtraActions` with a host context of the sample persona, or of the api session), and
+ * `waits` the ones of WAITS_FOR_DATA that rule hides before the data is in: those may show once the screen has loaded it.
+ */
+export async function extraPageActions(page, screen, { role = 'manager', ms = 'isms', lang = 0 } = {}) {
+  const { host, actions } = await screenHost();
+  const known = new Set(BUILTIN_IDS.flatMap((s) => actions.extraPageActionsFor(s).map((a) => a.id)));
+  for (const id of WAITS_FOR_DATA) if (!known.has(id)) throw new Error(`${id} of WAITS_FOR_DATA is no added page action of the screen host`);
+  const list = actions.extraPageActionsFor(screen);
+  const all = list.map((a) => a.label[lang]);
+  const ctx = host.createHostContext(await hostApp(page, { role, ms, lang, screen }));
+  const expected = host.hostExtraActions(screen, ctx).map((a) => a.label);
+  const waits = list.filter((a) => WAITS_FOR_DATA.includes(a.id)).map((a) => a.label[lang]).filter((l) => !expected.includes(l));
+  return { all, expected, waits };
+}
+
+const LAYERS = 'div[style*="z-index: 51"], div[style*="z-index: 41"]';
+const exactly = (label) => new RegExp('^\\s*' + esc(label) + '\\s*$');
+/**
+ * Clicks an action a package may claim (C.5, `id`) and checks what it did. Unclaimed, it shows its Milestone 1 `toast`.
+ * Claimed, it opens the package's form or drawer (`form`: a text the form shows), or shows the toast where the package
+ * keeps it. An opened form is closed with Escape, so the test goes on as after a toast. Returns 'toast' or 'form'.
+ */
+export async function clickClaimable(page, target, { id, toast, form } = {}) {
+  const claimed = await isClaimed(id);
+  const layers = page.locator(LAYERS);
+  const before = await layers.count();
+  const toasted = toast ? ui.toast(page).filter({ hasText: toast }) : null;
+  // The same toast of an earlier click goes first, so the toast seen below is this click's.
+  if (toasted) await expect(toasted).toHaveCount(0);
+  await expect(target).toBeEnabled();
+  await target.click();
+  if (!claimed) {
+    await expectToast(page, toast);
+    return 'toast';
+  }
+  let outcome = null;
+  await expect.poll(async () => {
+    if ((await layers.count()) > before) outcome = 'form';
+    else if (toasted && (await toasted.count())) outcome = 'toast';
+    return outcome;
+  }, { message: `${id} opens its form${toast ? ` or shows "${toast}"` : ''}` }).not.toBeNull();
+  // A claim that keeps its toast may open its form as well, once the form's lazy chunk is in (M2-12 deviation 2).
+  for (const end = Date.now() + 1500; outcome === 'toast' && Date.now() < end;) {
+    if ((await layers.count()) > before) outcome = 'form';
+    else await page.waitForTimeout(100);
+  }
+  if (outcome === 'form') {
+    // A form opened from a drawer is a modal over it; a page action opens a modal or a drawer.
+    if (form) await expect((before ? ui.modal(page) : layers).filter({ hasText: form }).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(layers).toHaveCount(before);
+  }
+  return outcome;
+}
+
+/**
+ * Checks the page actions of the open built-in screen `screen` (one of BUILTIN_IDS): its Milestone 1 actions `m1`
+ * first, in order, then exactly the actions packages add (`extraPageActions`) that the host's rules show to the session,
+ * in the order of the screen host. An action of `waits` may show as well, once the screen has loaded its data. Returns
+ * the labels of the added actions shown.
+ */
+export async function expectPageActions(page, screen, m1, options = {}) {
+  const { all, expected, waits } = await extraPageActions(page, screen, options);
+  const buttons = page.locator('main > div > div:first-child button[title]');
+  const fits = (shown) => {
+    if (shown.length < m1.length || !m1.every((l, i) => shown[i] === l)) return false;
+    const added = shown.slice(m1.length);
+    const want = all.filter((l) => expected.includes(l) || (waits.includes(l) && added.includes(l)));
+    return JSON.stringify(added) === JSON.stringify(want);
+  };
+  // Rules may read data the screen loads (an action of `waits` shows once it is in), so while the host hides one of
+  // its actions from the session, the header counts once it has matched for 600 ms; else as soon as it matches.
+  let shown = null;
+  let still = 0;
+  await expect.poll(async () => {
+    const now = await buttons.allTextContents();
+    still = shown && JSON.stringify(now) === JSON.stringify(shown) ? still + 1 : 0;
+    shown = now;
+    return fits(now) && (all.length === expected.length || still >= 3);
+  }, {
+    intervals: [200],
+    message: `${screen} page actions: ${[...m1, ...expected].join(', ')}${waits.length ? `, maybe ${waits.join(', ')}` : ''}`,
+  }).toBe(true);
+  await expect(buttons).toHaveCount(shown.length);
+  for (const label of shown) await expect(buttons.filter({ hasText: exactly(label) })).toBeVisible();
+  return shown.slice(m1.length);
+}
+
+/**
+ * Clicks a page action a package added to the open built-in screen `title` and checks that it did something: opened a
+ * form or drawer (closed again with Escape), opened another screen (then back to `title` from the sidebar), or showed
+ * a toast of its own. Only a form or drawer that opens after the click counts.
+ */
+export async function runExtraPageAction(page, label, title) {
+  const button = page.locator('main > div > div:first-child button[title]').filter({ hasText: exactly(label) });
+  const layers = page.locator(LAYERS);
+  const before = await layers.count();
+  const toastBefore = (await ui.toast(page).count()) ? await ui.toast(page).innerText() : null;
+  await expect(button).toBeEnabled();
+  await button.click();
+  let outcome = null;
+  await expect.poll(async () => {
+    if ((await layers.count()) > before) outcome = 'form';
+    else if ((await ui.title(page).innerText()) !== title) outcome = 'screen';
+    else if ((await ui.toast(page).count()) && (await ui.toast(page).innerText()) !== toastBefore) outcome = 'toast';
+    return outcome;
+  }, { message: `${label} on ${title} opens a form, a screen or a toast` }).not.toBeNull();
+  if (outcome === 'form') {
+    await page.keyboard.press('Escape');
+    await expect(layers).toHaveCount(before);
+  } else if (outcome === 'screen') {
+    await go(page, title);
+  }
+  return outcome;
+}

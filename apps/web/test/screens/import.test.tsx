@@ -119,13 +119,16 @@ describe('Import rules', () => {
     expect(importBlocked({ ...CLEAN, status: 'expired' })).toBe('expired');
   });
 
-  it('adds "Import" to Controls & requirements and Document register in api builds, with the kind of the screen', () => {
+  it('adds "Import" to Controls & requirements and Document register in both builds, with the kind of the screen', () => {
     expect(extraPageActions.map((a) => [a.screen, a.id])).toEqual([['controls', 'controls.import'], ['docs', 'docs.import']]);
     const go = vi.fn();
     const api = ctxOf('en', { mode: 'api', go, can: (_ms: unknown, perm: unknown) => perm === 'applicability.manage' } as Partial<HostContext>);
     expect(extraPageActions.map((a) => a.visible!(api))).toEqual([true, false]);
-    expect(extraPageActions.map((a) => a.visible!(ctxOf('en')))).toEqual([false, false]);
+    // The sample build: the manager persona holds every permission, the other personas none of the kinds.
+    expect(extraPageActions.map((a) => a.visible!(ctxOf('en')))).toEqual([true, true]);
+    expect(extraPageActions.map((a) => a.visible!(ctxOf('en', { role: 'owner', can: () => false })))).toEqual([false, false]);
     expect(extraPageActions[0]!.visible!(ctxOf('en', { mode: 'api', msObj: null }))).toBe(false);
+    expect(extraPageActions[0]!.visible!(ctxOf('en', { msObj: null }))).toBe(false);
     extraPageActions[0]!.run(api);
     expect(go).toHaveBeenCalledWith('import', { params: { kind: 'applicability', at: expect.any(Number) } });
     expect(extraPageActions[0]!.label).toEqual(['Import', 'Impor']);

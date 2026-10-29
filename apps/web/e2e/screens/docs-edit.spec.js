@@ -6,7 +6,7 @@ import {
 // install, its author cannot approve it and another persona approves it in the review panel; Return to draft keeps
 // its note for the author; New document checks its fields and opens the new draft; Edit of a shared document asks for
 // the BR-22 confirmation; Change owner or approver shows BR-16 before Save; Reassign asks for a person (BR-17).
-// The claims keep the Milestone 1 toasts of their actions. @sample-only: the API project covers the forms in
+// The claims open their forms in place of the Milestone 1 toasts. @sample-only: the API project covers the forms in
 // e2e/api-only/docs-edit.spec.js.
 const panel = (page) => ui.drawer(page).locator('[data-docs-edit]');
 const panelButton = (page, name) => panel(page).locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -38,7 +38,6 @@ test.describe('Document control forms @sample-only', () => {
     await expect(ui.modal(page)).toHaveCount(0);
     await expect(ui.drawer(page)).toContainText('In review');
     await drawerAction(page, 'Open review').click();
-    await expectToast(page, 'Opening STD-05 v1.1: review workflow');
     await expect(dialog(page)).toContainText('Review of STD-05');
     await expect(dialog(page)).toContainText('v2.0');
     await expect(dialog(page)).toContainText('Bagus Prasetyo');
@@ -96,7 +95,6 @@ test.describe('Document control forms @sample-only', () => {
     await go(page, 'Document register');
     await openRow(page, 'PRC-10');
     await drawerAction(page, 'Continue draft').click();
-    await expectToast(page, 'Opening PRC-10 v2.3: draft editor');
     await expect(dialog(page)).toContainText('Draft of PRC-10');
     await expect(dialog(page)).toContainText('Returned to draft');
     await expect(dialog(page)).toContainText('Add the patch window for servers in Surabaya.');
@@ -108,7 +106,6 @@ test.describe('Document control forms @sample-only', () => {
     await openApp(page);
     await go(page, 'Document register');
     await ui.pageAction(page, 'New document').click();
-    await expectToast(page, 'New document form opened');
     const form = ui.drawer(page);
     await expect(form).toContainText('New document');
     await expect(form).toContainText('Document register, ISMS');

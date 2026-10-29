@@ -396,10 +396,15 @@ describe('sample adapter', () => {
 });
 
 describe('claim, page actions and store', () => {
-  it('the sample build keeps the Milestone 1 toast; the api build opens the form for the MS Manager only', () => {
+  it('both builds open the form for the MS Manager only', () => {
     const toast = vi.fn();
     addEvent(ctxOf('en', { toast }), { ms: 'abms' });
-    expect(toast).toHaveBeenCalledWith('Audit event form opened');
+    expect(toast).not.toHaveBeenCalled();
+    expect(formRequest()).toMatchObject({ type: 'add', ms: 'abms' });
+    closeForm();
+    const top = vi.fn();
+    addEvent(ctxOf('en', { toast: top, role: 'top', can: () => false }), { ms: 'abms' });
+    expect(top).toHaveBeenCalledWith(TEXT.noAddRight[0]);
     expect(formRequest()).toBeNull();
     const refused = vi.fn();
     addEvent(ctxOf('id', { mode: 'api', toast: refused, can: () => false }), { ms: 'abms' });
@@ -411,7 +416,7 @@ describe('claim, page actions and store', () => {
     expect(actions.detailExtensions?.map((e) => [e.id, e.kind])).toEqual([['timeline-edit.event', 'event'], ['timeline-edit.prep', 'prep'], ['timeline-edit.cycle', 'cycle']]);
   });
 
-  it('shows "Start certification cycle" without an active cycle and "Record certificate" with one, in api builds', async () => {
+  it('shows "Start certification cycle" without an active cycle and "Record certificate" with one, in both builds', async () => {
     const [start, cert] = extraPageActions;
     const api = ctxOf('en', { mode: 'api' });
     expect([start.visible!(api), cert.visible!(api)]).toEqual([false, false]);
@@ -432,7 +437,10 @@ describe('claim, page actions and store', () => {
     expect(cycleMayStart([])).toBe(true);
     await loadCycles(api, { cycles: async () => ({ ok: true as const, data: [{ ...suspended, status: 'certified' as const }] }) } as never, 'isms', true);
     expect([start.visible!(api), cert.visible!(api)]).toEqual([true, false]);
-    expect([start.visible!(ctxOf('en')), cert.visible!(ctxOf('en'))]).toEqual([false, false]);
+    // The sample build follows the same rule with the cycles its adapter loaded, for the persona that manages events.
+    expect([start.visible!(ctxOf('en')), cert.visible!(ctxOf('en'))]).toEqual([true, false]);
+    const top = ctxOf('en', { role: 'top', can: () => false });
+    expect([start.visible!(top), cert.visible!(top)]).toEqual([false, false]);
     start.run(api);
     expect(formRequest()).toMatchObject({ type: 'start', ms: 'isms' });
   });

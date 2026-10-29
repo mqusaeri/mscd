@@ -1,4 +1,4 @@
-import { test, expect, openApp, go, ui, switchMs, activeTab, expectToast, drawerFact } from './helpers.js';
+import { test, expect, openApp, go, ui, switchMs, activeTab, expectToast, drawerFact, clickClaimable } from './helpers.js';
 
 const picks = (page) => page.locator('main button[style*="height: 28px"][style*="font-family: var(--ffm)"]');
 const pick = (page, label) => picks(page).filter({ hasText: new RegExp('^' + label + '$') });
@@ -112,13 +112,15 @@ test.describe('Audit readiness', () => {
     await expect(activeTab(page).locator('div').nth(1)).toHaveText('Evidence');
   });
 
-  // @sample-only: in API mode the evidence pack toast is the api's message (E.7) and Auditor access asks for the auditor's email (WP-25 deviation 5); e2e/api-only/guest.spec.js covers the grant.
+  // @sample-only: in API mode the evidence pack toast is the api's message (E.7); e2e/api-only/guest.spec.js covers the grant form of Auditor access (M2-15).
   test('page actions name the right repository', { tag: '@sample-only' }, async ({ page }) => {
     await openAudit(page);
     await ui.pageAction(page, 'Build evidence pack').click();
     await expectToast(page, 'Evidence pack is being compiled, manifest will appear in SharePoint Online');
-    await ui.pageAction(page, 'Auditor access').click();
-    await expectToast(page, 'Guest access link created, valid 14 days');
+    // A package may claim Auditor access (MILESTONE-2 C.5): its grant form replaces the Milestone 1 toast.
+    await clickClaimable(page, ui.pageAction(page, 'Auditor access'), {
+      id: 'audit.auditorAccess', toast: 'Guest access link created, valid 14 days', form: 'Grant auditor access',
+    });
     await switchMs(page, 'QMS');
     await ui.pageAction(page, 'Build evidence pack').click();
     await expectToast(page, 'manifest will appear in Managed Vault');

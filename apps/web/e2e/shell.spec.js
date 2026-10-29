@@ -1,4 +1,9 @@
-import { test, expect, SCREENS, HOST_METAS, openApp, go, ui, expectToast, expectNoHorizontalOverflow, navFor } from './helpers.js';
+import {
+  test, expect, SCREENS, HOST_METAS, BUILTIN_IDS, BUILTIN_SCREENS, openApp, go, ui, expectToast, expectNoHorizontalOverflow, navFor,
+  claimablePageActions, clickClaimable, expectPageActions, runExtraPageAction,
+} from './helpers.js';
+
+const exactly = (label) => new RegExp('^\\s*' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$');
 
 test.describe('App shell', () => {
   test('every screen opens from the sidebar with no layout overflow', async ({ page }) => {
@@ -15,6 +20,10 @@ test.describe('App shell', () => {
   // Golden Thread Viewer and My Tasks have no page actions in the design; every other screen has at least one.
   // Host screens list their page actions in meta.json (MILESTONE-2 C.2); they open forms, so only their labels count.
   const HOST_ACTIONS = Object.fromEntries(HOST_METAS.map((m) => [m.label[0], m.pageActions.map((p) => p[0])]));
+  // The page actions of the generated views and their Milestone 1 toasts. Packages change them through the screen host
+  // (MILESTONE-2 C.5), which the test reads as the app does: a claimed action opens the package's form or drawer (or
+  // keeps its toast), and the actions packages add (`extraPageActions`) follow the Milestone 1 ones, each one opening
+  // a form, a drawer or another screen.
   const PAGE_ACTIONS = {
     'Portfolio Overview': { 'Export board': 'Board exported as PDF' },
     'Overview': { 'Readiness report': 'Readiness report queued' },
@@ -33,6 +42,12 @@ test.describe('App shell', () => {
   };
   // @sample-only: in API mode page actions are api commands whose toasts carry the api's answers (exports queued for the worker, the auditor's email asked, counts from the api; H.4, WP-25 deviations 5 and 7).
   test('every screen has working page actions', { tag: '@sample-only' }, async ({ page }) => {
+    test.slow();
+    // The host's list of claimable action ids names Milestone 1 page actions only.
+    const claimable = await claimablePageActions();
+    for (const [screen, actions] of Object.entries(claimable)) {
+      for (const action of Object.keys(actions)) expect(PAGE_ACTIONS[screen]?.[action], `${screen}, ${action}`).toBeDefined();
+    }
     await openApp(page);
     for (const label of SCREENS) {
       await go(page, label);
@@ -42,11 +57,18 @@ test.describe('App shell', () => {
         continue;
       }
       const expected = PAGE_ACTIONS[label];
-      await expect(actions, label + ' page actions').toHaveCount(Object.keys(expected).length);
+      const added = await expectPageActions(page, BUILTIN_IDS[BUILTIN_SCREENS.indexOf(label)], Object.keys(expected));
       for (const [action, message] of Object.entries(expected)) {
-        await actions.filter({ hasText: action }).click();
-        await expectToast(page, message);
+        const button = actions.filter({ hasText: exactly(action) });
+        const id = claimable[label]?.[action];
+        if (id) await clickClaimable(page, button, { id, toast: message });
+        else {
+          await expect(button).toBeEnabled();
+          await button.click();
+          await expectToast(page, message);
+        }
       }
+      for (const action of added) await runExtraPageAction(page, action, label);
     }
   });
 

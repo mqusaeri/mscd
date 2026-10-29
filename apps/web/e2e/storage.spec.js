@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, chips, chip, chipCount, expectShown, moreButton, search,
-  drawerAction, drawerFact, openRow, expectToast, switchOrg, closeDrawer,
+  drawerAction, drawerFact, openRow, expectToast, switchOrg, closeDrawer, clickClaimable,
 } from './helpers.js';
 
 const repos = (page) => page.locator('main div[style*="box-shadow"][style*="flex-direction: column"][style*="gap: 10px"]');
@@ -51,10 +51,14 @@ test.describe('Storage repositories', () => {
     await expect(ui.toast(page)).toHaveText('Redirecting to Google Workspace consent...');
     await repo(page, 'OneDrive personal').locator('button[title="Move to team library"]').click();
     await expect(ui.toast(page)).toHaveText('Move request sent to Tenant Administrator');
-    await repo(page, 'Managed Vault').locator('button[title="Settings"]').click();
-    await expect(ui.toast(page)).toHaveText('Connector settings opened');
-    await ui.pageAction(page, 'Connect repository').click();
-    await expect(ui.toast(page)).toHaveText('Repository connection wizard opened');
+    // Settings and Connect repository may be claimed (MILESTONE-2 C.5): the settings drawer of the card's repository
+    // and the connection wizard replace the Milestone 1 toasts.
+    await clickClaimable(page, repo(page, 'Managed Vault').locator('button[title="Settings"]'), {
+      id: 'storage.settings', toast: 'Connector settings opened', form: 'Managed Vault',
+    });
+    await clickClaimable(page, ui.pageAction(page, 'Connect repository'), {
+      id: 'storage.connect', toast: 'Repository connection wizard opened', form: 'Connect a repository',
+    });
   });
 
   test('integrity chips filter the link health list', async ({ page }) => {

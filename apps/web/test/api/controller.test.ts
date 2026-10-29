@@ -515,11 +515,9 @@ describe('screen host in sample mode', () => {
 
   it('toast-only actions keep their toast when no package claims them (C.5)', async () => {
     const app = await sampleApp();
-    app.state = { ...app.state, screen: 'controls' };
-    app.renderVals().pageActions.find((a: AnyRecord) => a.label === 'Add control').go();
-    expect(app.state.toast).toBe('New custom control form opened');
-    app.state = { ...app.state, screen: 'timeline' };
-    app.renderVals().pageActions.find((a: AnyRecord) => a.label === 'Add audit event').go();
+    // Packages claim every action id of src/screens/actions.ts by now, so an id no package claims shows the fallback:
+    // the toast of the generated view.
+    app.claimGo('nobody.claims.this', {}, () => app.toast(app.t('toastEvent')))();
     expect(app.state.toast).toBe(app.t('toastEvent'));
   });
 

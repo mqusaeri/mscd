@@ -398,10 +398,11 @@ describe('evidence-edit panels and forms', () => {
 });
 
 describe('evidence-edit page actions and extensions', () => {
-  it('adds New evidence and Freshness limits to Evidence freshness in API builds only', () => {
+  it('adds New evidence and Freshness limits to Evidence freshness in both builds', () => {
     expect(extraPageActions.map((a) => [a.screen, a.label[0]])).toEqual([['fresh', 'New evidence'], ['fresh', 'Freshness limits']]);
     const sample = ctxOf(D);
-    expect(extraPageActions.map((a) => a.visible!(sample))).toEqual([false, false]);
+    expect(extraPageActions.map((a) => a.visible!(sample))).toEqual([true, true]);
+    expect(extraPageActions.map((a) => a.visible!(ctxOf(D, 'en', { msObj: null })))).toEqual([false, false]);
     const manager = apiCtxOf(D, 'isms', ['ms.read', 'evidence.manage'], ['ms_manager']);
     expect(extraPageActions.map((a) => a.visible!(manager))).toEqual([true, true]);
     const reader = apiCtxOf(D, 'isms', ['ms.read'], ['top_management']);

@@ -1,13 +1,10 @@
 // Claims, page actions and detail extensions of the certification timeline forms (MILESTONE-2 C.5, M2-15):
 // - `timeline.addEvent` ("Add audit event" in the page header and "Add" of a lane without events) opens "Add audit
-//   event" for the MS Manager of the system in API builds. The sample build keeps the Milestone 1 toast of the action,
-//   which `e2e/timeline.spec.js` and `e2e/shell.spec.js` pin (R-15), as the claims of M2-09 and M2-11 do;
+//   event" for the MS Manager of the system in both builds (the sample adapter adds the event to the sample snapshot);
 // - page actions "Start certification cycle" (no active cycle, and the newest certificate is not suspended) and
-//   "Record certificate" (an active cycle) on the timeline, in API builds only: `e2e/shell.spec.js` counts the page
-//   actions of each built-in screen in the sample build (M2-08 deviation 1). The sample build reaches both from the
-//   certification cycle panel of an audit event:
-//   "Start certification cycle" while no cycle is active (unless the shown certificate is suspended), "Record
-//   certificate" for an active cycle;
+//   "Record certificate" (an active cycle) on the timeline, in both builds, once the cycles of the system are loaded:
+//   the layer item loads them on the timeline in API builds, and the panel of the selected audit event in both builds
+//   (the sample adapter keeps the cycles of each sample organisation; the panel offers the same two forms);
 // - the detail extension of `event` (this audit, its certification cycle with the certificate, its activities) and
 //   of `prep` and `cycle` (Mark done, Reassign or change due date);
 // - the layer item that renders the open form.
@@ -18,12 +15,8 @@ import { activeCycle, cycleMayStart, mayManageEvents, mayMoveCycle } from './mod
 import { cyclesEntry, openForm } from './store';
 import { TEXT } from './text';
 
-/** "Add audit event": the form in API builds, the Milestone 1 toast in the sample build. */
+/** "Add audit event": the form for the MS Manager of the system. */
 export function addEvent(ctx: HostContext, args: ActionArgs): void {
-  if (ctx.mode !== 'api') {
-    ctx.toast(ctx.li(TEXT.sampleToast));
-    return;
-  }
   const ms = typeof args.ms === 'string' ? args.ms : ctx.msObj?.id;
   if (!ms) return;
   if (!mayManageEvents(ctx, ms)) {
@@ -49,7 +42,7 @@ export const extraPageActions: ExtraPageAction[] = [
     label: [TEXT.startCycle[0], TEXT.startCycle[1]],
     icon: CYCLE_ICON,
     visible: (ctx) => {
-      if (ctx.mode !== 'api' || !ctx.msObj || !mayManageEvents(ctx, ctx.msObj.id)) return false;
+      if (!ctx.msObj || !mayManageEvents(ctx, ctx.msObj.id)) return false;
       const cycles = loadedCycles(ctx);
       return Boolean(cycles) && cycleMayStart(cycles!);
     },
@@ -63,7 +56,7 @@ export const extraPageActions: ExtraPageAction[] = [
     label: [TEXT.recordCertificate[0], TEXT.recordCertificate[1]],
     icon: CERT_ICON,
     visible: (ctx) => {
-      if (ctx.mode !== 'api' || !ctx.msObj || !mayMoveCycle(ctx, ctx.msObj.id)) return false;
+      if (!ctx.msObj || !mayMoveCycle(ctx, ctx.msObj.id)) return false;
       const cycles = loadedCycles(ctx);
       return Boolean(cycles && activeCycle(cycles));
     },

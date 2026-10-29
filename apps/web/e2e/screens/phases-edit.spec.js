@@ -2,8 +2,9 @@ import { test, expect, ui, openApp, go, openRow, drawerAction, expectToast, expe
 
 // The activity forms of the sample build (MILESTONE-2 M2-11): the activity panel of the Phase board shows "Start" on a
 // not started activity, disabled with its reason because the sample data keeps the status of activities; "Record
-// blocker" keeps its Milestone 1 toast (e2e/phases.spec.js pins it). The API project covers Start and the Record blocker
-// form in e2e/api-only/phases-edit.spec.js. @sample-only.
+// blocker" keeps its Milestone 1 toast, because the sample data source only acknowledges a blocker (M2-11 deviation 3),
+// so the form could not save here. The API project covers Start and the Record blocker form in
+// e2e/api-only/phases-edit.spec.js. @sample-only.
 const panel = (page) => ui.drawer(page).locator('[data-m11="activity"]');
 const step = (page, name) => page.locator(`main button[title="${name}"]`);
 

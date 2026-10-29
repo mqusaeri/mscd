@@ -2,9 +2,10 @@
 // Framework library screen (`fw`) for MS Managers (`ms.transition`), which opens the transition drawer over that
 // screen (store.ts, layer.tsx).
 //
-// The action shows in API builds only. The sample build's Framework library keeps its single Milestone 1 page action
-// (its specs pin it, R-15), and its sample already shows the ISO 9001 system in transition with the Transition button
-// of the framework row.
+// The action shows in API builds only: the transition drawer reads and moves the systems through the api
+// (`createTransitionAdapter` in Transition.tsx) and has no sample adapter, and `e2e/screens/systems.spec.js` expects the
+// Framework library of the sample build without it. The sample already shows the ISO 9001 system in transition with
+// the Transition button of the framework row.
 import type { HostContext, ScreenActions } from '../types';
 import { TransitionLayer } from './layer';
 import { requestTransition } from './store';

@@ -3,8 +3,8 @@ import { test, expect, ui, openApp, go, openRow, listRow, search, chip, switchMs
 // The controls and requirements forms of the sample build (MILESTONE-2 M2-11): the entry panel of the Controls detail
 // with Edit entry (owner, justification, linked risks, operating frequency), Mark not applicable with the BR-03 warning
 // under the field after Save, the APPL-ASSESS reason on a clause row, Reject of an entry that waits for verification,
-// and Delete entry. The sample build keeps the Milestone 1 toast of "Add control" (e2e/shell.spec.js pins it); the API
-// project covers the Add form in e2e/api-only/controls-edit.spec.js. @sample-only.
+// and Delete entry. "Add control" opens the Add form in the sample build too; the API project covers its Save in
+// e2e/api-only/controls-edit.spec.js. @sample-only.
 const panel = (page) => ui.drawer(page).locator('[data-m11="entry"]');
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -24,10 +24,12 @@ async function inBothThemes(page, check) {
 }
 
 test.describe('Controls and requirements forms @sample-only', () => {
-  test('Add control keeps its Milestone 1 toast in the sample build', async ({ page }) => {
+  test('Add control opens the Add form in the sample build', async ({ page }) => {
     await openControls(page);
     await ui.pageAction(page, 'Add control').click();
-    await expectToast(page, 'New custom control form opened');
+    await expect(dialog(page)).toContainText('Add control or requirement');
+    await expectOverlayReadable(page);
+    await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
   });
 

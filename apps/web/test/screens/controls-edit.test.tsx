@@ -409,10 +409,15 @@ describe('controls-edit panel and forms', () => {
 });
 
 describe('controls-edit claim and extensions', () => {
-  it('keeps the Milestone 1 toast of Add control in the sample build', () => {
+  it('opens the Add form in the sample build for the manager persona and refuses the other personas', () => {
     const ctx = ctxOf(D);
     addControl(ctx, { ms: 'isms' });
-    expect(ctx.toast).toHaveBeenCalledWith('New custom control form opened');
+    expect(ctx.toast).not.toHaveBeenCalled();
+    expect(controlsRequest()).toMatchObject({ kind: 'add', ms: 'isms' });
+    requestControls(null);
+    const owner = ctxOf(D, 'en', { role: 'owner' });
+    addControl(owner, { ms: 'isms' });
+    expect(owner.toast).toHaveBeenCalled();
     expect(controlsRequest()).toBeNull();
   });
 

@@ -32,7 +32,6 @@ export const TEXT = {
     'Akses tamu dibuat, berlaku {n} hari. Tautan dikirim ke email {email}.',
   ],
   noGrantRight: ['Only the MS Manager of this system grants auditor access.', 'Hanya MS Manager sistem ini yang memberi akses auditor.'],
-  sampleToast: ['Guest access link created, valid 14 days', 'Tautan akses tamu dibuat, berlaku 14 hari'],
 
   colEmail: ['Email', 'Alamat email'],
   colCreated: ['Created', 'Dibuat'],

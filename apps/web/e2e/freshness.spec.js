@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, expectShown, moreButton, search, tabs, tab, tabCount, activeTab,
-  drawerAction, drawerFact, openRow, expectToast, switchMs, switchRole, closeDrawer,
+  drawerAction, drawerFact, openRow, expectToast, switchMs, switchRole, closeDrawer, expectPageActions, runExtraPageAction,
 } from './helpers.js';
 
 const freqRows = (page) => page.locator('main button[style*="grid-template-columns: 110px 1fr 120px"]');
@@ -15,6 +15,14 @@ async function openFresh(page) {
 }
 
 test.describe('Evidence freshness', () => {
+  // The page action of the generated view, then the ones packages add (MILESTONE-2 C.5) as the screen host shows them to
+  // the session, each opening its form. Run integrity check has its own test below.
+  test('page actions: Run integrity check and the ones packages add', async ({ page }) => {
+    await openFresh(page);
+    const added = await expectPageActions(page, 'fresh', ['Run integrity check']);
+    for (const action of added) await runExtraPageAction(page, action, 'Evidence freshness');
+  });
+
   test('tabs count evidence by freshness and filter the list, toggling off on a second click', async ({ page }) => {
     await openFresh(page);
     await expect(tabs(page)).toHaveCount(6);

@@ -19,7 +19,7 @@ import {
 import type { AdminData, RepoForm, RepoModel, StorageAdminAdapter } from '../../src/screens/storage-admin/model';
 import { ConnectWizard, RepositoryPanel, RepoFields, CredentialSection, TestSection, stepsOf } from '../../src/screens/storage-admin/panels';
 import { RepositoryTable, credentialText } from '../../src/screens/storage-admin/Screen';
-import { claims, connectRepository, layerItems, repositorySettings, SAMPLE_TOASTS } from '../../src/screens/storage-admin/actions';
+import { claims, connectRepository, layerItems, repositorySettings } from '../../src/screens/storage-admin/actions';
 import { requestStorage, storageRequest } from '../../src/screens/storage-admin/store';
 import { repoOf } from '../../src/screens/storage-admin/LayerHost';
 import { TEXT } from '../../src/screens/storage-admin/text';
@@ -401,12 +401,19 @@ describe('repository administration views', () => {
 });
 
 describe('claims of the Storage repositories screen and the screen definition', () => {
-  it('the sample build keeps the Milestone 1 toasts', () => {
+  it('the sample build opens the drawers too, and a card finds its sample repository by its short id', () => {
     const ctx = ctxOf('en');
     claims!['storage.connect']!(ctx, {});
-    claims!['storage.settings']!(ctx, { repo: REPOS[0] });
-    expect(ctx.toast).toHaveBeenNthCalledWith(1, SAMPLE_TOASTS.connect[0]);
-    expect(ctx.toast).toHaveBeenNthCalledWith(2, SAMPLE_TOASTS.settings[0]);
+    expect(storageRequest()).toMatchObject({ kind: 'connect' });
+    const vault = REPOS.find((r: { id: string }) => r.id === 'vault');
+    claims!['storage.settings']!(ctx, { repo: vault });
+    expect(storageRequest()).toMatchObject({ kind: 'settings', ref: null, slug: 'vault' });
+    expect(repoOf(sampleData(D, 'ndt'), storageRequest()!)?.name).toBe('Managed Vault');
+    expect(ctx.toast).not.toHaveBeenCalled();
+    requestStorage(null);
+    const reader = ctxOf('en', { orgCan: () => false });
+    claims!['storage.settings']!(reader, { repo: vault });
+    expect(reader.toast).toHaveBeenCalledWith(TEXT.noPermission[0]);
     expect(storageRequest()).toBeNull();
   });
 

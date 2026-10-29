@@ -1,9 +1,7 @@
 // Page action "Import" of Controls & requirements and Document register (MILESTONE-2 M2-08, C.5 `extraPageActions`):
-// opens the Import screen with the kind of the screen, for whoever may manage that kind in the selected system.
-//
-// API builds only: the sample build keeps the page actions of the generated screens as Milestone 1 counts them
-// (`e2e/shell.spec.js` checks each built-in screen's page actions one by one), and reaches the Import screen from
-// the sidebar.
+// opens the Import screen with the kind of the screen, for whoever may manage that kind in the selected system. Both
+// builds show it: the sample adapter checks and imports CSV files of controls and documents, and `e2e/shell.spec.js`
+// counts the page actions packages add to built-in screens from the screen host.
 import type { ExtraPageAction, HostContext } from '../types';
 import { sessionMayImport } from './model';
 import type { ImportKind } from './model';
@@ -17,7 +15,7 @@ function importFor(screen: 'controls' | 'docs', id: string, kind: ImportKind): E
     id,
     label: [TEXT.importAction[0], TEXT.importAction[1]],
     icon: ICON,
-    visible: (ctx: HostContext) => ctx.mode === 'api' && Boolean(ctx.msObj) && sessionMayImport(ctx, ctx.msObj!.id, kind),
+    visible: (ctx: HostContext) => Boolean(ctx.msObj) && sessionMayImport(ctx, ctx.msObj!.id, kind),
     run: (ctx: HostContext) => ctx.go('import', { params: { kind, at: Date.now() } }),
   };
 }

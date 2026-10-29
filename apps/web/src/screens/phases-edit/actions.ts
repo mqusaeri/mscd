@@ -1,7 +1,8 @@
 // Claims and detail extensions of the activity forms (MILESTONE-2 C.5, M2-11):
 // - `phases.recordBlocker` (activity detail "Record blocker") opens the Record blocker form in API builds for the
-//   activity owner or the MS Manager. The sample build keeps the Milestone 1 toast, which `e2e/phases.spec.js` pins
-//   (R-15), and its data source only acknowledges a blocker;
+//   activity owner or the MS Manager. The sample build keeps the Milestone 1 toast: its data source only acknowledges
+//   a blocker and keeps the status of activities (M2-11 deviation 3), so the form's BR-39 move and BR-46 count
+//   would not show there, and `e2e/screens/phases-edit.spec.js` expects the toast;
 // - the detail extension of `activity` ("Start").
 import type { Activity } from '../../data/types';
 import type { ActionArgs, HostContext, ScreenActions } from '../types';

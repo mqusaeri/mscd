@@ -1,7 +1,7 @@
 // The document control forms (MILESTONE-2 M2-12): routes against the shared table, the full-grant rules against the F.6
 // matrix, the checks before Save (BR-16, BR-17, the New document fields), the api adapter over a fake fetch (method,
 // path, body, If-Match, Idempotency-Key, X-CSRF-Token, refusals kept), the sample adapter on the sample data source
-// (a new version goes to In review and another person approves it), the claims with their Milestone 1 toasts, and the
+// (a new version goes to In review and another person approves it), the claims that open the forms, and the
 // panel, the review panel and the forms in both languages and themes.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -440,11 +440,11 @@ describe('Document control claims', () => {
     expect(layerItems?.map((l) => l.id)).toEqual(['docs-edit.forms']);
   });
 
-  it('New document: the Milestone 1 toast and the form for an MS Manager; a refusal for anyone else', async () => {
+  it('New document: the form for an MS Manager; a refusal for anyone else', async () => {
     const { D } = await sampleData();
     const ctx = ctxOf('en', D);
     newDocument(ctx, { ms: 'isms' });
-    expect(ctx.toast).toHaveBeenCalledWith('New document form opened');
+    expect(ctx.toast).not.toHaveBeenCalled();
     expect(formRequest()).toMatchObject({ type: 'new', ms: 'isms' });
     closeForm();
     const owner = ctxOf('id', D, { role: 'owner' as UiRole });
@@ -453,18 +453,17 @@ describe('Document control claims', () => {
     expect(formRequest()).toBeNull();
   });
 
-  it('Open review, Continue draft and Open document show their Milestone 1 toasts and open the review panel', async () => {
+  it('Open review, Continue draft and Open document open the review panel of the document', async () => {
     const { D } = await sampleData();
     const ctx = ctxOf('en', D);
     const doc = docOf(D, 'isms', 'PLN-02')!;
-    openReviewPanel(ctx, { ms: 'isms', key: 'isms:doc:PLN-02', record: doc }, 'review');
-    expect(ctx.toast).toHaveBeenLastCalledWith('Opening PLN-02 v1.1: review workflow');
+    claims!['docs.openReview']!(ctx, { ms: 'isms', key: 'isms:doc:PLN-02', record: doc });
     expect(formRequest()).toMatchObject({ type: 'review', ms: 'isms', code: 'PLN-02' });
-    openReviewPanel(ctx, { ms: 'isms', key: 'isms:doc:SOA-01' }, 'draft');
-    expect(ctx.toast).toHaveBeenLastCalledWith('Opening SOA-01 v3.0: draft editor');
-    const id = ctxOf('id', D);
-    openReviewPanel(id, { ms: 'isms', key: 'isms:doc:STD-04' }, 'task');
-    expect(id.toast).toHaveBeenLastCalledWith('Membuka STD-04');
+    claims!['docs.continueDraft']!(ctx, { ms: 'isms', key: 'isms:doc:SOA-01' });
+    expect(formRequest()).toMatchObject({ type: 'review', ms: 'isms', code: 'SOA-01' });
+    openReviewPanel(ctx, { ms: 'isms', key: 'isms:doc:STD-04' });
+    expect(formRequest()).toMatchObject({ type: 'review', ms: 'isms', code: 'STD-04' });
+    expect(ctx.toast).not.toHaveBeenCalled();
     expect(docArgs(ctx, {})).toBeNull();
   });
 });

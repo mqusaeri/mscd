@@ -1,6 +1,6 @@
 import {
   test, expect, openApp, go, ui, list, listRows, listRow, groupRows, chips, chip, chipCount, expectShown, search,
-  drawerAction, drawerFact, drawerLinks, openRow, expectToast, switchMs, closeDrawer,
+  drawerAction, drawerFact, drawerLinks, openRow, expectToast, switchMs, closeDrawer, clickClaimable, expectPageActions, runExtraPageAction,
 } from './helpers.js';
 
 const ids = (page) => listRows(page).locator('td:nth-child(2) > span:first-child');
@@ -77,8 +77,10 @@ test.describe('Document register', () => {
     await openRow(page, 'SOA-01');
     await expect(ui.drawer(page)).toContainText('Draft');
     await expect(ui.drawer(page).locator('span[title^="Draft: not yet a controlled document"]')).toHaveCount(1);
-    await drawerAction(page, 'Continue draft').click();
-    await expectToast(page, 'Opening SOA-01 v3.0: draft editor');
+    // A package may claim Continue draft (MILESTONE-2 C.5): the draft's form replaces the Milestone 1 toast.
+    await clickClaimable(page, drawerAction(page, 'Continue draft'), {
+      id: 'docs.continueDraft', toast: 'Opening SOA-01 v3.0: draft editor', form: 'SOA-01',
+    });
   });
 
   test('a control linked from a document opens in Controls & requirements', async ({ page }) => {
@@ -115,12 +117,15 @@ test.describe('Document register', () => {
     await expect(page.locator('main')).toContainText('Secure Development Procedure');
   });
 
-  test('page actions confirm with toasts', async ({ page }) => {
+  test('page actions confirm with toasts, open forms, and add the ones packages add', async ({ page }) => {
     await openRegister(page);
+    const added = await expectPageActions(page, 'docs', ['Export', 'New document']);
     await ui.pageAction(page, 'Export').click();
     await expectToast(page, 'Document register exported (xlsx)');
-    await ui.pageAction(page, 'New document').click();
-    await expectToast(page, 'New document form opened');
+    // A package may claim New document (MILESTONE-2 C.5): its form replaces the Milestone 1 toast.
+    await clickClaimable(page, ui.pageAction(page, 'New document'), { id: 'docs.new', toast: 'New document form opened', form: 'New document' });
+    // Each page action a package adds (M2-08: Import) opens its form or screen.
+    for (const action of added) await runExtraPageAction(page, action, 'Document register');
   });
 
   test('each management system has its own register', async ({ page }) => {

@@ -1,5 +1,5 @@
 import {
-  test, expect, openApp, go, ui, switchRole, expectToast, activeTab, listRow, listRows, drawerFact, tab, tabCount,
+  test, expect, openApp, go, ui, switchRole, expectToast, activeTab, listRow, listRows, drawerFact, tab, tabCount, clickClaimable,
 } from './helpers.js';
 
 const tasks = (page) => page.locator('main div[style*="grid-template-columns: 4px 44px"]');
@@ -166,6 +166,9 @@ test.describe('My Tasks', () => {
     await expect(t.locator('button')).toHaveText('Start review');
     await t.locator('button').click();
     await expectToast(page, 'Opening STD-04');
+    await expect(t.locator('button')).toHaveText('Open document');
+    // A package may claim Open document (MILESTONE-2 C.5): the document's review form replaces the Milestone 1 toast.
+    await clickClaimable(page, t.locator('button'), { id: 'mytasks.openDoc', toast: 'Opening STD-04', form: 'STD-04' });
     await expect(t.locator('button')).toHaveText('Open document');
   });
 

@@ -156,11 +156,12 @@ describe('sample adapter', () => {
 });
 
 describe('claim of Audit readiness', () => {
-  it('keeps the Milestone 1 toast in the sample build and opens the form for the MS Manager in api builds', () => {
+  it('opens the form for the MS Manager in both builds and tells anyone else who grants access', () => {
     const toast = vi.fn();
     auditorAccess(ctxOf('en', { toast }), { ms: 'isms' });
-    expect(toast).toHaveBeenCalledWith('Guest access link created, valid 14 days');
-    expect(grantRequest()).toBeNull();
+    expect(toast).not.toHaveBeenCalled();
+    expect(grantRequest()).toMatchObject({ ms: 'isms' });
+    openGrant(null);
     const refused = vi.fn();
     auditorAccess(ctxOf('en', { mode: 'api', toast: refused, can: () => false }), { ms: 'isms' });
     expect(refused).toHaveBeenCalledWith(TEXT.noGrantRight[0]);

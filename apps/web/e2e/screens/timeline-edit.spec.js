@@ -7,8 +7,8 @@ import {
 // the audit activities of a certification audit ("Generate activities", "Edit activity"), "Mark done" and "Reassign or
 // change due date" (BR-43) of preparation tasks and cycle items, "Start certification cycle", "Record certificate"
 // after a recommended result, and the suspension, reinstatement and withdrawal of a certificate. "Add audit event"
-// keeps its Milestone 1 toast in the sample build (e2e/timeline.spec.js pins it); the API project covers the form in
-// e2e/api-only/timeline-edit.spec.js. @sample-only.
+// opens its form in the sample build too; the API project covers its Save in e2e/api-only/timeline-edit.spec.js.
+// @sample-only.
 const marker = (page, title) => page.locator(`main button[title="${title}"]`);
 const card = (page) => page.locator('main div[style*="flex-direction: column"][style*="gap: 14px"]').filter({ hasText: 'Audit event,' });
 const panel = (page) => page.locator('main [data-tl-panel]');
@@ -35,7 +35,7 @@ async function openTimeline(page, query = '') {
 }
 
 test.describe('Certification timeline forms @sample-only', () => {
-  test('the event panel shows the certification cycle with the certificate and its expiry date, and Add audit event keeps its toast', async ({ page }) => {
+  test('the event panel shows the certification cycle with the certificate and its expiry date, and Add audit event opens its form', async ({ page }) => {
     await openTimeline(page);
     await expect(card(page)).toContainText('Surveillance 1');
     await expect(cyclePanel(page)).toHaveAttribute('data-tl-cycle', 'certified');
@@ -53,7 +53,8 @@ test.describe('Certification timeline forms @sample-only', () => {
     await expect(panel(page)).toContainText('Record the result once the audit has taken place.');
     await expect(activities(page)).toContainText('No activities yet.');
     await ui.pageAction(page, 'Add audit event').click();
-    await expectToast(page, 'Audit event form opened');
+    await expect(dialog(page)).toContainText('Add audit event');
+    await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await expectNoTextOverflow(page);

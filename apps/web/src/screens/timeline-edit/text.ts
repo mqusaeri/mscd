@@ -253,5 +253,4 @@ export const TEXT = {
   markedDone: ['{title} marked done', '{title} ditandai selesai'],
   itemSaved: ['{title} updated', '{title} diperbarui'],
   noRef: ['This item has no record on the server. Load the page again.', 'Item ini tidak memiliki rekaman di server. Muat ulang halaman.'],
-  sampleToast: ['Audit event form opened', 'Formulir audit event dibuka'],
 } as const satisfies Record<string, readonly [string, string]>;

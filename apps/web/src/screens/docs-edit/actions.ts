@@ -6,14 +6,13 @@
 // - the detail extension of `doc`: Edit, Change owner or approver, Reassign, Attach first version, Upload new version
 //   and the Versions tab;
 // - the layer item that renders the open form in the host layer.
-// Each claim first shows the Milestone 1 toast of its action (the Milestone 1 specs check them, R-15), then opens its form.
+// Each claim opens its form in both builds, in place of the Milestone 1 toast of its action.
 import type { MsId } from '../../data/types';
 import type { ActionArgs, HostContext, ScreenActions } from '../types';
 import { DocExtension, DocsLayer } from './extension';
 import { codeOfKey, docOf, holdsInFull } from './model';
 import type { DocRecord } from './model';
 import { openForm } from './store';
-import { TEXT } from './text';
 
 const NO_PERMISSION: readonly [string, string] = [
   'Only the MS Manager of this system registers documents.',
@@ -37,28 +36,21 @@ export function newDocument(ctx: HostContext, args: ActionArgs): void {
     ctx.toast(ctx.li(NO_PERMISSION));
     return;
   }
-  ctx.toast(ctx.li(TEXT.newFormOpened));
   openForm({ type: 'new', ms });
 }
 
 /** "Open review", "Continue draft" and "Open document" of My Tasks: the review panel of the document. */
-export function openReviewPanel(ctx: HostContext, args: ActionArgs, toast: 'review' | 'draft' | 'task'): void {
+export function openReviewPanel(ctx: HostContext, args: ActionArgs): void {
   const found = docArgs(ctx, args);
   if (!found) return;
-  const { ms, code, doc } = found;
-  const ver = doc?.ver ?? '-';
-  const head = `${ctx.li(TEXT.opening)} ${code}`;
-  if (toast === 'review') ctx.toast(`${head} v${ver}${ctx.li(TEXT.reviewWorkflow)}`);
-  else if (toast === 'draft') ctx.toast(`${head} v${ver}${ctx.li(TEXT.draftEditor)}`);
-  else ctx.toast(head);
-  openForm({ type: 'review', ms, code });
+  openForm({ type: 'review', ms: found.ms, code: found.code });
 }
 
 export const claims: ScreenActions['claims'] = {
   'docs.new': (ctx, args) => newDocument(ctx, args),
-  'docs.openReview': (ctx, args) => openReviewPanel(ctx, args, 'review'),
-  'docs.continueDraft': (ctx, args) => openReviewPanel(ctx, args, 'draft'),
-  'mytasks.openDoc': (ctx, args) => openReviewPanel(ctx, args, 'task'),
+  'docs.openReview': (ctx, args) => openReviewPanel(ctx, args),
+  'docs.continueDraft': (ctx, args) => openReviewPanel(ctx, args),
+  'mytasks.openDoc': (ctx, args) => openReviewPanel(ctx, args),
 };
 
 export const detailExtensions: ScreenActions['detailExtensions'] = [
