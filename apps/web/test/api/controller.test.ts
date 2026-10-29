@@ -66,7 +66,7 @@ async function acme() {
     orgs: me.orgs,
     MS: fx.org.MS.filter((m: AnyRecord) => ['isms', 'qms'].includes(m.id)),
     PEOPLE: { ...fx.org.PEOPLE },
-    ROLES: { manager: { who: 'joko', label: ['MS Manager', 'Manajer SM'] }, owner: { who: 'joko', label: ['Domain Owner', 'Pemilik Domain'] } },
+    ROLES: { manager: { who: 'joko', label: ['Management System Manager', 'Management System Manager'] }, owner: { who: 'joko', label: ['Domain Owner', 'Pemilik Domain'] } },
     PACKS: {},
     LICENCE: null,
     permissions: { org: [], ms: perms },
@@ -98,7 +98,7 @@ describe('controller in API mode', () => {
     expect(app.state.role).toBe('manager');
     // Persona menu outside demo mode: the role of this system and Sign out.
     const v = app.renderVals();
-    expect(v.roleOptions.map((r: AnyRecord) => r.label)).toEqual(['MS Manager', '']);
+    expect(v.roleOptions.map((r: AnyRecord) => r.label)).toEqual(['Management System Manager', '']);
     expect(v.roleOptions[1].name).toBe('Sign out');
     expect(v.me.name).toBe(app.personOf('joko')[0]);
   });

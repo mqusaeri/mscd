@@ -78,7 +78,10 @@ const PATCHES = [
   ['>Framework Pack<br>', '>{{ t.frameworkPack }}<br>'],
   ['title="Theme"', 'title="{{ t.theme }}"'],
   ['>Management system</th>', '>{{ t.c_msName }}</th>'],
-  ['>GATE</span>', '>{{ t.gateTag }}</span>', 2],
+  ['>CHECKPOINT</span>', '>{{ t.gateTag }}</span>', 2],
+  // Overview phase list: the CHECKPOINT tag (M2-17) is longer than GATE was, so a space before it lets it wrap under a
+  // phase name that ends in a long word ("BIA & risk assessment") instead of pushing the row out of its column.
+  ['{{ p.name }}<sc-if value="{{ p.gate }}"><span style="margin-left:6px;', '{{ p.name }} <sc-if value="{{ p.gate }}"><span style="margin-left:2px;'],
   ['>PDF, XLSX, DOCX, PNG, max 50 MB, SHA-256 computed on upload<', '>{{ t.uploadHint }}<'],
 
   // ---- Milestone 2 host slots (MILESTONE-2 C.1, M2-01) ----

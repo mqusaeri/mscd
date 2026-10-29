@@ -75,7 +75,7 @@ test.describe('Required documented information @sample-only', () => {
     await expectToast(page, 'SCO-01 v1.0 submitted for review');
     await closeDrawer(page);
 
-    await switchRole(page, 'MS Manager');
+    await switchRole(page, 'Management System Manager');
     await go(page, 'Document register');
     await openRow(page, 'SCO-01');
     await drawerAction(page, 'Open review').click();

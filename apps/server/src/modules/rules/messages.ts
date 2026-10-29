@@ -27,8 +27,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: 'Entri ini tidak dapat diubah menjadi diterapkan tanpa bukti dari periode berjalan yang berkasnya utuh atau dipindahkan. Ubah menjadi diterapkan sebagian atau direncanakan.',
   },
   'BR-02': {
-    en: 'Link this applicable entry to at least one risk. Until it is, the entry cannot be verified and holds the gate.',
-    id: 'Tautkan entri yang berlaku ini ke setidaknya satu risiko. Sampai ditautkan, entri tidak dapat diverifikasi dan menahan gerbang.',
+    en: 'Link this applicable entry to at least one risk. Until it is, the entry cannot be verified and blocks the checkpoint.',
+    id: 'Tautkan entri yang berlaku ini ke setidaknya satu risiko. Sampai ditautkan, entri tidak dapat diverifikasi dan memblokir checkpoint.',
   },
   'BR-03': {
     en: 'The exclusion justification does not look meaningful. Explain why this does not apply.',
@@ -68,8 +68,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: 'Bukti telah kedaluwarsa. Entri diubah menjadi diterapkan sebagian dan tugas dibuat untuk pemilik bukti.',
   },
   'BR-12': {
-    en: 'This activity stays locked until every activity of critical gate phase {phase} is verified.',
-    id: 'Aktivitas ini tetap terkunci sampai semua aktivitas pada fase gerbang kritis {phase} terverifikasi.',
+    en: 'This activity stays locked until every activity of critical checkpoint phase {phase} is verified.',
+    id: 'Aktivitas ini tetap terkunci sampai semua aktivitas pada fase checkpoint kritis {phase} terverifikasi.',
     defaults: { phase: { en: 'before it', id: 'sebelumnya' } },
   },
   'BR-13': {
@@ -184,8 +184,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
   },
   // Digest 6.4 (TS 8.3)
   'BR-39': {
-    en: 'State what is holding this activity and which gate item causes it.',
-    id: 'Sebutkan apa yang menahan aktivitas ini dan item gerbang mana yang menyebabkannya.',
+    en: 'State what is holding this activity and which checkpoint item causes it.',
+    id: 'Sebutkan apa yang menahan aktivitas ini dan item checkpoint mana yang menyebabkannya.',
   },
   'BR-40': {
     en: 'Link the output document from the register before marking this complete.',
@@ -215,8 +215,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: 'Item ini belum memiliki pemegang. Tugaskan kepada satu orang.',
   },
   'BR-46': {
-    en: 'The number of blocked activities does not match the open gate items. Check the blocking references.',
-    id: 'Jumlah aktivitas yang terblokir tidak sesuai dengan item gerbang yang terbuka. Periksa rujukan pemblokirannya.',
+    en: 'The number of blocked activities does not match the open checkpoint items. Check the blocking references.',
+    id: 'Jumlah aktivitas yang terblokir tidak sesuai dengan item checkpoint yang terbuka. Periksa rujukan pemblokirannya.',
   },
   'BR-47': {
     en: 'Document status and activity status do not match. Check one of them.',
@@ -254,8 +254,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: 'Lisensi ini terikat pada instalasi atau organisasi lain.',
   },
   'VERIFY-SELF': {
-    en: 'You cannot verify work that you completed or own. Another MS Manager or a Programme Owner must verify it.',
-    id: 'Anda tidak dapat memverifikasi pekerjaan yang Anda selesaikan atau miliki. Manajer SM lain atau Pemilik Program harus memverifikasinya.',
+    en: 'You cannot verify work that you completed or own. Another Management System Manager or a Programme Owner must verify it.',
+    id: 'Anda tidak dapat memverifikasi pekerjaan yang Anda selesaikan atau miliki. Management System Manager lain atau Pemilik Program harus memverifikasinya.',
   },
   'NOT-A-MEMBER': {
     en: '{who} is not a member of this organisation.',

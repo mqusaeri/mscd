@@ -24,7 +24,7 @@ export const REQUIREMENT_ACTION: Readonly<Partial<Record<ReqStatus, Pair>>> = {
   partial: ['Complete implementation', 'Selesaikan implementasi'],
   planned: ['Start implementation', 'Mulai implementasi'],
   ns: ['Assign and start', 'Tugaskan dan mulai'],
-  blocked: ['Resolve gate item: justification missing', 'Selesaikan item gate: justifikasi belum ada'],
+  blocked: ['Resolve checkpoint item: justification missing', 'Selesaikan item checkpoint: justifikasi belum ada'],
 };
 
 /** `Verify output (<name> marked complete)` (UI 2.3). */

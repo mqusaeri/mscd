@@ -53,8 +53,8 @@ const DOCUMENTED_CLAUSES = new Set(['4.3', '5.2', '6.1', '6.2', '7.2', '7.5', '8
 const EMPTY_PHRASES = new Set(['-', 'n/a', 'na', 'none', 'not applicable', 'not relevant', 'tidak berlaku', 'tidak ada', 'tidak relevan']);
 
 const BR02: [string, string] = [
-  'Link this applicable entry to at least one risk. Until it is, the entry cannot be verified and holds the gate.',
-  'Tautkan entri yang berlaku ini ke setidaknya satu risiko. Sampai ditautkan, entri tidak dapat diverifikasi dan menahan gerbang.',
+  'Link this applicable entry to at least one risk. Until it is, the entry cannot be verified and blocks the checkpoint.',
+  'Tautkan entri yang berlaku ini ke setidaknya satu risiko. Sampai ditautkan, entri tidak dapat diverifikasi dan memblokir checkpoint.',
 ];
 const BR03: [string, string] = [
   'The exclusion justification does not look meaningful. Explain why this does not apply.',

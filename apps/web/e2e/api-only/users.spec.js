@@ -78,7 +78,7 @@ test.describe('People and roles against the api @api-only', () => {
     await openApp(page);
     await go(page, 'People and roles');
     await expect(row(page, 'Rina Kusuma')).toContainText('Tenant Admin');
-    await expect(row(page, 'Rina Kusuma')).toContainText('MS Manager in ISMS, primary');
+    await expect(row(page, 'Rina Kusuma')).toContainText('Management System Manager in ISMS, primary');
     await expect(row(page, 'tenant.admin@mscd.test')).toContainText('You');
     await ui.pageAction(page, 'Invite person').click();
     await field(page, 'email').fill('wulan.sari@mscd.test');
@@ -129,7 +129,7 @@ test.describe('People and roles against the api @api-only', () => {
     await expect(dialog(page)).toContainText('Revoke Domain Owner in ISMS');
     const held = dialog(page).locator('[data-holdings="isms"]');
     await expect(held).toContainText(/\d+ open items/);
-    await expect(held).toContainText('Primary MS Manager: Rina Kusuma (rina.kusuma@nusantaradigital.co.id)');
+    await expect(held).toContainText('Primary Management System Manager: Rina Kusuma (rina.kusuma@nusantaradigital.co.id)');
     await expect(held).toContainText('Ask Rina Kusuma to move these items to a successor in Handover.');
     // A Tenant Admin sees counts only (H.13) and cannot open Handover in the system.
     await expect(held.locator('button', { hasText: 'Open Handover' })).toHaveCount(0);
@@ -149,7 +149,7 @@ test.describe('People and roles against the api @api-only', () => {
     await drawer(page).locator('button', { hasText: /^Disable$/ }).click();
     await expect(dialog(page)).toContainText('Disable Bagus Prasetyo');
     await expect(dialog(page).locator('[data-holdings="isms"]')).toContainText(/\d+ open items/);
-    await expect(dialog(page)).toContainText('Ask the primary MS Manager of each system to move these items in Handover');
+    await expect(dialog(page)).toContainText('Ask the primary Management System Manager of each system to move these items in Handover');
     await expectOverlayReadable(page);
     const confirm = dialog(page).locator('button', { hasText: /^Disable$/ });
     await expect(confirm).toBeDisabled();
@@ -321,14 +321,14 @@ test.describe('People and roles: your own role grant against the api @api-only',
     await expect(systems).toContainText('ISMS');
     await go(page, 'People and roles');
     await openPerson(page, 'Rina Kusuma');
-    await drawer(page).locator('[data-grant]', { hasText: 'MS Manager in ISMS' }).locator('button', { hasText: 'Revoke role' }).click();
+    await drawer(page).locator('[data-grant]', { hasText: 'Management System Manager in ISMS' }).locator('button', { hasText: 'Revoke role' }).click();
     await expect(dialog(page)).toContainText('This is your own role. Your session is renewed after the revocation');
     await expectOverlayReadable(page);
     const me = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/me' && r.request().method() === 'GET');
     await dialog(page).locator('button', { hasText: 'Revoke role' }).click();
     expect((await me).ok()).toBe(true);
     await expectToast(page, 'Role revoked');
-    await expect(drawer(page)).not.toContainText('MS Manager in ISMS');
+    await expect(drawer(page)).not.toContainText('Management System Manager in ISMS');
     // The reloaded snapshot no longer lists ISMS among her systems; People and roles stays open.
     await expect(systems).not.toContainText('ISMS');
     await expect(ui.title(page)).toHaveText('People and roles');

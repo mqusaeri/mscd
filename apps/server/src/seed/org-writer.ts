@@ -738,7 +738,7 @@ export async function writeOrganisation(trx: Trx, input: OrgSeedInput): Promise<
           status: ACTIVITY_STATUS[act.st],
           output_document_id: outputCode ? docIds.get(outputCode) ?? null : null,
           blocker_gate_item_ref: act.blocker,
-          blocker_reason: act.blocker ? `Blocked by gate item ${act.blocker}` : null,
+          blocker_reason: act.blocker ? `Blocked by checkpoint item ${act.blocker}` : null,
           due_at: verified || act.st === 'locked' ? null : act.date,
           verified_at: verified ? act.date : null,
           completed_at: verified ? act.date : null,

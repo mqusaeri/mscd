@@ -66,9 +66,9 @@ export default function Overview({ v }) {
           {list(v.ov?.phases).map((p, $i64) => (<Fragment key={$i64}>
             <button onClick={p?.go} style={{ display: "grid", gridTemplateColumns: "22px 1fr 90px 70px", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", border: "0", borderBottom: "1px solid var(--bd)", background: p?.bg, padding: "8px var(--pad)", cursor: "pointer", color: "var(--tx)", font: "inherit", fontSize: "var(--fs)" }}>
               <span style={{ width: "18px", height: "18px", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "700", background: p?.dotBg, color: p?.dotFg }}>{txt(p?.no)}</span>{" "}
-              <span style={{ fontWeight: p?.fw }}>{txt(p?.name)}
+              <span style={{ fontWeight: p?.fw }}>{txt(p?.name)}{" "}
                 {p?.gate ? (<>
-                  <span style={{ marginLeft: "6px", fontSize: "12px", padding: "1px 6px", borderRadius: "4px", background: "var(--badbg)", color: "var(--bad)" }}>{txt(v.t?.gateTag)}</span>
+                  <span style={{ marginLeft: "2px", fontSize: "12px", padding: "1px 6px", borderRadius: "4px", background: "var(--badbg)", color: "var(--bad)" }}>{txt(v.t?.gateTag)}</span>
                 </>) : null}
               </span>{" "}
               <span style={{ display: "flex", height: "6px", borderRadius: "3px", overflow: "hidden", background: "var(--bd)", transformOrigin: "left", animation: "growX .8s cubic-bezier(.2,.7,.2,1) both" }}>

@@ -165,7 +165,7 @@ test.describe('App shell', () => {
     await pick('Top management');
     await expect(ui.title(page)).toHaveText('Portfolio Overview');
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'top'));
-    await pick('MS Manager');
+    await pick('Management System Manager');
     await expect(page.locator('aside nav button[title="Phase board"]')).toBeVisible();
     await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
   });

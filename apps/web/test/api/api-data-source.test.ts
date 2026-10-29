@@ -132,7 +132,7 @@ describe('snapshot assembly', () => {
       ...fx.org,
       orgs: me.orgs,
       MS: fx.org.MS.filter((m: AnyRecord) => ['isms', 'qms'].includes(m.id)),
-      ROLES: { manager: { who: 'joko', label: ['MS Manager', 'Manajer SM'] }, owner: { who: 'joko', label: ['Domain Owner', 'Pemilik Domain'] } },
+      ROLES: { manager: { who: 'joko', label: ['Management System Manager', 'Management System Manager'] }, owner: { who: 'joko', label: ['Domain Owner', 'Pemilik Domain'] } },
     };
     const routes = { ...readRoutes(fx, me), 'GET /api/v1/ui/org': json(org) };
     const env = sourceWith(routes);
@@ -572,7 +572,7 @@ describe('errors and session', () => {
   });
 
   it('switchPersona posts the role, then loads as the new session user', async () => {
-    const personas = { manager: { who: 'rina', label: ['MS Manager', 'Manajer SM'] }, owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] } };
+    const personas = { manager: { who: 'rina', label: ['Management System Manager', 'Management System Manager'] }, owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] } };
     const bagus = meOf({ handle: 'bagus', personas, uiRoleByMs: { isms: 'owner', qms: 'owner', bcms: 'owner', abms: 'owner' } });
     const { ds, calls } = await loaded({ 'POST /api/v1/auth/demo/persona': json(bagus) }, meOf({ personas }));
     const snap = (await ds.switchPersona('owner')) as AnyRecord;

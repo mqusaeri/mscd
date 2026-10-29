@@ -39,7 +39,7 @@ test.describe('My Tasks', () => {
     await openApp(page);
     await go(page, 'My Tasks');
     await task(page, 'A.5.12').locator('button', { hasText: 'Mark done' }).click();
-    await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
+    await expectToast(page, 'Marked complete: awaiting verification by the Management System Manager');
     // completed controls wait for someone else to verify them, so they leave the list
     await expect(task(page, 'A.5.12')).toHaveCount(0);
     await expect(filters(page)).toHaveText([/All\s*2/, /Overdue\s*0/, /Due this week\s*0/, /Later\s*2/]);
@@ -60,11 +60,11 @@ test.describe('My Tasks', () => {
     const t = task(page, 'R-031');
     await expect(t).toContainText('Select a treatment: no treatment linked');
     // closing it here would drop it from the chain while the gate views still count it
-    await expect(t.locator('button')).toHaveText('Open gate item');
+    await expect(t.locator('button')).toHaveText('Open checkpoint item');
     await expect(t.locator('button', { hasText: 'Mark done' })).toHaveCount(0);
     await t.locator('button').click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items, Risk & SoA');
+    await expect(activeTab(page)).toContainText('Open checkpoint items, Risk & SoA');
     await expect(activeTab(page).locator('span').first()).toHaveText('4');
     await expect(ui.drawer(page)).toContainText('R-031');
     await expect(drawerFact(page, 'Pending action')).toHaveText('Select a treatment: no treatment linked');
@@ -80,9 +80,9 @@ test.describe('My Tasks', () => {
     await go(page, 'Overview');
     await expect(page.locator('main button[style*="grid-template-columns: 110px 1fr 220px 150px"]').filter({ hasText: 'R-031' })).toHaveCount(1);
     await go(page, 'Phase board');
-    await expect(page.locator('main')).toContainText('4 blocked, 4 open gate items.');
+    await expect(page.locator('main')).toContainText('4 blocked, 4 open checkpoint items.');
     await go(page, 'Portfolio Overview');
-    await expect(page.locator('main button[style*="grid-template-columns: 46px"]').filter({ hasText: '4 open gate items, Risk & SoA' })).toContainText('A.5.23, A.8.12, R-031, SOA-01');
+    await expect(page.locator('main button[style*="grid-template-columns: 46px"]').filter({ hasText: '4 open checkpoint items, Risk & SoA' })).toContainText('A.5.23, A.8.12, R-031, SOA-01');
     await go(page, 'My Tasks');
     await expect(tasks(page)).toHaveCount(3);
   });
@@ -94,7 +94,7 @@ test.describe('My Tasks', () => {
     await go(page, 'My Tasks');
     await expect(tasks(page)).toHaveCount(3);
     // the SoA approval holds the gate; the risk acceptance does not
-    await expect(tasks(page).filter({ hasText: 'Approve revised SoA' }).locator('button')).toHaveText('Open gate item');
+    await expect(tasks(page).filter({ hasText: 'Approve revised SoA' }).locator('button')).toHaveText('Open checkpoint item');
     await expect(task(page, 'R-022').locator('button')).toHaveText('Mark done');
     await task(page, 'R-022').locator('button').click();
     await expectToast(page, 'Item updated. After-audit flag recalculated.');
@@ -175,12 +175,12 @@ test.describe('My Tasks', () => {
   test('a control that holds a gate opens its gate item instead of being marked done', async ({ page }) => {
     await openApp(page);
     await switchRole(page, 'Domain Owner');
-    const t = tasks(page).filter({ hasText: 'Resolve the gate item for data leakage prevention' });
+    const t = tasks(page).filter({ hasText: 'Resolve the checkpoint item for data leakage prevention' });
     await expect(t).toHaveCount(1);
-    await expect(t.locator('button')).toHaveText('Open gate item');
+    await expect(t.locator('button')).toHaveText('Open checkpoint item');
     await t.locator('button').click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items');
+    await expect(activeTab(page)).toContainText('Open checkpoint items');
     await expect(ui.drawer(page)).toContainText('A.8.12');
     await expect(drawerFact(page, 'Justification')).toHaveText('-');
   });

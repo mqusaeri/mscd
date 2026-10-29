@@ -88,6 +88,8 @@ test.describe('Display settings', () => {
 
   for (const ms of SYSTEMS) {
     test(`Indonesian renders every ${ms} screen with translated titles and no leftover keys`, async ({ page }) => {
+      // It visits every screen of the system; with ten workers on a busy host that takes more than 60 s.
+      test.slow();
       await openIn(page, '?lang=id', ms);
       await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
       expect(SCREENS_ID).toHaveLength(await navFor(page, 'manager'));

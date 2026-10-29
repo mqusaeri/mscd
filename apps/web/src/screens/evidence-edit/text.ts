@@ -99,7 +99,7 @@ export const TEXT = {
   resetDefault: ['Reset to default', 'Kembalikan ke bawaan'],
   limitsSaved: ['Freshness limits of {frequency} saved', 'Batas kesegaran {frequency} disimpan'],
   limitsReset: ['Freshness limits of {frequency} back to the default', 'Batas kesegaran {frequency} kembali ke bawaan'],
-  limitsReadOnly: ['Only the MS Manager of this system changes the limits.', 'Hanya MS Manager sistem ini yang mengubah batas.'],
+  limitsReadOnly: ['Only the Management System Manager of this system changes the limits.', 'Hanya Management System Manager sistem ini yang mengubah batas.'],
   limitsLoading: ['Loading the freshness limits', 'Memuat batas kesegaran'],
   limitsFailed: ['The freshness limits could not be loaded.', 'Batas kesegaran tidak dapat dimuat.'],
   tryAgain: ['Try again', 'Coba lagi'],

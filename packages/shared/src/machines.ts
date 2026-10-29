@@ -162,14 +162,14 @@ const activity: Machine = {
     ...rows<ActivityState>(ACTIVITY, 'not_started', 'in_progress', 'activity.transition', { own: true, rules: ['BR-12'] }),
     ...rows<ActivityState>(ACTIVITY, 'not_started', 'complete', 'activity.transition', {
       own: true, rules: ['BR-12', 'BR-40'], sets: ['completed_by_user_id', 'completed_at'],
-      note: 'Two steps in one command (A.4 5.12): not_started to in_progress (BR-12, the gate lock) then in_progress to complete (BR-40); two audit entries',
+      note: 'Two steps in one command (A.4 5.12): not_started to in_progress (BR-12, the checkpoint lock) then in_progress to complete (BR-40); two audit entries',
     }),
     ...rows<ActivityState>(ACTIVITY, 'in_progress', 'complete', 'activity.transition', {
       own: true, rules: ['BR-40'], sets: ['completed_by_user_id', 'completed_at'],
     }),
     ...rows<ActivityState>(ACTIVITY, 'complete', 'verified', 'activity.verify', {
       rules: ['VERIFY-SELF'], sets: ['verified_by_user_id', 'verified_at'],
-      note: 'The verifier differs from the completer and the owner; another MS Manager or a Programme Owner verifies when the MS Manager owns the activity (A-48)',
+      note: 'The verifier differs from the completer and the owner; another Management System Manager or a Programme Owner verifies when the Management System Manager owns the activity (A-48)',
     }),
     ...rows<ActivityState>(ACTIVITY, 'complete', 'in_progress', 'activity.verify', { requires: ['rejectReason'] }),
     ...rows<ActivityState>(ACTIVITY, ['not_started', 'in_progress', 'complete'], 'blocked', 'activity.transition', {

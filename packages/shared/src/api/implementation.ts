@@ -84,7 +84,7 @@ export const ActivityTransitionRequest = named(
   }).refine((r) => r.to !== 'blocked' || (r.blockerGateItemRef !== undefined && r.blockerReason !== undefined), { message: 'blocked needs blockerGateItemRef and blockerReason', path: ['blockerGateItemRef'] }),
   'POST /ms/{ms}/activities/{id}/transitions body (C.13); rejectReason when a verifier returns a completed activity to in_progress',
   {
-    valid: [{ to: 'complete', outputDocumentCode: 'SOA-01' }, { to: 'blocked', blockerGateItemRef: 'A.8.12', blockerReason: 'Blocked by gate item A.8.12' }, { to: 'in_progress', rejectReason: 'Output not approved' }],
+    valid: [{ to: 'complete', outputDocumentCode: 'SOA-01' }, { to: 'blocked', blockerGateItemRef: 'A.8.12', blockerReason: 'Blocked by checkpoint item A.8.12' }, { to: 'in_progress', rejectReason: 'Output not approved' }],
     invalid: [{ to: 'blocked' }, { to: 'locked' }, { to: 'not_started' }],
   },
 );
@@ -112,7 +112,7 @@ export const applicabilityUpdateRoute = defineRoute({
   owner: 'WP-20',
   method: 'PATCH',
   path: '/api/v1/ms/:ms/applicability/:id',
-  summary: 'Change justifications, gate flag, note, frequency, owner, linked risks and documents of an entry',
+  summary: 'Change justifications, checkpoint flag, note, frequency, owner, linked risks and documents of an entry',
   auth: 'session',
   permission: 'applicability.manage',
   scope: 'ms',

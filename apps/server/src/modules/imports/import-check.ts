@@ -307,7 +307,7 @@ async function checkApplicability(ctx: CheckContext, people: People, seen: Map<s
       if (filler) check.warn(filler);
     }
     if (isApplicable && !risks?.length && (await ctx.rule('BR-02', { applicable: true, riskCount: 0 }))) {
-      check.warn(pair('No risk is linked yet: the new entry holds its gate until a risk is linked (BR-02).', 'Belum ada risiko yang ditautkan: entri baru menahan gerbangnya sampai risiko ditautkan (BR-02).'));
+      check.warn(pair('No risk is linked yet: the new entry blocks its checkpoint until a risk is linked (BR-02).', 'Belum ada risiko yang ditautkan: entri baru memblokir checkpoint-nya sampai risiko ditautkan (BR-02).'));
     }
     return check.done(row, code, 'create', { op: 'applicability.create', body, ...(then ? { then } : {}) });
   }

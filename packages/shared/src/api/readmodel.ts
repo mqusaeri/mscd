@@ -73,11 +73,11 @@ export const GateConsistency = named(
     flagged: z.boolean(),
     messages: z.object({ en: z.string(), id: z.string() }).optional(),
   }),
-  'BR-46 consistency of the critical gate phases: blocked activities against open gate items; flagged when they differ and the rule is active',
+  'BR-46 consistency of the critical checkpoint phases: blocked activities against open checkpoint items; flagged when they differ and the rule is active',
   {
     valid: [
       { gatePhases: [4], blockedActivities: 4, openGateItems: 4, flagged: false },
-      { gatePhases: [4], blockedActivities: 3, openGateItems: 4, flagged: true, messages: { en: 'Blocked activities and open gate items differ', id: 'Aktivitas terblokir dan butir gerbang terbuka berbeda' } },
+      { gatePhases: [4], blockedActivities: 3, openGateItems: 4, flagged: true, messages: { en: 'Blocked activities and open checkpoint items differ', id: 'Aktivitas terblokir dan item checkpoint terbuka berbeda' } },
     ],
     invalid: [{ gatePhases: [4], blockedActivities: -1, openGateItems: 4, flagged: false }, { gatePhases: [4], blockedActivities: 1, openGateItems: 4 }],
   },
@@ -95,12 +95,12 @@ export const ImplementationSummary = named(
     maturity: z.array(ClauseMaturity),
     gateConsistency: GateConsistency.optional(),
   }),
-  'GET /ms/{ms}/implementation/summary: five cards, the two evidence counts of A.4 5.13, phases with derived text, maturity per clause and, for readers with the full view of the system, the BR-46 gate consistency flag',
+  'GET /ms/{ms}/implementation/summary: five cards, the two evidence counts of A.4 5.13, phases with derived text, maturity per clause and, for readers with the full view of the system, the BR-46 checkpoint consistency flag',
   {
     valid: [{
       cards: [
         { key: 'implemented', label: 'Controls implemented', count: 61, total: 93 }, { key: 'partial', label: 'Partially implemented', count: 18 },
-        { key: 'gate_items', label: 'Gate items, Risk & SoA', count: 4 }, { key: 'documents_approved', label: 'Documents approved', count: 14, total: 22 },
+        { key: 'gate_items', label: 'Checkpoint items, Risk & SoA', count: 4 }, { key: 'documents_approved', label: 'Documents approved', count: 14, total: 22 },
         { key: 'documents_expired', label: 'Documents expired', count: 5 },
       ],
       criticalEvidence: 3, unverifiableEvidence: 3, currentPhase: 9, phases: [], maturity: [{ clause: 4, readiness: 100, dimensions: [4, 4, 4, 4] }],
@@ -163,7 +163,7 @@ export const GateItemView = named(
   z.object({
     id: z.string(), type: z.string(), why: z.string(), holder: PersonId, due: IsoDate.nullable(), key: z.string(), ref: RecordRef, affected: z.array(RecordRef),
   }),
-  'Gate item with the records it holds back (activities of the gate phase)',
+  'Checkpoint item with the records it holds back (activities of the checkpoint phase)',
   {
     valid: [{ id: 'A.8.12', type: 'Control', why: 'Justification missing', holder: 'dewi', due: null, key: 'req:A.8.12', ref: { ...EXAMPLE_REF, entityType: 'applicability_entry', code: 'A.8.12' }, affected: [] }],
     invalid: [{ id: 'A.8.12', type: ['Control', 'Kontrol'], why: 'x', holder: 'dewi', due: null, key: 'req:A.8.12', ref: EXAMPLE_REF, affected: [] }],
@@ -447,7 +447,7 @@ export const readDocumentsRoute = defineRoute({
 
 export const readGatesRoute = defineRoute({
   ...read, id: 'readmodel.gates', path: '/api/v1/ms/:ms/gates',
-  summary: 'Gate items with the records they hold back',
+  summary: 'Checkpoint items with the records they hold back',
   params: MsParams, response: z.array(GateItemView), errors: [404],
 });
 

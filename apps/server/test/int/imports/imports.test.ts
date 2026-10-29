@@ -309,7 +309,7 @@ describe('bulk import (M2-08)', () => {
     await inOrg(db, 'tst', (trx) => sql`update applicability_entry set deleted_at = now() where id = ${last!.id}`.execute(trx));
     const created = await importFile(full, rina, 'isms', 'applicability', 'new-entry.csv', csvOf(['ID', 'Owner', 'Justification', 'Status note'], [[last!.code, 'bagus', 'Needed for the new data centre', 'Planned for Q1']]));
     expect(created.checked.results[0]).toMatchObject({ action: 'create', status: 'warning' });
-    expect(created.checked.results[0]!.messages[0]!.en).toContain('holds its gate');
+    expect(created.checked.results[0]!.messages[0]!.en).toContain('blocks its checkpoint');
     expect(created.done).toMatchObject({ status: 'committed', summary: { created: 1, updated: 0, unchanged: 0 } });
     expect(await entry(last!.code)).toMatchObject({ inclusion: 'Needed for the new data centre', owner: 'bagus', status: 'not_started', note: 'Planned for Q1' });
   });

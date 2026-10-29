@@ -19,9 +19,9 @@ test.describe('Overview', () => {
     await expect(cells.nth(4)).toHaveAttribute('title', 'Optimised');
     await expect(clause(page, 10)).toContainText('3 open');
     await expect(clause(page, 10)).toContainText('2.0');
-    await expect(page.locator('main')).toContainText('Next gate: Risk assessment & SoA, 4 items');
+    await expect(page.locator('main')).toContainText('Next checkpoint: Risk assessment & SoA, 4 items');
     await switchMs(page, 'ABMS');
-    await expect(page.locator('main')).toContainText('Next gate: Bribery risk assessment, 1 item');
+    await expect(page.locator('main')).toContainText('Next checkpoint: Bribery risk assessment, 1 item');
     await expect(page.locator('main')).not.toContainText('1 items');
     await switchMs(page, 'ISMS');
     await expect(page.locator('main')).toContainText('Scale 0 to 4, average of four dimensions');
@@ -71,7 +71,7 @@ test.describe('Overview', () => {
     await go(page, 'Overview');
     await expect(phases(page)).toHaveCount(9);
     await expect(phases(page).nth(3)).toContainText('Risk assessment & SoA');
-    await expect(phases(page).nth(3)).toContainText('GATE');
+    await expect(phases(page).nth(3)).toContainText('CHECKPOINT');
     await expect(phases(page).nth(3)).toContainText('4 blocked');
     await expect(phases(page).nth(0)).toContainText('Verified');
     await expect(phases(page).nth(8)).toContainText('4 / 7');
@@ -93,7 +93,7 @@ test.describe('Overview', () => {
     await expect(blockers(page).nth(4)).toContainText('Overdue 113d');
     await blockers(page).nth(2).click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items, Risk & SoA');
+    await expect(activeTab(page)).toContainText('Open checkpoint items, Risk & SoA');
     await expect(listRows(page)).toHaveCount(4);
     await go(page, 'Overview');
     await blockers(page).nth(4).click();

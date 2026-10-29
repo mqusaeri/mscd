@@ -56,12 +56,12 @@ test.describe('Management systems @sample-only', () => {
     await expect(drawer(page)).toHaveCount(0);
     await expect(row(page, 'ISMS2')).toContainText('Setup');
     await expect(row(page, 'ISMS2')).toContainText('Not assigned');
-    await expect(page.locator('main')).toContainText('Grant the MS Manager role (primary) in People and roles before the system starts implementing.');
+    await expect(page.locator('main')).toContainText('Grant the Management System Manager role (primary) in People and roles before the system starts implementing.');
 
     await row(page, 'ISMS2').locator('button', { hasText: 'Start implementation' }).click();
     await expect(dialog(page)).toContainText('ISMS2 moves from setup to implementing.');
     await dialog(page).locator('button', { hasText: 'Start implementation' }).click();
-    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one MS Manager before the system moves to implementing.');
+    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one Management System Manager before the system moves to implementing.');
     await expectOverlayReadable(page);
     await dialog(page).locator('button', { hasText: 'Cancel' }).click();
     await expect(row(page, 'ISMS2')).toContainText('Setup');

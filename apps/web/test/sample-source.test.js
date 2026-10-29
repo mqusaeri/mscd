@@ -27,11 +27,21 @@ function localise(b, lang) {
     phases: b.phases,
   };
 }
+// M2-17 renamed the displayed word "gate" to "checkpoint" (product decision 10). The oracle keeps the lines it was
+// copied with, so its one text with the old word is translated here.
+const RENAMED = [['Resolve gate item', 'Resolve checkpoint item'], ['Selesaikan item gate', 'Selesaikan item checkpoint']];
+const renamed = (s) => (typeof s === 'string' ? RENAMED.reduce((t, [from, to]) => t.split(from).join(to), s) : s);
 // What the controller derived before WP-07 from the same override store.
 function legacyBundle(msId, lang, ov) {
   const c = new LegacyController(SAMPLE, lang, ov);
   const d = c.data(SAMPLE.MS.find((m) => m.id === msId));
-  return { reqs: d.reqs, docs: d.docs, evs: d.evs, chain: c.chain(d), gates: c.gateItems(d), phases: c.phases(d) };
+  const chain = c.chain(d);
+  return {
+    reqs: d.reqs, docs: d.docs, evs: d.evs,
+    chain: { ...chain, items: chain.items.map((i) => ({ ...i, act: renamed(i.act) })) },
+    gates: c.gateItems(d).map((g) => ({ ...g, why: renamed(g.why) })),
+    phases: c.phases(d),
+  };
 }
 // The fields WP-07 added to replace hard-coded switches (H.3) are compared separately.
 const normDoc = ({ approver, path: p, hashAlg, ...rest }) => rest;

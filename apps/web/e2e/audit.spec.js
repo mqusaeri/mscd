@@ -42,7 +42,7 @@ test.describe('Audit readiness', () => {
   });
 
   for (const [id, ids, colors, text] of [
-    ['R-022', ['CI-05', 'R-022', 'T-022', 'A.5.23', 'A.5.23', 'POL-14', '-', 'M-03'], [OK, WARN, OK, BAD, BAD, OK, BAD, OK], '3 break points: Control A.5.23: Resolve gate item: justification missing'],
+    ['R-022', ['CI-05', 'R-022', 'T-022', 'A.5.23', 'A.5.23', 'POL-14', '-', 'M-03'], [OK, WARN, OK, BAD, BAD, OK, BAD, OK], '3 break points: Control A.5.23: Resolve checkpoint item: justification missing'],
     ['R-031', ['CI-03', 'R-031', 'T-031', 'A.8.8', 'A.8.8', 'PRC-10', 'EV-0298', 'M-07'], [OK, WARN, BAD, WARN, WARN, OK, BAD, BAD], '3 break points: Risk treatment T-031: Assign owner and plan treatment (Unassigned)'],
     ['R-003', ['CI-01', 'R-003', 'T-003', 'A.5.15', 'A.5.15', 'PRC-07', 'EV-0142', 'M-02'], [OK, OK, OK, OK, OK, BAD, OK, OK], '1 break point: Document PRC-07: Start review: review date passed'],
   ]) {

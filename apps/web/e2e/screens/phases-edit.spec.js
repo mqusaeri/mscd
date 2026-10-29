@@ -36,7 +36,7 @@ test.describe('Activity forms @sample-only', () => {
     await openRow(page, '9.4');
     await expect(panel(page)).toHaveCount(0);
     await drawerAction(page, 'Record blocker').click();
-    await expectToast(page, 'Blocker recorded and linked to the gate item');
+    await expectToast(page, 'Blocker recorded and linked to the checkpoint item');
     await expect(ui.modal(page)).toHaveCount(0);
   });
 

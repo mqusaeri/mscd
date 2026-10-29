@@ -35,7 +35,7 @@ test.describe('Getting started @sample-only', () => {
     const url = new URL(href.replace('mailto:', 'mailto://'));
     expect(url.searchParams.get('subject')).toBe('MSCD: Plan the Stage 1 and Stage 2 audits for QMS, ISO 9001');
     expect(url.searchParams.get('body')).toContain('Hello Sari Wulandari,');
-    await expect(page.locator('main')).toContainText('For the management system manager');
+    await expect(page.locator('main')).toContainText('For the Management System Manager');
     await expect(page.locator('main')).toContainText('Assigned to Sari Wulandari');
   });
 
@@ -54,7 +54,7 @@ test.describe('Getting started @sample-only', () => {
       const main = page.locator('main');
       await expect(main.locator('h1')).toHaveText('Mulai di sini');
       await expect(main.locator('.mx-gs-progress')).toHaveText(/^\d+ dari \d+ langkah selesai$/);
-      await expect(main).toContainText('Untuk manajer sistem manajemen');
+      await expect(main).toContainText('Untuk Management System Manager');
       await expect(main.locator('a[href^="mailto:"]').first()).toContainText('Kirim email ke');
       await page.waitForTimeout(1300);
       await expectReadableText(page, 4.5);

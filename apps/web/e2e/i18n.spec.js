@@ -10,8 +10,9 @@ const TAB_SCREENS = [2, 6, 9];
 // Labels that are the same word in Indonesian, product and feature names, and storage mode names.
 const SAME = new Set([
   'Status', 'Audit', 'No.', 'Minor', 'Beta', 'item', 'SoA',
-  // the Indonesian interface uses "gate" as its term throughout (Item gate terbuka, Menahan gate)
-  'GATE',
+  // the Indonesian interface uses the English words "Checkpoint" (Item checkpoint terbuka, Memblokir checkpoint) and
+  // "Management System Manager" (product decision 10 of CLAUDE.md)
+  'CHECKPOINT', 'Management System Manager',
   'Golden Thread Viewer', 'Tera', 'Link', 'Upload', 'Zero-transit', 'Pass-through',
   'SaaS, region Jakarta',
 ]);
@@ -25,7 +26,9 @@ const DATA = new Set([
 ]);
 // IDs, codes, versions, dates, numbers and all-capital abbreviations (ISMS, MSCD, EN, ID, initials).
 const CODE = /^(?:[A-Z][A-Za-z]{0,4}[-.]\s?[A-Z]?\d|Cl\. ?\d|ISO|v\d|rev \d|\d|[A-Z]{2,5}$)/;
-const allowed = (s) => SAME.has(s) || DATA.has(s) || CODE.test(s);
+const one = (s) => SAME.has(s) || DATA.has(s) || CODE.test(s);
+// A label made of allowed parts, such as the role and job title of the top bar ("Management System Manager, ISMS Manager").
+const allowed = (s) => one(s) || (s.includes(', ') && s.split(', ').every(one));
 
 // Interface labels on screen: header and sidebar text and tooltips, table headers, button labels
 // (the tooltip of icon-only buttons), summary tab labels, drawer fact keys and the modal.
@@ -109,6 +112,8 @@ async function walkHost(page, meta, query) {
 test.describe('Indonesian interface', () => {
   for (const ms of SYSTEMS) {
     test(`no ${ms} interface label stays in English`, async ({ page }) => {
+      // It walks every screen twice (English, then Indonesian); with ten workers on a busy host that takes more than 60 s.
+      test.slow();
       const en = await walk(page, '', ms, SCREENS);
       const id = await walk(page, '?lang=id', ms, SCREENS_ID);
       expect([...id.keys()]).toEqual([...en.keys()]);
@@ -122,6 +127,7 @@ test.describe('Indonesian interface', () => {
 
   // Host screens (MILESTONE-2 C.2, C.7) as the persona of their meta.json, with the dialogs of their page actions.
   test('no host screen label stays in English', { tag: '@sample-only' }, async ({ page }) => {
+    test.slow();
     const untranslated = [];
     for (const meta of HOST_METAS) {
       const en = await walkHost(page, meta, '');
@@ -155,7 +161,7 @@ test.describe('Indonesian interface', () => {
     await expect(page.locator('aside')).toContainText('Organisasi');
     await expect(page.locator('aside')).toContainText('Surveilans');
     await expect(page.locator('aside')).toContainText('Paket framework');
-    await expect(page.locator('header')).toContainText('Manajer SM, ISMS Manager');
+    await expect(page.locator('header')).toContainText('Management System Manager, ISMS Manager');
     await expect(page.locator('aside button[title="Ciutkan"]')).toHaveCount(1);
     await expect(page.locator('header button[title="Tema"]')).toHaveCount(1);
   });

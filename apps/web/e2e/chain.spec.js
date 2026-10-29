@@ -97,7 +97,7 @@ test.describe('Chain stages', () => {
     await expect(listRows(page)).toHaveCount(3);
     await search(page, 'Fajar after');
     await expect(listRows(page)).toHaveCount(0);
-    await search(page, 'gate');
+    await search(page, 'checkpoint');
     await expect(ids(page)).toHaveText(['A.5.23', 'A.8.12']);
     await search(page, '');
     await expectShown(page, 28);

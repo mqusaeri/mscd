@@ -119,7 +119,7 @@ export function createSampleAdapter(getD: () => ControllerData | null): SystemsA
       if (system.status === 'archived') return conflict('The management system is archived; its data stays stored but no longer changes', 'Sistem manajemen telah diarsipkan; datanya tetap tersimpan tetapi tidak lagi berubah');
       if (body.status === 'implementing') {
         if (system.status !== 'setup') return conflict(`The system is ${system.status}`, `Sistem berstatus ${system.status}`);
-        if (!system.primaryManager) return conflict('Assign at least one MS Manager before the system moves to implementing.', 'Tetapkan minimal satu Manajer SM sebelum sistem berpindah ke tahap implementasi.');
+        if (!system.primaryManager) return conflict('Assign at least one Management System Manager before the system moves to implementing.', 'Tetapkan minimal satu Management System Manager sebelum sistem berpindah ke tahap implementasi.');
       }
       if (body.status === 'archived' && system.status === 'implementing' && system.slug === 'bcms') {
         return conflict('Close the active certification cycle before archiving the system.', 'Tutup siklus sertifikasi yang aktif sebelum mengarsipkan sistem.');

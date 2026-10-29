@@ -16,18 +16,18 @@ test.describe('Portfolio Overview', () => {
     await expect(groups.nth(2)).toContainText(/Housekeeping\s*6/);
     await expect(attention(page)).toHaveCount(12);
     await expect(groups.nth(0).locator('button')).toHaveText([
-      /ISMS.*4 open gate items, Risk & SoA.*A\.5\.23, A\.8\.12, R-031, SOA-01/,
-      /BCMS.*3 open gate items, BIA & Risk Assessment/,
-      /ABMS.*1 open gate item, Bribery Risk Assessment/,
+      /ISMS.*4 open checkpoint items, Risk & SoA.*A\.5\.23, A\.8\.12, R-031, SOA-01/,
+      /BCMS.*3 open checkpoint items, BIA & Risk Assessment/,
+      /ABMS.*1 open checkpoint item, Bribery Risk Assessment/,
       /BCMS.*Repository connector degraded, Google Shared Drive/,
     ]);
   });
 
   // Every attention item opens the screen, management system and filter that explain it.
   const TARGETS = [
-    { item: '4 open gate items, Risk & SoA', title: 'Controls & requirements', ms: 'ISMS', tab: 'Open gate items, Risk & SoA', rows: 4 },
-    { item: '3 open gate items, BIA & Risk Assessment', title: 'Controls & requirements', ms: 'BCMS', tab: 'Open gate items, BIA & Risk Assessment', rows: 3 },
-    { item: '1 open gate item, Bribery Risk Assessment', title: 'Controls & requirements', ms: 'ABMS', tab: 'Open gate items, Bribery Risk Assessment', rows: 1 },
+    { item: '4 open checkpoint items, Risk & SoA', title: 'Controls & requirements', ms: 'ISMS', tab: 'Open checkpoint items, Risk & SoA', rows: 4 },
+    { item: '3 open checkpoint items, BIA & Risk Assessment', title: 'Controls & requirements', ms: 'BCMS', tab: 'Open checkpoint items, BIA & Risk Assessment', rows: 3 },
+    { item: '1 open checkpoint item, Bribery Risk Assessment', title: 'Controls & requirements', ms: 'ABMS', tab: 'Open checkpoint items, Bribery Risk Assessment', rows: 1 },
     { item: 'Repository connector degraded, Google Shared Drive', title: 'Storage repositories', ms: 'BCMS' },
     { item: 'Surveillance audit 1 in 44 days', title: 'Chain stages', ms: 'ISMS' },
     { item: 'Recertification & ISO 9001:2026 transition audit in 65 days', title: 'Chain stages', ms: 'QMS' },
@@ -100,14 +100,14 @@ test.describe('Portfolio Overview', () => {
 
   // Each stat number equals the length of the list it opens.
   const STATS = [
-    { ms: 'ISMS', stat: 'Open gate items', n: 4, title: 'Controls & requirements', tab: 'Open gate items, Risk & SoA' },
+    { ms: 'ISMS', stat: 'Open checkpoint items', n: 4, title: 'Controls & requirements', tab: 'Open checkpoint items, Risk & SoA' },
     { ms: 'ISMS', stat: 'Open findings', n: 3, title: 'Audit readiness' },
     { ms: 'ISMS', stat: 'Documents expired', n: 5, title: 'Controls & requirements', tab: 'Documents expired' },
     { ms: 'ISMS', stat: 'Critical evidence', n: 3, title: 'Evidence freshness', tab: 'Critical' },
-    { ms: 'QMS', stat: 'Open gate items', n: 0, title: 'Controls & requirements', tab: 'Open gate items, Risk & Opportunity + Process Map' },
+    { ms: 'QMS', stat: 'Open checkpoint items', n: 0, title: 'Controls & requirements', tab: 'Open checkpoint items, Risk & Opportunity + Process Map' },
     { ms: 'QMS', stat: 'Open findings', n: 2, title: 'Audit readiness' },
     { ms: 'QMS', stat: 'Documents expired', n: 1, title: 'Controls & requirements', tab: 'Documents expired' },
-    { ms: 'BCMS', stat: 'Open gate items', n: 3, title: 'Controls & requirements', tab: 'Open gate items, BIA & Risk Assessment' },
+    { ms: 'BCMS', stat: 'Open checkpoint items', n: 3, title: 'Controls & requirements', tab: 'Open checkpoint items, BIA & Risk Assessment' },
     { ms: 'ABMS', stat: 'Critical evidence', n: 0, title: 'Evidence freshness', tab: 'Critical' },
   ];
   for (const s of STATS) {
@@ -144,7 +144,7 @@ test.describe('Portfolio Overview', () => {
     await rows.nth(2).locator('button', { hasText: 'BIA-03' }).click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
     await expect(ui.msSwitch(page)).toContainText('BCMS');
-    await expect(activeTab(page)).toContainText('Open gate items, BIA & Risk Assessment');
+    await expect(activeTab(page)).toContainText('Open checkpoint items, BIA & Risk Assessment');
     await page.locator('aside nav button[title="Portfolio Overview"]').click();
     await page.locator('main table tbody > tr').nth(1).locator('button', { hasText: 'QMS, Quality management system' }).click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');

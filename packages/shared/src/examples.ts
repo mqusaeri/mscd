@@ -95,7 +95,7 @@ export const EXAMPLE_ORG_SNAPSHOT = {
   orgs: [EXAMPLE_ORGANISATION],
   MS: [EXAMPLE_MS],
   PEOPLE: { rina: ['Rina Kusuma', 'ISMS Manager'], bagus: ['Bagus Prasetyo', 'IT Infrastructure Lead'], none: ['Unassigned', '-'] },
-  ROLES: { manager: { who: 'rina', label: ['MS Manager', 'Manajer SM'] } },
+  ROLES: { manager: { who: 'rina', label: ['Management System Manager', 'Management System Manager'] } },
   LOC: { sp: ['SharePoint Online', 'sp', 'SharePoint'], gd: ['Google Shared Drive', 'gd', 'Google Drive'] },
   REPOS: [EXAMPLE_REPO],
   ROUTING: [['BCMS', 'Google Shared Drive', 'Zero-transit', ['Internal to Link', 'Internal ke Link']]],

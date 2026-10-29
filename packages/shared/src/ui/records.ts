@@ -260,7 +260,7 @@ export type ChainItem = z.infer<typeof ChainItem>;
 export const GateItem = named(
   'GateItem',
   z.object({ id: z.string(), type: Pair, why: Pair, h: PersonId, due: IsoDate.nullable(), key: z.string() }),
-  'Gate item holding the critical gate (UI 2.4, A-27); type is a pair and the controller applies li() (G.5)',
+  'Checkpoint item holding the critical checkpoint (UI 2.4, A-27); type is a pair and the controller applies li() (G.5)',
   {
     valid: [EXAMPLE_GATE_ITEM, { id: 'R-031', type: ['Risk', 'Risiko'], why: ['Select a treatment', 'Select a treatment'], h: 'rina', due: '2026-10-20', key: 'x:R-031' }],
     invalid: [{ ...EXAMPLE_GATE_ITEM, type: 'Control' }, { ...EXAMPLE_GATE_ITEM, due: 'soon' }],

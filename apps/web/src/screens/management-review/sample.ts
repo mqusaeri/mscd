@@ -75,7 +75,7 @@ function seed(D: ControllerData | null): SampleReview[] {
     const contents: Record<string, string> = {};
     for (const [code, title] of INPUT_DEFS[s.ms] ?? []) {
       if (s.missing === 'all' || s.missing.includes(code)) continue;
-      contents[`${s.ms}:${code}`] = `${title}: summary prepared by the MS Manager for ${s.code}.`;
+      contents[`${s.ms}:${code}`] = `${title}: summary prepared by the Management System Manager for ${s.code}.`;
     }
     return {
       id: `review-${s.code}`, code: s.code, title: s.title, owner: 'hendra', plannedAt: s.plannedAt, heldAt: s.heldAt, status: s.status,

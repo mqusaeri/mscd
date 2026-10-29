@@ -35,14 +35,14 @@ export const UNASSIGNED: Pair = ['Unassigned', 'Belum ditugaskan'];
 export const CARD_LABELS = {
   implemented: { ctrl: ['Controls implemented', 'Kontrol diimplementasikan'], req: ['Requirements implemented', 'Persyaratan diimplementasikan'] },
   partial: ['Partially implemented', 'Diimplementasikan sebagian'],
-  gateItems: ['Gate items', 'Item gate'],
+  gateItems: ['Checkpoint items', 'Item checkpoint'],
   documentsApproved: ['Documents approved', 'Dokumen disetujui'],
   documentsExpired: ['Documents expired', 'Dokumen kedaluwarsa'],
 } as const satisfies Record<string, Pair | Record<'ctrl' | 'req', Pair>>;
 
 /** Derived text of a phase (UI 2.7 counts): `<verified> of <total> verified`, then the blocked, locked and open parts. */
 export function phaseText(c: { verified: number; complete: number; progress: number; blocked: number; ns: number; locked: number }, total: number, lang: Lang): string {
-  if (total > 0 && c.locked === total) return lang === 'id' ? 'Terkunci sampai gate sebelumnya lolos' : 'Locked until the previous gate passes';
+  if (total > 0 && c.locked === total) return lang === 'id' ? 'Terkunci sampai checkpoint sebelumnya lolos' : 'Locked until the previous checkpoint passes';
   const parts = [lang === 'id' ? `${c.verified} dari ${total} terverifikasi` : `${c.verified} of ${total} verified`];
   if (c.complete) parts.push(lang === 'id' ? `${c.complete} menunggu verifikasi` : `${c.complete} awaiting verification`);
   if (c.blocked) parts.push(lang === 'id' ? `${c.blocked} terblokir` : `${c.blocked} blocked`);
@@ -56,7 +56,7 @@ export const REQ_STATUS_LABELS: Readonly<Record<ReqStatus, Pair>> = {
   partial: ['Partially implemented', 'Diimplementasikan sebagian'],
   planned: ['Planned', 'Direncanakan'],
   ns: ['Not started', 'Belum dimulai'],
-  blocked: ['Blocked: gate item open', 'Terblokir: item gate terbuka'],
+  blocked: ['Blocked: checkpoint item open', 'Terblokir: item checkpoint terbuka'],
   na: ['Not applicable', 'Tidak berlaku'],
   complete: ['Complete, awaiting verification', 'Selesai, menunggu verifikasi'],
 };

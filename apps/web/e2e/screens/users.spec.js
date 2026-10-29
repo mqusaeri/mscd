@@ -27,7 +27,7 @@ test.describe('People and roles @sample-only', () => {
     await expect(main.locator('h1')).toHaveText('People and roles');
     await expect(main).toContainText('2 role grants are waiting for the approval of a second Tenant Admin.');
     await expect(rows(page)).toHaveCount(12);
-    await expect(row(page, 'Sari Wulandari')).toContainText('MS Manager in QMS, primary');
+    await expect(row(page, 'Sari Wulandari')).toContainText('Management System Manager in QMS, primary');
     await expect(row(page, 'Rina Kusuma')).toContainText('You');
     await expect(row(page, 'Rina Kusuma')).toContainText('Tenant Admin');
     await expect(row(page, 'Yusuf Rahman')).toContainText('Risk Owner in ISMS');
@@ -117,7 +117,7 @@ test.describe('People and roles @sample-only', () => {
     await expect(dialog(page)).toContainText('Open items held in ISMS');
     await expect(dialog(page).locator('[data-holdings="isms"]')).toContainText(/\d+ open items/);
     await expect(dialog(page).locator('[data-holdings="isms"]')).toContainText('Evidence:');
-    await expect(dialog(page)).toContainText('Primary MS Manager: Rina Kusuma (rina.kusuma@nusantaradigital.co.id)');
+    await expect(dialog(page)).toContainText('Primary Management System Manager: Rina Kusuma (rina.kusuma@nusantaradigital.co.id)');
     await expectOverlayReadable(page);
     await dialog(page).locator('button', { hasText: 'Open Handover' }).click();
     await expect(page.locator('main h1')).toHaveText('Handover');
@@ -157,7 +157,7 @@ test.describe('People and roles @sample-only', () => {
     await drawer(page).locator('button', { hasText: /^Disable$/ }).click();
     await expect(dialog(page)).toContainText('Disable Bagus Prasetyo');
     await expect(dialog(page).locator('[data-holdings]')).toHaveCount(2);
-    await expect(dialog(page).locator('[data-holdings="bcms"]')).toContainText('Primary MS Manager: Tono Hartono');
+    await expect(dialog(page).locator('[data-holdings="bcms"]')).toContainText('Primary Management System Manager: Tono Hartono');
     await expectOverlayReadable(page);
     const confirm = dialog(page).locator('button', { hasText: /^Disable$/ });
     await expect(confirm).toBeDisabled();
@@ -203,7 +203,7 @@ test.describe('People and roles @sample-only', () => {
     expect(download.suggestedFilename()).toMatch(/^roles-and-responsibilities-ndt-\d{4}-\d{2}-\d{2}\.csv$/);
     const lines = (await readFile(await download.path(), 'utf8')).replace(/^﻿/, '').split('\r\n');
     expect(lines[0]).toBe('Person,Email,Role,System,Primary,Granted by,Since,Valid until');
-    expect(lines).toContain('Sari Wulandari,sari.wulandari@nusantaradigital.co.id,MS Manager,QMS,Yes,Rina Kusuma,2026-02-02,');
+    expect(lines).toContain('Sari Wulandari,sari.wulandari@nusantaradigital.co.id,Management System Manager,QMS,Yes,Rina Kusuma,2026-02-02,');
     expect(lines).toContain('Rina Kusuma,rina.kusuma@nusantaradigital.co.id,Tenant Admin,Whole organisation,,,,');
     expect(lines.some((l) => l.startsWith('Yusuf Rahman') && l.includes('Risk Owner'))).toBe(false);
     await expectToast(page, 'Roles and responsibilities exported (CSV)');
@@ -212,7 +212,7 @@ test.describe('People and roles @sample-only', () => {
   for (const theme of ['light', 'dark']) {
     test(`the forms are readable in Indonesian, ${theme} theme`, async ({ page }) => {
       await openScreen(page, meta, `lang=id&theme=${theme}`);
-      await expect(row(page, 'Sari Wulandari')).toContainText('Manajer SM di QMS, utama');
+      await expect(row(page, 'Sari Wulandari')).toContainText('Management System Manager di QMS, utama');
       await ui.pageAction(page, 'Undang orang').click();
       await expect(dialog(page)).toContainText('Undang seseorang');
       await expectOverlayReadable(page);

@@ -71,7 +71,7 @@ export const Me = named(
     valid: [
       EXAMPLE_ME,
       { ...EXAMPLE_ME, pendingMemberships: [{ org: 'bsd', name: 'PT Bank Sentosa Digital', invitedBy: 'Andi Wijaya', invitedAt: '2026-10-20T03:00:00Z' }] },
-      { ...EXAMPLE_ME, personas: { manager: { who: 'rina', label: ['MS Manager', 'Manajer SM'] }, owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] } } },
+      { ...EXAMPLE_ME, personas: { manager: { who: 'rina', label: ['Management System Manager', 'Management System Manager'] }, owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] } } },
       { ...EXAMPLE_ME, org: null, orgs: [], rolesByMs: {}, uiRoleByMs: {}, adminRoles: [], platformRoles: ['platform_operator'], permissions: { org: ['ops.read'], ms: {} } },
     ],
     invalid: [

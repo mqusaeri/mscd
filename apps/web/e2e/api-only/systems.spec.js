@@ -67,7 +67,7 @@ test.describe('Management systems against the api @api-only', () => {
 
     await row(page, 'ISMS2').locator('button', { hasText: 'Start implementation' }).click();
     await dialog(page).locator('button', { hasText: 'Start implementation' }).click();
-    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one MS Manager before the system moves to implementing.');
+    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one Management System Manager before the system moves to implementing.');
     await expectOverlayReadable(page);
     await dialog(page).locator('button', { hasText: 'Cancel' }).click();
 
@@ -108,7 +108,7 @@ test.describe('Management systems against the api @api-only', () => {
     // The refusal of Start implementation in the dark theme: QMS has no MS Manager yet.
     await row(page, 'QMS').locator('button', { hasText: 'Start implementation' }).click();
     await dialog(page).locator('button', { hasText: 'Start implementation' }).click();
-    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one MS Manager before the system moves to implementing.');
+    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Assign at least one Management System Manager before the system moves to implementing.');
     await expectOverlayReadable(page);
     await dialog(page).locator('button', { hasText: 'Cancel' }).click();
     await expect(dialog(page)).toHaveCount(0);

@@ -17,7 +17,7 @@ export const TEXT = {
   colActions: ['Actions', 'Tindakan'],
   toEdition: ['in transition to {edition}', 'dalam transisi ke {edition}'],
   noManager: ['Not assigned', 'Belum ditetapkan'],
-  noManagerHint: ['Grant the MS Manager role (primary) in People and roles before the system starts implementing.', 'Berikan peran MS Manager (utama) di Orang dan peran sebelum sistem mulai implementasi.'],
+  noManagerHint: ['Grant the Management System Manager role (primary) in People and roles before the system starts implementing.', 'Berikan peran Management System Manager (utama) di Orang dan peran sebelum sistem mulai implementasi.'],
   managerUnknown: ['Not shown', 'Tidak ditampilkan'],
   statusSetup: ['Setup', 'Persiapan'],
   statusImplementing: ['Implementing', 'Implementasi'],
@@ -64,7 +64,7 @@ export const TEXT = {
   started: ['{code} is implementing', '{code} sedang implementasi'],
   archived: ['{code} archived', '{code} diarsipkan'],
   startTitle: ['Start implementation', 'Mulai implementasi'],
-  startBody: ['{code} moves from setup to implementing. Its MS Manager then works on the entries, documents and phases.', '{code} berpindah dari persiapan ke implementasi. MS Manager-nya kemudian mengerjakan entri, dokumen dan fase.'],
+  startBody: ['{code} moves from setup to implementing. Its Management System Manager then works on the entries, documents and phases.', '{code} berpindah dari persiapan ke implementasi. Management System Manager-nya kemudian mengerjakan entri, dokumen dan fase.'],
   archiveTitle: ['Archive management system', 'Arsipkan sistem manajemen'],
   archiveBody: ['{code} keeps its data, but nothing in it changes any more. Archiving cannot be undone on screen.', '{code} tetap menyimpan datanya, tetapi tidak ada lagi yang berubah. Pengarsipan tidak dapat dibatalkan di layar.'],
 
@@ -85,7 +85,7 @@ export const TEXT = {
 
   teraWhat: ['The management systems of your organisation: which standard and edition each follows, its scope, its primary manager and where its files go.', 'Sistem manajemen organisasi Anda: standar dan edisi yang diikuti, lingkupnya, manajer utamanya dan tujuan berkasnya.'],
   teraHow1: ['Use New management system to start a system on an installed standard', 'Gunakan Sistem manajemen baru untuk memulai sistem pada standar yang terpasang'],
-  teraHow2: ['Grant the MS Manager role, then use Start implementation', 'Berikan peran MS Manager, lalu gunakan Mulai implementasi'],
+  teraHow2: ['Grant the Management System Manager role, then use Start implementation', 'Berikan peran Management System Manager, lalu gunakan Mulai implementasi'],
   teraHow3: ['Use Edit to change the scope, certification body, colour or default repository', 'Gunakan Ubah untuk mengganti lingkup, lembaga sertifikasi, warna atau repositori bawaan'],
 } as const satisfies Record<string, readonly [string, string]>;
 

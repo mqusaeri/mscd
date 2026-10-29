@@ -31,7 +31,7 @@ export const TEXT = {
     'Guest access created, valid {n} days. The link was emailed to {email}.',
     'Akses tamu dibuat, berlaku {n} hari. Tautan dikirim ke email {email}.',
   ],
-  noGrantRight: ['Only the MS Manager of this system grants auditor access.', 'Hanya MS Manager sistem ini yang memberi akses auditor.'],
+  noGrantRight: ['Only the Management System Manager of this system grants auditor access.', 'Hanya Management System Manager sistem ini yang memberi akses auditor.'],
 
   colEmail: ['Email', 'Alamat email'],
   colCreated: ['Created', 'Dibuat'],

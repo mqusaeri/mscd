@@ -23,14 +23,14 @@ test.describe('Phase board', () => {
     await expect(steps(page)).toHaveCount(9);
     await expect(steps(page).locator('span[class]')).toHaveText(['✓', '✓', '✓', '4', '✓', '✓', '✓', '✓', '9']);
     await expect(current(page)).toContainText('4. Risk assessment & SoA');
-    await expect(current(page)).toContainText('GATE');
+    await expect(current(page)).toContainText('CHECKPOINT');
     await expect(current(page)).toContainText('4 blocked');
     expect(await counts(page)).toEqual(['6 Verified', '0 Complete, awaiting verification', '0 In progress', '4 Blocked', '0 Not started']);
-    await expect(bannerText(page)).toHaveText('Critical gate: every activity must be Verified before the next phase opens. 4 blocked, 4 open gate items. Open gate items');
+    await expect(bannerText(page)).toHaveText('Critical checkpoint: every activity must be Verified before the next phase opens. 4 blocked, 4 open checkpoint items. Open checkpoint items');
     await expect(listRows(page)).toHaveCount(10);
     await expect(statusCol(page)).toHaveText(['Verified', 'Verified', 'Verified', 'Verified', 'Blocked', 'Blocked', 'Verified', 'Verified', 'Blocked', 'Blocked']);
     await expect(listRow(page, '4.5')).toContainText('Blocked by A.8.12');
-    await expect(listRow(page, '4.5')).toContainText('Resolve gate item A.8.12');
+    await expect(listRow(page, '4.5')).toContainText('Resolve checkpoint item A.8.12');
   });
 
   test('stepper labels are cut at a word boundary and keep the full name in the title', async ({ page }) => {
@@ -52,7 +52,7 @@ test.describe('Phase board', () => {
     await step(page, 'Improvement & audit readiness').click();
     await expect(current(page)).toContainText('9. Improvement & audit readiness');
     await expect(current(page)).toContainText('In progress');
-    await expect(current(page)).not.toContainText('GATE');
+    await expect(current(page)).not.toContainText('CHECKPOINT');
     expect(await counts(page)).toEqual(['4 Verified', '0 Complete, awaiting verification', '2 In progress', '0 Blocked', '1 Not started']);
     await expect(listRows(page)).toHaveCount(7);
     await expect(statusCol(page)).toHaveText(['Verified', 'Verified', 'Verified', 'In progress', 'Verified', 'In progress', 'Not started']);
@@ -80,11 +80,11 @@ test.describe('Phase board', () => {
     await expectToast(page, 'Phase 1 is already verified');
   });
 
-  test('gate banner link opens the open gate items', async ({ page }) => {
+  test('gate banner link opens the open checkpoint items', async ({ page }) => {
     await openPhases(page);
-    await banner(page).locator('button', { hasText: 'Open gate items' }).click();
+    await banner(page).locator('button', { hasText: 'Open checkpoint items' }).click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items, Risk & SoA');
+    await expect(activeTab(page)).toContainText('Open checkpoint items, Risk & SoA');
   });
 
   test('locked phases show a locked state that links back to the gate phase', async ({ page }) => {
@@ -92,13 +92,13 @@ test.describe('Phase board', () => {
     await switchMs(page, 'BCMS');
     await expect(current(page)).toContainText('4. BIA & risk assessment');
     await expect(current(page)).toContainText('2 blocked');
-    await expect(banner(page)).toContainText('2 blocked, 3 open gate items.');
+    await expect(banner(page)).toContainText('2 blocked, 3 open checkpoint items.');
     await step(page, 'BC strategies & plans').click();
     await expect(current(page)).toContainText('5. BC strategies & plans');
     await expect(current(page)).toContainText('Locked');
     await expect(statusCol(page)).toHaveText(Array(7).fill('Locked'));
     await expect(listRows(page).locator('td:nth-child(8)')).toHaveText(Array(7).fill('-'));
-    await expect(bannerText(page)).toHaveText('This phase is locked until the gate phase is verified: 4. BIA & risk assessment. BIA & risk assessment');
+    await expect(bannerText(page)).toHaveText('This phase is locked until the checkpoint phase is verified: 4. BIA & risk assessment. BIA & risk assessment');
     await openRow(page, '5.1');
     await expect(ui.drawer(page)).toContainText('Locked');
     expect(await ui.drawer(page).locator('button[title]').count()).toBe(0);
@@ -111,20 +111,20 @@ test.describe('Phase board', () => {
     await openPhases(page);
     await openRow(page, '4.5');
     await expect(ui.drawer(page)).toContainText('Select Annex A controls');
-    await expect(ui.drawer(page)).toContainText('Holding gate');
-    await expect(drawerFact(page, 'Phase')).toHaveText('4. Risk assessment & SoA, GATE');
+    await expect(ui.drawer(page)).toContainText('Blocks checkpoint');
+    await expect(drawerFact(page, 'Phase')).toHaveText('4. Risk assessment & SoA, CHECKPOINT');
     await expect(drawerFact(page, 'Blocked by')).toHaveText('A.8.12, Data leakage prevention');
     await expect(drawerAction(page, 'Mark complete')).toHaveCount(0);
     await drawerFact(page, 'Blocked by').locator('button').click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items');
+    await expect(activeTab(page)).toContainText('Open checkpoint items');
 
     await go(page, 'Phase board');
     await openRow(page, '4.10');
     await expect(drawerLinks(page, 'Downstream')).toHaveText(['SOA-01']);
-    await drawerAction(page, 'Open gate item').click();
+    await drawerAction(page, 'Open checkpoint item').click();
     await expect(ui.title(page)).toHaveText('Controls & requirements');
-    await expect(activeTab(page)).toContainText('Open gate items');
+    await expect(activeTab(page)).toContainText('Open checkpoint items');
   });
 
   test('required output link opens the document', async ({ page }) => {
@@ -145,10 +145,10 @@ test.describe('Phase board', () => {
     // A package may claim Record blocker (MILESTONE-2 C.5): its form replaces the Milestone 1 toast, and this test
     // leaves it unsaved.
     await clickClaimable(page, drawerAction(page, 'Record blocker'), {
-      id: 'phases.recordBlocker', toast: 'Blocker recorded and linked to the gate item', form: 'Record blocker for 9.4',
+      id: 'phases.recordBlocker', toast: 'Blocker recorded and linked to the checkpoint item', form: 'Record blocker for 9.4',
     });
     await drawerAction(page, 'Mark complete').click();
-    await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
+    await expectToast(page, 'Marked complete: awaiting verification by the Management System Manager');
     await expect(listRow(page, '9.4').locator('td:nth-child(7)')).toHaveText('Complete, awaiting verification');
     await expect(listRow(page, '9.4').locator('td:nth-child(4)')).toHaveText('Awaiting verification');
     expect(await counts(page)).toEqual(['4 Verified', '1 Complete, awaiting verification', '1 In progress', '0 Blocked', '1 Not started']);

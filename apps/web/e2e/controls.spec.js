@@ -39,7 +39,7 @@ test.describe('Controls & requirements', () => {
     expect(await tabCount(page, 'Controls implemented')).toBe(61);
     await expect(tab(page, 'Controls implemented')).toContainText('of 93');
     expect(await tabCount(page, 'Partially implemented')).toBe(18);
-    expect(await tabCount(page, 'Open gate items, Risk & SoA')).toBe(4);
+    expect(await tabCount(page, 'Open checkpoint items, Risk & SoA')).toBe(4);
     expect(await tabCount(page, 'Documents approved')).toBe(14);
     await expect(tab(page, 'Documents approved')).toContainText('of 22');
     expect(await tabCount(page, 'Documents expired')).toBe(5);
@@ -55,8 +55,8 @@ test.describe('Controls & requirements', () => {
     await expectShown(page, 18);
     await expect(moreButton(page)).toHaveCount(0);
 
-    await tab(page, 'Open gate items, Risk & SoA').click();
-    await expect(heads(page)).toHaveText(['', 'Gate item', 'Type', 'Why it holds the gate', 'Holder', 'Due date']);
+    await tab(page, 'Open checkpoint items, Risk & SoA').click();
+    await expect(heads(page)).toHaveText(['', 'Checkpoint item', 'Type', 'Why it blocks the checkpoint', 'Holder', 'Due date']);
     await expect(chips(page)).toHaveCount(0);
     await expect(listRows(page).locator('td:nth-child(2)')).toHaveText(['A.5.23', 'A.8.12', 'R-031', 'SOA-01']);
     await expect(listRows(page).locator('td:nth-child(3)')).toHaveText(['Control', 'Control', 'Risk', 'SoA']);
@@ -193,7 +193,7 @@ test.describe('Controls & requirements', () => {
     await tab(page, 'Partially implemented').click();
     await openRow(page, 'A.5.13');
     await drawerAction(page, 'Mark complete').click();
-    await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
+    await expectToast(page, 'Marked complete: awaiting verification by the Management System Manager');
     await expect(ui.drawer(page)).toContainText('Complete, awaiting verification');
     await expect(drawerAction(page, 'Mark complete')).toHaveCount(0);
     await expect(ui.drawer(page).locator('span[title^="Marked complete by Rina Kusuma"]')).toHaveCount(1);
@@ -395,12 +395,12 @@ test.describe('Controls & requirements', () => {
 
   test('gate items explain why the gate is held and trace to the SoA stage', async ({ page }) => {
     await openControls(page);
-    await tab(page, 'Open gate items, Risk & SoA').click();
+    await tab(page, 'Open checkpoint items, Risk & SoA').click();
     await expect(listRow(page, 'A.5.23')).toContainText('Applicable: no risk-based justification linked');
     await expect(listRow(page, 'A.5.23')).toContainText('Missing');
     await openRow(page, 'A.5.23');
-    await expect(ui.drawer(page)).toContainText('Holding gate');
-    await expect(ui.drawer(page).locator('span[title*="Risk & SoA gate cannot close"]')).toHaveCount(1);
+    await expect(ui.drawer(page)).toContainText('Blocks checkpoint');
+    await expect(ui.drawer(page).locator('span[title*="Risk & SoA checkpoint cannot close"]')).toHaveCount(1);
     await expect(drawerAction(page, 'Mark complete')).toHaveCount(0);
     await expect(ui.drawer(page)).toContainText('No evidence this cycle');
     await drawerAction(page, 'Trace from here').click();
@@ -408,7 +408,7 @@ test.describe('Controls & requirements', () => {
     await expect(activeTab(page).locator('div').nth(1)).toHaveText('SoA');
 
     await go(page, 'Controls & requirements');
-    await tab(page, 'Open gate items, Risk & SoA').click();
+    await tab(page, 'Open checkpoint items, Risk & SoA').click();
     await openRow(page, 'R-031');
     await expect(ui.drawer(page)).toContainText('Unpatched hypervisor in Surabaya DC');
     await expect(drawerFact(page, 'Stage')).toHaveText('Risk');

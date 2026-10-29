@@ -231,7 +231,7 @@ test.describe('Certification timeline for Top Management @api-only', () => {
     await expect(ui.pageAction(page, 'Start certification cycle')).toHaveCount(0);
     await expect(ui.pageAction(page, 'Record certificate')).toHaveCount(0);
     await ui.pageAction(page, 'Add audit event').click();
-    await expectToast(page, 'Only the MS Manager of this system adds audit events.');
+    await expectToast(page, 'Only the Management System Manager of this system adds audit events.');
     await expect(dialog(page)).toHaveCount(0);
   });
 });

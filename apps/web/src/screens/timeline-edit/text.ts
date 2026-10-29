@@ -163,8 +163,8 @@ export const TEXT = {
     'Event audit {label} tersimpan. {n} orang diberi tahu tentang item yang kini jatuh tempo setelah audit (BR-42).',
   ],
   noAddRight: [
-    'Only the MS Manager of this system adds audit events.',
-    'Hanya MS Manager sistem ini yang menambahkan event audit.',
+    'Only the Management System Manager of this system adds audit events.',
+    'Hanya Management System Manager sistem ini yang menambahkan event audit.',
   ],
   loadingEvent: ['Loading the audit event', 'Memuat event audit'],
   eventLoadFailed: ['The audit event could not be loaded', 'Event audit tidak dapat dimuat'],

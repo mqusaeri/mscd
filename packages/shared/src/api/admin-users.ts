@@ -327,7 +327,7 @@ export const adminOnboardingRoute = defineRoute({
   owner: 'M2-06',
   method: 'GET',
   path: '/api/v1/admin/onboarding',
-  summary: 'Onboarding checklist computed from existing tables: states, counts and the assignee of the steps of the MS Manager (Milestone 2 D.5)',
+  summary: 'Onboarding checklist computed from existing tables: states, counts and the assignee of the steps of the Management System Manager (Milestone 2 D.5)',
   auth: 'session',
   permission: 'ms.admin',
   scope: 'org',

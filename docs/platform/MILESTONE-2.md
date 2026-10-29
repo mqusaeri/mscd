@@ -923,7 +923,7 @@ Acceptance:
 npm run gen:views:check -w @mscd/web
 node packs/scripts/extract-from-sample.mjs --check && node packs/scripts/validate-sources.mjs
 node apps/web/scripts/export-sample-snapshot.mjs --check
-! grep -rn "Golden Thread Viewer\|Phase board\|Domain Owner" apps/web/src --include=*.ts --include=*.tsx --include=*.js --include=*.jsx | grep -v test
+! grep -rnE "\bMS[ -]Managers?\b|[Mm]ana(jer|ger)[ -]SM\b|[Gg]erbang|GERBANG|\bGATES?\b|\bGates?\b|(^|[^-/._A-Za-z])[Gg]ates?-[a-z]|\bgates? (item|items|phase|phases|reason|banner|kritis|berikutnya|cannot|is|passes|sebelumnya|terlewati|lock|flag|consistency)\b|(\b([A-Z][A-Za-z&]*|open|critical|next|holding|holds|blocks|its|item|menahan|memblokir|fase|the|a|an|previous|ke|to|by|oleh|per|each|every|setiap|and|dan|or|atau|for|untuk|this|ini|adalah|at|pada|with|dengan|no|tanpa)|[0-9}]) gates?\b" apps/web/src apps/server/src packages/shared/src --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' | grep -vE '^[^:]+(/test/|\.test\.|\.spec\.)' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)'
 CI=1 npm run test:e2e -w @mscd/web
 flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web
 npm run test:int -w @mscd/server -- test/int/seed test/int/parity test/int/packs

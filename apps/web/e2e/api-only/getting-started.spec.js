@@ -19,7 +19,7 @@ test.describe('Getting started against the api @api-only', () => {
       await expect(main.locator('li[data-step="second_admin"]')).toContainText('Administrators: 2');
       await expect(main).not.toContainText('You are the only administrator');
       await expect(main).toContainText('ISMS');
-      await expect(main).toContainText('For the management system manager');
+      await expect(main).toContainText('For the Management System Manager');
       await expect(main.locator('li[data-step="audit_dates"]')).toContainText('Assigned to Rina Kusuma');
       const pending = main.locator('li[data-step][data-state="pending"] a[href^="mailto:rina.kusuma@nusantaradigital.co.id?"]');
       if (await pending.count()) await expect(pending.first()).toHaveText('Email Rina Kusuma');

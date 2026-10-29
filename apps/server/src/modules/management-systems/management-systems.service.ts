@@ -599,11 +599,11 @@ export class ManagementSystemsService {
       .where((eb) => eb.or([eb('valid_until', 'is', null), eb('valid_until', '>', new Date())]))
       .executeTakeFirst();
     if (!manager) {
-      throw new ConflictError('Assign an MS Manager before the system starts implementing', {
+      throw new ConflictError('Assign a Management System Manager before the system starts implementing', {
         messageKey: 'ms.manager_required',
         messages: {
-          en: 'Assign at least one MS Manager before the system moves to implementing.',
-          id: 'Tetapkan minimal satu Manajer SM sebelum sistem berpindah ke tahap implementasi.',
+          en: 'Assign at least one Management System Manager before the system moves to implementing.',
+          id: 'Tetapkan minimal satu Management System Manager sebelum sistem berpindah ke tahap implementasi.',
         },
       });
     }

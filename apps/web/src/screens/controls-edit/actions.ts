@@ -9,8 +9,8 @@ import { ControlsLayer, EntryExtension } from './extension';
 import { requestControls } from './store';
 
 const NO_PERMISSION: readonly [string, string] = [
-  'Only the MS Manager of this system adds controls and requirements.',
-  'Hanya MS Manager sistem ini yang menambahkan kontrol dan persyaratan.',
+  'Only the Management System Manager of this system adds controls and requirements.',
+  'Hanya Management System Manager sistem ini yang menambahkan kontrol dan persyaratan.',
 ];
 
 /** "Add control" of Controls & requirements: the Add form for an MS Manager. */

@@ -169,7 +169,7 @@ describe('WP-39 session user routes (D-26, D-20)', () => {
     const client = await sessionFor(ctx, rina, { org: ndt });
     const me = (await client.get('/api/v1/me')).json() as Me;
     expect(me.personas).toEqual({
-      manager: { who: 'rina', label: ['MS Manager', 'Manajer SM'] },
+      manager: { who: 'rina', label: ['Management System Manager', 'Management System Manager'] },
       owner: { who: 'bagus', label: ['Domain Owner', 'Pemilik Domain'] },
       auditor: { who: 'maya', label: ['Internal Auditor', 'Auditor Internal'] },
       top: { who: 'hendra', label: ['Top Management', 'Manajemen Puncak'] },

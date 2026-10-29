@@ -195,7 +195,7 @@ test.describe('MSCD full stack', () => {
     expect(await tabCount(page, 'Controls implemented')).toBe(61);
     await expect(tab(page, 'Controls implemented')).toContainText('of 93');
     expect(await tabCount(page, 'Partially implemented')).toBe(18);
-    expect(await tabCount(page, 'Open gate items, Risk & SoA')).toBe(4);
+    expect(await tabCount(page, 'Open checkpoint items, Risk & SoA')).toBe(4);
     expect(await tabCount(page, 'Documents approved')).toBe(14);
     await expect(tab(page, 'Documents approved')).toContainText('of 22');
     expect(await tabCount(page, 'Documents expired')).toBe(5);
@@ -206,7 +206,7 @@ test.describe('MSCD full stack', () => {
     await expect(listRows(page)).toHaveCount(18);
     await openRow(page, 'A.5.13');
     await drawerAction(page, 'Mark complete').click();
-    await expectToast(page, 'Marked complete: awaiting verification by the MS Manager');
+    await expectToast(page, 'Marked complete: awaiting verification by the Management System Manager');
     await expect(ui.drawer(page)).toContainText('Complete, awaiting verification');
     await expect(drawerAction(page, 'Mark complete')).toHaveCount(0);
     await expect(listRow(page, 'A.5.13').locator('td:nth-child(4)')).toHaveText('Complete, awaiting verification');

@@ -284,7 +284,7 @@ const registerRoute = { auth: 'session' as const, msSource: 'path' as const, own
 
 export const registersListRoute = defineRoute({
   ...ms, id: 'registers.list', method: 'GET', path: '/api/v1/ms/:ms/registers/:register',
-  summary: 'Rows of a register (context issues, interested parties, assets, risks, metrics, objectives, competence), filtered by ScopePolicy; competence rows of other people only for MS Managers, Programme Owners and Internal Auditors (H.5)',
+  summary: 'Rows of a register (context issues, interested parties, assets, risks, metrics, objectives, competence), filtered by ScopePolicy; competence rows of other people only for Management System Managers, Programme Owners and Internal Auditors (H.5)',
   permission: 'ms.read', params: RegisterParams, query: RegisterListQuery, response: pageOf(RegisterItem), errors: [404],
 });
 

@@ -19,7 +19,7 @@ export const TEXT = {
   noMatchTitle: ['No record matches the search', 'Tidak ada catatan yang cocok dengan pencarian'],
   noMatchText: ['Try another code, title or owner.', 'Coba kode, judul atau pemilik lain.'],
   sampleNote: ['Sample data: changes stay in this browser session.', 'Data contoh: perubahan hanya tersimpan selama sesi peramban ini.'],
-  readOnly: ['You can read this register. Changes are made by the management system manager or the owner of a record.', 'Anda dapat membaca register ini. Perubahan dilakukan oleh manajer sistem manajemen atau pemilik catatan.'],
+  readOnly: ['You can read this register. Changes are made by the Management System Manager or the owner of a record.', 'Anda dapat membaca register ini. Perubahan dilakukan oleh Management System Manager atau pemilik catatan.'],
   teraWhat: ['The registers the standard asks for in one place: context issues, interested parties, assets, risks with their treatments, metrics, objectives and competence records.', 'Register yang diminta standar di satu tempat: isu konteks, pihak berkepentingan, aset, risiko dengan perlakuannya, metrik, sasaran dan catatan kompetensi.'],
   teraHow1: ['Choose a tab, search, and open a row to see its details and what can be done with it.', 'Pilih tab, cari, lalu buka baris untuk melihat rinciannya dan tindakan yang tersedia.'],
   teraHow2: ['A risk needs an owner. Add treatments to a risk and move them along until the risk owner accepts the residual risk.', 'Risiko memerlukan pemilik. Tambahkan perlakuan ke risiko dan jalankan hingga pemilik risiko menerima risiko residual.'],

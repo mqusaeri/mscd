@@ -42,16 +42,16 @@ test.describe('Activity forms against the api @api-only', () => {
     await openRow(page, '4.5');
     await drawerAction(page, 'Record blocker').click();
     await expect(dialog(page)).toContainText('Record blocker for 4.5');
-    // BR-46: the gate phase holds 2 blocked activities against 3 open gate items before this blocker.
-    await expect(dialog(page)).toContainText('Gate phase 4: 2 blocked activities and 3 open gate items.');
-    await expect(dialog(page)).toContainText('The number of blocked activities does not match the open gate items.');
+    // BR-46: the gate phase holds 2 blocked activities against 3 open checkpoint items before this blocker.
+    await expect(dialog(page)).toContainText('Checkpoint phase 4: 2 blocked activities and 3 open checkpoint items.');
+    await expect(dialog(page)).toContainText('The number of blocked activities does not match the open checkpoint items.');
     await button(dialog(page), 'Record blocker').click();
-    await expect(dialog(page)).toContainText('Choose the gate item that holds this activity.');
+    await expect(dialog(page)).toContainText('Choose the checkpoint item that holds this activity.');
     await dialog(page).locator('[role="option"]', { hasText: 'Cl. 8.2' }).click();
     await dialog(page).locator('textarea[name="blockerReason"]').fill('The risk assessment waits for the approved BIA of the data centre.');
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Record blocker').click();
-    await expectToast(page, 'Blocker recorded and linked to gate item Cl. 8.2');
+    await expectToast(page, 'Blocker recorded and linked to checkpoint item Cl. 8.2');
     await expect(dialog(page)).toHaveCount(0);
     await expect(listRow(page, '4.5')).toContainText('Blocked by Cl. 8.2');
   });
@@ -62,7 +62,7 @@ test.describe('Activity forms against the api @api-only', () => {
     await step(page, 'Improvement & audit readiness').click();
     await openRow(page, '9.7');
     await button(panel(page), 'Start').click();
-    await expect(panel(page).locator('[role="alert"]')).toContainText('stays locked until every activity of critical gate phase');
+    await expect(panel(page).locator('[role="alert"]')).toContainText('stays locked until every activity of critical checkpoint phase');
     await expectOverlayReadable(page);
   });
 });

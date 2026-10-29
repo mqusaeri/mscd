@@ -1,12 +1,13 @@
 // Role labels (MILESTONE-2 M2-01, D2-06): one label pair per business role and per administration role, in the
 // current product words. The top bar and the role menu show the label of the role the person holds, so a Programme
 // Owner no longer reads "MS Manager" and an External Auditor no longer reads "Internal Auditor" (the UI roles of F.7
-// group several business roles under one persona). M2-17 changes these words once the product owner approves H.1.
+// group several business roles under one persona). M2-17 applied the renames of H.1 (product decision 10): the
+// role `ms_manager` reads "Management System Manager" in English and Indonesian; every other label keeps its words.
 import type { BusinessRole, OrgRole, PlatformRole } from '@mscd/shared';
 import type { Pair, UiRole } from '../data/types';
 
 export const BUSINESS_ROLE_LABELS: Readonly<Record<BusinessRole, Pair>> = {
-  ms_manager: ['MS Manager', 'Manajer SM'],
+  ms_manager: ['Management System Manager', 'Management System Manager'],
   programme_owner: ['Programme Owner', 'Pemilik Program'],
   domain_owner: ['Domain Owner', 'Pemilik Domain'],
   risk_owner: ['Risk Owner', 'Pemilik Risiko'],

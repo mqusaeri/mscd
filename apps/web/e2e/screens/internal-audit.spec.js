@@ -150,7 +150,7 @@ test.describe('Internal audit @sample-only', () => {
     await openScreen(page, meta);
     await switchMs(page, 'ABMS');
     await expect(page.locator('main')).toContainText('No certification cycle yet');
-    await expect(page.locator('main')).toContainText('The MS Manager starts the cycle on the Certification timeline');
+    await expect(page.locator('main')).toContainText('The Management System Manager starts the cycle on the Certification timeline');
     await expectReadableText(page, 4.5);
   });
 

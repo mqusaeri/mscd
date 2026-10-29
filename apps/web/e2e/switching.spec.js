@@ -165,7 +165,7 @@ test.describe('Roles and navigation', () => {
     await switchRole(page, 'Top Management');
     await expect(ui.title(page)).toHaveText('Portfolio Overview');
     await go(page, 'Chain stages');
-    await switchRole(page, 'MS Manager');
+    await switchRole(page, 'Management System Manager');
     await expect(ui.title(page)).toHaveText('Chain stages');
   });
 

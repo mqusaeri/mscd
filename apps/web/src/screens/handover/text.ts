@@ -46,7 +46,7 @@ export const TEXT = {
   warningsTitle: ['Check these items', 'Periksa item ini'],
   warningsSub: ['The move is done. The rules of the system found something to check on these items:', 'Pemindahan selesai. Aturan sistem menemukan hal yang perlu diperiksa pada item ini:'],
   noSystem: ['Choose a management system first.', 'Pilih sistem manajemen terlebih dahulu.'],
-  readOnly: ['Only an MS Manager or the Programme Owner of this system hands items over.', 'Hanya Manajer SM atau Pemilik Program sistem ini yang menyerahkan item.'],
+  readOnly: ['Only a Management System Manager or the Programme Owner of this system hands items over.', 'Hanya Management System Manager atau Pemilik Program sistem ini yang menyerahkan item.'],
   sampleNote: ['Sample organisation: a handover changes the sample records for this browser session only.', 'Organisasi contoh: serah terima mengubah rekaman contoh untuk sesi peramban ini saja.'],
   someoneElse: ['Choose a successor other than the person who holds the items.', 'Pilih penerus selain orang yang memegang item.'],
 

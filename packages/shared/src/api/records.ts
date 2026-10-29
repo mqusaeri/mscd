@@ -55,7 +55,7 @@ export type RecordParams = z.infer<typeof RecordParams>;
 export const AssignmentRequest = named(
   'AssignmentRequest',
   z.strictObject({ kind: AssignmentKind, holder: PersonId, dueAt: IsoDate.nullable() }),
-  'POST /ms/{ms}/records/{entityType}/{id}/assignment body: the kind selects the fields (a SoA gate item never changes the control owner); holder none unassigns',
+  'POST /ms/{ms}/records/{entityType}/{id}/assignment body: the kind selects the fields (a SoA checkpoint item never changes the control owner); holder none unassigns',
   { valid: [{ kind: 'x', holder: 'bagus', dueAt: '2026-10-20' }, { kind: 'soa', holder: 'none', dueAt: null }], invalid: [{ kind: 'task', holder: 'bagus', dueAt: null }, { kind: 'x', holder: 'bagus' }] },
 );
 export type AssignmentRequest = z.infer<typeof AssignmentRequest>;
@@ -204,7 +204,7 @@ export const recordsHoldingsRoute = defineRoute({
   owner: 'M2-07',
   method: 'GET',
   path: '/api/v1/ms/:ms/holdings/:handle',
-  summary: 'Open items a person holds in the system (MS Manager and Programme Owner)',
+  summary: 'Open items a person holds in the system (Management System Manager and Programme Owner)',
   auth: 'session',
   permission: 'record.assign',
   scope: 'ms',

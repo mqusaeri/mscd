@@ -269,7 +269,7 @@ Consistency the UI can rely on:
 | Inputs | Operating frequency from `operating_criteria`; `produced_at` of the latest evidence (upload and link dates are ignored, PRD 9.2); `link_status` of its storage object |
 | Bands | Defaults from the current prototype, configurable per tenant and framework: fresh up to period + 1 day, aging up to 1.25 times the period + 1 day, expired up to twice the period, critical after that. Per-event evidence has no expiry |
 | Integrity | Runs in parallel. Fresh evidence whose file is missing or cannot be verified counts as expired (PRD 9.2, BR-31) |
-| Effect on status | `implemented` drops to `partially_implemented` automatically when evidence is expired or integrity is broken (TS 6.1). Promotion back to `implemented` stays a user action by the MS Manager |
+| Effect on status | `implemented` drops to `partially_implemented` automatically when evidence is expired or integrity is broken (TS 6.1). Promotion back to `implemented` stays a user action by the Management System Manager |
 | Triggers | Evidence and criteria changes (immediate), a nightly sweep for age-based changes, link health results |
 | Consumers | Module 1 cards, Module 2 Evidence stage and Module 3 freshness explorer all read the same stored columns |
 
@@ -499,7 +499,7 @@ On-premise there is one organisation, so the sign-in page lists the installation
 
 ### 10.2 Authorisation
 
-- Business roles are granted per management system (`user_ms_role`): MS Manager, Programme Owner, Domain Owner, Risk Owner, Internal Auditor, Top Management, External Auditor and Compliance Investigator (ISO 37001). Display labels come from the pack, for example ISMS Manager or QMS Manager.
+- Business roles are granted per management system (`user_ms_role`): Management System Manager (`ms_manager`), Programme Owner, Domain Owner, Risk Owner, Internal Auditor, Top Management, External Auditor and Compliance Investigator (ISO 37001). The screens show each role under its own label, in English and Indonesian; the pack gives the job title of the manager per system, for example ISMS Manager or QMS Manager.
 - Risk Owner is also a record-level assignment: the owner named on a risk approves its residual risk (PRD 6.3, BR-04), and no other role can record that acceptance.
 - Administrative roles (Tenant Administrator, Storage Administrator, Platform Operator) grant no access to business data by default (TS 7.1).
 - Classification-based access (PRD 13): documents, evidence and storage objects carry a classification from the tenant's scheme (by default Public, Internal, Confidential and Restricted). Each role has a highest classification it may read in each management system. List and drill-down queries filter on it, and an RLS policy on the same tables backs the filter. Restricted needs an explicit grant.

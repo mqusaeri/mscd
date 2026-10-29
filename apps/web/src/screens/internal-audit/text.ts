@@ -7,7 +7,7 @@ export const TEXT = {
   cycle: ['Certification cycle', 'Siklus sertifikasi'],
   cycleOption: ['{start} to {end}, {status}', '{start} sampai {end}, {status}'],
   noCycle: ['No certification cycle yet', 'Belum ada siklus sertifikasi'],
-  noCycleText: ['Internal audits are listed per certification cycle. The MS Manager starts the cycle on the Certification timeline, or by planning the Stage 1 audit. An internal audit planned now joins the cycle when it starts.', 'Audit internal ditampilkan per siklus sertifikasi. Manajer SM memulai siklus di Linimasa sertifikasi, atau dengan merencanakan audit Tahap 1. Audit internal yang direncanakan sekarang masuk ke siklus saat siklus dimulai.'],
+  noCycleText: ['Internal audits are listed per certification cycle. The Management System Manager starts the cycle on the Certification timeline, or by planning the Stage 1 audit. An internal audit planned now joins the cycle when it starts.', 'Audit internal ditampilkan per siklus sertifikasi. Management System Manager memulai siklus di Linimasa sertifikasi, atau dengan merencanakan audit Tahap 1. Audit internal yang direncanakan sekarang masuk ke siklus saat siklus dimulai.'],
   cyPlanned: ['planned', 'direncanakan'],
   cyActive: ['active', 'aktif'],
   cyCertified: ['certified', 'tersertifikasi'],

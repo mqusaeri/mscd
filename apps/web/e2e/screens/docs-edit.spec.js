@@ -50,7 +50,7 @@ test.describe('Document control forms @sample-only', () => {
     await expect(ui.modal(page)).toHaveCount(0);
     await closeDrawer(page);
 
-    await switchRole(page, 'MS Manager');
+    await switchRole(page, 'Management System Manager');
     await go(page, 'Document register');
     await openRow(page, 'STD-05');
     await drawerAction(page, 'Open review').click();
@@ -78,7 +78,7 @@ test.describe('Document control forms @sample-only', () => {
     await expectToast(page, 'PRC-10 v3.0 submitted for review');
     await closeDrawer(page);
 
-    await switchRole(page, 'MS Manager');
+    await switchRole(page, 'Management System Manager');
     await go(page, 'Document register');
     await openRow(page, 'PRC-10');
     await drawerAction(page, 'Open review').click();

@@ -195,7 +195,7 @@ test.describe('Evidence forms against the api @api-only', () => {
       await expect(dialog(page).locator('select').nth(1)).toBeDisabled();
       await page.keyboard.press('Escape');
       await ui.pageAction(page, 'Freshness limits').click();
-      await expect(dialog(page)).toContainText('Only the MS Manager of this system changes the limits.');
+      await expect(dialog(page)).toContainText('Only the Management System Manager of this system changes the limits.');
       await expect(dialog(page).locator('form[data-frequency="monthly"] input[name="graceDays"]')).toBeDisabled();
       await expect(dialog(page).locator('form[data-frequency="monthly"] button')).toHaveCount(0);
     });

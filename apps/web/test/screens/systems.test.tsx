@@ -135,7 +135,7 @@ describe('management system API adapters', () => {
   });
 
   it('creates with POST and the Idempotency-Key, changes with PATCH, and keeps the refusal of Start implementation', async () => {
-    const refused = problem(409, 'conflict', { messageKey: 'ms.manager_required', messages: { en: 'Assign at least one MS Manager before the system moves to implementing.', id: 'Tetapkan minimal satu Manajer SM sebelum sistem berpindah ke tahap implementasi.' } });
+    const refused = problem(409, 'conflict', { messageKey: 'ms.manager_required', messages: { en: 'Assign at least one Management System Manager before the system moves to implementing.', id: 'Tetapkan minimal satu Management System Manager sebelum sistem berpindah ke tahap implementasi.' } });
     const f = fakeFetch({
       'POST /api/v1/admin/management-systems': json({ ...ISMS_VIEW, slug: 'isms2', code: 'ISMS2', status: 'setup' }, 201),
       [`PATCH /api/v1/admin/management-systems/${ISMS_VIEW.id}`]: [refused, json({ ...ISMS_VIEW, status: 'implementing' })],
@@ -148,7 +148,7 @@ describe('management system API adapters', () => {
     expect(f.calls[0]).toMatchObject({ method: 'POST', body });
     expect(f.calls[0].headers['idempotency-key']).toBe('key-9');
     expect(f.calls[0].headers['x-csrf-token']).toBe('csrf-token-0123456789abcdef');
-    expect(await adapter.update(ISMS_VIEW.id, { status: 'implementing' })).toMatchObject({ ok: false, error: { status: 409, messageKey: 'ms.manager_required', message: ['Assign at least one MS Manager before the system moves to implementing.', 'Tetapkan minimal satu Manajer SM sebelum sistem berpindah ke tahap implementasi.'] } });
+    expect(await adapter.update(ISMS_VIEW.id, { status: 'implementing' })).toMatchObject({ ok: false, error: { status: 409, messageKey: 'ms.manager_required', message: ['Assign at least one Management System Manager before the system moves to implementing.', 'Tetapkan minimal satu Management System Manager sebelum sistem berpindah ke tahap implementasi.'] } });
     expect(await adapter.update(ISMS_VIEW.id, { status: 'implementing' })).toMatchObject({ ok: true, data: { status: 'implementing' } });
     expect(f.calls[2]).toMatchObject({ method: 'PATCH', body: { status: 'implementing' } });
   });
@@ -182,7 +182,7 @@ describe('management system sample adapter', () => {
     expect(created).toMatchObject({ ok: true, data: { status: 'setup', primaryManager: null }, message: ['ISMS2 created with 123 entries', 'ISMS2 dibuat dengan 123 entri'] });
     if (!created.ok) return;
     expect(await adapter.create({ slug: 'isms2', code: 'X', name: 'x', packId: 'ISO27001-2022', edition: '2022', scopeStatement: 'x', defaultRepository: 'vault', color: '#2e7fb8' }, 'k')).toMatchObject({ ok: false, error: { status: 409 } });
-    expect(await adapter.update(created.data.id, { status: 'implementing' })).toMatchObject({ ok: false, error: { message: ['Assign at least one MS Manager before the system moves to implementing.', expect.any(String)] } });
+    expect(await adapter.update(created.data.id, { status: 'implementing' })).toMatchObject({ ok: false, error: { message: ['Assign at least one Management System Manager before the system moves to implementing.', expect.any(String)] } });
     expect(await adapter.update(created.data.id, { color: '#c94f6d' })).toMatchObject({ ok: true, data: { color: '#c94f6d' } });
     expect(await adapter.update(created.data.id, { status: 'archived' })).toMatchObject({ ok: true, data: { status: 'archived' } });
     expect(await adapter.update(created.data.id, { color: '#2e7fb8' })).toMatchObject({ ok: false, error: { status: 409 } });

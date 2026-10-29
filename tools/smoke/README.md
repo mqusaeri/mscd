@@ -17,7 +17,7 @@ The journey, in order and in one browser session:
 | Stack | `/healthz`, `/api/v1/system/profile` (demo mode), the Keycloak provider in `/api/v1/auth/providers`, the Mailpit API |
 | Sign-in | `rina` with password and TOTP on `/login` and `/login/mfa`; `GET /api/v1/me` answers with her account |
 | Portfolio | four management system cards (ISMS, QMS, BCMS, ABMS) |
-| ISMS controls | the reference counts of UI 4.7: 61 of 93 implemented, 18 partial, 4 open gate items, 14 of 22 documents approved, 5 expired |
+| ISMS controls | the reference counts of UI 4.7: 61 of 93 implemented, 18 partial, 4 open checkpoint items, 14 of 22 documents approved, 5 expired |
 | Mark complete | `A.5.13` shows the toast and becomes "Complete, awaiting verification" |
 | SharePoint link | `EV-0124` is re-linked to `Access-Review-Q3-2026.xlsx` from the mock SharePoint picker and leaves the "File cannot be verified" list |
 | Managed Vault | a generated file is uploaded to `EQ-0154` (QMS); the drawer shows its SHA-256, compared with the hash computed by the test |

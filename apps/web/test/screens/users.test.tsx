@@ -220,7 +220,7 @@ describe('forms and bodies', () => {
     const lines = csv.trim().split('\r\n');
     expect(lines).toHaveLength(3);
     expect(lines[1]).toBe("'=Bagus,bagus.prasetyo@nusantaradigital.co.id,Storage Admin,Whole organisation,,,,");
-    expect(lines[2]).toBe("'=Bagus,bagus.prasetyo@nusantaradigital.co.id,MS Manager,ISMS,Yes,\"Rina, K\",2026-09-02,2027-01-31");
+    expect(lines[2]).toBe("'=Bagus,bagus.prasetyo@nusantaradigital.co.id,Management System Manager,ISMS,Yes,\"Rina, K\",2026-09-02,2027-01-31");
     expect(rolesCsv([], [], {}, 'id').split('\r\n')[0]).toBe('﻿Orang,Alamat email,Peran,Sistem,Utama,Diberikan oleh,Sejak,Berlaku sampai');
     expect([csvCell('+1'), csvCell('a"b'), csvCell(null), csvCell(3)]).toEqual(["'+1", '"a""b"', '', '3']);
   });
@@ -602,7 +602,7 @@ describe('users views', () => {
         for (const p of [TEXT.colName, TEXT.colJob, TEXT.colAdmin, TEXT.colRoles, TEXT.colStatus, TEXT.colMfa, TEXT.colLastSignIn, TEXT.searchLabel, TEXT.filterStatus, TEXT.filterRole, TEXT.filterSystem, TEXT.you, TEXT.statusInvited, TEXT.pending, TEXT.mfaMissing]) {
           expect(table, p[0]).toContain(t(p));
         }
-        expect(table).toContain(lang === 'id' ? 'Manajer SM di ISMS' : 'MS Manager in ISMS');
+        expect(table).toContain(lang === 'id' ? 'Management System Manager di ISMS' : 'Management System Manager in ISMS');
         const yusuf = data.members.find((m) => m.handle === 'yusuf')!;
         const drawer = render(<PersonDrawer ctx={ctx} member={yusuf} data={data} onClose={() => undefined} onAction={() => undefined} onRevoke={() => undefined} />, ctx, theme);
         for (const p of [TEXT.drawerCrumb, TEXT.handle, TEXT.businessRoles, TEXT.actions, TEXT.edit, TEXT.grant, TEXT.revoke, TEXT.preRegister, TEXT.resetMfa, TEXT.disable, TEXT.otherOrgsNo]) expect(drawer, p[0]).toContain(t(p));
@@ -650,7 +650,7 @@ describe('users views', () => {
   it('a system with open items shows the counts per kind, the primary manager and the Handover link', () => {
     const ctx = ctxOf('en');
     const html = render(<SystemHoldings ctx={ctx} member={member()} system={{ ms: 'isms', name: 'ISMS', primaryManager: { handle: 'sari', displayName: 'Sari W', email: 'sari@x.id' }, counts: { risk: 3, evidence: 2 }, total: 5 }} onHandover={() => undefined} />, ctx);
-    for (const text of ['5 open items', 'Risks: 3', 'Evidence: 2', 'Primary MS Manager: Sari W (sari@x.id)', 'Ask Sari W to move these items', TEXT.openHandover[0]]) expect(html).toContain(text);
+    for (const text of ['5 open items', 'Risks: 3', 'Evidence: 2', 'Primary Management System Manager: Sari W (sari@x.id)', 'Ask Sari W to move these items', TEXT.openHandover[0]]) expect(html).toContain(text);
     expect(grantText(ctx, { grantId: 'g', ms: 'isms', role: 'external_auditor', isPrimary: false, approvalStatus: 'active', validUntil: '2026-10-13T23:59:59Z' }, [])).toMatch(/^External Auditor in ISMS, until /);
   });
 

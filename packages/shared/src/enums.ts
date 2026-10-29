@@ -524,7 +524,7 @@ export type UiRole = z.infer<typeof UiRole>;
 
 /** Labels of the UI roles, as the sample `ROLES` shows them (G.5 `ROLES`). */
 export const UI_ROLE_LABELS: Readonly<Record<UiRole, readonly [string, string]>> = {
-  manager: ['MS Manager', 'Manajer SM'],
+  manager: ['Management System Manager', 'Management System Manager'],
   owner: ['Domain Owner', 'Pemilik Domain'],
   auditor: ['Internal Auditor', 'Auditor Internal'],
   top: ['Top Management', 'Manajemen Puncak'],

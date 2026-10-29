@@ -449,7 +449,7 @@ describe('Document control claims', () => {
     closeForm();
     const owner = ctxOf('id', D, { role: 'owner' as UiRole });
     newDocument(owner, { ms: 'isms' });
-    expect(owner.toast).toHaveBeenCalledWith('Hanya MS Manager sistem ini yang mendaftarkan dokumen.');
+    expect(owner.toast).toHaveBeenCalledWith('Hanya Management System Manager sistem ini yang mendaftarkan dokumen.');
     expect(formRequest()).toBeNull();
   });
 

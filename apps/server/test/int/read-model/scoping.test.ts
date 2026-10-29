@@ -244,7 +244,7 @@ describe('UI parity reads: ROLES without demo personas (G.5)', () => {
     const sari = await sessionFor(ctx, db, 'sari', 'ndt');
     const org = (await sari.get<UiOrgSnapshot>('/api/v1/ui/org')).body;
     expect(org.ROLES).toEqual({
-      manager: { who: 'sari', label: ['MS Manager', 'Manajer SM'] },
+      manager: { who: 'sari', label: ['Management System Manager', 'Management System Manager'] },
       owner: { who: 'sari', label: ['Domain Owner', 'Pemilik Domain'] },
     });
   });

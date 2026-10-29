@@ -403,8 +403,8 @@
     "manager": {
      "who": "rina",
      "label": [
-      "MS Manager",
-      "Manajer SM"
+      "Management System Manager",
+      "Management System Manager"
      ]
     },
     "owner": {
@@ -4893,8 +4893,8 @@
          "Information security for use of cloud services"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "andi",
         "due": null,
@@ -5170,8 +5170,8 @@
          "Data leakage prevention"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "bagus",
         "due": null,
@@ -9824,7 +9824,7 @@
        "owner": "tono",
        "doc": "PLN-B01",
        "freq": "annual",
-       "note": "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: holds the BIA & Risk Assessment gate",
+       "note": "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: blocks the BIA & Risk Assessment checkpoint",
        "gate": true,
        "just": "Requirement within scope",
        "risks": [],
@@ -9840,7 +9840,7 @@
        "owner": "bagus",
        "doc": "PLN-B02",
        "freq": "annual",
-       "note": "Awaiting BIA gate",
+       "note": "Awaiting BIA checkpoint",
        "gate": false,
        "just": "Requirement within scope",
        "risks": [],
@@ -9856,7 +9856,7 @@
        "owner": "bagus",
        "doc": "PLN-B02",
        "freq": "annual",
-       "note": "Awaiting BIA gate",
+       "note": "Awaiting BIA checkpoint",
        "gate": false,
        "just": "Requirement within scope",
        "risks": [],
@@ -10565,8 +10565,8 @@
          "Business impact analysis and risk assessment"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "tono",
         "due": null,
@@ -10920,8 +10920,8 @@
         "Persyaratan"
        ],
        "why": [
-        "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: holds the BIA & Risk Assessment gate",
-        "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: holds the BIA & Risk Assessment gate"
+        "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: blocks the BIA & Risk Assessment checkpoint",
+        "BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: blocks the BIA & Risk Assessment checkpoint"
        ],
        "h": "tono",
        "due": null,
@@ -11678,7 +11678,7 @@
        "owner": "lina",
        "doc": "POL-A01",
        "freq": "annual",
-       "note": "Bribery risk assessment not started: holds the gate for phase 2",
+       "note": "Bribery risk assessment not started: blocks the checkpoint for phase 2",
        "gate": true,
        "just": "Requirement within scope",
        "risks": [],
@@ -12333,8 +12333,8 @@
          "Bribery risk assessment"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "lina",
         "due": null,
@@ -13093,8 +13093,8 @@
         "Persyaratan"
        ],
        "why": [
-        "Bribery risk assessment not started: holds the gate for phase 2",
-        "Bribery risk assessment not started: holds the gate for phase 2"
+        "Bribery risk assessment not started: blocks the checkpoint for phase 2",
+        "Bribery risk assessment not started: blocks the checkpoint for phase 2"
        ],
        "h": "lina",
        "due": null,
@@ -15546,8 +15546,8 @@
     "manager": {
      "who": "rina",
      "label": [
-      "MS Manager",
-      "Manajer SM"
+      "Management System Manager",
+      "Management System Manager"
      ]
     },
     "owner": {
@@ -19981,8 +19981,8 @@
          "Information security for use of cloud services"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "andi",
         "due": null,
@@ -20258,8 +20258,8 @@
          "Data leakage prevention"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "bagus",
         "due": null,
@@ -25941,8 +25941,8 @@
     "manager": {
      "who": "rina",
      "label": [
-      "MS Manager",
-      "Manajer SM"
+      "Management System Manager",
+      "Management System Manager"
      ]
     },
     "owner": {
@@ -30339,8 +30339,8 @@
          "Information security for use of cloud services"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "andi",
         "due": null,
@@ -30616,8 +30616,8 @@
          "Data leakage prevention"
         ],
         "act": [
-         "Resolve gate item: justification missing",
-         "Selesaikan item gate: justifikasi belum ada"
+         "Resolve checkpoint item: justification missing",
+         "Selesaikan item checkpoint: justifikasi belum ada"
         ],
         "h": "bagus",
         "due": null,

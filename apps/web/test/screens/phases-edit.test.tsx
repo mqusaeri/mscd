@@ -43,8 +43,8 @@ describe('phases-edit route and texts', () => {
 
   it('has every text in both languages without an em dash or a centre dot', () => {
     expect(pairProblems(TEXT)).toEqual([]);
-    // The sample build keeps the Milestone 1 toast word for word (static.js `toastBlocker`).
-    expect(TEXT.sampleBlockerToast).toEqual(['Blocker recorded and linked to the gate item', 'Blokir dicatat dan ditautkan ke item gate']);
+    // The sample build keeps the Milestone 1 toast word for word (static.js `toastBlocker`), with the M2-17 term.
+    expect(TEXT.sampleBlockerToast).toEqual(['Blocker recorded and linked to the checkpoint item', 'Blokir dicatat dan ditautkan ke item checkpoint']);
   });
 });
 
@@ -81,8 +81,8 @@ describe('phases-edit adapters', () => {
       [`POST /api/v1/ms/isms/activities/${UUID}/transitions`]: [
         json({ ok: true, changed: ['isms'] }),
         json({ ok: true, changed: ['isms'] }),
-        problem(422, 'business-rule', { rule: 'BR-12', messages: { en: 'This activity stays locked until every activity of critical gate phase 4 is verified.', id: 'Terkunci.' } }),
-        problem(422, 'business-rule', { rule: 'BR-39', messages: { en: 'State what is holding this activity and which gate item causes it.', id: 'Sebutkan.' } }),
+        problem(422, 'business-rule', { rule: 'BR-12', messages: { en: 'This activity stays locked until every activity of critical checkpoint phase 4 is verified.', id: 'Terkunci.' } }),
+        problem(422, 'business-rule', { rule: 'BR-39', messages: { en: 'State what is holding this activity and which checkpoint item causes it.', id: 'Sebutkan.' } }),
       ],
     });
     const client = new ApiClient({ fetch: f.fetch });
@@ -158,7 +158,7 @@ describe('phases-edit panel and form', () => {
         const html = render(<BlockerDialog ctx={ctx} ms="isms" activity={a} onClose={() => undefined} />, ctx, theme);
         expect(html).toContain(lang === 'en' ? 'Record blocker for 9.4' : 'Catat blokir untuk 9.4');
         for (const g of D.bundles.isms.gates) expect(html).toContain(g.id);
-        expect(html).toContain(lang === 'en' ? 'Gate phase 4:' : 'Fase gate 4:');
+        expect(html).toContain(lang === 'en' ? 'Checkpoint phase 4:' : 'Fase checkpoint 4:');
         expect(html).not.toMatch(FORBIDDEN);
       }
     }
@@ -179,7 +179,7 @@ describe('phases-edit claim and extensions', () => {
   it('keeps the Milestone 1 toast of Record blocker in the sample build', () => {
     const ctx = ctxOf(D);
     recordBlocker(ctx, { ms: 'isms', key: record().key, record: record() });
-    expect(ctx.toast).toHaveBeenCalledWith('Blocker recorded and linked to the gate item');
+    expect(ctx.toast).toHaveBeenCalledWith('Blocker recorded and linked to the checkpoint item');
     expect(blockerRequest()).toBeNull();
   });
 

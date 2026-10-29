@@ -24,11 +24,11 @@
 | `IsoDate` | Local date string `YYYY-MM-DD`. The controller compares dates as strings (`due > audit.date`) or through `dd()` |
 | `PersonId` | Key into `PEOPLE`, for example `'bagus'`. `'none'` means unassigned (BR-45) |
 | `MsId` | Management system id: `'isms'`, `'qms'`, `'bcms'`, `'abms'` in the sample; any stable slug on the API |
-| `RecordKey` | `` `${msId}:${kind}:${id}` ``. Kinds: `req` (control or requirement, `isms:req:A.5.23`), `doc` (`isms:doc:PRC-07`), `ev` (evidence code, `isms:ev:EV-0313`), `soa` (applicability gate entry, `isms:soa:A.5.23`), `x` (explicit chain record, `isms:x:R-031`), `act` (activity `phase.activity`, `isms:act:4.5`), `drift` (row key only, `isms:drift:R-005`) |
+| `RecordKey` | `` `${msId}:${kind}:${id}` ``. Kinds: `req` (control or requirement, `isms:req:A.5.23`), `doc` (`isms:doc:PRC-07`), `ev` (evidence code, `isms:ev:EV-0313`), `soa` (applicability entry that blocks the checkpoint, `isms:soa:A.5.23`), `x` (explicit chain record, `isms:x:R-031`), `act` (activity `phase.activity`, `isms:act:4.5`), `drift` (row key only, `isms:drift:R-005`) |
 | Today | `TODAY_S = '2026-09-29'` in the sample. `dd(s)` is whole days from today, negative in the past |
 | Placement | **S**: computed by the server read model (TS 9.1, one function per concept). **S/C**: server aggregate; the client may count from server lists until the aggregate endpoint exists. **C**: client presentation only |
 
-A `RecordKey` indexes `state.ov` (the override store), `state.sel`, `state.expanded`, list row keys, `_dets`, and every command in section 3. A record has the same key on every screen (controls, chain stages, gate tab, freshness, storage), so a selection survives navigation. The API must keep business ids stable and unique per management system.
+A `RecordKey` indexes `state.ov` (the override store), `state.sel`, `state.expanded`, list row keys, `_dets`, and every command in section 3. A record has the same key on every screen (controls, chain stages, checkpoint tab, freshness, storage), so a selection survives navigation. The API must keep business ids stable and unique per management system.
 
 Status codes double as translation keys: the controller renders `this.t(c.st)`, `this.t(doc.st)`, `this.t(e.fresh)`, `this.t(it.st)` and `this.t(a.st)`. Every status code listed below must exist in `T` with exactly that spelling.
 
@@ -59,8 +59,8 @@ Sample: `ndt` (4 systems, saas, 2 sites), `bsd` (isms and qms, onprem, 3 sites),
 | `ed` | string | `'2022'`, `'2015 to 2026'` | `portfolio`, `msOptions`, `fwScreen` | Active `framework_version` edition; `from to to` while transitioning |
 | `short` | string | `'ISMS'` | `portfolio`, attention, tasks, timeline lanes, `fwScreen`, `storageScreen` (repo and routing filter, row column), `docDetail` path and used-by, sample vault path | `management_system.code` short label |
 | `name` | `Pair` | `['Information security management system','Sistem manajemen keamanan informasi']` | `portfolio`, `fwScreen` | Pack label |
-| `mgr` | `PersonId` | `'rina'` | `phasesScreen` owner action `'Verified by ' + pname(ms.mgr)` | User holding the MS Manager role |
-| `mgrRole` | string | `'ISMS Manager'` | `actDetail` note `'Awaiting verification by the ' + mgrRole` | MS Manager role label from the pack |
+| `mgr` | `PersonId` | `'rina'` | `phasesScreen` owner action `'Verified by ' + pname(ms.mgr)` | User holding the Management System Manager role (`ms_manager`) |
+| `mgrRole` | string | `'ISMS Manager'` | `actDetail` note `'Awaiting verification by the ' + mgrRole` | Job title of the manager from the pack (`ms.manager_role`) |
 | `color` | CSS colour | `'#e8731a'` | `portfolio`, attention, tasks, timeline, `fwScreen`, `msOptions` | New display attribute per system |
 | `scope` | string | `'Data centre & managed services operations: Jakarta and Surabaya'` | `portfolio`, `msOptions`, timeline event, `fwScreen` | `scope_statement` |
 | `certifier` | string | `'PT Sertifikasi Nusantara'` | `portfolio`, `upcoming`, chain and audit hero, timeline lane (strips `PT `, `Lembaga Sertifikasi `, ` Indonesia`), timeline event, `fwScreen` | `certification_body` |
@@ -104,7 +104,7 @@ Shape: `{[PersonId]: [displayName, jobTitle]}`, with the sentinel `none: ['Unass
 
 | Role key | `who` | `label` | Screens (`visFor`) |
 |---|---|---|---|
-| `manager` | `'rina'` | MS Manager | All |
+| `manager` | `'rina'` | Management System Manager | All |
 | `owner` | `'bagus'` | Domain Owner | `mytasks`, `m1overview`, `controls`, `docs`, `fresh` |
 | `auditor` | `'maya'` | Internal Auditor | `portfolio`, `audit`, `chain`, `gt`, `docs`, `controls`, `fresh`, `timeline`, `mytasks` |
 | `top` | `'hendra'` | Top Management | `portfolio`, `m1overview`, `timeline`, `audit`, `chain`, `mytasks` |
@@ -115,16 +115,16 @@ Shape: `{[PersonId]: [displayName, jobTitle]}`, with the sentinel `none: ['Unass
 
 | Field | Type | Example | Read by | Server source |
 |---|---|---|---|---|
-| `id` | string | `'A.8.13'`, `'Cl. 8.7'` | Rows, details, keys, chain and gate ids, golden thread, `titleOf`, evidence link `e.ctrl` | Catalogue item code with `A.` prefix, or requirement code with `Cl. ` prefix |
+| `id` | string | `'A.8.13'`, `'Cl. 8.7'` | Rows, details, keys, chain and checkpoint item ids, golden thread, `titleOf`, evidence link `e.ctrl` | Catalogue item code with `A.` prefix, or requirement code with `Cl. ` prefix |
 | `key` | string | `'8.13'`, `'cl-5.1'` | `buildEvidence` (`ctrlKey`, evidence title lookup `EVT`, BCMS evidence filter); tasks `EXAMPLES` lookup (with the system: `isms:8.13`); Controls screen grouping (Milestone 2) | Raw code. In a catalogue system (ISO/IEC 27001) a clause entry has the key `cl-<code>` (Milestone 2 D2-09, `clauseEntryKey` in `codes.ts`), for example `cl-5.1` with snapshot ref `isms:cl-5.1`, so it never shares a key with the Annex A control of the same number (`5.1`). The Controls screen lists `cl-` entries first, in a group "Clauses 4 to 10" with the label `Cl. 4.1` |
 | `title` | string | `'Information backup'` | `reqRow`, `reqDetail`, chain title, `evRow` and `evDetail`, `titleOf`, tasks | Pack label |
 | `theme` | string | `'A.8 Technological'`, `'Clause 8'` | `reqRow` sub line when `note` is empty | Group label |
 | `st` | `ReqStatus` | `'partial'` | Badges, tab and chip counts, chain inclusion and action text, evidence inclusion, action availability | `applicability_entry.implementation_status` (see 5.1) |
-| `owner` | `PersonId` | `'bagus'` | Rows, facts, chain holder, gate holder, tasks, owner scoping, activity blocker owner | `owner_user_id` |
+| `owner` | `PersonId` | `'bagus'` | Rows, facts, chain holder, checkpoint item holder, tasks, owner scoping, activity blocker owner | `owner_user_id` |
 | `doc` | string | `'PRC-11'` | `reqRow`, `reqDetail` implementing document, chain downstream, document usage (orphan check), golden thread | First `applicability_entry_document` |
 | `freq` | `FreqId` | `'monthly'` | `reqDetail` operating frequency and partial note, evidence period | `operating_criteria` frequency |
-| `note` | string | `'Q3 backup log not found at pinned location'` | `reqRow` sub line (warn colour), gate item `why`, `reqDetail` gate note, search, tasks text | Status note: blocker reason or the derivation message |
-| `gate` | boolean | `false` | `reqRow` tag, `reqDetail` badges, note and actions, chain `gate` flag | Derived: entry holds the critical gate |
+| `note` | string | `'Q3 backup log not found at pinned location'` | `reqRow` sub line (warn colour), checkpoint item `why`, `reqDetail` checkpoint note, search, tasks text | Status note: blocker reason or the derivation message |
+| `gate` | boolean | `false` | `reqRow` tag, `reqDetail` badges, note and actions, chain `gate` flag | Derived: entry blocks the critical checkpoint |
 | `just` | string | `'Required by risk treatment; see linked risks.'` | `reqDetail` justification fact (empty shows red) | `inclusion_justification` or `exclusion_justification` |
 | `risks` | `string[]` | `['R-014','R-031']` | `reqDetail` linked risks and upstream links, `noUp`, chain upstream, golden thread risk node | `applicability_entry_risk` |
 | `prod` | `IsoDate` or undefined | `'2026-04-14'` | `buildEvidence` only | Sample seed |
@@ -207,11 +207,11 @@ Stages per system, with the server entity behind each:
 
 | Field | Type | Example | Read by |
 |---|---|---|---|
-| `id` | string | `'R-031'` | Chain item id, gate item id, `findX`, `titleOf`, drift rows, golden thread search (case-insensitive) |
+| `id` | string | `'R-031'` | Chain item id, checkpoint item id, `findX`, `titleOf`, drift rows, golden thread search (case-insensitive) |
 | `t` | string | `'Unpatched hypervisor in Surabaya DC'` | Chain title, `titleOf`, drift row title |
-| `act` | string | `'Select a treatment: no treatment linked'` | Chain action, gate `why`, action fact |
-| `h` | `PersonId` | `'rina'`, `'none'` | Chain holder, gate holder, activity blocker owner, drift holder |
-| `due` | `IsoDate` or `null` | `null` | Chain due, gate due, drift due |
+| `act` | string | `'Select a treatment: no treatment linked'` | Chain action, checkpoint item `why`, action fact |
+| `h` | `PersonId` | `'rina'`, `'none'` | Chain holder, checkpoint item holder, activity blocker owner, drift holder |
+| `due` | `IsoDate` or `null` | `null` | Chain due, checkpoint item due, drift due |
 | `gate` | boolean, optional | `true` | Chain `gate`, `gateItems` |
 | `up`, `down` | `string[]`, optional | `['CI-03']`, `[]` | Chain upstream and downstream links; golden thread fallback scan |
 
@@ -403,7 +403,7 @@ Per stage source:
 
 | `src` | `recs` | Items |
 |---|---|---|
-| `req` | `d.reqs.length` | Every requirement whose `st` is not `implemented` or `na`. Kind `req`, title `c.title`, holder `c.owner`, `ref` the requirement, `up` `c.risks`, `down` `[c.doc]`, `gate` `c.gate`, `missing` when `st === 'blocked'`. Action by status: partial `Complete implementation`; planned `Start implementation`; ns `Assign and start`; blocked `Resolve gate item: justification missing`; complete `Verify output (<name of by or owner> marked complete)`. Due: `c.due`, else `null` for blocked, else `addD('2026-10-01', (i*9) % 95)` with `i` the index in `d.reqs` (sample fabrication) |
+| `req` | `d.reqs.length` | Every requirement whose `st` is not `implemented` or `na`. Kind `req`, title `c.title`, holder `c.owner`, `ref` the requirement, `up` `c.risks`, `down` `[c.doc]`, `gate` `c.gate`, `missing` when `st === 'blocked'`. Action by status: partial `Complete implementation`; planned `Start implementation`; ns `Assign and start`; blocked `Resolve checkpoint item: justification missing`; complete `Verify output (<name of by or owner> marked complete)`. Due: `c.due`, else `null` for blocked, else `addD('2026-10-01', (i*9) % 95)` with `i` the index in `d.reqs` (sample fabrication) |
 | `soa` | `s.rec` | Every blocked requirement as kind `soa`: title `'Applicability entry: ' + c.title`, action `Add risk-based justification`, holder `c.owner`, due `null`, `missing`, `gate`, `down [c.id]`. Then every `X.soa` record as kind `x` |
 | `doc` | `d.docs.length` | Every document not `approved`. Kind `doc`, title `title + ', v' + ver`, holder `owner`, due `rev`, `ref` the document, `up` the ids of up to 3 requirements with `c.doc === doc.id`. Action: expired `Start review: review date passed`; review `Approve review`; draft `Continue draft and approve` |
 | `ev` | `d.evs.length` | Every evidence that is unverifiable or has `fresh` `expired` or `critical`. Kind `ev`, id `code`, title `title + ', ' + ctrl`, holder `owner`, due `next`, `ref` the evidence, `up [ctrl]`, `missing` when integ is `missing` or `revoked`. Action: unverifiable `Re-link file in repository (<INTEG English label>)`, else `Submit <frequency, lower case> evidence` |
@@ -413,19 +413,19 @@ Every item carries `q` from its stage. Sample totals: ISMS 63 items, QMS 18, BCM
 
 Mapping to the TS 9.3 pending record: `key` to `ref`; `stage` to `ref.stage`; `id` to `ref.id`; `title`; `act` to `action`; `h` to `holder.user_id`; `due` to `due_at`; `st` to `status`; `after` to `after_audit`; `up` and `down` to `upstream` and `downstream` ids; `gate` (new); `q` from the stage definition; `ref` rehydrated on the client (section 4.3). The server should implement the TS 6.9 per-stage derivation table; the UI only displays `st`.
 
-### 2.4 Requirements, documents and gates
+### 2.4 Requirements, documents and checkpoint items
 
 | Value | Rule | Placement |
 |---|---|---|
 | Document `expired` | Stored in the sample. Every sample `expired` document has `rev` before today and every `approved` one has `rev` on or after today. Server: `approved` and `rev < today` gives `expired` (BR-10) | S |
-| Gate items `gateItems(d)` | Blocked requirements as `{id, type: 'Control' or 'Requirement' (by unit, localised), why: c.note or 'Blocked', h: c.owner, due: null, key: 'req:' + id}`; then every `X` record of any stage with `gate: true` as `{id, type, why: x.act, h: x.h, due: x.due, key: 'x:' + id}` where `type` is `Risk`, `Treatment`, `SoA`, `BIA` for those stage ids, else the stage id. Overrides are not applied (see 5.11) | S |
-| Gate name `gateName(ms)` | `isms` `Risk & SoA`; `qms` `Risk & Opportunity + Process Map`; `bcms` `BIA & Risk Assessment`; `abms` `Bribery Risk Assessment` | S (pack gate phase name) |
+| Checkpoint items `gateItems(d)` | Blocked requirements as `{id, type: 'Control' or 'Requirement' (by unit, localised), why: c.note or 'Blocked', h: c.owner, due: null, key: 'req:' + id}`; then every `X` record of any stage with `gate: true` as `{id, type, why: x.act, h: x.h, due: x.due, key: 'x:' + id}` where `type` is `Risk`, `Treatment`, `SoA`, `BIA` for those stage ids, else the stage id. Overrides are not applied (see 5.11) | S |
+| Checkpoint name `gateName(ms)` | `isms` `Risk & SoA`; `qms` `Risk & Opportunity + Process Map`; `bcms` `BIA & Risk Assessment`; `abms` `Bribery Risk Assessment` | S (pack checkpoint phase name, `gate.name`) |
 | Orphan candidate | No requirement with `c.doc === doc.id`: badge `Orphan candidate`, `noUp` `Not linked to any control or requirement` | S |
 | Used by | `doc.shared` gives the organisation's system shorts joined plus `' (shared IMS document)'`, else `ms.short`; golden thread shared marker lists the other systems of the organisation | S (`entity_ms_link`, the systems that actually link the document) |
-| Requirement notes | Gate: `note + ': ' + gateName + ' gate cannot close until this is resolved.'`; partial with expired or critical evidence: held at Partial text; complete: `Marked complete by <by or owner>. Verification by a different person is required ...` | C over S data |
+| Requirement notes | Checkpoint item: `note + ': ' + gateName + ' checkpoint cannot close until this is resolved.'`; partial with expired or critical evidence: held at Partial text; complete: `Marked complete by <by or owner>. Verification by a different person is required ...` | C over S data |
 | `noUp`, `noDown` | `noUp` for controls applicable without risks: `No risk linked (Cl. 6.1.3)`; `noDown` when no evidence and `st` not `na`, `ns`, `planned`: `No evidence this cycle` | S flags, C text |
 
-Sample gate items: ISMS `A.5.23`, `A.8.12`, `R-031`, `SOA-01`; BCMS `Cl. 8.2`, `BIA-03`, `BIA-06`; ABMS `Cl. 4.5`; QMS none.
+Sample checkpoint items: ISMS `A.5.23`, `A.8.12`, `R-031`, `SOA-01`; BCMS `Cl. 8.2`, `BIA-03`, `BIA-06`; ABMS `Cl. 4.5`; QMS none.
 
 ### 2.5 Counts per screen
 
@@ -437,7 +437,7 @@ Owner scoping: when `role === 'owner'`, `controlsScreen`, `freshScreen` and `doc
 | Nav | `chain` badge | Chain items with `st !== 'pending'` | S |
 | Nav | `fresh` badge | Evidence with `fresh === 'critical'` | S |
 | Nav | `mytasks` badge | `taskItems(me).length` | S |
-| Controls | Tabs | `implemented` (sub `of <reqs>`), `partial` (partial plus complete), `gate` (gate items), `docsApproved` (sub `of <docs>`), `docsExpired`; default tab `implemented` | S/C |
+| Controls | Tabs | `implemented` (sub `of <reqs>`), `partial` (partial plus complete), `gate` (checkpoint items), `docsApproved` (sub `of <docs>`), `docsExpired`; default tab `implemented` | S/C |
 | Controls | Requirement chips | `all`, `implemented`, `complete`, `partial`, `planned`, `ns`, `blocked`, `na`; default chip is the tab id, or `['partial','complete']` for the partial tab | S/C |
 | Controls | Document chips | `all`, `approved`, `expired`, `review`, `draft`; default `expired` on the expired tab, else `approved` | S/C |
 | Chain | Hero | `items.length` (sub `of <sum of recs> records`), overdue or missing (`st !== 'pending'`), after audit, ready `= sum(recs) - items.length` | S |
@@ -461,8 +461,8 @@ Owner scoping: when `role === 'owner'`, `controlsScreen`, `freshScreen` and `doc
 | Maturity values | Per clause with readiness `p` and open count `o`: `[min(100, p+14), p, max(0, p-10-(o ? 8 : 0)), max(0, p-22)]` for Documented, Implemented, Evidenced, Measured | S in the sample. From Milestone 2 the API sends the stored dimensions in `ms.readiness.groups` (see 1.2); a null value shows as "Not computed yet" |
 | Level | `q(x) = max(0, min(4, round(x/25)))`; level `q(mean of the four values)`; labels Initial, Basic, Defined, Managed, Optimised; colour ok at 3 or more, warn at 2, else bad | S value, C labels |
 | Current phase | First phase with `verified < total` and no locked activity, else the last phase | S |
-| Blockers | Gate items (`title = titleOf(id)` or `why`), then overdue non-gate chain items sorted by due; first 5 | S |
-| Next gate | Gate phase not fully verified: `<gate phase name>, <gate items> items`; else `All gates passed` | S |
+| Blockers | Checkpoint items (`title = titleOf(id)` or `why`), then overdue chain items that are not checkpoint items, sorted by due; first 5 | S |
+| Next checkpoint | Checkpoint phase not fully verified: `<checkpoint phase name>, <checkpoint items> items`; else `All checkpoints passed` | S |
 
 ### 2.7 Phases (`phases(d)`, `phasesScreen`)
 
@@ -486,22 +486,22 @@ if (ov[key].st) st = ov[key].st;
 | Counts | `c` per status and `total` | S |
 | Default phase | `state.tab.phases`, else the current phase (2.6) | C |
 | Stepper | `done` when all verified, `locked` when all locked, `blocked` when any blocked, `started` when any verified, complete or in progress; fill `lastDone / (n-1) * 90 %` | C |
-| Banner | All locked: `lockedBanner + ' ' + <gate no>. <gate name>.`; gate phase not fully verified: `gateBanner + ' ' + <blocked> blocked = <gate items> open gate items.` (the BR-46 comparison); fully verified: `phaseDone` | C over S counts |
-| Owner action text | verified `Verified by <ms.mgr>`; complete `Awaiting verification`; progress `Produce output and mark complete`; blocked `Resolve gate item <blocker>`; ns `Start when predecessor is complete`; locked `-` | C |
+| Banner | All locked: `lockedBanner + ' ' + <checkpoint no>. <checkpoint name>.`; checkpoint phase not fully verified: `gateBanner + ' ' + <blocked> blocked = <checkpoint items> open checkpoint items.` (the BR-46 comparison); fully verified: `phaseDone` | C over S counts |
+| Owner action text | verified `Verified by <ms.mgr>`; complete `Awaiting verification`; progress `Produce output and mark complete`; blocked `Resolve checkpoint item <blocker>`; ns `Start when predecessor is complete`; locked `-` | C |
 | Verify phase page action | Phase counts all verified: `Phase <n> is already verified`, else `Phase verification needs all activities Verified` | S (BR-12) |
 
 ### 2.8 Portfolio (`portfolio()`)
 
 | Value | Rule | Placement |
 |---|---|---|
-| Card stats | Gate items count; findings `open` (label adds `, <major> Major`; colour bad when major, warn when open); `docExp` (documents `expired`); `evCrit` (evidence `critical`); `evBad` (unverifiable evidence); `af` (chain items after audit) | S |
+| Card stats | Checkpoint items count; findings `open` (label adds `, <major> Major`; colour bad when major, warn when open); `docExp` (documents `expired`); `evCrit` (evidence `critical`); `evBad` (unverifiable evidence); `af` (chain items after audit) | S |
 | Clause colour | `>= 90` ok, `>= 60` warn, `> 0` bad, else border | C |
 | Radar | Points at angle `-90 + i*360/7`, radius `max(2, p/100*46)` around (60, 60) | C |
-| Attention items | Weight 0: gate items (`<n> open gate items, <gateName>`, tag Blocked). Weight 1: audit within 70 days (`<audit name> in <n> days`; sub `<af> pending items are due after the audit date` or `Preparation window open`; tag `After audit, <af>` or Due soon). Weight 2: expired documents (sub lists the ids). Weight 3: critical evidence (`<n> critical evidence`, tag Critical, opens the fresh tab `critical`) and unverifiable evidence (`<n> evidence files cannot be verified`, tag Integrity, opens the fresh tab `cannot`). Weight 4: banner, with text and target hard-coded per system (`bcms` connector degraded, tag `Error`, opens storage; `qms` edition transition, tag `Transition`; others beta pack, tag `Beta`; both open fw). English texts switch to the singular when the count is 1. Sorted by weight | S data, C rules |
+| Attention items | Weight 0: checkpoint items (`<n> open checkpoint items, <gateName>`, tag Blocked). Weight 1: audit within 70 days (`<audit name> in <n> days`; sub `<af> pending items are due after the audit date` or `Preparation window open`; tag `After audit, <af>` or Due soon). Weight 2: expired documents (sub lists the ids). Weight 3: critical evidence (`<n> critical evidence`, tag Critical, opens the fresh tab `critical`) and unverifiable evidence (`<n> evidence files cannot be verified`, tag Integrity, opens the fresh tab `cannot`). Weight 4: banner, with text and target hard-coded per system (`bcms` connector degraded, tag `Error`, opens storage; `qms` edition transition, tag `Transition`; others beta pack, tag `Beta`; both open fw). English texts switch to the singular when the count is 1. Sorted by weight | S data, C rules |
 | Attention groups | Blocking: weight 0 or (4 and tag `Error`). Audit soon: weight 1. Housekeeping: weights 2, 3, or (4 and tag not `Error`) | C |
 | Upcoming audits | Systems with `audit`, sorted by date; tag `Prep window open` at 60 days or less, `Prep opens <date - 60>` at 120 or less, else `Planned` | C (60 days should come from `audit_event.prep_window_days`) |
 
-Sample (gate, findings, expired documents, critical evidence, unverifiable evidence, after audit): ISMS 4, 3 (1 major), 5, 3, 3, 16; QMS 0, 2, 1, 0, 0, 4; BCMS 3, 0, 0, 0, 0, 0; ABMS 1, 0, 0, 0, 0, 0.
+Sample (checkpoint items, findings, expired documents, critical evidence, unverifiable evidence, after audit): ISMS 4, 3 (1 major), 5, 3, 3, 16; QMS 0, 2, 1, 0, 0, 4; BCMS 3, 0, 0, 0, 0, 0; ABMS 1, 0, 0, 0, 0, 0.
 
 ### 2.9 Audit readiness and traceability test (`auditScreen`, `resolveNode`)
 
@@ -575,17 +575,17 @@ Drill links (`nodeGo` and fact links), placement C: chain item to the chain stag
 |---|---|---|
 | Visible screens | `visFor(role)`; `landing()` keeps the wanted screen if allowed, else the first allowed screen (never portfolio for single-system orgs) | RBAC per route and endpoint |
 | Owner scoping | Lists filtered by `owner === me` for `owner` (controls, fresh, docs) | RLS on owner (TS 7.1, 9.1) |
-| Verify allowed | `canVerify = role === 'manager' or 'auditor'` | MS Manager per TS 6.1 and 6.6 (see 5.5) |
+| Verify allowed | `canVerify = role === 'manager' or 'auditor'` | Management System Manager per TS 6.1 and 6.6 (see 5.5) |
 | Self-verification | Requirement: `c.by === me` shows `toastSelfVerify`; activity: `a.by === me` | Separation of duties (TS 7.4, CHECK on verifier) |
 | Pending per person | `canSeePeople = role === 'manager' or 'auditor'` | TS 7.5 matrix (see 5.6) |
-| Mark complete | No role check | Domain Owner on own entries, MS Manager (TS 7.3) |
+| Mark complete | No role check | Domain Owner on own entries, Management System Manager (TS 7.3) |
 
 ### 2.14 Values hard-coded in the controller that must become data
 
 | Location | Hard-coded value | Replacement field |
 |---|---|---|
 | `ORGS` | Organisation list | `orgs` from session |
-| `gateName` | Gate names per system id | `ms.gateName` |
+| `gateName` | Checkpoint names per system id | `ms.gateName` |
 | `docDetail` | Approver per system (`hendra`, `sari`, `hendra`, `lina`), storage path `Compliance / <short> / Documents`, pinned hash algorithm by `ms.loc` | `doc.approver`, `doc.path`, `doc.hashAlg` |
 | `locFacts` | Fingerprint suffix `<code letters>a91f...3c7e`; last check `27 Sep 2026 (ok)` for pending | `e.hash` (shortened), `e.lastGoodCheck` |
 | `phases` | Owner pools per system | Stored owners |
@@ -615,9 +615,9 @@ Toast texts are English; every one also has its Indonesian form. `Reminder sent 
 
 | Action | Shown when | Current effect | Server command |
 |---|---|---|---|
-| Requirement: Mark complete | `st` in `partial`, `planned`, `ns`, `blocked` and not `gate`; any role | `ovSet(ms:req:id, {st:'complete', by:me})`; toast `Marked complete: awaiting verification by the MS Manager` | `POST /ms/{ms}/applicability/{id}/transitions {to:'complete'}`; records `completed_by`, `completed_at`; RBAC owner or MS Manager; audit trail (state gap, 5.1) |
+| Requirement: Mark complete | `st` in `partial`, `planned`, `ns`, `blocked` and not `gate`; any role | `ovSet(ms:req:id, {st:'complete', by:me})`; toast `Marked complete: awaiting verification by the Management System Manager` | `POST /ms/{ms}/applicability/{id}/transitions {to:'complete'}`; records `completed_by`, `completed_at`; RBAC owner or Management System Manager; audit trail (state gap, 5.1) |
 | Requirement: Verify | `st === 'complete'` and role manager or auditor | If `c.by === me`: toast `You completed this item: verification must be done by someone else`. Else verify modal with meta `<id>, completed by <by>, verify as <me>, <today>`. Confirm: `ovSet(key, {st:'implemented', by:null})`; toast `Verified. Status recalculated across Module 1, 2 and 3.` | `POST .../applicability/{id}/transitions {to:'implemented'}`; verifier differs from completer and verification date differs from completion date (modal text; principle of BR-08 and BR-09), BR-01 evidence in period with a valid link; 422 with the rule id otherwise |
-| Requirement: Trace (gate) | `gate` | `go('chain', {tab:{chain:'soa'}})` | None |
+| Requirement: Trace (checkpoint item) | `gate` | `go('chain', {tab:{chain:'soa'}})` | None |
 | Requirement: Send reminder | Always | Toast `Reminder sent to <owner>, email + in-app` | `POST /reminders {entity_ref, recipient}`; BR-50 throttle (72 hours) |
 | Requirement: Reassign | Always | Opens reassign modal with `h = owner`, `due` = chain item due, else `c.due`, else empty | Assignment command (3.3) |
 | Requirement: Trace from here | Not `gate` | `go('gt', {gtId: id})` | None |
@@ -636,8 +636,8 @@ Toast texts are English; every one also has its Indonesian form. `Reminder sent 
 | Chain record: Trace | Always | `go('gt', {gtId: id})` | None |
 | Activity: Mark complete | `st` `progress` or `ns` | `ovSet(ms:act:no, {st:'complete', by:me})`; toast as requirement | `POST /ms/{ms}/activities/{id}/transitions {to:'complete'}`; BR-40 output document; TS 6.6 order (5.12) |
 | Activity: Verify output | `st === 'complete'` and role manager or auditor | Self check on `a.by`; verify modal with `verifyTo:'verified'`, meta `<no> <title>, <by or owner> to <me>, <today>`. Confirm: `ovSet(key, {st:'verified', by:null})`; toast `Verified. ...` | `POST .../activities/{id}/transitions {to:'verified'}`; `verified_by` differs from owner |
-| Activity: Open gate item | `st === 'blocked'` | `go('controls', {tab:{controls:'gate'}})` | None |
-| Activity: Record blocker | `st` `progress` or `ns` | Toast `Blocker recorded and linked to the gate item`; no change | `POST .../activities/{id}/transitions {to:'blocked', blocker_gate_item_ref, blocker_reason}` (BR-39); needs a form |
+| Activity: Open checkpoint item | `st === 'blocked'` | `go('controls', {tab:{controls:'gate'}})` | None |
+| Activity: Record blocker | `st` `progress` or `ns` | Toast `Blocker recorded and linked to the checkpoint item`; no change | `POST .../activities/{id}/transitions {to:'blocked', blocker_gate_item_ref, blocker_reason}` (BR-39); needs a form |
 | Activity: Send reminder, Reassign | Not `locked` | Toast `Reminder sent to <owner>`; reassign modal with `a.owner`, `a.date`, `<no> <title>` | `POST /reminders`; assignment command |
 | Drift row with fixed rows: Send reminder, Trace | Always | Toast; `go('gt')` | `POST /reminders`; none |
 
@@ -679,7 +679,7 @@ Task card text by kind: evidence `Re-link the file for <title>` or `Upload this 
 | Framework: check (card area) | onprem: toast `Choose a signed .bundle file to import`; saas: toast `Checked: ISO9001-2026 1.0.0 and ISO37001-2025 0.7.0 available` | `POST /admin/packs/import` (multipart) or `POST /admin/packs/check-updates` |
 | Timeline: add event (lane without events) | Toast `Audit event form opened` | `POST /ms/{ms}/audit-events` (needs a form) |
 | Timeline: Open audit readiness | `setMs(em.id)`, `go('audit')` | None |
-| Portfolio: card, stats, gate chips, attention rows | `setMs` plus `go` to controls, audit, fresh, chain, storage or fw | None |
+| Portfolio: card, stats, checkpoint item chips, attention rows | `setMs` plus `go` to controls, audit, fresh, chain, storage or fw | None |
 
 ### 3.6 Page actions (`pageActions`)
 
@@ -896,7 +896,7 @@ export interface DataSource {
 
 Reference numbers from the sample (role `manager` unless stated):
 
-| System | Requirements | Evidence | Documents | Chain items | Not pending | Gate items | Critical evidence |
+| System | Requirements | Evidence | Documents | Chain items | Not pending | Checkpoint items | Critical evidence |
 |---|---|---|---|---|---|---|---|
 | ISMS | 93 | 79 | 22 | 63 | 24 | 4 | 3 |
 | QMS | 28 | 27 | 10 | 18 | 5 | 0 | 0 |
@@ -909,8 +909,8 @@ My Tasks across all four systems: `rina` 3, `bagus` 31, `maya` 1, `hendra` 3.
 
 | # | Gap | Recommendation |
 |---|---|---|
-| 5.1 | The UI has a requirement status `complete` (awaiting verification). TS 6.1 has no such state for `applicability_entry` | Add `complete` between the working states and `implemented`, with `completed_by_user_id` and `completed_at`; MS Manager verifies |
-| 5.2 | The UI has a requirement status `blocked`; TS 6.1 has none | Derive `blocked` in the read model for entries holding the gate (BR-02 for ISO 27001 and ISO 37001, gate requirements for others); never store it |
+| 5.1 | The UI has a requirement status `complete` (awaiting verification). TS 6.1 has no such state for `applicability_entry` | Add `complete` between the working states and `implemented`, with `completed_by_user_id` and `completed_at`; Management System Manager verifies |
+| 5.2 | The UI has a requirement status `blocked`; TS 6.1 has none | Derive `blocked` in the read model for entries blocking the checkpoint (BR-02 for ISO 27001 and ISO 37001, requirements flagged as checkpoint items for others); never store it |
 | 5.3 | The UI counts `moved` and `changed` as unverifiable; TS 6.4 counts `moved` and `version_changed` as valid, and BR-32 says not to downgrade | Decide before Phase 5. If TS wins, add `Evidence.valid` and have the controller's `bad` predicate read it when present; the sample sets it false for `changed` and `moved` |
 | 5.4 | Verification checks differ: UI blocks the completer; TS 6.6 requires `verified_by` to differ from the owner; the modal text also requires a different date | Enforce all three on the server; return 422 with the rule id |
 | 5.5 | The UI lets Internal Auditors verify | TS says MS Manager; keep auditors read-only unless the PRD owner decides otherwise |
@@ -919,7 +919,7 @@ My Tasks across all four systems: `rina` 3, `bagus` 31, `maya` 1, `hendra` 3.
 | 5.8 | Documents in review have no approve action; drafts have no editor | Add an approval command and a review entry point |
 | 5.9 | Record blocker, Add control, New document, Connect repository, Add audit event and Settings only show toasts | Commands exist (3.2, 3.6); forms are later UI work |
 | 5.10 | The vault upload modal has no file input | Controller-owned hidden file input (4.6) |
-| 5.11 | `gateItems` ignores overrides, so a reassigned gate record keeps its old holder in the gate tab | The server derives gate items from current state |
+| 5.11 | `gateItems` ignores overrides, so a reassigned checkpoint record keeps its old holder in the checkpoint tab | The server derives checkpoint items from current state |
 | 5.12 | The UI allows `ns` to `complete` directly; TS 6.6 requires `in_progress` first | Server performs both transitions in one command, or the UI shows Start first |
 | 5.13 | Critical evidence and unverifiable evidence are separate counts (nav badge and portfolio `evCrit`: critical only; portfolio `evBad` and freshness tab `cannot`: unverifiable). Evidence can be in both | One named server function per count (TS 9.6), returned as `criticalEvidence` and `unverifiableEvidence` in the summary |
 | 5.14 | Clause readiness and the four maturity dimensions have no defined source | Milestone 2 D.6: the job `readiness.recompute` stores the readiness and the four dimensions per clause group in `clause_readiness`; values are null until computed |

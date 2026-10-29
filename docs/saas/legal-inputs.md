@@ -217,7 +217,7 @@ The full table, with the gaps, is in [records-of-processing.md](records-of-proce
 ## End of contract and what is not built yet
 
 - **End of contract (D-S5, Planned (M2-S09)):** the operator sets the organisation to `offboarding`. Users can read and export for 30 days and cannot change anything. Then the operator sets it to `archived` and nobody can sign in to it. Users who belong to other organisations keep those.
-- **Exports available today:** the statement of applicability, the readiness and portfolio reports, the document register, the audit trail export (for MS Managers) and evidence packs.
+- **Exports available today:** the statement of applicability, the readiness and portfolio reports, the document register, the audit trail export (for Management System Managers) and evidence packs.
 - **Not built yet (K.8 of the plan):**
   - a full export of an organisation in open formats, and a verified deletion after offboarding (needed before the first customer leaves);
   - a feature for requests from data subjects (export, anonymise or delete one person); the manual procedure covers them until then;

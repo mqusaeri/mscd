@@ -15,8 +15,8 @@ import type { DocRecord } from './model';
 import { openForm } from './store';
 
 const NO_PERMISSION: readonly [string, string] = [
-  'Only the MS Manager of this system registers documents.',
-  'Hanya MS Manager sistem ini yang mendaftarkan dokumen.',
+  'Only the Management System Manager of this system registers documents.',
+  'Hanya Management System Manager sistem ini yang mendaftarkan dokumen.',
 ];
 
 /** The system and document a row action names: its record, else its key. */

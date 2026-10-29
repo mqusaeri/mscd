@@ -158,7 +158,7 @@ export class EvidencePacksService {
       const system = await this.system(trx, ms);
       const ctx = await this.policy.scopeContext(trx, principal, ms);
       if (ctx.kind === 'top_management') throw new ForbiddenError('Top Management has no file access');
-      if (ctx.kind === 'own') throw new ForbiddenError('Pack manifests list every evidence record of the system; ask an MS Manager');
+      if (ctx.kind === 'own') throw new ForbiddenError('Pack manifests list every evidence record of the system; ask a Management System Manager');
       const pack = await this.pack(trx, system.id, id, ctx);
       if (pack.status !== 'ready') throw new ConflictError('The evidence pack is not ready yet');
       const objectId =
