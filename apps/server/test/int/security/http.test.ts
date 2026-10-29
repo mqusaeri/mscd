@@ -13,6 +13,7 @@ import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
 import { totpAt } from '../../../src/modules/identity/totp';
 import { LOG_RING } from '../../../src/modules/observability/log-ring';
 import { useTestDatabase } from '../../setup/test-db';
+import { testTenancy } from '../../setup/tenancy';
 import { inScope } from '../db/helpers';
 import { addUser, PASSWORD, type TestUser } from '../identity/helpers';
 import { devLicence } from '../packs/fixtures';
@@ -162,9 +163,14 @@ describe('J.5 HTTP hardening of the api', () => {
   });
 
   it('blocks writes but not reads in licence read-only mode (BR-37), and the licence upload ends it', async () => {
-    const admin = await addFixtureUser(db, 'tst', 'wp30-licence-ta', { org: ['tenant_admin'] });
-    const ta = await sessionFor(full, admin.id, 'tst');
-    const late = await ta.put('/api/v1/admin/license', devLicence(ORG_IDS.tst, { license_id: 'LIC-WP30-RO', valid_from: '2025-01-01', valid_until: '2026-08-15', grace_days: 10 }));
+    // The Tenant Admin installs the organisation's licence in single tenancy; in multi tenancy (`test:int:saas`) the
+    // platform operator does, naming the organisation (Milestone 2 D.2, M2-S10).
+    const multi = testTenancy() === 'multi';
+    const installer = multi
+      ? await sessionFor(full, (await addFixtureUser(db, 'tst', 'wp30-licence-op', { platformOperator: true })).id, null)
+      : await sessionFor(full, (await addFixtureUser(db, 'tst', 'wp30-licence-ta', { org: ['tenant_admin'] })).id, 'tst');
+    const install = (licence: Record<string, unknown>) => installer.put('/api/v1/admin/license', multi ? { org: 'tst', licence } : licence);
+    const late = await install(devLicence(ORG_IDS.tst, { license_id: 'LIC-WP30-RO', valid_from: '2025-01-01', valid_until: '2026-08-15', grace_days: 10 }));
     expect(late.status, late.text).toBe(200);
     expect(late.body).toMatchObject({ state: 'read_only' });
     try {
@@ -173,7 +179,7 @@ describe('J.5 HTTP hardening of the api', () => {
       expect(write.body).toMatchObject({ type: 'https://mscd.cyberlentera.com/problems/read-only-mode', rule: 'BR-37' });
       expect((await rina.get('/api/v1/ui/ms/isms')).status).toBe(200);
     } finally {
-      const valid = await ta.put('/api/v1/admin/license', devLicence(ORG_IDS.tst, { license_id: 'LIC-WP30-OK' }));
+      const valid = await install(devLicence(ORG_IDS.tst, { license_id: 'LIC-WP30-OK' }));
       expect(valid.body).toMatchObject({ state: 'valid' });
     }
     expect((await rina.post('/api/v1/ms/isms/phases/1/verify')).status).not.toBe(403);

@@ -21,6 +21,7 @@
     "test": "vitest run -c vitest.unit.config.ts --passWithNoTests",
     "pretest:int": "node scripts/gen-build-info.mjs",
     "test:int": "vitest run -c vitest.int.config.ts --passWithNoTests",
+    "test:int:saas": "node scripts/gen-build-info.mjs && vitest run -c vitest.int-saas.config.ts",
     "start": "node dist/main.js api",
     "migrate": "node dist/main.js migrate",
     "seed:demo": "node scripts/seed-demo.mjs"

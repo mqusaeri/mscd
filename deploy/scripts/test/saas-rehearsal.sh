@@ -71,6 +71,10 @@
 #                                  release without them (docker-compose.{backup,ops}.yml,
 #                                  deploy/{backup,ops}, config/caddy/conf.d/*.caddy)
 #   MSCD_REHEARSAL_KEEP            true: keep everything for a look; remove it with --down
+#   MSCD_EDGE_SUBNET6              IPv6 range of the edge network, which saas-deploy.sh turns on
+#                                  when the host has a global IPv6 address (default: a unique
+#                                  local range made from the project name, so the rehearsal does
+#                                  not take the range of another SaaS stack on the same host)
 #   MSCD_SAAS_TEST_SCAN            gate (default): build-release-images.sh --load and its Trivy
 #                                  gate. auto: for build hosts that cannot reach the Alpine
 #                                  mirrors (as saas-stack.sh)
@@ -134,6 +138,10 @@ CHECKS=0
 DOCKER_GID=''
 SMTP_SECRET='' SMTP_SECRET2=''
 SUBNET_MSCD='' SUBNET_EDGE=''
+# Docker refuses two networks with the same IPv6 range, and every SaaS install takes the range of
+# .env.saas.example unless the deploy sends one: a range of this project's own (as run-saas.mjs).
+EDGE_SUBNET6=${MSCD_EDGE_SUBNET6:-$(printf 'mscd-rehearsal:%s' "$PROJECT" | sha256sum |
+    sed -E 's|^(..)(....)(....)(....).*|fd\1:\2:\3:\4::/64|')}
 declare -A SERVER_DIGEST=() WEB_DIGEST=()
 
 usage() {
@@ -420,7 +428,7 @@ write_input() {
                 MSCD_HTTP_PORT=$HTTP_PORT MSCD_HTTPS_PORT=$HTTPS_PORT
                 MSCD_SUBNET=172.31.$SUBNET_MSCD.0/24 MSCD_WEB_ADDRESS=172.31.$SUBNET_MSCD.10
                 MSCD_EDGE_SUBNET=172.31.$SUBNET_EDGE.0/24 MSCD_CADDY_ADDRESS=172.31.$SUBNET_EDGE.2
-                MSCD_WEB_EDGE_ADDRESS=172.31.$SUBNET_EDGE.3
+                MSCD_WEB_EDGE_ADDRESS=172.31.$SUBNET_EDGE.3 MSCD_EDGE_SUBNET6=$EDGE_SUBNET6
                 BACKUP_S3_ENDPOINT=http://$OFFSITE_ALIAS:8333 BACKUP_S3_BUCKET=mscd-rehearsal
                 BACKUP_S3_ACCESS_KEY=rehearsal-access BACKUP_S3_SECRET_KEY=rehearsal-secret
                 BACKUP_SECRETS_ACCESS_KEY=rehearsal-secrets-access BACKUP_SECRETS_SECRET_KEY=rehearsal-secrets-secret
@@ -430,7 +438,7 @@ write_input() {
                 OPS_DOMAIN=$ops_domain OPS_BASIC_AUTH_USER='' OPS_BASIC_AUTH_HASH=''
                 saas_encode_input SMTP_PASSWORD MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_SMTP_SECURE \
                     MSCD_MAIL_FROM MSCD_DOMAIN MSCD_TLS_MODE ACME_EMAIL MSCD_SITE_DOMAIN MSCD_HTTP_PORT MSCD_HTTPS_PORT \
-                    MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS \
+                    MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS MSCD_EDGE_SUBNET6 \
                     "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"
             )
         } >"$file"
@@ -1188,11 +1196,13 @@ const expr = (value) => String(value).replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, e) =
   m = /^(secrets|vars|env)\.(\w+)$/.exec(e);
   if (m) return String({ secrets, vars, env: wf.env }[m[1]][m[2]] ?? '');
   if (e in context) return context[e];
+  m = /^vars\.(\w+) \|\| '([^']*)'$/.exec(e);
+  if (m) return String(vars[m[1]] || m[2]);
   if (e === "inputs.skip_backup && 'true' || 'false'") return 'false';
   throw new Error(`unknown expression ${e}`);
 });
 const q = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-const head = Object.entries(wf.env).map(([k, v]) => `export ${k}=${q(String(v))}`).join('\n');
+const head = Object.entries(wf.env).map(([k, v]) => `export ${k}=${q(expr(v))}`).join('\n');
 Object.values(wf.jobs)[0].steps.forEach((step, i) => {
   if (!step.run) return;
   const env = Object.entries(step.env || {}).map(([k, v]) => `export ${k}=${q(expr(v))}`).join('\n');
@@ -1314,17 +1324,17 @@ EOF
     else
         ok "Deploy on the server reaches saas-deploy.sh, which stops at the image pull as expected"
     fi
-    if grep -q '26 values read (not shown)' "$WORK/wf-deploy.out" &&
+    if grep -q '28 values read (not shown)' "$WORK/wf-deploy.out" &&
         grep -q 'Signature of ghcr.io/mqusaeri/mscd-server made by release.yml for v1.1.0' "$WORK/wf-deploy.out" &&
         grep -q 'docker pull ghcr.io/mqusaeri/mscd-server@sha256:1111' "$WORK/wf-deploy.out"; then
-        ok "saas-deploy.sh read 26 values on standard input, ran the copied cosign and pulled by digest"
+        ok "saas-deploy.sh read 28 values on standard input, ran the copied cosign and pulled by digest"
     else
         bad "saas-deploy.sh did not get the values, run cosign or pull by digest"
         tail -n 30 "$WORK/wf-deploy.out" | sed 's/^/          /'
     fi
     if awk '/^::stop-commands::[0-9a-f]{32}$/ { t = substr($0, 18); s = NR }
             s && $0 == "::" t "::" { e = NR }
-            /26 values read/ { v = NR }
+            /28 values read/ { v = NR }
             END { exit !(s && e && v > s && v < e) }' "$WORK/wf-deploy.out" &&
         grep -q '^::error::saas-deploy.sh deploy stopped with exit code' "$WORK/wf-deploy.out"; then
         ok "The output of the server sits between ::stop-commands:: and its token, and the step reports the exit code"
@@ -1363,8 +1373,8 @@ EOF
     wf_expect "Open the SSH connection and copy the older release" wf_open_and_copy
     wf_run_step 08 >"$WORK/wf-old.out" 2>&1 || true
     if grep -q '^::notice::MSCD_SITE_DOMAIN is not sent: release v1.1.0 does not take it.$' "$WORK/wf-old.out" &&
-        grep -q '25 values read (not shown)' "$WORK/wf-old.out" && ! grep -q 'which the deploy does not take' "$WORK/wf-old.out"; then
-        ok "The deploy step sends only the names the release takes: MSCD_SITE_DOMAIN is left out with a notice, and the older saas-deploy.sh reads the other 25 values"
+        grep -q '27 values read (not shown)' "$WORK/wf-old.out" && ! grep -q 'which the deploy does not take' "$WORK/wf-old.out"; then
+        ok "The deploy step sends only the names the release takes: MSCD_SITE_DOMAIN is left out with a notice, and the older saas-deploy.sh reads the other 27 values"
     else
         bad "The deploy step sent a name the older release does not take"
         tail -n 20 "$WORK/wf-old.out" | sed 's/^/          /'
@@ -1490,7 +1500,7 @@ setup() {
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
     octets=$(free_subnets) || die "No two free 172.31.x.0/24 ranges for the networks of the stack"
     read -r SUBNET_MSCD SUBNET_EDGE <<<"$octets"
-    pass "Networks: mscd 172.31.$SUBNET_MSCD.0/24, edge 172.31.$SUBNET_EDGE.0/24"
+    pass "Networks: mscd 172.31.$SUBNET_MSCD.0/24, edge 172.31.$SUBNET_EDGE.0/24 (IPv6 $EDGE_SUBNET6 when the host has IPv6)"
     install -d -m 0755 -o "$RUN_UID" -g "$RUN_UID" "$INSTALL" "$INSTALL/releases"
     install -d -m 0755 "$WORK" "$WORK/logs"
     install -d -m 0700 -o "$RUN_UID" -g "$RUN_UID" "$WORK/home"

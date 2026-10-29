@@ -37,10 +37,15 @@ x-server-image: &server-image
 
 # Profile overrides of the SaaS stack, on top of x-app-env of docker-compose.yml. The
 # profile file defaults to saas.yaml here, so a missing setting never falls back to the
-# on-premise profile (tenancy single). The public URL is required.
+# on-premise profile (tenancy single). The public URL is required. The links of the
+# sign-in page footer to the privacy notice and the terms of service (legal.privacy_url,
+# legal.terms_url) come from MSCD_LEGAL_PRIVACY_URL and MSCD_LEGAL_TERMS_URL; an empty
+# value hides the link.
 x-saas-env: &saas-env
   MSCD_PROFILE_FILE: ${MSCD_PROFILE_FILE:-/app/apps/server/profiles/saas.yaml}
   MSCD__HTTP__PUBLIC_URL: ${MSCD_PUBLIC_URL:?set MSCD_PUBLIC_URL (https://app.<domain>)}
+  MSCD__LEGAL__PRIVACY_URL: ${MSCD_LEGAL_PRIVACY_URL:-}
+  MSCD__LEGAL__TERMS_URL: ${MSCD_LEGAL_TERMS_URL:-}
 
 services:
   postgres:

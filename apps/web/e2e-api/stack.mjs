@@ -7,20 +7,26 @@
 //   2. PostgreSQL, SeaweedFS and Mailpit containers on random host ports, labelled mscd.test=true;
 //   3. db bootstrap, migrate and `seed demo` into the template database mscd_e2e_tpl, then mscd_e2e is created from it
 //      (the database the api uses; `POST /test/reset` recreates it from the template before every test);
-//   4. mock providers (4310) with the demo fixtures, storage gateway (4311, TLS off) and api (3174) from
-//      apps/server/dist with profiles/test.yaml, test.endpoints_enabled, test.template_database and the
-//      administrator URL file; the api's SMTP goes to Mailpit;
+//   4. mock providers (4310) with the demo fixtures and their DNS responder for TXT records (UDP 4312), storage
+//      gateway (4311, TLS off) and api (3174) from apps/server/dist with profiles/test.yaml, test.endpoints_enabled,
+//      test.template_database and the administrator URL file; the api's SMTP goes to Mailpit, and its DNS lookups of
+//      email domains (network.dns_resolvers, M2-S11) go to the mock responder, whose records a spec sets with
+//      POST <mock>/_admin/dns/records;
 //   5. the web app built with VITE_DATA_SOURCE=api into a temporary folder and served by `vite preview` on 4174, which
 //      forwards /api to the api.
 //
 // No worker runs: jobs stay queued, and the suite asserts command results, not job effects. The addresses of the
-// run (Mailpit API, database) are written to node_modules/.cache/mscd/e2e-api-stack.json for the specs. On SIGTERM,
+// run (Mailpit API, mock providers, DNS responder, tenancy) are written to node_modules/.cache/mscd/e2e-api-stack.json
+// for the specs. On SIGTERM,
 // SIGINT, a failed start, the end of a child process or the end of the process that started the stack, everything is
 // stopped and every container is removed. At start, containers of an earlier stack that was killed are removed once
 // their mscd.test.expires label has passed (3 hours) and their name carries the same container prefix.
 //
 // Environment: MSCD_TEST_CONTAINER_PREFIX names the containers <prefix>e2e-<service>-<random> (default "mscd-");
-// MSCD_TEST_PG_IMAGE replaces postgres:16.15-alpine; E2E_STACK_SKIP_BUILD=1 skips step 1 apart from ensure-built.
+// MSCD_TEST_PG_IMAGE replaces postgres:16.15-alpine; E2E_STACK_SKIP_BUILD=1 skips step 1 apart from ensure-built;
+// E2E_STACK_TENANCY=multi runs every server command (seed, gateway, api) with tenancy mode multi and one schema per
+// organisation, as profiles/saas.yaml does (default single, the tenancy of the test profile): the stack of SaaS specs,
+// whose operator domain checks (ops.domains.verify) then ask the mock DNS responder.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,7 +44,12 @@ const MAIN = path.join(SERVER, 'dist/main.js');
 const TEST_PROFILE = path.join(SERVER, 'profiles/test.yaml');
 export const STATE_FILE = path.join(ROOT, 'node_modules/.cache/mscd/e2e-api-stack.json');
 
-export const PORTS = { web: 4174, api: 3174, mock: 4310, gateway: 4311 };
+export const PORTS = { web: 4174, api: 3174, mock: 4310, gateway: 4311, dns: 4312 };
+/** The DNS responder of the mock providers (UDP), the api's only resolver (network.dns_resolvers). */
+const DNS_ADDRESS = `127.0.0.1:${PORTS.dns}`;
+const TENANCY = process.env.E2E_STACK_TENANCY || 'single';
+/** Profile overrides of a multi-tenant stack: tenancy mode multi with schema isolation, as saas.yaml runs. */
+const TENANCY_ENV = TENANCY === 'multi' ? { MSCD__TENANCY__MODE: 'multi', MSCD__TENANCY__ISOLATION: 'schema' } : {};
 const IMAGES = {
   postgres: process.env.MSCD_TEST_PG_IMAGE || 'postgres:16.15-alpine',
   seaweed: 'chrislusf/seaweedfs:4.48',
@@ -239,6 +250,7 @@ function removeLeftovers() {
 }
 
 async function main() {
+  if (TENANCY !== 'single' && TENANCY !== 'multi') throw new Error(`E2E_STACK_TENANCY must be single or multi, got "${TENANCY}"`);
   removeLeftovers();
   // 1. Builds.
   run('ensure-built (shared packages and development packs)', process.execPath, [path.join(ROOT, 'tools/scripts/ensure-built.mjs'), '--quiet']);
@@ -302,6 +314,7 @@ async function main() {
     MSCD__GATEWAY__VAULT__ENDPOINT: s3Endpoint,
     MSCD__MAIL__SMTP__HOST: '127.0.0.1',
     MSCD__MAIL__SMTP__PORT: String(mail[1025]),
+    ...TENANCY_ENV,
     ...extra,
   });
   run('db bootstrap', process.execPath, [MAIN, 'db', 'bootstrap'], { env: serverEnv(TEMPLATE_DB) });
@@ -313,9 +326,18 @@ async function main() {
   const adminUrlFile = path.join(work, 'db-admin.url');
   writeFileSync(adminUrlFile, admin('postgres'), { mode: 0o600 });
 
-  // 4. Mock providers, storage gateway and api.
-  startChild('mock-providers', process.execPath, [path.join(ROOT, 'tools/mock-providers/dist/server.js'), '--port', String(PORTS.mock), '--host', '127.0.0.1', '--fixtures', 'demo'], baseEnv);
+  // 4. Mock providers (with their DNS responder), storage gateway and api.
+  startChild(
+    'mock-providers',
+    process.execPath,
+    [path.join(ROOT, 'tools/mock-providers/dist/server.js'), '--port', String(PORTS.mock), '--host', '127.0.0.1', '--fixtures', 'demo', '--dns-port', String(PORTS.dns)],
+    baseEnv,
+  );
   await waitFor('mock providers', () => httpOk(`http://127.0.0.1:${PORTS.mock}/_admin/health`));
+  await waitFor('mock DNS responder', async () => {
+    const response = await fetch(`http://127.0.0.1:${PORTS.mock}/_admin/dns`, { signal: AbortSignal.timeout(3000) });
+    return response.ok && (await response.json()).address === DNS_ADDRESS;
+  });
   startChild('storage-gateway', process.execPath, [MAIN, 'storage-gateway'], serverEnv(APP_DB, { MSCD__GATEWAY__PORT: String(PORTS.gateway) }));
   await waitFor('storage gateway', () => httpOk(`http://127.0.0.1:${PORTS.gateway}/healthz`));
   startChild(
@@ -325,6 +347,8 @@ async function main() {
     serverEnv(APP_DB, {
       MSCD__HTTP__PORT: String(PORTS.api),
       MSCD__HTTP__PUBLIC_URL: `http://localhost:${PORTS.web}`,
+      // The TXT lookups of the email domain checks (M2-S11) go to the mock responder only.
+      MSCD__NETWORK__DNS_RESOLVERS: JSON.stringify([DNS_ADDRESS]),
       MSCD__STORAGE__GATEWAY__URL: `http://127.0.0.1:${PORTS.gateway}`,
       MSCD__TEST__ENDPOINTS_ENABLED: 'true',
       MSCD__TEST__TEMPLATE_DATABASE: TEMPLATE_DB,
@@ -336,7 +360,11 @@ async function main() {
   mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   writeFileSync(
     STATE_FILE,
-    JSON.stringify({ runId: RUN_ID, mailApi, web: `http://localhost:${PORTS.web}`, api: `http://127.0.0.1:${PORTS.api}`, mock: `http://127.0.0.1:${PORTS.mock}` }, null, 2),
+    JSON.stringify(
+      { runId: RUN_ID, mailApi, web: `http://localhost:${PORTS.web}`, api: `http://127.0.0.1:${PORTS.api}`, mock: `http://127.0.0.1:${PORTS.mock}`, dns: DNS_ADDRESS, tenancy: TENANCY },
+      null,
+      2,
+    ),
   );
 
   // 5. The web app in API mode.
@@ -345,7 +373,7 @@ async function main() {
   run('build the web app (VITE_DATA_SOURCE=api)', process.execPath, [VITE, 'build', '--outDir', dist, '--emptyOutDir'], { cwd: WEB, env: webEnv });
   assertNoSampleMaterial(dist);
   startChild('web', process.execPath, [VITE, 'preview', '--port', String(PORTS.web), '--strictPort', '--outDir', dist], webEnv, WEB);
-  log(`ready: web http://localhost:${PORTS.web}, api ${PORTS.api}, mock providers ${PORTS.mock}, gateway ${PORTS.gateway}, Mailpit ${mailApi}`);
+  log(`ready (tenancy ${TENANCY}): web http://localhost:${PORTS.web}, api ${PORTS.api}, mock providers ${PORTS.mock} (DNS udp ${DNS_ADDRESS}), gateway ${PORTS.gateway}, Mailpit ${mailApi}`);
 }
 
 // Texts only the sample build carries: the sample organisations of src/data/sample-orgs.js and the sample licence id

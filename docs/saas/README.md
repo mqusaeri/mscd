@@ -1,6 +1,6 @@
 # MSCD SaaS: owner pack and operations documents
 
-This folder holds what the owner and the operators need to run MSCD as a multi-tenant SaaS service: the go-live checklist, the owner's inputs, the facts for the lawyer, the records of processing, the incident plan and the penetration test scope, plus the operating guides that later work packages add. The plan behind it is section K of the [Milestone 2 plan](../platform/MILESTONE-2.md#k-saas-production-track).
+This folder holds what the owner and the operators need to run MSCD as a multi-tenant SaaS service: the go-live checklist, the owner's inputs, the facts for the lawyer, the records of processing, the incident plan and the penetration test scope, and the operating guides of the SaaS service: releases, the Compose stack, server bootstrap, deploys, backups, monitoring, customer organisations, plans and sign-in. The plan behind it is section K of the [Milestone 2 plan](../platform/MILESTONE-2.md#k-saas-production-track).
 
 Every legal point in these documents is general information. Each one needs the advice of a lawyer qualified in Indonesian law before go-live.
 
@@ -14,6 +14,8 @@ Every legal point in these documents is general information. Each one needs the 
 | Book the penetration test | [pentest-scope.md](pentest-scope.md) |
 | Handle a security incident or a personal data breach | [incident-response.md](incident-response.md) |
 | Answer a person who asks to see, correct or delete their data | [Requests from data subjects](records-of-processing.md#requests-from-data-subjects) |
+| Onboard, suspend or offboard a customer organisation | [operator.md](operator.md) |
+| Change a customer's plan or a limit | [entitlements.md](entitlements.md) |
 
 ## Documents in this folder
 
@@ -26,19 +28,19 @@ Every legal point in these documents is general information. Each one needs the 
 | [incident-response.md](incident-response.md) | Roles, severity levels, the steps, how to find the affected organisations and people, notice templates in Indonesian and English, the incident log and an exercise script. Draft for legal review | M2-S04 |
 | [pentest-scope.md](pentest-scope.md) | The staging target, test accounts per role in two organisations, the areas in and out of scope, and the rules of engagement | M2-S04 |
 
-These guides join the folder as their work packages finish:
+The operating guides of the SaaS service:
 
-| Document | Topic | Work package |
+| Document | What it holds | Written by |
 |---|---|---|
-| `release.md` | Cutting a release, the checks, verifying an image with `cosign verify` | M2-S01 |
-| `stack.md` | The SaaS Compose stack and TLS | M2-S02 |
-| `bootstrap.md` | Preparing a new server | M2-S03 |
-| `deploy.md` | Deploys, rehearsals and rollback | M2-S05 |
-| `backup-restore.md` | Backups, the weekly restore test and a full restore | M2-S07 |
-| `monitoring.md` | What each alert means and the first action | M2-S08 |
-| `operator.md` | Onboarding and offboarding a customer, the operator commands | M2-S09 |
-| `entitlements.md` | Plans, limits and what users see at each limit | M2-S10 |
-| `sign-in.md` | Email domain verification and how sign-in finds the organisation | M2-S11 |
+| [release.md](release.md) | Cutting a release, the checks of each image, verifying an image with `cosign verify`, the security scans and test builds | M2-S01 |
+| [stack.md](stack.md) | The SaaS Compose stack: what runs, how a request travels, certificates and HSTS, request limits, logs, the marketing site and the local test stack | M2-S02 |
+| [bootstrap.md](bootstrap.md) | Preparing a new Ubuntu server: what to buy, the DNS records, the bootstrap run from GitHub Actions and what to do afterwards | M2-S03 |
+| [deploy.md](deploy.md) | Deploys through `deploy-prod.yml`, the automatic rollback, rollback by hand and the deploy rehearsal | M2-S05 |
+| [backup-restore.md](backup-restore.md) | The nightly off-site backup, the weekly restore test and a full restore onto a new server | M2-S07 |
+| [monitoring.md](monitoring.md) | What runs, where alerts go, what each alert means and the first action, and the outside heartbeat and uptime checks | M2-S08 |
+| [operator.md](operator.md) | The first operator account, onboarding and offboarding a customer, the organisation statuses and every operator command | M2-S09 |
+| [entitlements.md](entitlements.md) | The plan presets, how to see and change a customer's plan, and what users see at each limit | M2-S10 |
+| [sign-in.md](sign-in.md) | The one sign-in page, email domain verification with a DNS TXT record, and the privacy and terms links | M2-S11 |
 
 ## Order of going live
 

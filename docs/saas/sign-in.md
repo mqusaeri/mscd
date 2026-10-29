@@ -18,7 +18,7 @@ The password field disappears only when the organisation allows company sign-in 
 
 The sign-in page never tells a stranger which organisations use MSCD. An unknown slug, an email domain that no organisation verified, and an organisation without company sign-in all get the same answer: the email and password form, with no buttons. The server also answers at most 20 lookups a minute from one network address; after that the page shows no new buttons for a minute, and signing in with email and password still works.
 
-The footer of the page links to the privacy notice and the terms of service. The server profile keys `legal.privacy_url` and `legal.terms_url` hold their addresses (as environment settings: `MSCD__LEGAL__PRIVACY_URL` and `MSCD__LEGAL__TERMS_URL`), and each link is hidden while its key is empty. The GitHub variables `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` of [owner-inputs.md](owner-inputs.md) hold the same addresses, but the deploy does not pass them to the server yet; until it does, the SaaS sign-in page shows no footer links.
+The footer of the page links to the privacy notice and the terms of service. The server profile keys `legal.privacy_url` and `legal.terms_url` hold their addresses (as environment settings: `MSCD__LEGAL__PRIVACY_URL` and `MSCD__LEGAL__TERMS_URL`), and each link is hidden while its key is empty. The GitHub variables `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` of [owner-inputs.md](owner-inputs.md) hold the same addresses. `deploy-prod.yml` sends them to `saas-deploy.sh`, which writes them to `MSCD_LEGAL_PRIVACY_URL` and `MSCD_LEGAL_TERMS_URL` in `.env`, and Compose passes them to the server as the two settings above. A variable that is not set hides its link.
 
 ## Why an email domain is verified
 

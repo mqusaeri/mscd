@@ -275,13 +275,21 @@ export interface HtmlForm {
   fields: Record<string, string>;
 }
 
+const ENTITIES: Readonly<Record<string, string>> = { '&amp;': '&', '&quot;': '"', '&#39;': "'", '&#x27;': "'", '&lt;': '<', '&gt;': '>' };
+
+/** The HTML entities Keycloak writes, decoded in one pass, so a decoded "&" never starts another entity. */
 function decodeEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&#x27;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+  return text.replace(/&(?:amp|quot|#39|#x27|lt|gt);/g, (entity) => ENTITIES[entity]!);
+}
+
+/** The text of an HTML fragment: tags are removed until none is left (a removal can join the parts of another). */
+function textOf(html: string): string {
+  let text = html;
+  for (let previous = ''; text !== previous; ) {
+    previous = text;
+    text = text.replace(/<[^<>]*>/g, '');
+  }
+  return text.replace(/[<>]/g, '');
 }
 
 function attribute(tag: string, name: string): string | null {
@@ -310,7 +318,7 @@ export function htmlForms(html: string): HtmlForm[] {
 /** Text of the error message on a Keycloak page, for test failure messages. */
 export function keycloakPageError(html: string): string {
   const match = /<span[^>]*(?:kc-feedback-text|input-error)[^>]*>([\s\S]*?)<\/span>/i.exec(html);
-  return match ? decodeEntities(match[1]!.replace(/<[^>]+>/g, '').trim()) : html.slice(0, 300).replace(/\s+/g, ' ');
+  return match ? decodeEntities(textOf(match[1]!).trim()) : html.slice(0, 300).replace(/\s+/g, ' ');
 }
 
 export interface KeycloakResponse {

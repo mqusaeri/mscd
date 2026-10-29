@@ -1,11 +1,13 @@
 // Expected guard decisions of the generated RBAC tests (build plan J.5, F.6, F.7), derived from the F.6 matrix as
 // data (`PERMISSION_MATRIX`) and the route table, for a user who holds exactly one role. The rules are written out
 // here instead of calling the server's evaluator, so the suite checks the wiring of every route (permission, scope,
-// system source, alternatives, machine rows) and the guard pipeline against the plan.
+// system source, alternatives, machine rows) and the guard pipeline against the plan. The grants are those of the
+// run's tenancy mode (test/setup/tenancy.ts): single in `test:int`, multi in `test:int:saas` (Milestone 2 J.2, M2-S13).
 import {
   EXTERNAL_AUDITOR, effectiveGrant, machinePermissions, permissionCase, type Permission, type PermissionCheckScope, type RouteDef,
 } from '@mscd/shared';
 import type { TestDatabase } from '../../setup/test-db';
+import { testTenancy } from '../../setup/tenancy';
 import { BUSINESS_ROLE, ORG_ROLE, type RoleKey, type RouteInput } from '../contract/harness';
 import { RBAC_EXPECTATIONS as M2_05 } from './expectations/M2-05';
 import { RBAC_EXPECTATIONS as M2_06 } from './expectations/M2-06';
@@ -55,7 +57,7 @@ export interface Check {
 
 /** Whether a user holding only `role` (business roles in the request's system) passes one check (F.6, F.7). */
 export function roleHolds(role: RoleKey, check: Check): boolean {
-  const grant = effectiveGrant(check.permission, 'single');
+  const grant = effectiveGrant(check.permission, testTenancy());
   if (role === 'OP') return grant.platformRoles.includes('platform_operator');
   if (check.scope === 'platform' || grant.scope === 'platform') return false;
   const orgRole = ORG_ROLE[role];
@@ -77,7 +79,7 @@ export function roleHolds(role: RoleKey, check: Check): boolean {
 
 /** The checks the guard makes for a request (`member` is the value of a `permissionBy` member). */
 export function checksOf(def: RouteDef, member?: unknown): { any: Check[]; all: Check[] } {
-  const scopeOf = (permission: Permission, scope?: PermissionCheckScope): PermissionCheckScope => scope ?? effectiveGrant(permission, 'single').scope;
+  const scopeOf = (permission: Permission, scope?: PermissionCheckScope): PermissionCheckScope => scope ?? effectiveGrant(permission, testTenancy()).scope;
   if (def.permissionBy) {
     const c = permissionCase(def.permissionBy, member);
     return { any: [{ permission: c.permission, scope: c.scope }], all: [] };

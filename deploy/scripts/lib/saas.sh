@@ -56,6 +56,7 @@ readonly SAAS_SETTINGS=(
     MSCD_MAIL_FROM MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_SMTP_SECURE MSCD_SMTP_USER
     MSCD_HTTP_PORT MSCD_HTTPS_PORT MSCD_LOG_LEVEL MSCD_NO_NEW_PRIVILEGES
     MSCD_SUBNET MSCD_WEB_ADDRESS MSCD_EDGE_SUBNET MSCD_CADDY_ADDRESS MSCD_WEB_EDGE_ADDRESS MSCD_EDGE_SUBNET6
+    MSCD_LEGAL_PRIVACY_URL MSCD_LEGAL_TERMS_URL
 )
 # The mail settings of .env, which go with the secret file smtp.password (MSCD_SMTP_USER
 # is the account the password belongs to). Every deploy and rollback writes smtp.password
@@ -629,6 +630,15 @@ saas_validate_settings() {
             "Set the variable ACME_EMAIL of the GitHub environment, or leave it empty"
     fi
     saas_validate_mail_settings "$target"
+    # The links of the sign-in page footer (legal.privacy_url, legal.terms_url): empty hides a
+    # link; a value is the https address of the published document.
+    for name in MSCD_LEGAL_PRIVACY_URL MSCD_LEGAL_TERMS_URL; do
+        value=${v[$name]:-}
+        if [[ -n $value && ! $value =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^[:space:]]*)?$ ]]; then
+            fail "$name '$value' is not an https address (it may be empty)" \
+                "Set the variable ${name#MSCD_} of the GitHub environment to the published address, or remove it"
+        fi
+    done
     for name in MSCD_HTTP_PORT MSCD_HTTPS_PORT; do
         value=${v[$name]:-}
         if [[ -n $value ]] && ! valid_port "$value"; then

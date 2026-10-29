@@ -2,14 +2,15 @@
   "name": "@mscd/smoke",
   "version": "1.0.0",
   "private": true,
-  "description": "MSCD full-stack smoke test (build plan J.9, WP-31) and fresh-organisation journey (MILESTONE-2 M2-18): Playwright against Compose stacks",
+  "description": "MSCD full-stack smoke test (build plan J.9, WP-31), fresh-organisation journey (MILESTONE-2 M2-18) and SaaS end-to-end run (M2-S13): Playwright against Compose stacks",
   "engines": {
     "node": ">=22"
   },
-  "//": "The smoke test script is named smoke, never test: the root npm test runs the test script of every workspace, and the root test:smoke runs this smoke script (WP-03 handoff, deviation 1). The journey is run with npm run journey -w @mscd/smoke [-- --saas].",
+  "//": "The smoke test script is named smoke, never test: the root npm test runs the test script of every workspace, and the root test:smoke runs this smoke script (WP-03 handoff, deviation 1). The journey is run with npm run journey -w @mscd/smoke [-- --saas], the SaaS end-to-end run with npm run saas -w @mscd/smoke [-- --with-ops].",
   "scripts": {
     "smoke": "node run-smoke.mjs",
-    "journey": "node run-journey.mjs"
+    "journey": "node run-journey.mjs",
+    "saas": "node run-saas.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1"

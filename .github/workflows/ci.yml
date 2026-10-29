@@ -4,7 +4,12 @@
 # on PostgreSQL 15, 16 and 17; the web E2E suites (sample data and API); the
 # images (web, release server with rehearsal keys, demo server) with the release
 # artefact check (R-13) and a vulnerability scan; the full-stack smoke test; the
-# static Helm checks; the writing rules.
+# static Helm checks; the writing rules; the SaaS static checks (workflows,
+# Compose overlays, alert rules, scripts, go-live checklist) and the integration
+# tests with tenancy multi (Milestone 2 K.6, M2-S13).
+# Pushes to the default branch and nightly: the SaaS end-to-end run on release
+# images with throwaway keys, the monitoring overlay with Grafana, the backup
+# and restore test, and the deploy rehearsal.
 # Nightly (and by hand): the Helm install test in k3s and an offline bundle
 # rehearsal (build, install, uninstall).
 #
@@ -23,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       nightly:
-        description: Also run the nightly jobs (Helm install test in k3s, offline bundle rehearsal)
+        description: Also run the nightly jobs (Helm install test in k3s, offline bundle rehearsal, SaaS end-to-end run)
         type: boolean
         default: false
 
@@ -65,11 +70,17 @@ jobs:
           node packs/scripts/extract-from-sample.mjs --check
           node packs/scripts/validate-sources.mjs
       - name: Shell scripts
+        # Each folder from its own place, so -x follows the files the scripts source.
         run: |
-          docker run --rm -v "$PWD/deploy/scripts:/s:ro" -w /s koalaman/shellcheck:stable -x \
-            install.sh upgrade.sh uninstall.sh build-bundle.sh check-release-artefacts.sh deploy-demo.sh lib/common.sh
+          docker run --rm -v "$PWD/deploy:/d:ro" -w /d/scripts koalaman/shellcheck:stable -x \
+            install.sh upgrade.sh uninstall.sh build-bundle.sh check-release-artefacts.sh deploy-demo.sh lib/common.sh \
+            build-release-images.sh saas-keys.sh saas-deploy.sh saas-ops.sh bootstrap-host.sh lib/saas.sh \
+            test/saas-stack.sh test/saas-rehearsal.sh
+          docker run --rm -v "$PWD/deploy:/d:ro" -w /d/backup koalaman/shellcheck:stable -x \
+            backup.sh backup-run.sh restore.sh restore-test.sh lib.sh
+          docker run --rm -v "$PWD/deploy:/d:ro" -w /d/ops koalaman/shellcheck:stable -x test-ops.sh
           docker run --rm -v "$PWD/deploy:/d:ro" -w /d koalaman/shellcheck:stable -s sh \
-            nginx/40-mscd-runtime.sh compose/config/postgres/10-mscd-bootstrap.sh
+            nginx/40-mscd-runtime.sh compose/config/postgres/10-mscd-bootstrap.sh ops/ops-init.sh
       - name: Compose files
         run: |
           docker compose -f deploy/compose/docker-compose.yml config -q
@@ -115,6 +126,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: jq (test/int/saas-ops runs saas-ops.sh and the input step of ops-cli.yml)
+        run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
       - name: Integration tests
         run: npm run test:int
       - name: Remove test containers
@@ -325,6 +338,138 @@ jobs:
           key: kubeconform-1.34.1-${{ hashFiles('deploy/helm/mscd/ci/validate.sh') }}
       - name: helm lint, helm template, kubeconform, render assertions
         run: bash deploy/helm/mscd/ci/validate.sh
+
+  saas-static:
+    name: SaaS static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: SaaS workflows (pinned actions, permissions, secrets, concurrency)
+        run: |
+          node tools/scripts/check-workflows.mjs --self-test
+          node tools/scripts/check-workflows.mjs --saas --require-all
+      - name: Compose files of the SaaS stack with the backup and monitoring overlays
+        run: |
+          c=(docker compose --env-file deploy/compose/.env.saas.example -f deploy/compose/docker-compose.yml
+            -f deploy/compose/docker-compose.saas.yml)
+          "${c[@]}" config -q
+          "${c[@]}" -f deploy/compose/docker-compose.backup.yml config -q
+          "${c[@]}" -f deploy/compose/docker-compose.ops.yml config -q
+          "${c[@]}" -f deploy/compose/docker-compose.ops.yml --profile grafana config -q
+          "${c[@]}" -f deploy/compose/docker-compose.backup.yml -f deploy/compose/docker-compose.ops.yml config -q
+      - name: Alert rules and monitoring settings (promtool, amtool, ops-init, blackbox, Caddy, dashboard)
+        run: bash deploy/ops/test-ops.sh --static
+      - name: Syntax of every SaaS script
+        run: |
+          for f in deploy/scripts/saas-deploy.sh deploy/scripts/saas-ops.sh deploy/scripts/saas-keys.sh \
+            deploy/scripts/bootstrap-host.sh deploy/scripts/build-release-images.sh deploy/scripts/lib/saas.sh \
+            deploy/scripts/test/saas-stack.sh deploy/scripts/test/saas-rehearsal.sh deploy/ops/test-ops.sh \
+            deploy/backup/backup.sh deploy/backup/backup-run.sh deploy/backup/restore.sh \
+            deploy/backup/restore-test.sh deploy/backup/lib.sh; do
+            bash -n "$f"
+          done
+          sh -n deploy/ops/ops-init.sh
+      - name: Go-live checklist (rows, statuses, evidence and links)
+        # --agent-items-done is the acceptance of M2-S13; it fails while an agent row is open, and the
+        # security scan row (GL-13) waits for dependency updates and the CodeQL triage.
+        run: |
+          node tools/scripts/check-golive.mjs --self-test
+          node tools/scripts/check-golive.mjs docs/saas/go-live-checklist.md
+
+  int-saas:
+    name: Integration tests (tenancy multi, SaaS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: jq (test/int/saas-ops runs saas-ops.sh and the input step of ops-cli.yml)
+        run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
+      - name: security, rbac and contract with tenancy multi; saas-ops, entitlements and domains
+        run: npm run test:int:saas -w @mscd/server
+      - name: Remove test containers
+        if: always()
+        run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
+
+  saas-smoke:
+    name: SaaS end-to-end run, monitoring, backup and deploy rehearsal
+    # Pushes to the default branch, nightly, and by hand with "nightly".
+    if: >-
+      (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) ||
+      github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Build CA
+        env:
+          BUILD_CA: ${{ secrets.MSCD_BUILD_CA }}
+        run: |
+          printf '%s' "$BUILD_CA" > "$RUNNER_TEMP/build-ca.pem"
+          echo "MSCD_BUILD_CA=$RUNNER_TEMP/build-ca.pem" >> "$GITHUB_ENV"
+      - name: jq (saas-ops.sh reads its values with it)
+        run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
+      - name: Free disk space for the release images and Grafana
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+      - name: Playwright browsers cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium system packages
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: SaaS end-to-end run (throwaway keys, release images, every step in the browser)
+        # saas-stack.sh makes a throwaway key set with saas-keys.sh in /tmp/mscd-saas-run, builds
+        # the release images with it behind the Trivy gate, and deletes both at the end.
+        run: npm run saas -w @mscd/smoke -- --with-ops
+      - name: Monitoring overlay on the test stack, with the real Grafana image
+        if: ${{ !cancelled() }}
+        env:
+          MSCD_OPS_TEST_GRAFANA: 'true'
+        run: bash deploy/ops/test-ops.sh
+      - name: Backup and restore end to end (restore-test.sh --local)
+        if: ${{ !cancelled() }}
+        # Root, as the backup timer and restore.sh run: it reads and writes the secret files of every service.
+        run: sudo -E env "PATH=$PATH" bash deploy/backup/restore-test.sh --local
+      - name: Deploy rehearsal (deploy, upgrade, automatic and manual rollback)
+        if: ${{ !cancelled() }}
+        # Root for setpriv: the deploys run as a user in the docker group, as on a server.
+        run: sudo -E env "PATH=$PATH" bash deploy/scripts/test/saas-rehearsal.sh
+      - name: Deploy workflow rehearsal (SSH, copy and deploy steps of deploy-prod.yml)
+        if: ${{ !cancelled() }}
+        run: sudo -E env "PATH=$PATH" bash deploy/scripts/test/saas-rehearsal.sh --workflow
+      - name: Remove test containers
+        if: always()
+        run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
+      - name: Upload the SaaS run results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saas-results
+          path: tools/smoke/test-results/saas
+          retention-days: 7
 
   helm:
     name: Helm install test (k3s)

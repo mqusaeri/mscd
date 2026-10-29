@@ -140,3 +140,52 @@ flock /tmp/mscd-stack.lock npm run journey -w @mscd/smoke -- --saas
 `--keep` leaves the stack running and prints the temporary folder with the state of the run; `--down` removes it (`JOURNEY_PROJECT=... node tools/smoke/run-journey.mjs [--saas] --down`).
 
 The development keys and the signed licence stay in the temporary folder of the run and never enter the repository. The release check (`deploy/scripts/check-release-artefacts.sh`) refuses them in any release artefact.
+
+# SaaS end-to-end run
+
+`npm run saas -w @mscd/smoke` runs the SaaS end-to-end run of MILESTONE-2 M2-S13: two customer organisations on one SaaS stack of release images, every step in the browser. `-- --with-ops` adds the monitoring overlay and checks that every Prometheus target is up. It publishes the ports of the other test stacks (18080, 18443 and Mailpit's API on 18025), so it takes the host lock (R-05):
+
+```bash
+flock /tmp/mscd-stack.lock npm run saas -w @mscd/smoke -- --with-ops
+```
+
+Run it alone. On the build host of Milestone 2 the run (release image builds, the stack with the monitoring overlay and the browser) took up to about 10 GiB of Linux memory with page cache: the 14 containers about 0.73 GiB, Chromium up to 1.6 GiB, the rest image builds and cache. Windows then had only about 2.8 GiB of free commit memory left. A second Compose stack or a test suite next to it stopped the WSL host on 29 October 2026 (`docs/platform/handoff/M2-S13.md`, "Build host memory").
+
+## What it does
+
+1. `deploy/scripts/test/saas-stack.sh up` (M2-S02): a throwaway release key set made with `saas-keys.sh` in the state folder, the release images built with it behind the Trivy gate (`build-release-images.sh --load`; `MSCD_SAAS_TEST_SCAN=auto` on a host that cannot reach the Alpine mirrors), Caddy with its own local certificate authority (`tls internal`) and Mailpit as the mail relay. Then `saas-stack.sh check` on the same stack: tenancy multi, ports, TLS and HSTS, rate limits, client address and log redaction, the public profile, the marketing site and the audit anchor key.
+2. The run overlay `<state folder>/compose.run.yml`: the provider mocks (image built from `deploy/docker/mock-providers.Dockerfile` as `localhost/<project>/mscd-mock-providers`, removed by `saas-stack.sh down`) with their DNS responder on UDP 5353 at a fixed address, which the api and the worker use as their only resolver (`network.dns_resolvers`); Mailpit's API on 127.0.0.1; the privacy notice and terms addresses in `.env` (`MSCD_LEGAL_PRIVACY_URL`, `MSCD_LEGAL_TERMS_URL`), which `docker-compose.saas.yml` passes to the server. With `--with-ops` also `deploy/compose/docker-compose.ops.yml`: the alerts go to the app's Mailpit, and the HTTPS probe reaches Caddy over the edge network with Caddy's root certificate. The services start in phases, so the web container keeps its fixed addresses while others are recreated.
+3. `deploy/scripts/saas-ops.sh create-operator --input-stdin --public`, as `ops-cli.yml` runs it on a server: the values on standard input, the output masked (the run fails when the operator's email appears in it). The script runs against a view of the stack as an install folder (`<state folder>/install`: its `.env` names the project and the profiles, and `deploy/compose/docker-compose.yml` is the stack's configuration as Compose resolved it). The set-password email goes to Mailpit.
+4. `tests/saas.spec.mjs` with `saas.config.mjs` (the browser accepts the certificate of Caddy's local authority). Each person has their own browser session; emails come from Mailpit and authenticator codes from the secret each person enrolled. The run fails on any page error, console error, 5xx answer or 4xx answer that its step does not expect. The expected 4xx answers are named in the spec: the 401 of the session check before sign-in, the 404 answers of the isolation step, the 401 and 403 answers of the suspension, the 403 of the offboarding and the 422 `LIC-USERS`; so are two browser and app messages the steps expect. The browser's "Failed to load resource" lines count only for an answer the page received and the spec judged. The run also checks every screen a person sees for the first time and every dialog and drawer of the operator console with `lib/readable.mjs` (WCAG AA contrast, no text under 12px), and checks that every cookie of every person is an essential cookie of `docs/saas/legal-inputs.md`, HttpOnly and Secure.
+5. With `--with-ops`: every Prometheus target is up (`prometheus`, `alertmanager`, `api`, `worker`, `storage-gateway`, `node`, `postgres`, `blackbox`, `public-url`), and the HTTPS probe of the public URL succeeds.
+6. `saas-stack.sh down`: containers, networks, volumes, the images under `localhost/<project>/` and the state folder; on success, on failure and on Ctrl-C.
+
+## The steps
+
+| Step | On screen |
+|---|---|
+| Operator | Oki Pratama, made by `saas-ops.sh create-operator`, sets a password from the emailed link and enrols the authenticator; the operator console opens |
+| Organisations | Create organisation: Alpha (PT Alpha Solusi Digital) on the plan preset `standard` and Beta (CV Beta Mandiri) on `trial`; the list shows 0 of 50 and 0 of 10 users |
+| Domain | Manage Alpha, Domains: `alphasolusi.co.id` added, its TXT record published in the mock DNS, Verify now: verified |
+| First administrators | Ayu Lestari (Alpha) and Budi Santoso (Beta) accept the emailed invitations and land on Getting started. Ayu signs in again on another computer: the sign-in page links the privacy notice and the terms, looks up her work email (discovery) and opens Alpha after the password and the authenticator code |
+| Systems | each administrator invites a second Tenant Admin (Dimas Saputra, Citra Dewi), creates a system with the Managed Vault as default repository (Alpha ISMS on ISO/IEC 27001:2022, Beta QMS on ISO 9001:2015), asks for the Management System Manager role (primary), which the second administrator approves in Pending approvals (four eyes), and starts the implementation |
+| Files | each manager creates evidence (A.5.1, clause 4.3) and uploads a file from the browser into the Managed Vault; the vault records its SHA-256. Alpha's manager exports the readiness report |
+| Isolation | Alpha's manager opens Alpha's system, file (the bytes match the upload) and export URLs. Beta's manager opens the same URLs, and the file also on behalf of Beta's own system: every answer is 404 with a problem body that names no record. A stranger's sign-in page with `?org=` of an unknown slug, of Beta and of Alpha gets the same discovery answer |
+| Suspension | the operator suspends Beta (reason and slug): its sessions end, the Tenant Admins get an email; Budi's next page is the sign-in page, and after sign-in every page of Beta is refused with the full-page message "The organisation is not active". Alpha keeps working. Reactivate, and "Try again" opens Beta as it was |
+| Offboarding | the operator starts offboarding Beta: Budi's session stays, pages and files open, and an invitation is refused with 403 `organisation-inactive` |
+| User limit | the operator sets custom limits for Alpha with 2 users, its current use (2 of 2); Ayu's next invitation shows "The user limit is reached" and the `LIC-USERS` message of a SaaS plan |
+
+## Running it
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MSCD_SAAS_TEST_PROJECT` | `mscd-saas-run` | Compose project, also the image path `localhost/<project>/` |
+| `MSCD_SAAS_TEST_DIR` | `/tmp/mscd-saas-run` | state folder (keys, secrets, `.env`, the run state); a plain absolute path below `/tmp`, `/var/tmp` or `$TMPDIR`, deleted at the end |
+| `MSCD_SAAS_TEST_HTTP_PORT`, `MSCD_SAAS_TEST_HTTPS_PORT`, `MSCD_MAILPIT_PORT` | 18080, 18443, 18025 | published ports on 127.0.0.1 |
+| `MSCD_SAAS_TEST_SCAN` | `gate` | `auto` for a build host that cannot reach the Alpine mirrors (as `saas-stack.sh`) |
+| `MSCD_EDGE_SUBNET6` | a range made from the project name | IPv6 range of the edge network on a host with IPv6, so the run can sit next to another SaaS stack |
+| `MSCD_BUILD_CA` | empty | CA certificate of a TLS-inspecting proxy for the image builds (`--build-ca` wins) |
+| `SAAS_OUTPUT_DIR` | `tools/smoke/test-results/saas` | logs, the Playwright report and traces |
+| `SMOKE_KEEP` | unset | `1` is the same as `--keep` |
+
+`--keep` leaves the stack running at `https://localhost:18443/` (Caddy's root certificate is `<state folder>/caddy-root.crt`); `--down` removes it with the same project and state folder (`MSCD_SAAS_TEST_PROJECT=... MSCD_SAAS_TEST_DIR=... node tools/smoke/run-saas.mjs --down`). The throwaway keys stay in the state folder and are deleted with it; nothing signed and no key is written into the repository.

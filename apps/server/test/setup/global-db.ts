@@ -17,6 +17,12 @@
 // uses it (useTestDatabase('demo'), createTestDatabase('demo') or mscd_tpl_demo in its source); MSCD_TEST_DEMO_TEMPLATE
 // set to on or off forces the choice. A demo template that cannot be built is reported and left out, so suites on
 // the empty template still run; useTestDatabase('demo') then fails with the template missing.
+//
+// The SaaS run (`npm run test:int:saas`, vitest.int-saas.config.ts, MSCD_TEST_TENANCY=multi) builds the demo template
+// as the multi-tenancy template: `seed demo` runs with tenancy mode multi and schema isolation (tenancy.ts), and the
+// template must hold at least two active organisations, each in its own schema, because the security and rbac
+// suites prove that one organisation cannot reach another. A SaaS run whose multi-tenancy template cannot be built
+// stops here instead of leaving it out.
 import 'reflect-metadata';
 import { execFile } from 'node:child_process';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
@@ -33,6 +39,7 @@ import { LocalKeyService } from '../../src/seed/key-service';
 import { seedDemo } from '../../src/seed/seed-demo';
 import type { TestDatabase } from './test-db';
 import { serverUrl, templateName, TEST_ROLE_PASSWORDS, type TemplateKind, type TestDbServer } from './test-db-server';
+import { MULTI_TENANCY_ENV, isSaasRun } from './tenancy';
 
 const DEFAULT_IMAGE = 'postgres:16.15-alpine';
 /** Containers of crashed runs are removed by later runs once this old (R-06). */
@@ -41,11 +48,15 @@ const run = promisify(execFile);
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const ENSURE_BUILT = path.join(REPO_ROOT, 'tools', 'scripts', 'ensure-built.mjs');
 const TEST_PROFILE = path.resolve(__dirname, '../../profiles/test.yaml');
+/** Organisations the multi-tenancy template must hold at least: the cross-organisation sweeps need two. */
+export const SAAS_TEMPLATE_MIN_ORGANISATIONS = 2;
 
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
   process.env.TESTCONTAINERS_RYUK_DISABLED ??= 'true';
-  const demoWanted = await demoTemplateWanted(project);
+  const saas = isSaasRun();
+  const demoWanted = saas || (await demoTemplateWanted(project));
   const built = demoWanted ? await ensureBuilt() : false;
+  if (saas && !built) throw new Error('global-db: the SaaS run needs the multi-tenancy template, and ensure-built failed (see above)');
   await removeExpiredTestContainers();
 
   let stopContainer: (() => Promise<void>) | undefined;
@@ -96,9 +107,19 @@ export default async function setup(project: TestProject): Promise<() => Promise
     if (built) {
       try {
         const started = Date.now();
-        await buildTemplate(server, 'demo', (adminUrlOfTemplate) => fillDemoTemplate(server, adminUrlOfTemplate));
-        process.stdout.write(`global-db: demo template ${templateName('demo')} built in ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
+        let organisations = 0;
+        await buildTemplate(server, 'demo', async (adminUrlOfTemplate) => {
+          await fillDemoTemplate(server, adminUrlOfTemplate, saas ? MULTI_TENANCY_ENV : {});
+          if (saas) organisations = await checkMultiTenancyTemplate(adminUrlOfTemplate);
+        });
+        const seconds = ((Date.now() - started) / 1000).toFixed(1);
+        process.stdout.write(
+          saas
+            ? `global-db: multi-tenancy template ${templateName('demo')} built in ${seconds} s (tenancy multi, schema isolation, ${organisations} organisations)\n`
+            : `global-db: demo template ${templateName('demo')} built in ${seconds} s\n`,
+        );
       } catch (error) {
+        if (saas) throw error;
         process.stderr.write(`global-db: the demo template ${templateName('demo')} was not built: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
       }
     }
@@ -161,8 +182,9 @@ async function ensureBuilt(): Promise<boolean> {
 /**
  * The demo template (J.2, G.1): bootstrap, platform and ref migrations, then `seed demo` with the test profile on
  * this database. Data keys and credentials are made in process with the test storage key (`gateway.kms.file`).
+ * `overrides` are profile overrides of the seed (the multi-tenancy settings in the SaaS run).
  */
-async function fillDemoTemplate(server: TestDbServer, adminUrlOfTemplate: string): Promise<void> {
+async function fillDemoTemplate(server: TestDbServer, adminUrlOfTemplate: string, overrides: Readonly<Record<string, string>> = {}): Promise<void> {
   const name = templateName('demo');
   const urls = {
     migrator: serverUrl(server, name, 'mscd_migrator', TEST_ROLE_PASSWORDS.migrator),
@@ -185,6 +207,7 @@ async function fillDemoTemplate(server: TestDbServer, adminUrlOfTemplate: string
       MSCD_DATABASE_PACK_URL: urls.packInstaller,
       MSCD_DATABASE_ADMIN_URL: adminUrlOfTemplate,
       MSCD__OBSERVABILITY__METRICS_PORT: 'null',
+      ...overrides,
     },
   });
   const keys = LocalKeyService.fromConfig(config);
@@ -192,6 +215,33 @@ async function fillDemoTemplate(server: TestDbServer, adminUrlOfTemplate: string
     await seedDemo(config, { keys });
   } finally {
     await keys.close();
+  }
+}
+
+/**
+ * The checks of the multi-tenancy template (SaaS run): at least SAAS_TEMPLATE_MIN_ORGANISATIONS active organisations,
+ * each with a schema of its own that exists in the database. Returns the number of organisations.
+ */
+async function checkMultiTenancyTemplate(adminUrlOfTemplate: string): Promise<number> {
+  const client = new pg.Client({ connectionString: adminUrlOfTemplate });
+  client.on('notice', () => undefined);
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ slug: string; schema_name: string; present: boolean }>(
+      `SELECT o.slug, o.schema_name, EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = o.schema_name) AS present
+         FROM platform.organization o WHERE o.status = 'active' AND o.deleted_at IS NULL ORDER BY o.slug`,
+    );
+    const schemas = new Set(rows.map((r) => r.schema_name));
+    const missing = rows.filter((r) => !r.present).map((r) => `${r.slug} (${r.schema_name})`);
+    if (rows.length < SAAS_TEMPLATE_MIN_ORGANISATIONS || schemas.size !== rows.length || missing.length > 0) {
+      throw new Error(
+        `global-db: the multi-tenancy template needs at least ${SAAS_TEMPLATE_MIN_ORGANISATIONS} active organisations, each in its own schema; ` +
+          `it holds ${rows.length} (${rows.map((r) => r.slug).join(', ') || 'none'})${missing.length ? `, schemas missing: ${missing.join(', ')}` : ''}`,
+      );
+    }
+    return rows.length;
+  } finally {
+    await client.end();
   }
 }
 
