@@ -78,7 +78,9 @@ env:
   SIGNER: https://github.com/mqusaeri/mscd/.github/workflows/release.yml
   OIDC_ISSUER: https://token.actions.githubusercontent.com
   COSIGN_RELEASE: v3.1.3
-  INSTALL_DIR: /opt/mscd
+  # A server whose Docker cannot use /opt (the snap package of Docker, which a shared staging
+  # host may run) names another install folder in the variable MSCD_INSTALL_DIR of its environment.
+  INSTALL_DIR: ${{ vars.MSCD_INSTALL_DIR || '/opt/mscd' }}
 
 jobs:
   deploy:
@@ -271,6 +273,9 @@ jobs:
           MSCD_SITE_DOMAIN: ${{ vars.MSCD_SITE_DOMAIN }}
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           ACME_CA: ${{ vars.ACME_CA }}
+          # Optional: a host port for Caddy's HTTP side when another web server holds port 80 (a shared
+          # staging host whose proxy forwards the MSCD host names, including the ACME challenge, to it).
+          MSCD_HTTP_PORT: ${{ vars.MSCD_HTTP_PORT }}
           BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
           BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
           BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
@@ -296,6 +301,7 @@ jobs:
           . deploy/scripts/lib/saas.sh
           # Optional values that are not set are left out, so the server keeps its default.
           [[ -n $ACME_CA ]] || unset ACME_CA
+          [[ -n $MSCD_HTTP_PORT ]] || unset MSCD_HTTP_PORT
           # This file runs from the default branch, the scripts from the tag. Only the names
           # that the tag's saas-deploy.sh takes are sent (saas_input_names of its lib/saas.sh),
           # so a rollback to an older release, or a hotfix tag cut before a name was added
@@ -304,7 +310,7 @@ jobs:
           names=()
           for name in PLATFORM_KEY STORAGE_KEY AUDIT_ANCHOR_KEY SMTP_PASSWORD \
             MSCD_SMTP_USER MSCD_SMTP_HOST MSCD_SMTP_PORT MSCD_MAIL_FROM MSCD_DOMAIN MSCD_SITE_DOMAIN \
-            ACME_EMAIL ACME_CA "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"; do
+            ACME_EMAIL ACME_CA MSCD_HTTP_PORT "${SAAS_BACKUP_INPUTS[@]}" "${SAAS_OPS_INPUTS[@]}"; do
             if [[ $accepted == *" $name "* ]]; then
               names+=("$name")
             else
@@ -377,7 +383,7 @@ jobs:
           {
             echo "## $ACTION $VERSION on $TARGET: $RESULT"
             echo
-            echo "Duration: $(( $(date +%s) - STARTED )) seconds. The server keeps the full log in /opt/mscd/logs."
+            echo "Duration: $(( $(date +%s) - STARTED )) seconds. The server keeps the full log in $INSTALL_DIR/logs."
             if [[ -s $WORK/deploy.out ]] && grep -qE '^ +WARN ' "$WORK/deploy.out"; then
               echo
               echo "Warnings of the server:"
