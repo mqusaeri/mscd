@@ -138,7 +138,8 @@ describe('backup verify', () => {
     expect(summary.failures).toEqual([]);
     expect(summary.ok).toBe(true);
     expect(summary.database).toMatchObject({ ok: true, organisations: 2, skipped: 0 });
-    expect(summary.database.serverVersion).toMatch(/^16\./);
+    // CI runs this suite on PostgreSQL 15, 16 and 17 (MSCD_TEST_PG_IMAGE).
+    expect(summary.database.serverVersion).toMatch(/^\d+\.\d+/);
     expect(summary.gateway.ok).toBe(true);
     expect(summary.gateway.storageKeyId).toMatch(/^[0-9a-f]{8}$/);
     expect(summary.platformKey).toMatchObject({ ok: true, sealedValues: 1, opened: 1 });
