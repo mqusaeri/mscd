@@ -52,6 +52,8 @@ async function openIn(page, query, ms) {
 test.describe('Display settings', () => {
   for (const ms of SYSTEMS) {
     test(`dark theme renders every ${ms} screen with readable text`, async ({ page }) => {
+      // Every screen walk gets the slow test time: alone it takes up to 55 s, so a busy host passes 60 s.
+      test.slow();
       await openIn(page, '?theme=dark', ms);
       const root = page.locator('.mscd').first();
       await expect(root).toHaveAttribute('data-theme', 'dark');
@@ -129,6 +131,7 @@ test.describe('Display settings', () => {
     });
     for (const ms of SYSTEMS) {
       test(`${density} density renders every ${ms} screen`, async ({ page }) => {
+        test.slow();
         await openIn(page, '?density=' + density, ms);
         await visitAll(page, SCREENS);
       });
@@ -145,6 +148,7 @@ test.describe('Display settings', () => {
       // The pairing comes from Google Fonts and falls back to system fonts when that is unreachable
       // (the on-premise image does not load it by default), so the text must fit with either.
       test(`${font} font pairing renders every ${ms} screen`, async ({ page }) => {
+        test.slow();
         await openIn(page, '?font=' + font, ms);
         await page.evaluate(() => document.fonts.ready);
         await visitAll(page, SCREENS);

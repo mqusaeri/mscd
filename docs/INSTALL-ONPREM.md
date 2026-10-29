@@ -12,7 +12,7 @@ This guide installs and runs MSCD on your own servers: with Docker Compose on on
 4. [Install with Docker Compose](#4-install-with-docker-compose)
 5. [First administrator](#5-first-administrator)
 6. [Licence](#6-licence)
-7. [Administration settings](#7-administration-settings)
+7. [Administration in the browser](#7-administration-in-the-browser)
 8. [Sign-in with your identity provider](#8-sign-in-with-your-identity-provider)
 9. [Local sign-in policy](#9-local-sign-in-policy)
 10. [Connect file repositories](#10-connect-file-repositories)
@@ -27,6 +27,7 @@ This guide installs and runs MSCD on your own servers: with Docker Compose on on
 19. [Uninstall](#19-uninstall)
 20. [Security summary](#20-security-summary)
 21. [Try MSCD on a test server](#21-try-mscd-on-a-test-server)
+22. [Not yet available](#22-not-yet-available)
 
 ## 1. What you receive
 
@@ -306,17 +307,17 @@ cd /opt/mscd
 sudo docker compose run --rm cli admin create-user --email ana.wijaya@acme.co.id --tenant-admin
 ```
 
-The command emails the invitation and prints `Invitation sent to ana.wijaya@acme.co.id`. When MSCD cannot send email, it prints a one-time link instead. The link is valid for 72 hours: send it to the administrator through a trusted channel. The administrator opens it, sets a password and enrols an authenticator app (TOTP). Multi-factor sign-in is always on for local accounts.
+The command emails the invitation and prints `Invitation sent to ana.wijaya@acme.co.id`. When MSCD cannot send email, it prints a one-time link instead. The link is valid for 72 hours: send it to the administrator through a trusted channel. The administrator opens it, sets a password and enrols an authenticator app (TOTP): MSCD shows a QR code and the secret, asks for one code from the app, and shows ten recovery codes to keep. Multi-factor sign-in is always on for local accounts.
 
 An address that already has an MSCD account (for example a person who works for another organisation on the same installation) gets an invitation to accept or decline after signing in, by email and as a notification in MSCD.
 
-The administrator (role Tenant Admin) then installs the licence (section 6), invites the other users (section 8) and grants their roles per management system.
+The administrator (role Tenant Admin) then lands on **Getting started**, the checklist of section 7, and does the rest in the browser: installs the licence (section 6), invites a second administrator and the team, connects company sign-in and the file repositories, and creates the management systems.
 
 ## 6. Licence
 
 Until a licence is installed, the organisation has its first Tenant Admin and nothing else: no further users, management systems or features. CyberLentera issues a licence file (signed JSON) for your installation. It is bound to the installation id, which identifies this database.
 
-1. Find the installation id:
+1. Find the installation id. In MSCD, open **Administration > Licence** (or **Organisation**): the panel "Installation id" shows it with a **Copy** button. From the server:
 
    ```bash
    cd /opt/mscd
@@ -327,41 +328,30 @@ Until a licence is installed, the organisation has its first Tenant Admin and no
 
 2. Send the installation id and your organisation name to CyberLentera. You receive the licence file.
 
-3. Sign in as the Tenant Admin and install the licence with the helper of section 7:
-
-   ```js
-   await mscd('PUT', '/admin/license', <paste the content of the licence file here>)
-   ```
-
-   The answer shows the licence with `"state": "valid"`. A licence for another installation is refused with `LIC-BINDING`.
+3. Sign in as the Tenant Admin, open **Administration > Licence** and choose **Install licence**. Choose the licence file (`.json`) or paste its text, then choose **Install licence**. The page shows the licence with the state **Valid**, the seats in use against the limit, the management systems, the frameworks, the storage adapters and the features. A licence for another installation is refused with `LIC-BINDING`, shown next to the field.
 
 The licence names the frameworks, the number of users and management systems, the storage adapters and the features you may use. Before it expires there is a grace period with a warning banner. After the grace period MSCD becomes read-only until a new licence is installed. Background jobs and exports keep running. The installation id changes only when the database is created again, so restore backups instead of reinstalling (section 15).
 
-## 7. Administration settings
+## 7. Administration in the browser
 
-Some settings have no screen in this release: the licence, identity providers, the local sign-in policy and file repositories. You change them through the MSCD API, from the browser in which you are signed in as Tenant Admin. No extra tool is needed.
+Every setting of the organisation has a screen. A Tenant Admin finds them in the **Administration** group of the sidebar; a Storage Admin sees the repository screens. Every change is recorded in the audit trail.
 
-1. Sign in to MSCD as the Tenant Admin.
-2. Open the browser's developer tools (F12) and choose the Console tab.
-3. Paste this helper once and press Enter:
+| Screen | What you do there |
+|---|---|
+| Getting started | The checklist of the setup, with the state of each step and a button to the screen that completes it: licence, second administrator, company sign-in, local sign-in policy, repository, routing rule, management systems, the team, and per system the Management System Manager, the people who verify, implementation, the entries and the Stage 1 and Stage 2 audit dates. A Tenant Admin without a business role lands here |
+| Organisation | Name, time zone, number of sites, and the installation id for licence requests. The slug cannot be changed |
+| Licence | The licence and **Install licence** (section 6) |
+| Management systems | **New management system** (standard and edition, scope statement, certification body, colour, default repository), **Edit**, **Start implementation** once a primary Management System Manager is granted, and **Archive** |
+| People and roles | **Invite person** (work email, name, job title, and the Tenant Admin or Storage Admin role), and per person: **Grant role** in a management system, **Revoke role**, **Edit**, **Pre-register company sign-in**, **Reset sign-in factor**, **Disable** or **Enable again**, and **Export roles and responsibilities** as CSV |
+| Pending approvals | Role grants and routing changes that wait for a second Tenant Admin, with **Approve** and **Reject** |
+| Company sign-in | OpenID Connect and SAML providers with **Test** (section 8) and the local sign-in policy (section 9) |
+| Storage repositories | The repositories with **Connect repository**, **Settings** and **Test connection** on each card (section 10), and **Repository administration** with every repository and its credential |
+| Routing rules | Which repository and storage mode new files of a system go to (section 10.4) |
+| Framework library | The installed framework packs and **Import offline bundle** |
 
-   ```js
-   async function mscd(method, path, body) {
-     const me = await (await fetch('/api/v1/me')).json();
-     const res = await fetch('/api/v1' + path, {
-       method,
-       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': me.csrfToken },
-       body: body === undefined ? undefined : JSON.stringify(body),
-     });
-     const text = await res.text();
-     console.log(res.status, text);
-     return text ? JSON.parse(text) : null;
-   }
-   ```
+**Grants that need a second administrator.** A role grant to yourself or to another administrator (a Tenant Admin or a Storage Admin) waits in **Pending approvals** until another Tenant Admin, who neither asked for it nor receives it, approves it. Invite a second Tenant Admin early; Getting started warns while you are the only one.
 
-4. Run the commands of the following sections, one at a time. Each prints the HTTP status and the answer. Any `2xx` status (`200`, `201`, `202` or `204`) means success. Any other status comes with a message that explains the problem.
-
-`await mscd('GET', '/license')` shows the installed licence, and `await mscd('GET', '/admin/identity-providers')` and `await mscd('GET', '/admin/storage/repositories')` list what is configured. Every change is recorded in the audit trail.
+**Separation of duties.** A person never verifies their own work. Each management system needs at least two people who can verify (a Management System Manager and a Programme Owner, or two Management System Managers), or no control reaches Implemented. Getting started counts them.
 
 ## 8. Sign-in with your identity provider
 
@@ -369,65 +359,50 @@ MSCD supports OpenID Connect (OIDC) and SAML 2.0 identity providers per organisa
 
 1. In the Entra admin center, register an application:
    - Supported account types: accounts in this organisational directory only.
-   - Redirect URI (Web): `https://<host name>/api/v1/auth/oidc/entra/callback`. The last but one part, `entra`, is the slug you give the provider in step 2.
+   - Redirect URI (Web): `https://<host name>/api/v1/auth/oidc/entra/callback`. The last but one part, `entra`, is the short id you give the provider in step 2.
    - Create a client secret and note its value, the application (client) id and the directory (tenant) id.
 
-2. In the MSCD console (section 7):
+2. In MSCD, open **Administration > Company sign-in** and choose **Add OIDC provider**:
+   - Button label: `Sign in with Microsoft`, short id: `entra`. The form shows the redirect address to register at the provider.
+   - Issuer address: `https://login.microsoftonline.com/<tenant id>/v2.0`; client id: the application id; client secret: its value; scopes: `openid email profile`.
+   - Account id: choose "Microsoft Entra ID object id and tenant" and enter the tenant id. MSCD then identifies users by their Entra tenant and object id, which never change, and refuses tokens from any other Entra tenant.
+   - Second factor: keep "Accept the second factor of the provider when it confirms one" with "Ask for the MSCD authenticator code" when it does not.
 
-   ```js
-   const idp = await mscd('POST', '/admin/identity-providers', {
-     slug: 'entra', kind: 'oidc', displayName: 'Sign in with Microsoft', icon: 'microsoft',
-     oidc: {
-       issuer: 'https://login.microsoftonline.com/<tenant id>/v2.0',
-       clientId: '<application id>',
-       clientSecret: '<client secret>',
-       scopes: 'openid email profile',
-       subjectMode: 'entra',
-       entraTenantId: '<tenant id>',
-     },
-   })
-   await mscd('POST', `/admin/identity-providers/${idp.id}/test`)
-   ```
+   Choose **Add provider**. MSCD reads the provider's discovery document first and refuses an issuer that does not answer. The client secret is encrypted and never shown again.
 
-   `subjectMode: 'entra'` identifies users by their Entra tenant and object id, which never change, and refuses tokens from any other Entra tenant. The test prints `"ok": true` with the endpoints MSCD found. The client secret is encrypted and never shown again.
+3. Choose **Test** on the provider row. The test shows the endpoints MSCD found, and the row shows that the test passed (for the rest of your browser session). The sign-in page now shows "Sign in with Microsoft".
 
-3. The sign-in page now shows "Sign in with Microsoft".
+For a SAML provider (for example AD FS), choose **Add SAML provider**, paste the federation metadata XML and choose **Fill from metadata**: the sign-on address, the entity id and the signing certificates are filled in. SAML never creates accounts at the first sign-in.
 
-How accounts are matched: Entra ID tokens carry no verified email, so MSCD never links an account by email. Invite each user. The user receives an invitation email, opens it and chooses "Sign in with Microsoft"; from then on the Microsoft account is linked. To invite a user from the console:
+How accounts are matched: Entra ID tokens carry no verified email, so MSCD never links an account by email. Invite each user in **People and roles > Invite person**. The user receives an invitation email, opens it and chooses "Sign in with Microsoft"; the invitation is redeemed through the provider and from then on the Microsoft account is linked. The token's email must be the invited address. To link an account the person already has, use **Pre-register company sign-in** in the person's panel of People and roles.
 
-```js
-await mscd('POST', '/admin/users', { email: 'budi.santoso@acme.co.id', displayName: 'Budi Santoso', adminRoles: [] })
-```
+Getting started counts the company sign-in as done once someone has signed in through the provider, which is the real test.
 
-The answer is `202` with `"invited"`, for a new and an existing account alike.
-
-Automatic account creation (`jitProvisioning: true`) needs a provider that sends verified emails and an email domain verified by the operator:
+Automatic account creation (the option "Create the account at the first sign-in of a person from a verified email domain") needs a provider that sends verified emails and an email domain verified by the operator:
 
 ```bash
 sudo docker compose run --rm cli tenant verify-domain --org acme --domain acme.co.id --by "Ana Wijaya"
 ```
 
-Multi-factor: when the token does not show that the user passed multi-factor sign-in, MSCD asks for its own TOTP code after the provider sign-in. Keep this default.
+Multi-factor: when the token does not show that the user passed multi-factor sign-in, MSCD asks for its own TOTP code after the provider sign-in, and a person without an MSCD authenticator enrols one at the first sign-in. Keep this default.
 
 ## 9. Local sign-in policy
 
 Local accounts sign in with email, password and TOTP. Decide who may still use them once your identity provider works:
 
-| Policy | Effect |
+| Choice in MSCD | Effect |
 |---|---|
-| `allowed` (default) | Every member may sign in locally |
-| `admins_only` | Only Tenant Admins and Storage Admins may sign in locally. Keep this as the emergency access when the identity provider is down. |
-| `disabled` | Nobody signs in locally to this organisation. A password reset sends no email. |
+| Everyone (default) | Every member may sign in locally |
+| Administrators only (Tenant Admins and Storage Admins) | Only Tenant Admins and Storage Admins may sign in locally. Keep this as the emergency access when the identity provider is down. |
+| Nobody: company sign-in only | Nobody signs in locally to this organisation. A password reset sends no email. |
 
-```js
-await mscd('PATCH', '/admin/organization', { localLogin: 'admins_only' })
-```
+Open **Administration > Company sign-in**, choose the policy under **Local sign-in** and choose **Save policy**. The page warns to test company sign-in first: limit local sign-in only after every person who needs it has signed in through the provider once.
 
-With `admins_only` or `disabled`, a user who is disabled in your identity provider cannot keep working through a local password.
+With "Administrators only" or "Nobody", a user who is disabled in your identity provider cannot keep working through a local password.
 
 ## 10. Connect file repositories
 
-MSCD keeps evidence and documents in repositories. Every organisation has a Managed Vault: encrypted object storage inside MSCD, ready after installation. You can add SharePoint Online and Google Shared Drives, which MSCD links to without copying the files. Each repository has one root folder per management system, and users can browse and link files only below the root folder of their system.
+MSCD keeps evidence and documents in repositories. Every organisation has a Managed Vault: encrypted object storage inside MSCD, ready after installation. You can add SharePoint Online and Google Drive (a Shared Drive or a personal My Drive), which MSCD links to without copying the files. Each repository has one root folder per management system, and users can browse and link files only below the root folder of their system.
 
 Repository changes need the Storage Admin or Tenant Admin role, and the licence must include the adapter (`m365` or `google_drive`). The storage gateway connects to Microsoft and Google over HTTPS (section 18).
 
@@ -450,73 +425,34 @@ MSCD uses an app registration with the `Sites.Selected` permission, so it reache
    ```
 
 4. Find the ids with Graph Explorer: the site id (`GET https://graph.microsoft.com/v1.0/sites/acme.sharepoint.com:/sites/compliance`), the document library (`GET .../sites/<site id>/drives`) and the folder ids (`GET .../drives/<drive id>/root:/Compliance` and one folder per system, for example `Compliance/ISMS`).
-5. Create the repository in the MSCD console (section 7). The keys of `roots` are the codes of your management systems:
-
-   ```js
-   const sp = await mscd('POST', '/admin/storage/repositories', {
-     slug: 'sharepoint', name: 'SharePoint Compliance', adapter: 'm365',
-     modes: ['link', 'pass_through'], ownershipType: 'organizational',
-     metadataMinimization: false, retentionConfirmed: true,
-     config: {
-       siteId: '<site id>', driveId: '<drive id>', rootFolderId: '<Compliance folder id>',
-       roots: { isms: { folderId: '<ISMS folder id>', path: 'Compliance/ISMS' } },
-     },
-   })
-   ```
-
-6. Store the credential. It goes straight to the storage gateway, which encrypts it; MSCD never stores it in clear text. Paste the PEM files between the backquotes:
-
-   ```js
-   await mscd('PUT', `/admin/storage/repositories/${sp.ref}/credentials`, {
-     kind: 'm365_certificate',
-     secret: {
-       tenantId: '<tenant id>', clientId: '<application id>',
-       certificatePem: `<content of mscd-sp.crt>`,
-       privateKeyPem: `<content of mscd-sp.key>`,
-     },
-   })
-   await mscd('POST', `/admin/storage/repositories/${sp.ref}/test`)
-   ```
+5. In MSCD, open **Storage repositories** and choose **Connect repository**. The wizard has four steps:
+   1. Storage type: Microsoft 365 (SharePoint or OneDrive).
+   2. Settings: a name and short id, the Microsoft 365 tenant id, the SharePoint site id, the document library (drive) id, the root folder id, and under "Folder per management system" the folder id and path of each system that exists already. Choose the storage modes: **Link** (files stay in the library; MSCD pins the version and its hash) and, if you want it, **Pass-through** (files pass through the storage gateway into the library). Leave **Zero-transit** off (section 22). Confirm that the retention settings of the library keep files long enough, then choose **Save and continue**.
+   3. Credential: the application (client) id, the certificate (`mscd-sp.crt`) and the private key (`mscd-sp.key`), pasted as PEM text. **Save credential** sends them straight to the storage gateway, which seals them; MSCD never stores or shows them in clear text.
+   4. Test connection: MSCD checks the credential, the root folder and every system folder, and shows "Connected to <library>".
 
    Delete `mscd-sp.key` from your workstation afterwards.
 
-### 10.2 Google Shared Drive
+### 10.2 Google Drive
 
 1. In Google Cloud, create a project, enable the Google Drive API and create a service account with a JSON key.
 2. In Google Drive, add the service account email as a Content manager of the Shared Drive.
 3. Note the Shared Drive id and the folder ids (the last part of each folder's address in the browser).
-4. In the MSCD console:
+4. In MSCD, **Storage repositories > Connect repository** with the storage type Google Drive: the drive type (a shared drive, or the My Drive of one account), the drive id, the root folder id and the folder per system in the settings step, then the service account email (`client_email` of the JSON key) and its private key (`private_key`) in the credential step, then **Test connection**.
 
-   ```js
-   const gd = await mscd('POST', '/admin/storage/repositories', {
-     slug: 'gdrive', name: 'Google Shared Drive', adapter: 'google_drive',
-     modes: ['link', 'pass_through'], ownershipType: 'organizational',
-     metadataMinimization: false, retentionConfirmed: true,
-     config: {
-       driveId: '<shared drive id>', rootFolderId: '<Compliance folder id>',
-       roots: { bcms: { folderId: '<BCMS folder id>', path: 'Compliance/BCMS' } },
-     },
-   })
-   await mscd('PUT', `/admin/storage/repositories/${gd.ref}/credentials`, {
-     kind: 'google_service_account',
-     secret: { clientEmail: '<client_email from the JSON key>', privateKeyPem: `<private_key from the JSON key>` },
-   })
-   await mscd('POST', `/admin/storage/repositories/${gd.ref}/test`)
-   ```
+Instead of a service account, a Google account can grant access (delegated consent): set the OAuth client id in the settings step, then choose **Grant consent** in the credential step and sign in with the account that can open the drive. A My Drive is allowed, but it ties company records to one person, so the repository is marked as personal storage; a shared drive is the safer choice.
 
 ### 10.3 Root folders per management system
 
-To add a system to a repository later, change its `roots` (all roots are sent together). A change of the configuration needs the credential again, so repeat the `credentials` command afterwards:
+When you create a management system later, give it its folder in each repository it uses: choose **Settings** on the repository card and fill in the folder id and path of the system under "Folder per management system", then **Save**. A change of the site, library, drive or folders removes the credential, because it is sealed for the settings it was made for: the settings panel says so, and you set the credential again in the same panel and choose **Test connection**.
 
-```js
-await mscd('PATCH', `/admin/storage/repositories/${sp.ref}`, { config: {
-  siteId: '<site id>', driveId: '<drive id>', rootFolderId: '<Compliance folder id>',
-  roots: {
-    isms: { folderId: '<ISMS folder id>', path: 'Compliance/ISMS' },
-    qms: { folderId: '<QMS folder id>', path: 'Compliance/QMS' },
-  },
-} })
-```
+### 10.4 Default repository and routing rules
+
+Each management system has a default repository, chosen when the system is created (**Management systems > New management system**, or **Edit**). Routing rules change where new files go: **Routing rules > Add rule** names the system (or the whole organisation), the classification and the kind of file, the repository and the storage mode. The most specific active rule wins. Example: confidential files of every system go to the Managed Vault, everything else to the default repository.
+
+The file pickers follow the default repository of the system. A system whose default repository is the Managed Vault uploads new files from the browser; a system on SharePoint or Google Drive links files that are already in its folder. A system can start in the Managed Vault and move to a library once its folder there is set (section 10.3): in **Management systems**, choose **Edit** on the system and pick the library as the default repository, then **Save**. Files stored before the change stay where they are.
+
+A rule asked for by a Tenant Admin who is also the Management System Manager of an affected system waits in **Pending approvals** for a second Tenant Admin.
 
 ## 11. Your own PostgreSQL or S3 storage
 
@@ -757,13 +693,7 @@ What this proves:
 - The chain detects any change, removal or insertion of an entry made through the application, because the hashes no longer match. The nightly check reports it (metric `mscd_audit_chain_broken`).
 - Together with the anchors kept outside the database, it also detects a rewrite by someone with full database rights. Such a person could recompute the chain, but cannot forge a signed anchor for the rewritten chain without `audit-anchor.key`, which only the worker holds. Compare the anchors in your log platform or in your downloaded files with the chain.
 
-To make the anchors useful, send the worker log to your log platform (section 16), keep object lock on the vault bucket when possible, and download the anchors regularly (Tenant Admin, console of section 7):
-
-```js
-const r = await fetch('/api/v1/admin/audit-trail/anchors'); console.log(await r.text())
-```
-
-`await mscd('GET', '/admin/audit-trail/verify')` runs the chain check on demand. Keep `secrets/audit-anchor.pub` with your audit records: it checks the anchor signatures.
+To make the anchors useful, send the worker log to your log platform (section 16), keep object lock on the vault bucket when possible, and download the anchors regularly: in MSCD, the Management System Manager opens **Audit > Audit trail**, where "Chain and export" offers **Download anchors** (the file of signed lines), **Verify chain** (the chain check on demand, with the result of each chain) and **Export CSV** of the system's entries. Keep `secrets/audit-anchor.pub` with your audit records: it checks the anchor signatures.
 
 ## 15. Backups, upgrades and rollback
 
@@ -889,7 +819,13 @@ sudo docker compose exec worker wget -qO- http://127.0.0.1:9464/readyz
 sudo docker compose exec storage-gateway wget -qO- http://127.0.0.1:9464/readyz
 ```
 
-A Platform Operator account (set up with CyberLentera support) can download a diagnostics archive with `POST /api/v1/ops/diagnostics` (settings without secrets, versions, database change state, queues, the last 1,000 log lines, metrics) and see the health of every component with `GET /api/v1/ops/health`. Send the archive to CyberLentera support; it contains no secret.
+A diagnostics archive (settings without secrets, versions, database change state, queues, the last 1,000 log lines, metrics) helps CyberLentera support. Write it on the server, also when the api does not start:
+
+```bash
+sudo docker compose run --rm -T cli diagnostics --out - > mscd-diagnostics.tar.gz
+```
+
+A Platform Operator account (set up with `admin create-operator`, section 16) sees the health of every component in the **Operator console** and downloads the same archive there with **Download diagnostics**. Review the archive before you send it; it contains no secret.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -909,7 +845,7 @@ A Platform Operator account (set up with CyberLentera support) can download a di
 | Everything is read-only, with a licence banner | The licence and its grace period ended, or the licence cannot be verified | Install a new licence (section 6) |
 | `LIC-USERS` when inviting users | No licence yet, or the licence allows no more users | Install a licence, or ask CyberLentera for one with more users |
 | `LIC-BINDING` when installing a licence | The licence was made for another installation id | Send the installation id of section 6 to CyberLentera |
-| Sign-in with the identity provider ends with an error page | Redirect URI, client secret or tenant id wrong | Run the provider test of section 8 and compare the redirect URI |
+| Sign-in with the identity provider ends with an error page | Redirect URI, client secret or tenant id wrong | Choose **Test** on the provider in Company sign-in (section 8) and compare the redirect URI |
 | Background jobs stop running and the health view shows `job-outbox` as degraded | The Valkey queue was unreachable for a long time | Fix Valkey, then: `sudo docker compose exec postgres psql -U postgres -d mscd -c "UPDATE platform.job_outbox SET attempts = 0, run_at = now() WHERE dispatched_at IS NULL AND attempts >= 12"` |
 | `The new settings did not work and were not kept` | MSCD did not start with the new settings | MSCD runs again with the previous settings. Fix the problem shown and run the installer again. |
 | `upgrade.sh` ends with `Upgrade failed and was rolled back` | The new version failed its health check | The previous version is running. Send the printed log lines to CyberLentera support. |
@@ -957,7 +893,7 @@ sudo /opt/mscd/uninstall.sh --purge
 
 Both commands ask for confirmation. Add `--yes` to skip it. For an installation in another directory, pass `--dir DIR`.
 
-`--purge` deletes every tag of the `cyberlentera/mscd-server` and `cyberlentera/mscd-web` images on the host, not only the version you installed. The confirmation lists them. If you keep other MSCD versions on the same host, for example for a rehearsal, tag them with another name first (`docker tag cyberlentera/mscd-web:1.0.0 keep/mscd-web:1.0.0`) or load them again from their bundle afterwards.
+`--purge` deletes every tag of the `cyberlentera/mscd-server` and `cyberlentera/mscd-web` images on the host, including versions other than the one you installed. The confirmation lists them. If you keep other MSCD versions on the same host, for example for a rehearsal, tag them with another name first (`docker tag cyberlentera/mscd-web:1.0.0 keep/mscd-web:1.0.0`) or load them again from their bundle afterwards.
 
 The scripts use the Compose project name `mscd`. If you set the `COMPOSE_PROJECT_NAME` variable when you ran `install.sh`, set the same value for `upgrade.sh` and `uninstall.sh`, for example `sudo env COMPOSE_PROJECT_NAME=mscd-test /opt/mscd/uninstall.sh`. Without it they do not find the containers, volumes and networks of that installation and leave them in place. Most operators never set this variable.
 
@@ -1005,3 +941,12 @@ The script builds the demo images from the checkout, starts the stack (`deploy/c
 | `MSCD_DEMO_RESET=1` | | Delete the demo data and seed it again |
 
 The repository also has a GitHub Actions workflow "Deploy demo" (`.github/workflows/deploy-demo.yml`), started by hand from the Actions tab. It connects to the test server over SSH and runs the same script. It needs the repository secrets `VPS_HOST`, `VPS_USER` and `VPS_SSH_KEY`, optionally the variables `VPS_PORT` and `MSCD_DEMO_PUBLIC_URL`, and a clone of the repository in `~/mscd` on the server.
+
+## 22. Not yet available
+
+These features are not part of this release. Nothing in MSCD offers them, and this guide does not describe them:
+
+- Sign-in with LDAP or Active Directory. Connect Active Directory through an identity provider that speaks OpenID Connect or SAML, such as Microsoft Entra ID or AD FS (section 8).
+- File repositories on SMB shares, S3 buckets or WebDAV servers. Evidence and documents live in the Managed Vault, SharePoint Online or Google Drive. An S3-compatible store serves only as the storage behind the Managed Vault (section 11.2).
+- Self-service sign-up of new organisations. On-premise, the installer creates the organisation (section 5).
+- Zero-transit upload, where the browser uploads straight into Microsoft 365 or Google Drive. Uploads go through the storage gateway. The file pickers of a system whose default repository is SharePoint or Google Drive link files that are already in the repository; a system whose default repository is the Managed Vault uploads new files from the browser.

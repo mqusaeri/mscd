@@ -9,7 +9,18 @@
 #     folders of R-11 (hashed when this check runs, so no list of development
 #     secrets is kept anywhere);
 #   - a demo.yaml or test.yaml server profile;
-#   - the demo seed data (apps/server/src/seed/demo, sample-snapshot.json).
+#   - the demo seed data (apps/server/src/seed/demo, sample-snapshot.json);
+#   - in a framework pack (a .pack or .bundle file, alone or inside an artefact):
+#     the demo texts of MILESTONE-2 E.4 (NC-2025-02, SoA v3.0, DC Jakarta,
+#     "Internal audit 2026 report" in any file of the pack, SharePoint in its
+#     preparation tasks and cycle requirements, and the demo's transition phase
+#     "ISO 9001:2026 transition" in the ISO 9001:2026 pack), and a pack id and
+#     version without a lead auditor sign-off row in packs/README.md (E.2).
+#
+# The development bundles of the journey, the smoke test and the test suites
+# are not release runs and do not use this check. A rehearsal build (CI, the
+# deploy rehearsal) may set MSCD_ALLOW_UNSIGNED_PACKS=1: a pack without its
+# sign-off row is then reported as a warning. Never set it for a release.
 #
 # Arguments:
 #   a directory      every file in it (an extracted bundle, for example)
@@ -34,13 +45,22 @@ readonly DEV_SECRET_DIRS=(
 )
 readonly DEV_KEY_IDS_FILE=packages/pack-tools/dev-keys/dev-key-ids.json
 readonly SEED_DIR=apps/server/src/seed/demo
+# The lead auditor sign-off table of the framework packs (MILESTONE-2 E.2).
+readonly SIGNOFF_FILE=packs/README.md
+# Demo texts that must never reach a released pack (MILESTONE-2 E.4), in any file of a pack.
+readonly PACK_DEMO_TEXTS=(
+    'NC-2025-02'
+    'SoA v3.0'
+    'DC Jakarta'
+    'Internal audit 2026 report'
+)
 # Archives inside archives are opened up to this depth (bundle > image > layer > pack).
 readonly MAX_DEPTH=4
 
 if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
-    C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
+    C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
 else
-    C_RED='' C_GREEN='' C_BOLD='' C_RESET=''
+    C_RED='' C_GREEN='' C_YELLOW='' C_BOLD='' C_RESET=''
 fi
 
 usage() {
@@ -50,6 +70,15 @@ Usage: deploy/scripts/check-release-artefacts.sh <bundle dir | archive | image>.
 Checks release artefacts for development keys, development secrets, the demo
 and test profiles and the demo seed data (build plan R-13). Archives inside the
 artefacts (image files, image layers, the Helm chart, packs) are checked too.
+
+Framework packs (.pack and .bundle files) must also be free of the demo texts
+of MILESTONE-2 E.4, and their pack id and version need a lead auditor sign-off
+row in packs/README.md (E.2).
+
+Environment:
+  MSCD_ALLOW_UNSIGNED_PACKS=1   rehearsal builds only (CI, the deploy rehearsal):
+                                report a pack without its sign-off row as a
+                                warning. Never set it for a release.
 
 Exit codes: 0 clean, 1 something forbidden was found, 2 usage or tool error.
 EOF
@@ -70,16 +99,23 @@ cleanup() {
 trap cleanup EXIT
 
 FINDINGS=0
+WARNINGS=0
 # finding LABEL REASON
 finding() {
     FINDINGS=$((FINDINGS + 1))
     printf '  %sFOUND%s %s\n        %s\n' "$C_RED" "$C_RESET" "$1" "$2"
 }
 
+# warning LABEL REASON: reported, but the check still passes.
+warning() {
+    WARNINGS=$((WARNINGS + 1))
+    printf '  %sWARNING%s %s\n        %s\n' "$C_YELLOW" "$C_RESET" "$1" "$2"
+}
+
 # ---------------------------------------------------------------------------
 # Reference data, read from the repository when the check runs
 # ---------------------------------------------------------------------------
-KEY_IDS_FILE='' HASHES_FILE='' SIZES=''
+KEY_IDS_FILE='' HASHES_FILE='' SIZES='' SIGNOFFS_FILE=''
 
 load_reference() {
     local ids dir file size hash count=0
@@ -104,8 +140,81 @@ load_reference() {
     done
     # Sizes to look at: only files of exactly these sizes need a hash.
     SIZES=$(cut -d' ' -f2 "$HASHES_FILE" | sort -un | paste -sd ' ' -)
-    printf '  Reference: %s development key ids, %s files of the development secret folders and the seed data\n' \
-        "$(wc -l <"$KEY_IDS_FILE")" "$count"
+
+    # Signed-off packs: "<pack id> <version>" for every row of the sign-off table that names a lead auditor and a
+    # date. A row whose lead auditor reads "not signed yet" (or is empty) does not count.
+    [[ -f $REPO_DIR/$SIGNOFF_FILE ]] || die "Cannot find $SIGNOFF_FILE (the lead auditor sign-off table of the packs)"
+    SIGNOFFS_FILE=$WORK/pack-signoffs.txt
+    awk -F'|' '
+        /^## / { inside = ($0 ~ /^## Lead auditor sign-off/) ; next }
+        inside && NF >= 6 {
+            pack = $2; version = $3; auditor = $4; date = $5
+            gsub(/[ `\t]/, "", pack); gsub(/[ \t]/, "", version); gsub(/^[ \t]+|[ \t]+$/, "", auditor); gsub(/[ \t]/, "", date)
+            if (pack == "Pack" || pack ~ /^-+$/ || pack == "") next
+            if (auditor == "" || tolower(auditor) == "not signed yet") next
+            if (date !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) next
+            print pack " " version
+        }' "$REPO_DIR/$SIGNOFF_FILE" >"$SIGNOFFS_FILE"
+    printf '  Reference: %s development key ids, %s files of the development secret folders and the seed data, %s signed-off pack versions\n' \
+        "$(wc -l <"$KEY_IDS_FILE")" "$count" "$(wc -l <"$SIGNOFFS_FILE")"
+}
+
+# json_string FILE KEY: the string value of a top-level key of a pack manifest (no JSON tool is needed).
+json_string() {
+    grep -o "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$1" 2>/dev/null | head -n 1 | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/'
+}
+
+# check_pack DIR LABEL: the checks of one extracted framework pack (MILESTONE-2 E.2 and E.4).
+check_pack() {
+    local dir=$1 label=$2 manifest pack version text file rel
+    manifest=$dir/manifest.json
+    if [[ ! -f $manifest ]]; then
+        finding "$label" "is a pack archive without manifest.json, so its sign-off cannot be checked"
+        return 0
+    fi
+    pack=$(json_string "$manifest" pack_id)
+    version=$(json_string "$manifest" pack_version)
+    if [[ -z $pack || -z $version ]]; then
+        finding "$label" "has a manifest.json without pack_id or pack_version"
+        return 0
+    fi
+    # 5. Demo texts (E.4).
+    for text in "${PACK_DEMO_TEXTS[@]}"; do
+        while IFS= read -r file; do
+            [[ -n $file ]] || continue
+            rel=${file#"$dir"/}
+            finding "$label: $rel" "contains the demo text \"$text\" (MILESTONE-2 E.4)"
+        done < <(grep -rlaF -- "$text" "$dir" 2>/dev/null || true)
+    done
+    for rel in prep_tasks.csv cycle_requirements.csv; do
+        if [[ -f $dir/$rel ]] && grep -qaF -- 'SharePoint' "$dir/$rel"; then
+            finding "$label: $rel" "names SharePoint, a demo fact of the preparation tasks and cycle titles (MILESTONE-2 E.4)"
+        fi
+    done
+    # The ISO 9001:2015 pack keeps its transition phase to the 2026 edition as release content (M2-04 deviation 8);
+    # the ISO 9001:2026 pack must not hold the demo's transition phase.
+    if [[ $pack == ISO9001-2026 ]]; then
+        while IFS= read -r file; do
+            [[ -n $file ]] || continue
+            finding "$label: ${file#"$dir"/}" "contains the demo phase \"ISO 9001:2026 transition\" (MILESTONE-2 E.4)"
+        done < <(grep -rlaF -- 'ISO 9001:2026 transition' "$dir" 2>/dev/null || true)
+    fi
+    # 6. Lead auditor sign-off (E.2).
+    if ! grep -qxF -- "$pack $version" "$SIGNOFFS_FILE"; then
+        if [[ ${MSCD_ALLOW_UNSIGNED_PACKS:-} == 1 ]]; then
+            warning "$label" "$pack $version has no lead auditor sign-off row in $SIGNOFF_FILE (allowed by MSCD_ALLOW_UNSIGNED_PACKS=1, never in a release)"
+        else
+            finding "$label" "$pack $version has no lead auditor sign-off row in $SIGNOFF_FILE (MILESTONE-2 E.2): a lead auditor signs the version off before it is released"
+        fi
+    fi
+}
+
+# is_pack FILE: a framework pack archive.
+is_pack() {
+    case "$1" in
+        *.pack | *.bundle) return 0 ;;
+    esac
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -160,7 +269,7 @@ check_tree() {
 # is_archive FILE: archives that are opened and checked inside.
 is_archive() {
     case "$1" in
-        *.tar | *.tar.gz | *.tgz | *.pack) return 0 ;;
+        *.tar | *.tar.gz | *.tgz | *.pack | *.bundle) return 0 ;;
     esac
     # Image layers in a docker save archive: blobs/sha256/<digest> (OCI layout)
     # or <id>/layer.tar (older layout). Configs and manifests are JSON, which
@@ -199,6 +308,7 @@ check_path() {
         n=$((n + 1))
         sub=$(mktemp -d "$WORK/x.XXXXXX")
         extract "$file" "$sub"
+        if is_pack "$file"; then check_pack "$sub" "$label > $(short_name "$rel")"; fi
         check_path "$sub" "$label > $(short_name "$rel")" $((depth + 1))
         chmod -R u+rwX "$sub" 2>/dev/null || true
         rm -rf -- "$sub"
@@ -222,9 +332,10 @@ check_target() {
     if [[ -d $target ]]; then
         check_path "$(cd -- "$target" && pwd)" "$target" 0
     elif [[ -f $target ]]; then
-        is_archive "$target" || die "$target is not a directory, a .tar, .tar.gz, .tgz or .pack archive, or an image"
+        is_archive "$target" || die "$target is not a directory, a .tar, .tar.gz, .tgz, .pack or .bundle archive, or an image"
         tmp=$(mktemp -d "$WORK/t.XXXXXX")
         extract "$target" "$tmp"
+        if is_pack "$target"; then check_pack "$tmp" "$target"; fi
         check_path "$tmp" "$target" 1
     elif command -v docker >/dev/null 2>&1 && docker image inspect "$target" >/dev/null 2>&1; then
         tmp=$(mktemp -d "$WORK/i.XXXXXX")
@@ -236,7 +347,7 @@ check_target() {
         die "$target is not a directory, an archive or a local Docker image"
     fi
     if ((FINDINGS == before)); then
-        printf '  %sPASS%s  no development key, development secret, demo or test profile, or seed data\n' "$C_GREEN" "$C_RESET"
+        printf '  %sPASS%s  no development key, development secret, demo or test profile, seed data, demo pack text or pack without sign-off\n' "$C_GREEN" "$C_RESET"
     fi
 }
 
@@ -263,10 +374,13 @@ main() {
 
     echo
     if ((FINDINGS > 0)); then
-        printf '%sFAILED%s: %s forbidden file(s) found. Do not release these artefacts.\n' "$C_RED$C_BOLD" "$C_RESET" "$FINDINGS"
+        printf '%sFAILED%s: %s finding(s). Do not release these artefacts.\n' "$C_RED$C_BOLD" "$C_RESET" "$FINDINGS"
         exit 1
     fi
-    printf '%sPASSED%s: the artefacts carry no development key, development secret, demo or test profile, or seed data.\n' \
+    if ((WARNINGS > 0)); then
+        printf '%s%s warning(s)%s: see above. A release build must not need MSCD_ALLOW_UNSIGNED_PACKS.\n' "$C_YELLOW$C_BOLD" "$WARNINGS" "$C_RESET"
+    fi
+    printf '%sPASSED%s: the artefacts carry no development key, development secret, demo or test profile, seed data, demo pack text or pack without sign-off.\n' \
         "$C_GREEN$C_BOLD" "$C_RESET"
 }
 

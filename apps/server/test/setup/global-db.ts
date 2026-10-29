@@ -68,6 +68,9 @@ export default async function setup(project: TestProject): Promise<() => Promise
       .withDatabase('postgres')
       .withUsername('postgres')
       .withPassword(randomBytes(12).toString('hex'))
+      // Test files that provision organisation schemas at the same moment need more than the default lock table
+      // (64 per connection gives about 6,400 entries; a full run peaked near 11,900 and failed with code 53200).
+      .withCommand(['postgres', '-c', 'max_locks_per_transaction=256'])
       .withLabels({ 'mscd.test': 'true', 'mscd.test.expires': String(Date.now() + CONTAINER_LIFETIME_MS) });
     const prefix = process.env.MSCD_TEST_CONTAINER_PREFIX;
     if (prefix) container = container.withName(`${prefix}postgres-${randomBytes(4).toString('hex')}`);

@@ -1,0 +1,46 @@
+# SaaS variant of the fresh-organisation journey (MILESTONE-2 M2-18, run-journey.mjs --saas). Development and test
+# use only. Added after journey.yml, it runs the MSCD services with many organisations in one installation, as the
+# saas.yaml profile does: tenancy mode multi with one schema per organisation, mail required (so the operator's
+# set-password email and every invitation go through Mailpit, and no one-time link is printed), and the plan presets
+# of saas.yaml. The rest of the demo profile stays: the development keys, the provider mocks and plain HTTP.
+#
+# Two settings stand in for the services a SaaS installation reaches on the internet:
+#   - the provider mocks also answer DNS (TXT records) on UDP 5353 at the fixed address JOURNEY_MOCK_ADDRESS, and the
+#     api asks them when the operator verifies the customer's email domain (network.dns_resolvers, M2-S11);
+#   - the company sign-in of the customer is the development Keycloak on the internal network, which multi tenancy
+#     refuses for discovery unless its host is allowed (network.egress_allowlist).
+x-saas-env: &saas-env
+  MSCD__TENANCY__MODE: multi
+  MSCD__TENANCY__ISOLATION: schema
+  MSCD__MAIL__REQUIRED: "true"
+  MSCD__LICENSE__PLANS__TRIAL: "{max_users: 10, max_management_systems: 1, valid_days: 30, grace_days: 7, frameworks: [], storage_adapters: [managed_vault, m365, google_drive], features: [integrated_mode, edition_transition, link_health_monitor, auditor_guest_access], rate_user_per_minute: null, rate_org_per_minute: null}"
+  MSCD__NETWORK__DNS_RESOLVERS: "[${JOURNEY_MOCK_ADDRESS:?set JOURNEY_MOCK_ADDRESS}:5353]"
+  MSCD__NETWORK__EGRESS_ALLOWLIST: "[keycloak]"
+  MSCD__LICENSE__PLANS__STANDARD: "{max_users: 50, max_management_systems: 3, valid_days: 365, grace_days: 30, frameworks: [], storage_adapters: [managed_vault, m365, google_drive], features: [integrated_mode, edition_transition, link_health_monitor, auditor_guest_access], rate_user_per_minute: null, rate_org_per_minute: null}"
+
+services:
+  migrate:
+    environment:
+      <<: *saas-env
+  storage-gateway:
+    environment:
+      <<: *saas-env
+  api:
+    environment:
+      <<: *saas-env
+    # The operator console creates organisations (POST /ops/organizations): the api provisions the new schema as the
+    # database owner (database.migrator_url_file, M2-06), so it gets the migrator URL as the cli does.
+    secrets:
+      - db-migrator.url
+  worker:
+    environment:
+      <<: *saas-env
+  cli:
+    environment:
+      <<: *saas-env
+
+  mock-providers:
+    command: ["--port", "4310", "--fixtures", "demo", "--dns-port", "5353"]
+    networks: !override
+      mscd:
+        ipv4_address: ${JOURNEY_MOCK_ADDRESS:?set JOURNEY_MOCK_ADDRESS}

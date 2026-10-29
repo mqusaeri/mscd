@@ -11,6 +11,8 @@ const outputDir = path.resolve(process.env.SMOKE_OUTPUT_DIR || path.join(HERE, '
 
 export default defineConfig({
   testDir: './tests',
+  // The fresh-organisation journey (tests/fresh-org.spec.mjs) has its own runner and configuration (journey.config.mjs).
+  testMatch: 'smoke.spec.mjs',
   outputDir: path.join(outputDir, 'artifacts'),
   // One user journey in order against one stack: no parallel workers and no retries (a retry would meet the
   // records the first attempt already changed).

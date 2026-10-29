@@ -247,6 +247,10 @@ jobs:
             --secret id=build_ca,src="$MSCD_BUILD_CA" \
             -t cyberlentera/mscd-server-demo:ci .
       - name: Release artefact check (R-13)
+        # CI images are rehearsal builds: packs without a lead auditor sign-off only warn (E.2).
+        # release.yml never sets this.
+        env:
+          MSCD_ALLOW_UNSIGNED_PACKS: "1"
         run: bash deploy/scripts/check-release-artefacts.sh cyberlentera/mscd-server:ci cyberlentera/mscd-web:ci
       - name: The check finds development keys (self-test)
         run: |
@@ -379,6 +383,9 @@ jobs:
           IFS=. read -r major minor patch <<<"${base%%-*}"
           echo "BUNDLE_VERSION=$major.$minor.$((patch + 1))-ci.${{ github.run_number }}" >> "$GITHUB_ENV"
       - name: Build the bundle
+        # A rehearsal bundle: packs without a lead auditor sign-off only warn (E.2).
+        env:
+          MSCD_ALLOW_UNSIGNED_PACKS: "1"
         run: |
           deploy/scripts/build-bundle.sh --version "$BUNDLE_VERSION" \
             --trusted-keys-dir "$REHEARSAL_KEYS" --pack-signing-key "$REHEARSAL_KEYS/pack-rehearsal.key" \

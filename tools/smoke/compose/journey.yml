@@ -1,0 +1,51 @@
+# Fresh-organisation journey overlay (MILESTONE-2 M2-18). Development and test use only.
+#
+#   docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.demo.yml \
+#     -f tools/smoke/compose/journey.yml up -d --wait
+#
+# tools/smoke/run-journey.mjs starts the stack with this file; it is not meant to be started by hand. On top of the
+# on-premise file and the demo overlay (the server demo image, whose build accepts the development keys, Mailpit,
+# the provider mocks and Keycloak) it:
+#   - turns the demo seed off: the one-shot "seed" service gets a profile that is never started, and api and worker
+#     no longer wait for it, so the database holds no organisation until the journey runs "tenant create" and
+#     "admin create-user" through the cli service (the installer step, MILESTONE-2 A.2);
+#   - turns the demo personas off (no persona switch in the top bar);
+#   - fixes the server date to JOURNEY_TODAY (demo.fixed_today, demo builds only). The runner sets it to the date of
+#     the organisation's time zone when the journey starts, so a run that crosses midnight keeps one date. The journey
+#     later moves the date forward by recreating api and worker with a later JOURNEY_TODAY (time passes between an
+#     implementation and its effectiveness check, BR-08, and until the Stage 2 audit has taken place).
+x-journey-env: &journey-env
+  MSCD__DEMO__FIXED_TODAY: ${JOURNEY_TODAY:-}
+  MSCD__DEMO__PERSONAS: "false"
+
+services:
+  seed:
+    profiles: [demo-seed]
+
+  api:
+    environment:
+      <<: *journey-env
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+      storage-gateway:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  worker:
+    environment:
+      <<: *journey-env
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+      storage-gateway:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  cli:
+    environment:
+      <<: *journey-env

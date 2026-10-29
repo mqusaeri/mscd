@@ -147,12 +147,19 @@ export function SystemDrawer({ ctx, adapter, data, system, open, onClose, onSave
     reset();
     // A different system, or opening the drawer again, starts the form again; `reset` uses a stable state setter.
   }, [system?.id, open]);
+  // A functional update, so a change made right after Edit opens the drawer applies to the chosen system's form
+  // (the effect above fills it after the first render) and never to the form of the system shown before.
   const set = <K extends keyof SystemForm>(k: K, v: SystemForm[K]) => {
-    const next = { ...form, [k]: v };
-    if (k === 'code' && !system && (!form.slug || form.slug === slugOfCode(form.code))) next.slug = slugOfCode(String(v));
-    setForm(next);
-    if (Object.keys(local).length) setLocal(systemErrors(next, system ? 'edit' : 'create'));
+    setForm((prev) => {
+      const next = { ...prev, [k]: v };
+      if (k === 'code' && !system && (!prev.slug || prev.slug === slugOfCode(prev.code))) next.slug = slugOfCode(String(v));
+      return next;
+    });
   };
+  // Errors shown after a refused submit follow the form while the person corrects it.
+  useEffect(() => {
+    setLocal((shown) => (Object.keys(shown).length ? systemErrors(form, system ? 'edit' : 'create') : shown));
+  }, [form]);
   const submit = () => {
     const problems = systemErrors(form, system ? 'edit' : 'create');
     setLocal(problems);

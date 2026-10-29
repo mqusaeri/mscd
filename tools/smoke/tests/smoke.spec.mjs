@@ -70,19 +70,19 @@ async function openRow(page, id) {
 }
 
 /**
- * Clicks a button of a modal. The modal is centred with a fixed position and has no scroll area, so with a long
- * repository listing (the demo SharePoint folder holds more than 80 files) its first rows and its footer are
- * outside the window and a mouse cannot reach them. A keyboard user still can: the button is focused and Enter is
- * pressed, and the test records the overflow as an annotation of the report.
+ * Clicks a button of a modal. A mouse user must reach every button: the repository picker scrolls its file list, so
+ * with a long listing (the demo SharePoint folder holds more than 80 files) its rows and its footer stay inside the
+ * window. A button outside the window fails the step (the strict layout check, the default since M2-18).
  *
- * This is a temporary workaround for a finding of WP-31 against WP-25 and WP-14 (picker without a scroll area).
- * SMOKE_STRICT_LAYOUT=1 makes the overflow a test failure; once the picker or the fixture is fixed, the strict
- * behaviour becomes the default and the keyboard path is removed.
+ * SMOKE_STRICT_LAYOUT=0 turns the old keyboard path back on for a look at a layout problem: the button is focused,
+ * Enter is pressed and the overflow is recorded as an annotation of the report instead of a failure.
  */
-const STRICT_LAYOUT = process.env.SMOKE_STRICT_LAYOUT === '1' || process.env.SMOKE_STRICT_LAYOUT === 'true';
+const STRICT_LAYOUT = !['0', 'false'].includes(process.env.SMOKE_STRICT_LAYOUT ?? '');
 
 async function pressModalButton(page, locator) {
   await expect(locator).toBeVisible();
+  // A row of a scrolling list is brought into view first, as a mouse user scrolls the list to it.
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
   const box = await locator.boundingBox();
   const viewport = page.viewportSize();
   if (box && viewport && box.y >= 0 && box.y + box.height <= viewport.height) {
@@ -90,10 +90,12 @@ async function pressModalButton(page, locator) {
     return;
   }
   const modalBox = await ui.modal(page).boundingBox();
-  const note = `the modal is ${Math.round(modalBox?.height ?? 0)} px high in a ${viewport?.height} px window; "${(await locator.innerText()).split('\n')[0]}" was pressed with the keyboard`;
+  const label = (await locator.innerText()).split('\n')[0];
+  const where = `the modal is ${Math.round(modalBox?.height ?? 0)} px high in a ${viewport?.height} px window and "${label}" is outside the window`;
+  if (STRICT_LAYOUT) throw new Error(`layout: ${where}, so a mouse user cannot reach it (SMOKE_STRICT_LAYOUT=0 presses it with the keyboard)`);
+  const note = `${where}; it was pressed with the keyboard`;
   test.info().annotations.push({ type: 'layout', description: note });
   console.warn(`smoke: layout: ${note}`);
-  if (STRICT_LAYOUT) throw new Error(`layout: ${note} (SMOKE_STRICT_LAYOUT=1: a mouse user cannot reach the button)`);
   await locator.focus();
   await page.keyboard.press('Enter');
 }

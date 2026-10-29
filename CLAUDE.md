@@ -9,8 +9,8 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 ## Status
 
 - **Milestone 1 is done.** All 39 work packages of `docs/platform/BUILD-PLAN.md` are built and verified. `main` holds the work (the old `mscd-platform` branch is the same history).
-- **Milestone 2 is planned, not started.** `docs/platform/MILESTONE-2.md` is the plan of record: the core track (M2-01 to M2-18: admin screens, data-entry forms, ISO clauses 4 to 10, readiness, certification cycle, bulk import) and the SaaS production track (section K, M2-Sxx: release images, Compose on one VPS with Caddy, GitHub Actions deploy, backups, monitoring, operator console, go-live checklist).
-- The demo runs with `deploy/scripts/deploy-demo.sh`. A new customer cannot yet be run from the web app alone; Milestone 2 fixes that.
+- **Milestone 2 is nearly done** (32 of 33 packages; `docs/platform/M2-STATUS.md` lists each one). `docs/platform/MILESTONE-2.md` is the plan of record: the core track (M2-01 to M2-18: admin screens, data-entry forms, ISO clauses 4 to 10, readiness, certification cycle, bulk import) and the SaaS production track (section K, M2-Sxx: release images, Compose on one VPS with Caddy, GitHub Actions deploy, backups, monitoring, operator console, go-live checklist).
+- The demo runs with `deploy/scripts/deploy-demo.sh`. Since M2-18 a new customer can be run from the web app alone, on-premise and on SaaS (`npm run journey -w @mscd/smoke`, with `-- --saas`).
 - `docs/product/USER-FLOWS.md` holds the four user flows and the audit glossary (81 label proposals). They passed an agent ISO lead-auditor review and a code accuracy check; a human lead auditor should confirm them before customers see them.
 
 ## Next steps
@@ -115,5 +115,4 @@ Decided by the product owner on 2026-10-28:
 - Helm chart: a Job or documented values for `tenant create` and `admin create-user`.
 - Bundle: a third-party notices file (the common-passwords list carries the SecLists notice).
 - `docs/DEVELOPMENT.md`: a section for the API E2E project and the current default data source (`api`).
-- Smoke test: make the strict picker layout check the default now that the picker scrolls.
 - Web E2E stack (`apps/web/e2e-api/stack.mjs`): only remove leftover containers whose expiry label has passed.

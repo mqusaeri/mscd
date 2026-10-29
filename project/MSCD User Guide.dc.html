@@ -45,7 +45,7 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
     <div>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5pt;color:#c25c0f;letter-spacing:.08em">PANDUAN PENGGUNA, VERSI 2.4</div>
       <h1 style="margin-top:10pt;font-size:38pt;max-width:6.2in">MSCD: dari konteks sampai bukti, dalam satu rantai.</h1>
-      <p style="margin-top:14pt;max-width:5.6in;font-size:12.5pt;color:#4a453d">Panduan lengkap penggunaan platform untuk MS Manager, Domain Owner, Internal Auditor, Top Management dan Tenant Administrator. Berlaku untuk ISO/IEC 27001, ISO 9001, ISO 22301 dan ISO 37001, pada mode SaaS maupun On-Premise.</p>
+      <p style="margin-top:14pt;max-width:5.6in;font-size:12.5pt;color:#4a453d">Panduan lengkap penggunaan platform untuk Management System Manager, Domain Owner, Internal Auditor, Top Management dan Tenant Administrator. Berlaku untuk ISO/IEC 27001, ISO 9001, ISO 22301 dan ISO 37001, pada mode SaaS maupun On-Premise.</p>
       <figure style="margin-top:22pt"><img src="screenshots/portfolio.png" alt="Portfolio Overview"><figcaption>Gambar 0. Portfolio Overview, halaman awal untuk organisasi dengan lebih dari satu sistem manajemen.</figcaption></figure>
     </div>
     <table style="max-width:4.6in;margin:0"><tbody><tr><td style="color:#6b655a;width:1.6in">Dokumen</td><td>UG-MSCD-01 v2.4</td></tr><tr><td style="color:#6b655a">Aplikasi</td><td>MSCD 2.4.1 (SaaS dan On-Premise)</td></tr><tr><td style="color:#6b655a">Dokumen pendamping</td><td>PRD-MSCD-01 v2.4, TS-MSCD-01 v2.4</td></tr><tr><td style="color:#6b655a">Tanggal</td><td>29 September 2026</td></tr></tbody></table>
@@ -73,13 +73,13 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <p>MSCD menjaga rantai keterlacakan sistem manajemen tetap utuh secara otomatis: isu konteks, risiko, perlakuan atau pengendalian, dokumen, bukti operasional, metrik, temuan, dan tindakan korektif. Setiap kali satu mata rantai putus, kedaluwarsa, atau tidak memiliki pemegang, sistem menampilkannya sebagai item terbuka dengan nama orang dan tanggal jatuh tempo.</p>
   <p>Aplikasi terdiri atas tiga area kerja yang mengikuti siklus sertifikasi, ditambah area lintas modul.</p>
   <table><thead><tr><th style="width:1.6in">Area</th><th>Digunakan untuk</th><th style="width:1.7in">Pengguna utama</th></tr></thead><tbody>
-    <tr><td><strong>Implementation</strong></td><td>Membangun sistem: progres fase, kesiapan klausul, kontrol dan persyaratan, register dokumen.</td><td>MS Manager, Domain Owner</td></tr>
-    <tr><td><strong>Audit</strong></td><td>Menjalani audit internal dan eksternal: kesiapan menjelang audit, item terbuka per tahap rantai, pending per orang, penelusuran Golden Thread.</td><td>MS Manager, Internal Auditor</td></tr>
-    <tr><td><strong>Surveillance</strong></td><td>Mempertahankan sertifikat: linimasa siklus tiga tahun, kesegaran bukti, kalender review dokumen, kelengkapan siklus, deteksi kemunduran.</td><td>MS Manager, Top Management</td></tr>
+    <tr><td><strong>Implementation</strong></td><td>Membangun sistem: progres fase, kesiapan klausul, kontrol dan persyaratan, register dokumen.</td><td>Management System Manager, Domain Owner</td></tr>
+    <tr><td><strong>Audit</strong></td><td>Menjalani audit internal dan eksternal: kesiapan menjelang audit, item terbuka per tahap rantai, pending per orang, penelusuran Golden Thread.</td><td>Management System Manager, Internal Auditor</td></tr>
+    <tr><td><strong>Surveillance</strong></td><td>Mempertahankan sertifikat: linimasa siklus tiga tahun, kesegaran bukti, kalender review dokumen, kelengkapan siklus, deteksi kemunduran.</td><td>Management System Manager, Top Management</td></tr>
     <tr><td><strong>My Tasks</strong></td><td>Daftar tugas pribadi lintas semua sistem manajemen, dalam bahasa awam.</td><td>Domain Owner</td></tr>
     <tr><td><strong>Administration</strong></td><td>Framework library, lisensi, repositori penyimpanan, kesehatan tautan berkas.</td><td>Tenant Administrator</td></tr>
   </tbody></table>
-  <div class="note"><strong>Satu sumber angka.</strong> Jumlah dokumen kedaluwarsa, bukti kritis, atau item gate yang tampil di Portfolio, Implementation, Audit dan Surveillance dihitung dari fungsi yang sama. Bila Anda menutup satu item di salah satu layar, angka di layar lain ikut berubah.</div>
+  <div class="note"><strong>Satu sumber angka.</strong> Jumlah dokumen kedaluwarsa, bukti kritis, atau item checkpoint yang tampil di Portfolio, Implementation, Audit dan Surveillance dihitung dari fungsi yang sama. Bila Anda menutup satu item di salah satu layar, angka di layar lain ikut berubah.</div>
 
   <!-- 2 -->
   <div class="sec"></div>
@@ -88,7 +88,7 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <ol>
     <li>Buka alamat aplikasi organisasi Anda. Pada SaaS: <span class="kbd">mscd.cyberlentera.com</span>. Pada On-Premise: alamat yang diberikan tim infrastruktur.</li>
     <li>Pilih <strong>Microsoft Entra ID</strong> atau <strong>Google Workspace</strong> bila organisasi memakai SSO, atau masukkan email kerja dan kata sandi.</li>
-    <li>Selesaikan faktor kedua (aplikasi autentikator). Pada On-Premise, akun LDAP atau Active Directory dapat dipakai.</li>
+    <li>Selesaikan faktor kedua (aplikasi autentikator). Masuk perusahaan memakai penyedia identitas OpenID Connect atau SAML organisasi Anda, misalnya Microsoft Entra ID, pada SaaS maupun On-Premise.</li>
   </ol>
   <h3>2.2 Berpindah organisasi</h3>
   <p>Konsultan atau grup usaha yang menangani lebih dari satu organisasi melihat pemilih organisasi di bagian atas sidebar. Klik kotak <strong>Organisation</strong>, lalu pilih organisasi. Seluruh data, sistem manajemen, dan mode deployment ikut berganti. Organisasi dengan satu sistem manajemen tidak menampilkan Portfolio dan pemilih sistem manajemen; antarmuka tampil seperti produk satu standar.</p>
@@ -97,7 +97,7 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <figure><img src="screenshots/overview.png" alt="Bilah atas dan sidebar"><figcaption>Gambar 1. Sidebar (organisasi, navigasi tiga area), bilah atas (pemilih sistem manajemen, ruang lingkup, mode deployment, bahasa, tema, peran).</figcaption></figure>
   <h3>2.4 Peran dan label</h3>
   <table><thead><tr><th style="width:1.5in">Peran generik</th><th>ISO/IEC 27001</th><th>ISO 9001</th><th>ISO 22301</th><th>ISO 37001</th></tr></thead><tbody>
-    <tr><td>MS Manager</td><td>ISMS Manager</td><td>QMS Manager</td><td>BCMS Manager</td><td>Anti-Bribery Compliance Function</td></tr>
+    <tr><td>Management System Manager</td><td>ISMS Manager</td><td>QMS Manager</td><td>BCMS Manager</td><td>Anti-Bribery Compliance Function</td></tr>
     <tr><td>Programme Owner</td><td>CISO</td><td>Head of Quality</td><td>Head of BCM</td><td>Chief Compliance Officer</td></tr>
     <tr><td>Domain Owner</td><td>Domain Owner</td><td>Process Owner</td><td>Activity Owner</td><td>Control Owner</td></tr>
   </tbody></table>
@@ -115,40 +115,40 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <h2>3. Portfolio Overview</h2>
   <p>Halaman awal untuk organisasi dengan lebih dari satu sistem manajemen. Dua bagian utamanya:</p>
   <ol>
-    <li><strong>Needs attention</strong>: daftar hal yang menahan kesiapan lintas sistem, diurutkan menurut dampaknya: item gate terbuka, audit dalam 70 hari beserta jumlah item yang jatuh tempo setelah tanggal audit, dokumen kedaluwarsa, bukti kritis, dan status konektor repositori. Klik baris untuk melompat ke layar terkait dengan filter yang sudah terpasang.</li>
-    <li><strong>Kartu per sistem manajemen</strong>: radar kesiapan klausul 4 sampai 10, audit berikutnya beserta hitung mundur, dan empat angka yang dapat diklik (item gate, temuan terbuka, dokumen kedaluwarsa, bukti kritis).</li>
+    <li><strong>Needs attention</strong>: daftar hal yang menahan kesiapan lintas sistem, diurutkan menurut dampaknya: item checkpoint terbuka, audit dalam 70 hari beserta jumlah item yang jatuh tempo setelah tanggal audit, dokumen kedaluwarsa, bukti kritis, dan status konektor repositori. Klik baris untuk melompat ke layar terkait dengan filter yang sudah terpasang.</li>
+    <li><strong>Kartu per sistem manajemen</strong>: radar kesiapan klausul 4 sampai 10, audit berikutnya beserta hitung mundur, dan empat angka yang dapat diklik (item checkpoint, temuan terbuka, dokumen kedaluwarsa, bukti kritis).</li>
   </ol>
   <figure><img src="screenshots/portfolio.png" alt="Portfolio Overview"><figcaption>Gambar 2. Portfolio Overview dengan empat sistem manajemen aktif.</figcaption></figure>
-  <div class="note"><strong>Tidak ada rata-rata lintas framework.</strong> Kesiapan selalu ditampilkan per sistem manajemen. Satu sistem yang tertahan gate kritis tidak boleh tersamar oleh angka sehat sistem lain.</div>
+  <div class="note"><strong>Tidak ada rata-rata lintas framework.</strong> Kesiapan selalu ditampilkan per sistem manajemen. Satu sistem yang terblokir checkpoint kritis tidak boleh tersamar oleh angka sehat sistem lain.</div>
   <p>Tata letak alternatif berupa baris tabel tersedia melalui pengaturan tampilan (Overview layout: cards atau rows).</p>
 
   <!-- 4 -->
   <div class="sec"></div>
   <h2>4. Implementation</h2>
   <h3>4.1 Overview</h3>
-  <p>Ringkasan sistem manajemen aktif: kesiapan per klausul dengan jumlah item terbuka, progres setiap fase implementasi beserta gate berikutnya, dan hambatan utama (item gate dan item paling terlambat). Klik baris klausul untuk membuka daftar item yang menahannya; klik fase untuk membuka Phase board pada fase tersebut.</p>
+  <p>Ringkasan sistem manajemen aktif: kesiapan per klausul dengan jumlah item terbuka, progres setiap fase implementasi beserta checkpoint berikutnya, dan hambatan utama (item checkpoint dan item paling terlambat). Klik baris klausul untuk membuka daftar item yang menahannya; klik fase untuk membuka Phase board pada fase tersebut.</p>
   <figure><img src="screenshots/overview.png" alt="Implementation Overview"><figcaption>Gambar 3. Overview: kesiapan klausul, progres fase, hambatan utama.</figcaption></figure>
 
   <h3>4.2 Controls &amp; requirements</h3>
-  <p>Lima kartu ringkasan berfungsi sebagai tab di atas daftar: kontrol atau persyaratan diterapkan, sebagian diterapkan, item gate terbuka, dokumen disetujui, dokumen kedaluwarsa. Isi daftar mengikuti sistem manajemen aktif: 93 kontrol Annex A untuk ISO/IEC 27001, persyaratan klausul 4 sampai 10 untuk framework lain.</p>
+  <p>Lima kartu ringkasan berfungsi sebagai tab di atas daftar: kontrol atau persyaratan diterapkan, sebagian diterapkan, item checkpoint terbuka, dokumen disetujui, dokumen kedaluwarsa. Isi daftar mengikuti sistem manajemen aktif: 93 kontrol Annex A untuk ISO/IEC 27001, persyaratan klausul 4 sampai 10 untuk framework lain.</p>
   <ol>
     <li>Pilih tab. Chip status di bawahnya menampilkan jumlah per status; chip dengan jumlah nol disembunyikan.</li>
     <li>Ketik di kotak pencarian untuk menyaring berdasarkan ID, judul, pemilik, catatan, atau dokumen pelaksana. Jumlah pada chip ikut diperbarui.</li>
     <li>Klik baris untuk membuka rincian: applicability dan justifikasi, risiko tertaut, dokumen pelaksana beserta versi dan statusnya, frekuensi operasi, bukti terakhir, lokasi berkas dan integritasnya.</li>
-    <li>Gunakan tombol aksi: <strong>Mark complete</strong> (Domain Owner), <strong>Verify</strong> (MS Manager, tidak boleh orang yang sama), ikon lonceng untuk pengingat, ikon pengalihan untuk mengalihkan pemegang, ikon rute untuk menelusuri rantai dari item ini.</li>
+    <li>Gunakan tombol aksi: <strong>Mark complete</strong> (Domain Owner), <strong>Verify</strong> (Management System Manager, tidak boleh orang yang sama), ikon lonceng untuk pengingat, ikon pengalihan untuk mengalihkan pemegang, ikon rute untuk menelusuri rantai dari item ini.</li>
   </ol>
   <figure><img src="screenshots/controls.png" alt="Controls and requirements"><figcaption>Gambar 4. Controls &amp; requirements untuk ISO/IEC 27001 dengan tab Controls implemented.</figcaption></figure>
-  <p>Penanda <strong>Holding gate</strong> pada baris menunjukkan item yang menahan gate kritis, misalnya kontrol yang dinyatakan applicable tanpa justifikasi berbasis risiko. Tab <strong>Open gate items</strong> merinci setiap item beserta entitas yang terdampak.</p>
+  <p>Penanda <strong>Blocks checkpoint</strong> pada baris menunjukkan item yang memblokir checkpoint kritis, misalnya kontrol yang dinyatakan applicable tanpa justifikasi berbasis risiko. Tab <strong>Open checkpoint items</strong> merinci setiap item beserta entitas yang terdampak.</p>
   <p>Tab dokumen menampilkan register dengan kolom versi, tanggal disetujui, review jatuh tempo, dan lokasi berkas. Dokumen bersama berawalan <span class="kbd">IMS-</span> menampilkan penanda <strong>Shared</strong> dan berlaku untuk semua sistem manajemen yang memakainya.</p>
 
   <h3>4.3 Phase board</h3>
   <p>Fase implementasi berasal dari activity template Framework Pack: sembilan fase dan 69 aktivitas untuk ISO/IEC 27001. Deretan fase tampil sebagai tab; jumlah aktivitas terverifikasi, selesai, berjalan, dan terblokir dihitung dari data.</p>
   <ul>
-    <li><strong>Fase gate</strong> (misalnya Risk assessment &amp; SoA) menampilkan banner: seluruh aktivitas wajib Verified sebelum fase berikutnya terbuka. Jumlah aktivitas Blocked selalu sama dengan jumlah item gate terbuka, dan setiap aktivitas Blocked merujuk item gate penyebabnya.</li>
-    <li><strong>Fase terkunci</strong> menyebut fase gate yang menahannya; aktivitasnya hanya dapat dilihat.</li>
-    <li>Rincian aktivitas memuat outcome, output wajib beserta status dokumennya, pemilik, dan tanggal. Aksi: Mark complete, Record blocker, Verify output, Open gate item.</li>
+    <li><strong>Fase checkpoint</strong> (misalnya Risk assessment &amp; SoA) menampilkan banner: seluruh aktivitas wajib Verified sebelum fase berikutnya terbuka. Jumlah aktivitas Blocked selalu sama dengan jumlah item checkpoint terbuka, dan setiap aktivitas Blocked merujuk item checkpoint penyebabnya.</li>
+    <li><strong>Fase terkunci</strong> menyebut fase checkpoint yang menahannya; aktivitasnya hanya dapat dilihat.</li>
+    <li>Rincian aktivitas memuat outcome, output wajib beserta status dokumennya, pemilik, dan tanggal. Aksi: Mark complete, Record blocker, Verify output, Open checkpoint item.</li>
   </ul>
-  <figure><img src="screenshots/phases.png" alt="Phase board"><figcaption>Gambar 5. Phase board pada fase gate dengan aktivitas terblokir.</figcaption></figure>
+  <figure><img src="screenshots/phases.png" alt="Phase board"><figcaption>Gambar 5. Phase board pada fase checkpoint dengan aktivitas terblokir.</figcaption></figure>
 
   <h3>4.4 Document register</h3>
   <p>Seluruh artefak dikelompokkan per tier: Policies, Standards, Procedures, Plans, Registers, Records, Forms. Chip status: All, Approved, Expired, In review, Draft. Tombol aksi mengikuti status: Start review untuk dokumen kedaluwarsa, Open review, Continue draft, Upload new version. Dokumen yang tidak tertaut ke kontrol atau persyaratan mana pun ditandai sebagai kandidat Orphan.</p>
@@ -215,7 +215,7 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <ul>
     <li>Kelompok <strong>Overdue</strong>, <strong>Due this week</strong>, dan <strong>Later</strong>.</li>
     <li>Setiap kartu menjelaskan apa yang harus dilakukan dan contoh bukti yang diterima, misalnya laporan pemindai PDF dengan tanggal pemindaian, atau ekspor log backup dengan tanda tangan uji pemulihan.</li>
-    <li>Satu tombol: <strong>Submit</strong> membuka file picker repositori atau unggahan Vault; <strong>Mark done</strong> menandai selesai dan mengirimkannya ke MS Manager untuk verifikasi.</li>
+    <li>Satu tombol: <strong>Submit</strong> membuka file picker repositori atau unggahan Vault; <strong>Mark done</strong> menandai selesai dan mengirimkannya ke Management System Manager untuk verifikasi.</li>
   </ul>
   <figure><img src="screenshots/tasks.png" alt="My Tasks"><figcaption>Gambar 14. My Tasks lintas framework.</figcaption></figure>
 
@@ -223,7 +223,7 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <div class="sec"></div>
   <h2>8. Administrasi</h2>
   <h3>8.1 Framework library</h3>
-  <p>Setiap kartu framework menampilkan edisi yang terpasang, versi dan tanda tangan Framework Pack, sistem manajemen aktif, lembaga sertifikasi, dan repositori default. Pembaruan pack ditandai; pada SaaS pack didistribusikan otomatis, pada On-Premise diimpor sebagai bundel luring bertanda tangan.</p>
+  <p>Setiap kartu framework menampilkan edisi yang terpasang, versi dan tanda tangan Framework Pack, sistem manajemen aktif, lembaga sertifikasi, dan repositori default. Pembaruan pack ditandai; pada SaaS operator platform memasang versi pack baru bagi semua organisasi, pada On-Premise Tenant Administrator mengimpornya sebagai bundel luring bertanda tangan.</p>
   <p>Ketika edisi baru terbit (ISO 9001:2026, ISO 37001:2025), pack edisi baru dipasang berdampingan dengan edisi lama. <strong>Edition Transition Assistant</strong> memetakan persyaratan lama ke baru, memindahkan relasi yang dapat dipetakan otomatis, dan menjadikan sisanya daftar tugas transisi pada Phase board.</p>
   <p>Panel <strong>Licence &amp; entitlement</strong> menampilkan masa berlaku, jumlah framework, sistem manajemen, pengguna, adapter penyimpanan, dan fitur yang dilisensikan. Lisensi divalidasi luring pada On-Premise.</p>
   <figure><img src="screenshots/framework.png" alt="Framework library"><figcaption>Gambar 15. Framework library dan lisensi.</figcaption></figure>
@@ -234,9 +234,9 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
     <tr><td>Managed Vault</td><td>Berkas diunggah dan disimpan aplikasi dengan versi dan checksum SHA-256.</td><td>Ya, disimpan</td></tr>
     <tr><td>Pass-through</td><td>Aplikasi meneruskan berkas ke repositori Anda dan menghitung checksum dalam perjalanan.</td><td>Sesaat, tidak disimpan</td></tr>
     <tr><td>Link</td><td>Anda memilih berkas yang sudah ada melalui file picker; aplikasi mencatat rujukan dan versi.</td><td>Tidak</td></tr>
-    <tr><td>Zero-transit</td><td>Browser mengunggah langsung ke repositori dengan kredensial Anda; aplikasi hanya menerima metadata.</td><td>Tidak pernah</td></tr>
+    <tr><td>Zero-transit</td><td>Belum tersedia pada rilis ini: unggahan selalu melewati storage gateway. Nantinya browser mengunggah langsung ke repositori dengan kredensial Anda dan aplikasi hanya menerima metadata.</td><td>Belum tersedia</td></tr>
   </tbody></table>
-  <p><strong>Routing rules</strong> menetapkan repositori dan mode default per sistem manajemen, dipersempit per klasifikasi (misalnya Restricted wajib Zero-transit). <strong>Link health</strong> mendaftar setiap rujukan yang perlu perhatian: versi berubah, dipindahkan, hilang, akses dicabut, pemeriksaan tertunda, tanpa hash.</p>
+  <p><strong>Routing rules</strong> menetapkan repositori dan mode default per sistem manajemen, dipersempit per klasifikasi (misalnya berkas Confidential selalu ke Managed Vault). <strong>Link health</strong> mendaftar setiap rujukan yang perlu perhatian: versi berubah, dipindahkan, hilang, akses dicabut, pemeriksaan tertunda, tanpa hash.</p>
   <figure><img src="screenshots/storage.png" alt="Storage repositories"><figcaption>Gambar 16. Storage repositories: konektor, aturan penempatan, kesehatan tautan.</figcaption></figure>
   <div class="note"><strong>Repositori pribadi.</strong> Bukti di OneDrive atau My Drive pribadi mengikuti siklus hidup akun pemiliknya. Sistem mengizinkannya agar tidak menghambat adopsi, tetapi menandainya dan menyarankan pemindahan ke library atau shared drive organisasi.</div>
 
@@ -263,12 +263,12 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <h2>10. Aturan integritas yang ditegakkan sistem</h2>
   <table><thead><tr><th>Aturan</th><th style="width:1.4in">Berlaku</th><th style="width:2.1in">Yang dilakukan sistem</th></tr></thead><tbody>
     <tr><td>Kontrol atau persyaratan tidak boleh berstatus Implemented tanpa minimal satu bukti pada siklus berjalan.</td><td>Semua</td><td>Status ditolak; ditawarkan Partial atau Planned.</td></tr>
-    <tr><td>Applicability Yes wajib memiliki justifikasi yang merujuk minimal satu risiko.</td><td>27001, 37001</td><td>Penyimpanan diblokir; item menahan gate.</td></tr>
+    <tr><td>Applicability Yes wajib memiliki justifikasi yang merujuk minimal satu risiko.</td><td>27001, 37001</td><td>Penyimpanan diblokir; item memblokir checkpoint.</td></tr>
     <tr><td>Perlakuan risiko tidak selesai tanpa penerimaan risiko residual oleh Risk Owner.</td><td>Semua</td><td>Alur persetujuan terpisah; pelaksana tidak dapat menyetujui sendiri.</td></tr>
     <tr><td>Temuan tidak dapat ditutup tanpa RCA, cek sistemik, dan verifikasi efektivitas bertanggal berbeda dari implementasi.</td><td>Semua</td><td>Tanggal sama ditolak.</td></tr>
     <tr><td>Tindakan korektif dan output aktivitas tidak dapat diverifikasi oleh pelaksananya.</td><td>Semua</td><td>Pemisahan peran pada level data.</td></tr>
     <tr><td>Dokumen yang melewati review date otomatis Expired.</td><td>Semua</td><td>Memblokir kesiapan klausul terkait di setiap sistem yang memakainya.</td></tr>
-    <tr><td>RTO tidak boleh melebihi MTPD pada BIA.</td><td>22301</td><td>Penyimpanan diblokir; item gate.</td></tr>
+    <tr><td>RTO tidak boleh melebihi MTPD pada BIA.</td><td>22301</td><td>Penyimpanan diblokir; item checkpoint.</td></tr>
     <tr><td>Rencana BC tanpa latihan dalam periode program ditandai tidak teruji.</td><td>22301</td><td>Status diturunkan; tugas dibuat untuk plan owner.</td></tr>
     <tr><td>Mitra usaha berisiko di atas rendah wajib memiliki due diligence yang berlaku.</td><td>37001</td><td>Status mitra ditandai; tugas dibuat untuk control owner.</td></tr>
     <tr><td>Bukti yang berkasnya tidak dapat diverifikasi di repositori pelanggan tidak dihitung sebagai bukti.</td><td>Customer Repository</td><td>Diperlakukan seperti bukti kedaluwarsa.</td></tr>
@@ -280,9 +280,9 @@ a{color:#c25c0f;text-decoration:none}a:hover{color:#e8731a}
   <h3>Mengapa kontrol saya kembali ke Partial padahal sudah Implemented?</h3>
   <p>Bukti terakhirnya sudah Expired atau Critical untuk frekuensi operasinya, atau berkasnya tidak lagi dapat diverifikasi di repositori. Buka Evidence freshness, cari kontrol tersebut, dan serahkan bukti siklus berjalan.</p>
   <h3>Saya menandai aktivitas selesai, mengapa belum Verified?</h3>
-  <p>Verifikasi harus dilakukan orang lain, biasanya MS Manager. Pelaksana tidak dapat memverifikasi pekerjaannya sendiri.</p>
-  <h3>Angka item gate di Portfolio berbeda dengan yang saya ingat kemarin.</h3>
-  <p>Angka dihitung dari data saat ini. Gate ISMS misalnya terdiri atas kontrol tanpa justifikasi risiko, risiko tanpa perlakuan, dan SoA yang masih draf. Menutup salah satunya langsung mengubah angka di semua layar.</p>
+  <p>Verifikasi harus dilakukan orang lain, biasanya Management System Manager. Pelaksana tidak dapat memverifikasi pekerjaannya sendiri.</p>
+  <h3>Angka item checkpoint di Portfolio berbeda dengan yang saya ingat kemarin.</h3>
+  <p>Angka dihitung dari data saat ini. Checkpoint ISMS misalnya terdiri atas kontrol tanpa justifikasi risiko, risiko tanpa perlakuan, dan SoA yang masih draf. Menutup salah satunya langsung mengubah angka di semua layar.</p>
   <h3>Bagaimana bukti di SharePoint kami dibuktikan tidak berubah?</h3>
   <p>MSCD mematok version ID berkas dan menyimpan hash yang disediakan penyedia (quickXorHash pada Microsoft 365, SHA-256 pada Google Drive untuk berkas biner). Pemeriksaan terjadwal membandingkan keduanya dan menandai perubahan, pemindahan, penghapusan, atau pencabutan akses.</p>
   <h3>Apakah auditor eksternal dapat masuk?</h3>

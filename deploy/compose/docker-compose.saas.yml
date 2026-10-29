@@ -60,6 +60,10 @@ services:
       - wal_compression=on
       - -c
       - log_min_duration_statement=500ms
+      # One schema per organisation: creating several organisations at once, and pg_dump (one lock per
+      # table of every schema), need more than the default 64 locks per connection.
+      - -c
+      - max_locks_per_transaction=256
     # Shared memory for parallel queries; the Docker default of 64 MB is too small.
     shm_size: 1g
     logging: *logging
@@ -99,6 +103,10 @@ services:
     <<: *server-image
     environment:
       <<: *saas-env
+    # The operator console creates organisations (POST /ops/organizations): the api provisions the new
+    # schema as the database owner (database.migrator_url_file, M2-06), as the cli does.
+    secrets:
+      - db-migrator.url
     logging: *logging
     deploy:
       resources:

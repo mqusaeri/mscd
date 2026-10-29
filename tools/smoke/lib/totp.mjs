@@ -56,3 +56,24 @@ export function selfTest() {
   const key = Buffer.from('12345678901234567890', 'ascii');
   return RFC6238_SHA1.filter(([time, code]) => totp(key, time, 8) !== code).map(([time]) => time);
 }
+
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** The bytes of a base32 TOTP secret (RFC 4648, as the enrolment page shows it; spaces and padding ignored). */
+export function base32Bytes(secret) {
+  const clean = secret.replace(/[\s=]/g, '').toUpperCase();
+  let bits = '';
+  for (const ch of clean) {
+    const v = BASE32.indexOf(ch);
+    if (v < 0) throw new Error(`"${ch}" is not a base32 character`);
+    bits += v.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(bytes);
+}
+
+/** The current code of an enrolled base32 secret. */
+export function codeOf(secret, unixSeconds = Math.floor(Date.now() / 1000)) {
+  return totp(base32Bytes(secret), unixSeconds);
+}
