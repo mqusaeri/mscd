@@ -112,6 +112,7 @@ Decided by the product owner on 2026-10-29:
 
 12. Until a lead auditor signs the packs off (`packs/README.md`, E.2), a release candidate (`vX.Y.Z-rc.N`) may carry unsigned packs and go to staging; `deploy-prod.yml` refuses such a release for production, and a final version needs every sign-off.
 13. The orchestrator may make the release key set and the SSH keys on the build host and store them in GitHub environments with `gh` (owner, 2026-10-29). It never reads or prints a private value; the owner keeps offline copies and deletes the folder. The owner alone types server passwords and mail passwords, and approves releases and production deploys.
+14. The GitHub environments `release` and `production` have no required reviewer (owner, 2026-10-30, against the recommendation to keep production manual): releases build and production deploys run without an approval click. The release check of unsigned packs (decision 12) and the admin-only release tags stay.
 
 ## Open follow-ups
 
