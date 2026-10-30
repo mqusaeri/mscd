@@ -964,6 +964,67 @@ flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web
 test -z "$(docker ps -q --filter label=mscd.test=true)"
 ```
 
+### L. Additions after the staging review (product owner, 2026-10-30)
+
+The product owner tried staging and asked for two packages. They run together after the security clean-up of M2-S13 (wave 7). The orchestrator owns the shared web tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` while they run.
+
+#### M2-19 Operator accounts
+
+| | |
+|---|---|
+| Wave, depends on | 7; M2-S13 and its security clean-up |
+| Owns | `packages/shared/src/api/ops.ts` (new routes), `packages/shared/src/authz/matrix.ts` (only if a new permission is needed), `apps/server/src/modules/ops/**`, `apps/server/test/int/ops/**` (new), `apps/server/test/int/rbac/expectations.ts` (entries of the new routes), `apps/web/src/screens/ops/**`, `apps/web/src/data/api/ApiClient.ts` (problem text only) and its unit test, `apps/web/test/screens/ops*.test.tsx`, `apps/web/e2e/screens/ops*.spec.js`, `apps/web/e2e/api-only/ops*.spec.js`, `docs/saas/operator.md`, `docs/platform/handoff/M2-19.md` |
+
+Brief:
+- Routes for the platform operator (permission `ops.read` to read, `ops.users.manage` to act; platform scope; every write takes a reason of 3 to 500 characters, writes one platform audit entry, and follows the idempotency and `If-Match` rules of the other `ops.*` routes):
+  - `GET /ops/accounts`: every account of the service, paged, with search by name or email and filters by organisation, account status and kind. Each row: id, handle, email, display name, kind, status, second factor enrolled or not, locked or not, last sign-in, created, platform operator or not, and the memberships (organisation slug and name, membership status, admin roles). No password hash, no factor secret, no business roles of a customer organisation.
+  - `GET /ops/accounts/:id`: the row plus the active sessions (start, last seen, sign-in method, network address cut to /24 for IPv4 and /48 for IPv6, browser) and the latest platform audit entries about the account.
+  - `POST /ops/accounts/:id/reset-mfa`, `/password-reset` (a set-password link by email; with `mail.required` the route answers 409 `mail_required` while mail does not work), `/invitations/:org/resend` (a new invitation link for a pending membership, the old one stops working), `/sessions/revoke` (every session of the account), `/status` (`disabled` or `active`; disabling ends every session).
+  - `GET /ops/operators`, `POST /ops/operators` (email and name: the flow of `admin create-operator`, with the set-password link by email), `DELETE /ops/operators/:id`.
+  - Refusals: an operator cannot disable, demote or end the sessions of their own account, and the last active operator cannot be removed or disabled. System accounts take no action. The operator never changes memberships or roles inside a customer organisation; the customer's Tenant Admin keeps that (ISO/IEC 27001 A.5.18).
+  - `POST /ops/users/reset-mfa` stays for `saas-ops.sh`.
+- The Accounts tab of the operator console becomes the account list with search, filters and paging, an account drawer with the detail and the actions (each action asks for the reason and names the account in its confirmation), and an Operators section with add and remove. The form that asks for an email to reset the second factor goes away. English and Indonesian, 12px or more, WCAG AA in both themes, readable at the widths the E2E layout checks use.
+- `ApiClient.ts`: a problem without a message pair shows its `detail` before its `title`, so a refusal such as `mail_required` shows the server's sentence and never the word "Conflict" alone. Unit test.
+- `docs/saas/operator.md`: the Accounts screen, what each action does, and the privacy rule (what the operator sees and why).
+
+Acceptance:
+
+```bash
+npm run typecheck && npm run lint && npm test
+npm run test:int -w @mscd/server -- test/int/ops test/int/rbac test/int/security test/int/contract
+npm run test:int:saas -w @mscd/server
+CI=1 npm run test:e2e -w @mscd/web -- e2e/screens e2e/contrast.spec.js
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only
+npm run check:text
+```
+
+#### M2-20 Screen addresses
+
+| | |
+|---|---|
+| Wave, depends on | 7; M2-S13 and its security clean-up. Runs next to M2-19 |
+| Owns | `apps/web/src/MscdApp.jsx` (navigation state only), `apps/web/src/main.jsx`, `apps/web/src/screens/host.tsx`, `apps/web/src/screens/registry.ts`, `apps/web/src/screens/ui/host-context.ts`, `apps/web/src/routing/**` (new), the tab state of the host screens in `apps/web/src/screens/*/Screen.tsx` except `screens/ops/**` (M2-19 owns it: leave a patch for its tab in the handoff), `apps/web/e2e/routing.spec.js` (new) and the E2E specs that need an adjusted start, `apps/web/test/**` except the two shared tests the orchestrator owns, `docs/platform/ui-contract.md` (a section on addresses), `docs/platform/handoff/M2-20.md`. Never the generated views |
+
+Brief:
+- Every screen has an address, its screen id as the path (D2-14 named the ids for this), with the selected management system (`ms=<slug>`), the organisation where a person belongs to several (`org=<slug>`), and the tab of a host screen with tabs (`tab=<id>`) as query values. For example `/controls?ms=isms` or `/ops?tab=organisations`.
+- A change of screen adds a history entry; a change of tab or system replaces it. Back and Forward move between them, a refresh opens the same place, and a copied address opens it for another person who may see it. An address of a screen the person cannot open, or of an unknown screen, opens the start screen and corrects the address.
+- The sign-in pages keep their addresses (`/login`, `/invite`, `/reset-password` and the rest). An app address opened without a session goes to sign-in and returns to it afterwards (a same-origin path only, never another host).
+- The API build uses paths (NGINX already falls back to `index.html`, `deploy/nginx/site.conf`). The sample build keeps working from files: it uses the hash (`#/controls?ms=isms`).
+- No change to what any screen shows or does. The existing E2E suites stay green.
+
+Acceptance:
+
+```bash
+npm run typecheck && npm run lint && npm test
+npm run gen:views:check -w @mscd/web
+CI=1 npm run test:e2e -w @mscd/web
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web
+flock /tmp/mscd-stack.lock npm run test:smoke
+npm run check:text
+```
+
+The new `e2e/routing.spec.js` proves: a refresh keeps screen, system and tab; Back and Forward; a copied address opens the same place after sign-in; an address the person cannot open goes to the start screen; the sample build works with the hash.
+
 ## H. Questions for the product owner
 
 Each question has a default that is built when no answer arrives before the package that needs it.

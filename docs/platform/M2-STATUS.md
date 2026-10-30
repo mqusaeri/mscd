@@ -49,6 +49,8 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-17 Terminology | 4 | Done | The owner answered H.1 on 2026-10-28: rename only "Gate" to "Checkpoint" (and its forms) and "MS Manager" to "Management System Manager" (the per-system titles of the packs keep their names); every other proposed label keeps its name. Indonesian screens use the same English words, "Checkpoint" and "Management System Manager" (owner, 2026-10-28; today "gate" and "Manajer SM") |
 | M2-18 Fresh-organisation journey | 5 | Done | Also: apply the two renames of decision 10 to `project/MSCD User Guide.dc.html` (M2-17 follow-up 1) |
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | Done (GL-05, GL-13 and GL-30 wait for green CI jobs and the security clean-up) | Also assigned by the orchestrator: pass `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` to the server as `MSCD__LEGAL__*` (M2-S11 follow-up 8) and start the mock DNS responder in `apps/web/e2e-api/stack.mjs` for the multi-tenant stack (M2-S11 deviation 4) |
+| M2-19 Operator accounts | 7 | Next, after the security clean-up | Owner request 2026-10-30 (staging review) |
+| M2-20 Screen addresses | 7 | Next, after the security clean-up, next to M2-19 | Owner request 2026-10-30 (staging review) |
 
 ## Open orchestrator items
 
