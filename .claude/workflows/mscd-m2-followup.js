@@ -26,6 +26,7 @@ CONCURRENCY RULES (several agents work in this repo at the same time, on other w
 - Temporary files and logs: use your own subfolder of the scratchpad or of /var/tmp named after your work package (for example "${WP.toLowerCase()}/"); several packages share those folders, so never reuse a generic file name such as e2e-api.log.
 - Writing rules for any document or UI text: plain English, no em dash (U+2014), no centre dot (U+00B7), no meta commentary.
 - SPEED RULE: the machine is shared by up to four packages. Do not run the full web E2E suite (all of apps/web/e2e) or the full server integration suite; run your package's acceptance commands, the targeted specs and tests of the files you touch, and the reduced common acceptance of section G.1. The orchestrator runs the full suites once per wave.
+- BROWSER SUITE RULE (owner, 2026-10-31: the full browser suites were the slowest part of every package): where an acceptance command names \"npm run test:e2e\" or \"npm run test:e2e:api\" without spec files, run it with the spec files of your package and of the screens and shared code you touched (for example \"npm run test:e2e:api -w @mscd/web -- e2e/routing.spec.js e2e/shell.spec.js\"), never the whole suite. List the specs you ran in the acceptance note. The orchestrator runs both full suites once per wave, and CI runs them on every push to main.
 - Keep the handoff note docs/platform/handoff/${WP}.md up to date, with a section for this follow-up run.
 `
 
@@ -51,7 +52,7 @@ const REVIEW = {
 
 const verifyPrompt = (round, prior) => `${CTX}
 TASK: You are the independent verifier for ${WP} (follow-up round ${round}). Do NOT edit any files.
-1. Run every acceptance command of ${WP} literally, from a clean state where the command implies it. Record exact output for failures.
+1. Run every acceptance command of ${WP} literally (browser suites with targeted spec files, as the BROWSER SUITE RULE says), from a clean state where the command implies it. Record exact output for failures.
 2. Adversarially review the implementation against the Milestone 2 plan, the Milestone 1 rules it keeps, and the UI contract, and check that the findings of the previous review are fixed: missing items from the brief, behaviour that differs from the plan, security issues, fragile code, files changed outside the owned and assigned paths, and violations of the writing rules.
 Only report problems you can prove with evidence. Severity blocker = acceptance fails or the brief is not met; major = real defect; minor = polish.
 ${prior ? 'Implementer report:\n' + JSON.stringify(prior) : ''}`

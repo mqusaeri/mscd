@@ -27,6 +27,7 @@ CONCURRENCY RULES (several agents work in this repo at the same time, on other w
 - Temporary files and logs: use your own subfolder of the scratchpad or of /var/tmp named after your work package (for example "${WP.toLowerCase()}/"); several packages share those folders, so never reuse a generic file name such as e2e-api.log.
 - Writing rules for any document or UI text: plain English, no em dash (U+2014), no centre dot (U+00B7), no meta commentary.
 - SPEED RULE: the machine is shared by up to four packages. Do not run the full web E2E suite (all of apps/web/e2e) or the full server integration suite; run your package's acceptance commands, the targeted specs and tests of the files you touch, and the reduced common acceptance of section G.1. The orchestrator runs the full suites once per wave.
+- BROWSER SUITE RULE (owner, 2026-10-31: the full browser suites were the slowest part of every package): where an acceptance command names \"npm run test:e2e\" or \"npm run test:e2e:api\" without spec files, run it with the spec files of your package and of the screens and shared code you touched (for example \"npm run test:e2e:api -w @mscd/web -- e2e/routing.spec.js e2e/shell.spec.js\"), never the whole suite. List the specs you ran in the acceptance note. The orchestrator runs both full suites once per wave, and CI runs them on every push to main.
 - Write the handoff note docs/platform/handoff/${WP}.md (what was built, deviations, follow-ups, acceptance results).
 `
 
@@ -61,7 +62,7 @@ TASK: Implement ${WP} completely and to production quality, following the plan e
 
 const verifyPrompt = (round, prior) => `${CTX}
 TASK: You are the independent verifier for ${WP} (round ${round}). Do NOT edit any files.
-1. Run every acceptance command of ${WP} literally, from a clean state where the command implies it (for example stop and remove the compose project first if the acceptance starts one). Record exact output for failures.
+1. Run every acceptance command of ${WP} literally (browser suites with targeted spec files, as the BROWSER SUITE RULE says), from a clean state where the command implies it (for example stop and remove the compose project first if the acceptance starts one). Record exact output for failures.
 2. Adversarially review the implementation against the Milestone 2 plan, the Milestone 1 rules it keeps, and the UI contract: missing items from the brief, behaviour that differs from the plan, security issues (secrets in files, injection, missing auth checks, RLS gaps where relevant), fragile code (hard-coded paths, race conditions, unpinned versions), files changed outside the owned paths (check with "git status --porcelain" and compare with the Owns list; note that other agents are concurrently changing other paths, so only flag files that this WP's report claims or that clearly belong to its feature), and violations of the writing rules.
 Only report problems you can prove with evidence. Severity blocker = acceptance fails or the brief is not met; major = real defect; minor = polish.
 ${prior ? 'Implementer report:\n' + JSON.stringify(prior) : ''}`
