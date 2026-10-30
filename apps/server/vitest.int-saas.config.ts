@@ -1,4 +1,4 @@
-import type { UserConfig } from 'vitest/config';
+import type { ViteUserConfig } from 'vitest/config';
 import { MULTI_TENANCY_SUITES, OPERATOR_SUITES, SAAS_RUN_VARIABLE } from './test/setup/tenancy';
 import base from './vitest.int.config';
 
@@ -16,7 +16,7 @@ process.env[SAAS_RUN_VARIABLE] = 'multi';
 const test = base.test ?? {};
 const setupFiles = test.setupFiles === undefined ? [] : Array.isArray(test.setupFiles) ? test.setupFiles : [test.setupFiles];
 
-const config: UserConfig = {
+const config: ViteUserConfig = {
   ...base,
   test: {
     ...test,

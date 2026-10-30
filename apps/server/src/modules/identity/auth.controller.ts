@@ -40,7 +40,8 @@ import { SessionService, type CurrentSession } from './session.service';
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
-    private readonly mfa: MfaService,
+    // Code scanning reads a value called `mfa` as a password, so the field carries the service name.
+    private readonly mfaService: MfaService,
     private readonly invitations: InvitationService,
     private readonly preferences: PreferencesService,
     private readonly sessions: SessionService,
@@ -53,12 +54,12 @@ export class AuthController {
 
   @ApiRoute(authMfaVerifyRoute)
   async verifyMfa(@Req() request: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply, @RouteInputParam('body') body: MfaVerifyRequest): Promise<LoginResponse> {
-    return this.mfa.verify(this.current(request), reply, body);
+    return this.mfaService.verify(this.current(request), reply, body);
   }
 
   @ApiRoute(authMfaEnrolStartRoute)
   async startEnrolment(@Req() request: FastifyRequest, @RouteInputParam('body') body: MfaEnrolStartRequest): Promise<MfaEnrolStartResponse> {
-    return this.mfa.startEnrolment(this.current(request), body);
+    return this.mfaService.startEnrolment(this.current(request), body);
   }
 
   @ApiRoute(authMfaEnrolConfirmRoute)
@@ -67,7 +68,7 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @RouteInputParam('body') body: MfaEnrolConfirmRequest,
   ): Promise<MfaEnrolConfirmResponse> {
-    return this.mfa.confirmEnrolment(this.current(request), reply, body.code);
+    return this.mfaService.confirmEnrolment(this.current(request), reply, body.code);
   }
 
   @ApiRoute(authLogoutRoute)

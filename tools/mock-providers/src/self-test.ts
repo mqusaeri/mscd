@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createSelfSignedCertificate } from './certs.js';
 import { createGoogleServiceAccountAssertion, createM365ClientAssertion } from './client.js';
+import { withoutTrailingSlashes } from './http.js';
 import { quickXorHash } from './quickxor.js';
 
 // Round trip against a running mock (CLI `--self-test`): registers throwaway credentials and drives, then for
@@ -8,7 +9,7 @@ import { quickXorHash } from './quickxor.js';
 // lists the folder again. Throws on the first failure.
 
 export async function runSelfTest(baseUrl: string, log: (line: string) => void = () => undefined): Promise<void> {
-  const base = baseUrl.replace(/\/+$/, '');
+  const base = withoutTrailingSlashes(baseUrl);
   const suffix = randomBytes(6).toString('hex').toUpperCase();
   const step = (name: string) => log(`self-test: ${name} ok`);
 

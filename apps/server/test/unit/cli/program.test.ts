@@ -71,7 +71,7 @@ describe('gen-build-info.mjs (B.4, D-16)', () => {
       stderr: expect.stringMatching(/no licence-\*\.pub key/),
     });
     const rsa = await mkdtemp(path.join(dir, 'rsa-'));
-    const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 1024 });
+    const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     await writeFile(path.join(rsa, 'licence-rsa.pub'), publicKey.export({ type: 'spki', format: 'pem' }));
     await expect(generate(path.join(dir, 'd.ts'), { MSCD_BUILD_FLAVOR: 'release', MSCD_TRUSTED_KEYS_DIR: rsa })).rejects.toMatchObject({
       stderr: expect.stringMatching(/not an Ed25519 public key/),

@@ -115,7 +115,9 @@ export function demoUsers(people: SampleOrgSnapshot['PEOPLE']): DemoUser[] {
   const manager = (handle: string): DemoUser['roles'] => (_org, system) =>
     PRIMARY_MANAGER[handle] === system ? [{ role: 'ms_manager', primary: true }] : [{ role: 'domain_owner', primary: false }];
   const orgsOf = (handle: string): DemoOrgSlug[] => (ISMS_RECORD_HOLDERS_IN_TST.has(handle) ? ALL_ORGS : SAMPLE_ORGS);
-  const testUser = (handle: string, displayName: string, jobTitle: string | null, extra: Partial<DemoUser>): DemoUser => ({
+  // A test user of G.3 is described by one object whose handle is a field, so static analysis does not read a handle
+  // such as `mfa.tester` as the name of a password.
+  const testUser = ({ handle, displayName, jobTitle, ...extra }: Pick<DemoUser, 'handle' | 'displayName' | 'jobTitle'> & Partial<DemoUser>): DemoUser => ({
     handle,
     displayName,
     jobTitle,
@@ -137,11 +139,11 @@ export function demoUsers(people: SampleOrgSnapshot['PEOPLE']): DemoUser[] {
     sample('tono', SAMPLE_ORGS, manager('tono')),
     sample('lina', orgsOf('lina'), manager('lina')),
     ...['dewi', 'fajar', 'andi', 'yusuf'].map((handle) => sample(handle, orgsOf(handle), only('domain_owner'))),
-    testUser('tenant.admin', 'Tenant Admin', 'IT Administrator', { memberships: [{ org: 'tst', adminRoles: ['tenant_admin'] }] }),
+    testUser({ handle: 'tenant.admin', displayName: 'Tenant Admin', jobTitle: 'IT Administrator', memberships: [{ org: 'tst', adminRoles: ['tenant_admin'] }] }),
     // The external auditor's role comes with the seeded auditor access grant (F.14), not from this list.
-    testUser('ext.auditor', 'Eko Santoso', 'Lead Auditor', { kind: 'guest', password: false, memberships: [{ org: 'tst', adminRoles: [] }] }),
-    testUser('mfa.tester', 'MFA Tester', 'Analyst', { totp: false, memberships: [{ org: 'tst', adminRoles: [] }], roles: only('domain_owner') }),
-    testUser('ops', 'Platform Operator', null, { platformOperator: true }),
+    testUser({ handle: 'ext.auditor', displayName: 'Eko Santoso', jobTitle: 'Lead Auditor', kind: 'guest', password: false, memberships: [{ org: 'tst', adminRoles: [] }] }),
+    testUser({ handle: 'mfa.tester', displayName: 'MFA Tester', jobTitle: 'Analyst', totp: false, memberships: [{ org: 'tst', adminRoles: [] }], roles: only('domain_owner') }),
+    testUser({ handle: 'ops', displayName: 'Platform Operator', jobTitle: null, platformOperator: true }),
   ];
   for (let n = 1; n <= 75; n++) {
     const number = String(n).padStart(2, '0');

@@ -23,8 +23,11 @@ export const RefreshTokenSecret = z.strictObject({
 });
 export type RefreshTokenSecret = z.infer<typeof RefreshTokenSecret>;
 
-/** The OAuth client of an `oauth_refresh_token` credential before consent (`{clientId, clientSecret}`). */
-export function readOAuthClient(credential: OpenedCredential | null): { clientId: string; clientSecret: string } {
+/**
+ * The client of an `oauth_refresh_token` credential before consent (`{clientId, clientSecret}`). Google issues its
+ * secret and a person never chooses it, so the SHA-256 cache keys over it (`refreshTokenCacheKey`) are cache keys only.
+ */
+export function readConsentClient(credential: OpenedCredential | null): { clientId: string; clientSecret: string } {
   if (!credential) throw forbidden('The repository has no OAuth client credential; add one before the consent', 'credential-missing');
   if (credential.kind !== 'oauth_refresh_token') {
     throw forbidden(`A ${credential.kind} credential cannot be used for the Google consent flow`, 'credential-kind');

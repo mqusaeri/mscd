@@ -299,7 +299,12 @@ function attributesOf(tag: string): Record<string, string> {
  * certificates of its KeyDescriptors (`use="signing"` or no use). Comments are ignored; null when nothing was found.
  */
 export function parseSamlMetadata(xml: string): SamlMetadata | null {
-  const text = xml.replace(/<!--[\s\S]*?-->/g, '');
+  // Removed until none is left: one pass over `<!<!---->-- ... -->` would join the remains into a new comment.
+  let text = xml;
+  for (let previous = ''; previous !== text; ) {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+  }
   const idp = /<([\w.-]+:)?IDPSSODescriptor\b[\s\S]*?<\/([\w.-]+:)?IDPSSODescriptor>/.exec(text);
   if (!idp) return null;
   const before = text.slice(0, idp.index);

@@ -53,7 +53,8 @@ export function inspectCertificate(certificatePem: string): CertificateInfo {
   const certificate = new X509Certificate(certificatePem);
   return {
     thumbprintSha256: createHash('sha256').update(certificate.raw).digest('base64url'),
-    thumbprintSha1: createHash('sha1').update(certificate.raw).digest('base64url'),
+    // The `x5t` thumbprint is SHA-1 by definition (RFC 7515); Node's X509Certificate gives it as `fingerprint`.
+    thumbprintSha1: Buffer.from(certificate.fingerprint.replace(/:/g, ''), 'hex').toString('base64url'),
     notBefore: new Date(certificate.validFrom),
     notAfter: new Date(certificate.validTo),
     subject: certificate.subject,

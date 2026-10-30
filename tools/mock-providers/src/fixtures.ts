@@ -1,6 +1,7 @@
 import { createPublicKey } from 'node:crypto';
 import { inspectCertificate } from './certs.js';
 import { mimeTypeFromName } from './content.js';
+import { withoutEdgeSlashes, withoutTrailingSlashes } from './http.js';
 import {
   isDriveId,
   isGraphId,
@@ -386,7 +387,7 @@ function checkFolderPath(check: Checker, obj: Json, key: string, path: string, p
     check.fail(`${path}.${key}`, allowRoot ? 'must be a string' : 'must be a non-empty string');
     return undefined;
   }
-  const normalised = value.replace(/^\/+|\/+$/g, '');
+  const normalised = withoutEdgeSlashes(value);
   if (!allowRoot && normalised === '') {
     check.fail(`${path}.${key}`, 'must name a folder below the root');
     return undefined;
@@ -426,7 +427,7 @@ function checkDrive(check: Checker, value: unknown, path: string, provider: Prov
     });
     if (driveType) drive.driveType = driveType as M365DriveType;
     const webUrl = check.string(obj, 'webUrl', path, { test: (v) => URL.canParse(v), hint: 'must be an absolute URL' });
-    if (webUrl) drive.webUrl = webUrl.replace(/\/+$/, '');
+    if (webUrl) drive.webUrl = withoutTrailingSlashes(webUrl);
     const tenantId = check.string(obj, 'tenantId', path, { test: isTenant, hint: 'must be a tenant id or domain' });
     if (tenantId) drive.tenantId = tenantId;
   } else {

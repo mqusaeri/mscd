@@ -48,13 +48,13 @@
     "csv-parse": "7.0.3",
     "csv-stringify": "6.9.0",
     "exceljs": "4.4.0",
-    "fastify": "5.12.5",
+    "fastify": "5.12.6",
     "ical-generator": "8.1.1",
     "ioredis": "5.11.1",
     "jose": "6.2.12",
     "kysely": "0.28.17",
     "nestjs-pino": "4.6.1",
-    "nodemailer": "10.0.13",
+    "nodemailer": "10.1.4",
     "openid-client": "6.8.8",
     "pdf-lib": "1.17.1",
     "pg": "8.23.1",
@@ -77,9 +77,9 @@
     "@testcontainers/postgresql": "11.14.0",
     "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
-    "@vitest/coverage-v8": "3.2.7",
+    "@vitest/coverage-v8": "4.1.12",
     "testcontainers": "11.14.0",
     "unplugin-swc": "2.0.0",
-    "vitest": "3.2.7"
+    "vitest": "4.1.12"
   }
 }

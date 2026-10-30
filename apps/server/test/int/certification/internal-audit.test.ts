@@ -124,7 +124,7 @@ describe('internal audits (Milestone 2 D.2)', () => {
       const own = await maya.patch(ACTIVITY(activityId), { auditorHandle: 'bagus', targetCode: ownedTarget });
       expect(own.status).toBe(200);
       expect(own.body.warnings).toEqual([
-        { rule: 'AUD-INDEP', messages: { en: expect.stringMatching(new RegExp(`owns an entry, document or evidence of ${ownedTarget.replace(/\./g, '\\.')}`)), id: expect.stringMatching(/Auditor sebaiknya/) } },
+        { rule: 'AUD-INDEP', messages: { en: expect.stringContaining(`owns an entry, document or evidence of ${ownedTarget}`), id: expect.stringMatching(/Auditor sebaiknya/) } },
       ]);
       expect(own.body.warnings![0]!.messages.en).toMatch(/^Bagus/);
       const [row] = await rowsOf<{ auditor: string; target_code: string }>(db, 'tst', sql`

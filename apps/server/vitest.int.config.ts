@@ -34,7 +34,6 @@ export default defineConfig({
     environment: 'node',
     pool: 'forks',
     maxWorkers: 2,
-    minWorkers: 1,
     testTimeout: 60000,
     hookTimeout: 120000,
     teardownTimeout: 60000,

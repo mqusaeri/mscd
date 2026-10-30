@@ -108,12 +108,13 @@ function plain(value) {
 
 /** Heading text as GitHub renders it, then the GitHub anchor slug. */
 export function headingSlug(text) {
-  const rendered = text
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, '')
-    .replace(/[`*]/g, '')
-    .trim()
-    .toLowerCase();
+  // Tags are removed until none is left, so the remains of a removed tag cannot join into a new one.
+  let tagless = text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');
+  for (let previous = ''; previous !== tagless; ) {
+    previous = tagless;
+    tagless = tagless.replace(/<[^>]+>/g, '');
+  }
+  const rendered = tagless.replace(/[`*]/g, '').trim().toLowerCase();
   return rendered.replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
 }
 

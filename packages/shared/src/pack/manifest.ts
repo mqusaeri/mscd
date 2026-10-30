@@ -49,10 +49,16 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
  * such as `smoke`, or a development build) cannot be compared and accepts every pack.
  */
 export function engineVersionSatisfies(serverVersion: string, engineMinVersion: string): boolean {
-  const server = serverVersion.replace(/\+.*$/, '');
+  const server = beforeFirst(serverVersion, '+');
   if (!SEMVER_RE.test(server)) return true;
-  const release = server.replace(/-.*$/, '');
+  const release = beforeFirst(server, '-');
   return compareSemver(release, engineMinVersion) >= 0;
+}
+
+/** The part of `text` before the first `mark` (all of it without one), found in linear time on any input. */
+function beforeFirst(text: string, mark: string): string {
+  const at = text.indexOf(mark);
+  return at === -1 ? text : text.slice(0, at);
 }
 
 export const FrameworkCode = named('FrameworkCode', z.string().regex(/^[A-Z][A-Z0-9]{1,19}$/), 'Framework code (ref.framework.code), for example ISO27001', {

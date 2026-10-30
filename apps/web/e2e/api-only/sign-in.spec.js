@@ -67,6 +67,9 @@ test.describe('Sign-in @api-only', () => {
 
   test('a session that ends on the server sends the user back to sign in with a notice', async ({ page, baseURL }) => {
     await signIn(page, 'sari');
+    // The first screen loads its data in the background; a load still running after the reset below would find the
+    // session ended and open the sign-in page before the menu is clicked (CI run of 29 October 2026, 22:34 UTC).
+    await page.waitForLoadState('networkidle');
     // The test reset recreates the database, which ends every session (as an idle or absolute timeout does).
     const reset = await page.request.post(baseURL + '/api/v1/test/reset', { headers: { origin: baseURL } });
     expect(reset.ok()).toBe(true);

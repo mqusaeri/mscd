@@ -16,7 +16,7 @@ describe('keyId', () => {
   });
 
   it('rejects keys that are not Ed25519', () => {
-    const rsa = generateKeyPairSync('rsa', { modulusLength: 1024 });
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
     expect(() => keyId(rsa.publicKey)).toThrow(/Ed25519/);
   });
 });

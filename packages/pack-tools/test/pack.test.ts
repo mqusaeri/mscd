@@ -161,7 +161,7 @@ describe('buildPack', () => {
 
   it('refuses a signing key that is not Ed25519, a public key, or a rejected key id', () => {
     const dir = path.join(SOURCES_DIR, 'ISO27001-2022');
-    const rsa = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey;
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
     expect(packError(() => buildPack(dir, rsa)).code).toBe('signing_key');
     expect(packError(() => buildPack(dir, testPack().key.publicKeyPem)).code).toBe('signing_key');
     expect(packError(() => buildPack(dir, 'not a key')).code).toBe('signing_key');

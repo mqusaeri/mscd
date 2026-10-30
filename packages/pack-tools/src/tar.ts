@@ -194,7 +194,12 @@ function readOctal(header: Buffer, offset: number, length: number, field: string
   if (raw[0] !== undefined && (raw[0] & 0x80) !== 0) {
     throw new TarFormatError(`header at byte ${at}: ${field} uses base-256 encoding, which pack archives never need`);
   }
-  const text = raw.toString('latin1').replace(/[\0 ]+$/, '').replace(/^ +/, '');
+  // Trailing NULs and spaces, then leading spaces, trimmed byte by byte (a trailing-class regex is quadratic).
+  let end = raw.length;
+  while (end > 0 && (raw[end - 1] === 0 || raw[end - 1] === 0x20)) end -= 1;
+  let start = 0;
+  while (start < end && raw[start] === 0x20) start += 1;
+  const text = raw.toString('latin1', start, end);
   if (text === '') return 0;
   if (!/^[0-7]+$/.test(text)) throw new TarFormatError(`header at byte ${at}: ${field} is not an octal number`);
   const value = Number.parseInt(text, 8);

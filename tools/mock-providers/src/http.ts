@@ -61,9 +61,23 @@ export function formBody(request: FastifyRequest): URLSearchParams {
   return new URLSearchParams(bodyBuffer(request).toString('utf8'));
 }
 
+/** `value` without trailing slashes, in linear time (a `/\/+$/` replace is quadratic on a long run of slashes). */
+export function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') end -= 1;
+  return value.slice(0, end);
+}
+
+/** `value` without leading and trailing slashes, in linear time. */
+export function withoutEdgeSlashes(value: string): string {
+  let start = 0;
+  while (start < value.length && value[start] === '/') start += 1;
+  return withoutTrailingSlashes(value.slice(start));
+}
+
 /** Scheme, host and port the client used, or the configured public URL. */
 export function originOf(request: FastifyRequest, publicUrl: string | undefined): string {
-  if (publicUrl) return publicUrl.replace(/\/+$/, '');
+  if (publicUrl) return withoutTrailingSlashes(publicUrl);
   const host = header(request, 'host') ?? 'localhost';
   return `${request.protocol}://${host}`;
 }

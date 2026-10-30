@@ -40,7 +40,7 @@ import { checkItemName, joinPath, pathSegments, samePath, startsWithPath } from 
 import { connectionFailure, statFailure } from '../m365/provider/results';
 import { detectAndReplay, meterUpload, type MeteredUpload } from '../m365/provider/streams';
 import { TokenCache } from '../m365/provider/token-cache';
-import { readGoogleCredential, readOAuthClient, refreshTokenCacheKey, type GoogleCredential } from './credential';
+import { readGoogleCredential, readConsentClient, refreshTokenCacheKey, type GoogleCredential } from './credential';
 import {
   checkDriveId,
   DriveSession,
@@ -606,7 +606,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
   }
 
   async exchangeOAuthCode(ctx: AdapterContext, input: OAuthExchangeInput): Promise<OAuthExchangeOutput> {
-    const client = readOAuthClient(ctx.credential);
+    const client = readConsentClient(ctx.credential);
     let answer: Awaited<ReturnType<GoogleTokens['exchangeCode']>>;
     try {
       answer = await this.tokens.exchangeCode(client, input.code, input.redirectUri, input.codeVerifier);

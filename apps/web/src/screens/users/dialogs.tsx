@@ -32,6 +32,19 @@ export function asApi<T>(promise: Promise<Result<T>>): Promise<ApiResult<{ data:
 }
 
 /**
+ * Runs `reset` in the render in which `key` changes (a dialog opens, or opens for another person), so the first frame
+ * of the dialog already shows its fresh values. An effect would reset them one frame later: until then the dialog
+ * showed the values of the person edited before, and a quick click acted on those.
+ */
+function useResetOnChange(key: unknown, reset: () => void): void {
+  const [seen, setSeen] = useState<{ key: unknown } | null>(null);
+  if (seen === null || !Object.is(seen.key, key)) {
+    setSeen({ key });
+    reset();
+  }
+}
+
+/**
  * `GET /me` after a change of the session user's own roles (F.1): the client takes the renewed session's CSRF token
  * from it. `reload` when a snapshot reload carries the change, `restart` when the app must load again: the roles the
  * shell read from `Me` changed (`sessionRestart`), or `GET /me` failed, so the token may be the old one.
@@ -171,13 +184,15 @@ export function InviteDialog({ ctx, adapter, open, tenancy, onClose, onInvited }
   const key = useRef(newIdempotencyKey());
   const save = useMutation((f: InviteForm) => asApi(adapter.invite(inviteBody(f), key.current)));
   const { reset } = save;
-  useEffect(() => {
+  useResetOnChange(open, () => {
     if (open) {
       setForm(empty);
       setLocal({});
-      key.current = newIdempotencyKey();
       reset();
     }
+  });
+  useEffect(() => {
+    if (open) key.current = newIdempotencyKey();
   }, [open]);
   const set = <K extends keyof InviteForm>(k: K, v: InviteForm[K]) => {
     const next = { ...form, [k]: v };
@@ -239,13 +254,13 @@ export function EditDialog({ ctx, adapter, member, members, onClose, onSaved }: 
   const [note, setNote] = useState<TextPair | null>(null);
   const save = useMutation((input: { member: Member; patch: NonNullable<ReturnType<typeof editPatch>> }) => asApi(saveEdit(ctx, adapter, input.member, input.patch)));
   const { reset } = save;
-  useEffect(() => {
+  useResetOnChange(member?.id, () => {
     if (member) {
       setForm({ jobTitle: member.jobTitle ?? '', adminRoles: [...member.adminRoles] });
       setNote(null);
       reset();
     }
-  }, [member?.id]);
+  });
   if (!member) return null;
   const jobBlock = jobTitleBlock(ctx, member);
   const self = isSelf(ctx, member);
@@ -324,13 +339,15 @@ export function GrantDialog({ ctx, adapter, member, members, systems, onClose, o
   const key = useRef(newIdempotencyKey());
   const save = useMutation((input: { system: SystemRef; form: GrantForm; member: Member }) => asApi(adapter.grant(input.system, grantBody(input.form, input.member), key.current)));
   const { reset } = save;
-  useEffect(() => {
+  useResetOnChange(member?.id, () => {
     if (member) {
       setForm({ ms: usable.length === 1 ? usable[0].slug : '', role: '', isPrimary: false, validUntil: '' });
       setLocal({});
-      key.current = newIdempotencyKey();
       reset();
     }
+  });
+  useEffect(() => {
+    if (member) key.current = newIdempotencyKey();
   }, [member?.id]);
   if (!member) return null;
   const today = ctx.D?.TODAY_S ?? null;
@@ -517,14 +534,16 @@ export function PreRegisterDialog({ ctx, adapter, member, providers, onClose, on
   const key = useRef(newIdempotencyKey());
   const save = useMutation((input: { id: string; provider: string; subject: string }) => asApi(adapter.registerIdentity(input.id, { provider: input.provider, subject: input.subject }, key.current)));
   const { reset } = save;
-  useEffect(() => {
+  useResetOnChange(member?.id, () => {
     if (member) {
       setProvider(usable.length === 1 ? usable[0].slug : '');
       setSubject('');
       setLocal({});
-      key.current = newIdempotencyKey();
       reset();
     }
+  });
+  useEffect(() => {
+    if (member) key.current = newIdempotencyKey();
   }, [member?.id]);
   if (!member) return null;
   const submit = () => {

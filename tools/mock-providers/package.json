@@ -22,10 +22,10 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "fastify": "5.12.5",
+    "fastify": "5.12.6",
     "jose": "6.2.12"
   },
   "devDependencies": {
-    "vitest": "3.2.7"
+    "vitest": "4.1.12"
   }
 }

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import {
-  IdentityProviderIcon, IdentityProviderKind, PROBLEM_TYPE_BASE, Permission, PermissionScope, RECORD_KEY_KINDS, RuleId,
+  IdentityProviderIcon, IdentityProviderKind, Permission, PermissionScope, RECORD_KEY_KINDS, RuleId,
 } from '../enums.js';
 import type { MachineEntity } from '../machines.js';
 
@@ -227,10 +227,16 @@ export const ReauthMethods = named(
 );
 export type ReauthMethods = z.infer<typeof ReauthMethods>;
 
+/**
+ * The `type` of a problem (D.1): `PROBLEM_TYPE_BASE` and a slug. Written out with every dot escaped, so the host
+ * matches only `mscd.cyberlentera.com`; test/input-handling.test.ts checks that it agrees with `PROBLEM_TYPE_BASE`.
+ */
+export const PROBLEM_TYPE_RE = /^https:\/\/mscd\.cyberlentera\.com\/problems\/[a-z][a-z-]*$/;
+
 export const Problem = named(
   'Problem',
   z.object({
-    type: z.string().regex(new RegExp(`^${PROBLEM_TYPE_BASE.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}[a-z][a-z-]*$`)),
+    type: z.string().regex(PROBLEM_TYPE_RE),
     title: z.string(),
     status: z.int().min(400).max(599),
     detail: z.string().optional(),
@@ -415,7 +421,7 @@ export type WorkPackageId = `WP-${string}` | `M2-${string}`;
 /** Work packages of the build plan (K.2) and of Milestone 2 (G.2, K.6); `RouteDef.owner` names one of them. */
 export const WORK_PACKAGE_IDS: readonly WorkPackageId[] = [
   ...Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const),
-  ...Array.from({ length: 18 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 20 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 13 }, (_, i) => `M2-S${String(i + 1).padStart(2, '0')}` as const),
 ];
 

@@ -110,7 +110,7 @@ describe('signLicence and verifyLicence', () => {
   });
 
   it('refuses signing keys that are not Ed25519 private keys, and rejected key ids', () => {
-    const rsa = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey;
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
     expect(licenceError(() => signLicence(UNSIGNED, rsa)).code).toBe('signing_key');
     expect(licenceError(() => signLicence(UNSIGNED, key.publicKeyPem)).code).toBe('signing_key');
     expect(licenceError(() => signLicence(UNSIGNED, key.privateKey, { rejectKeyIds: [key.keyId] })).code).toBe('signing_key');

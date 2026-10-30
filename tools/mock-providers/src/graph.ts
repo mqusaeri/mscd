@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { assertDriveAccess, authenticate } from './auth.js';
 import { mimeTypeFromName } from './content.js';
 import { graphError } from './errors.js';
-import { bodyBuffer, decodeSegment, header, intParam, jsonBody, originOf, queryOf, rawPath } from './http.js';
+import { bodyBuffer, decodeSegment, header, intParam, jsonBody, originOf, queryOf, rawPath, withoutTrailingSlashes } from './http.js';
 import { isGraphId, isGraphVersionId, randomToken, stableGuid } from './ids.js';
 import { signDownload, signPageToken, verifyDownload, verifyPageToken } from './links.js';
 import {
@@ -99,14 +99,14 @@ export function parseGraphPath(path: string): GraphRoute {
       const end = rest.indexOf(':', 2);
       const encoded = end === -1 ? rest.slice(2) : rest.slice(2, end);
       rest = end === -1 ? '' : rest.slice(end + 1);
-      relPath = encoded.replace(/\/+$/, '').split('/').map((segment) => {
+      relPath = withoutTrailingSlashes(encoded).split('/').map((segment) => {
         const name = decodeSegment(segment, 'graph');
         if (name === '' || name === '.' || name === '..') throw invalid(`Invalid path segment "${segment}".`);
         return name;
       });
     }
   }
-  return { driveId, baseId, relPath, suffix: rest.replace(/\/+$/, '') };
+  return { driveId, baseId, relPath, suffix: withoutTrailingSlashes(rest) };
 }
 
 function validName(name: unknown): string {

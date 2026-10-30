@@ -12,7 +12,7 @@ import type { Answer, Handler, Recorded } from '../auth/helpers';
 
 /** A stable uuid for a label. */
 export function uuidOf(label: string): string {
-  const h = createHash('sha1').update(label).digest('hex');
+  const h = createHash('sha256').update(label).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 

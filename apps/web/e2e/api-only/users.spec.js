@@ -71,6 +71,31 @@ async function openPerson(page, name) {
   await expect(drawer(page)).toContainText(name);
 }
 
+/**
+ * Waits for one frame and one task, so the page has applied the updates it scheduled while a dialog opened (the form
+ * of a reopened dialog). Used where the dialog shows the same values before and after, so there is nothing to see.
+ */
+async function settled(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  }));
+}
+
+/**
+ * Opens Edit from the drawer and waits until the form shows the person's current job title and administration roles,
+ * so a change is never made to the values of the person edited before.
+ */
+async function openEdit(page, jobTitle, adminRoles) {
+  await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+  await expect(field(page, 'jobTitle')).toHaveValue(jobTitle);
+  for (const role of ['Tenant Admin', 'Storage Admin']) {
+    const box = dialog(page).getByLabel(role);
+    if (adminRoles.includes(role)) await expect(box).toBeChecked();
+    else await expect(box).not.toBeChecked();
+  }
+  await settled(page);
+}
+
 test.describe('People and roles against the api @api-only', () => {
   test.use({ apiSession: 'tenant.admin' });
 
@@ -81,6 +106,8 @@ test.describe('People and roles against the api @api-only', () => {
     await expect(row(page, 'Rina Kusuma')).toContainText('Management System Manager in ISMS, primary');
     await expect(row(page, 'tenant.admin@mscd.test')).toContainText('You');
     await ui.pageAction(page, 'Invite person').click();
+    await expect(field(page, 'email')).toHaveValue('');
+    await settled(page);
     await field(page, 'email').fill('wulan.sari@mscd.test');
     await field(page, 'displayName').fill('Wulan Sari');
     await field(page, 'jobTitle').fill('Quality Analyst');
@@ -97,7 +124,7 @@ test.describe('People and roles against the api @api-only', () => {
     await go(page, 'People and roles');
     await openPerson(page, 'Bagus Prasetyo');
     await expect(drawer(page)).toContainText('Domain Owner in ISMS');
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Infrastructure Lead', []);
     await expect(dialog(page)).toContainText('Edit Bagus Prasetyo');
     // bagus is a member of other organisations too: the job title is his own (F.6).
     await expect(field(page, 'jobTitle')).toBeDisabled();
@@ -110,6 +137,8 @@ test.describe('People and roles against the api @api-only', () => {
     await drawer(page).locator('button', { hasText: 'Grant role' }).click();
     await expect(dialog(page)).toContainText('Bagus Prasetyo is an administrator, so another Tenant Admin must approve this grant before it applies.');
     await expect(dialog(page)).toContainText('Who can approve: Rina Kusuma');
+    // The organisation has one system, which the form chooses when it opens for bagus.
+    await expect(field(page, 'ms')).toHaveValue('isms');
     await field(page, 'ms').selectOption({ index: 1 });
     await field(page, 'role').selectOption({ label: 'Risk Owner' });
     await expectOverlayReadable(page);
@@ -228,7 +257,7 @@ test.describe('People and roles against the api @api-only', () => {
     await go(page, 'People and roles');
     await row(page, 'tenant.admin@mscd.test').click();
     await expect(drawer(page)).toContainText('IT Administrator');
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Administrator', ['Tenant Admin']);
     await expect(dialog(page)).toContainText('You are editing your own administration roles.');
     await dialog(page).getByLabel('Storage Admin').check();
     // The save renews the session: the dialog reads GET /me (the new CSRF token), then the snapshot is loaded again.
@@ -242,7 +271,7 @@ test.describe('People and roles against the api @api-only', () => {
     await expect(row(page, 'tenant.admin@mscd.test')).toContainText('Storage Admin');
 
     // The second change in the same page, without a new page load: before the fix the server refused it (403 csrf).
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Administrator', ['Tenant Admin', 'Storage Admin']);
     await field(page, 'jobTitle').fill('Head of IT');
     await dialog(page).locator('button', { hasText: /^Save$/ }).click();
     await expect(dialog(page)).toHaveCount(0);
@@ -250,7 +279,7 @@ test.describe('People and roles against the api @api-only', () => {
     // A change of another member still goes through.
     await page.keyboard.press('Escape');
     await openPerson(page, 'Bagus Prasetyo');
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Infrastructure Lead', []);
     await dialog(page).getByLabel('Storage Admin').check();
     await dialog(page).locator('button', { hasText: /^Save$/ }).click();
     await expect(dialog(page)).toHaveCount(0);
@@ -294,7 +323,7 @@ test.describe('People and roles against the api @api-only', () => {
     await expect(drawer(page).locator('[data-grant]', { hasText: 'ISMS' })).toHaveCount(0);
 
     // The next change in the same page carries the renewed CSRF token: before the fix the server refused it (403 csrf).
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Administrator', ['Tenant Admin']);
     await field(page, 'jobTitle').fill('Head of IT');
     await dialog(page).locator('button', { hasText: /^Save$/ }).click();
     await expect(dialog(page)).toHaveCount(0);
@@ -342,7 +371,7 @@ test.describe('People and roles: your own role grant against the api @api-only',
 
     // The next change in the same page carries the renewed CSRF token.
     await openPerson(page, 'Bagus Prasetyo');
-    await drawer(page).locator('button', { hasText: /^Edit$/ }).click();
+    await openEdit(page, 'IT Infrastructure Lead', []);
     await dialog(page).getByLabel('Storage Admin').check();
     await dialog(page).locator('button', { hasText: /^Save$/ }).click();
     await expect(dialog(page)).toHaveCount(0);
