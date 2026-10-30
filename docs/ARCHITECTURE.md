@@ -46,7 +46,7 @@ The repository holds a working front end in `app/`, built from the Claude Design
 
 | Area | Today | Target |
 |---|---|---|
-| Stack | React 18.3, Vite 5.4, plain JS and JSX | React 18, TypeScript, Vite |
+| Stack | React 18.3, Vite 6.4, plain JS and JSX | React 18, TypeScript, Vite |
 | Structure | One controller class (`src/MscdApp.jsx`) holds state, derivations and actions; `renderVals()` returns a flat view model | Route components with typed hooks per screen |
 | Views | 18 view components, including the root `AppView`, generated from `project/MSCD Mockup.dc.html` by `scripts/convert-template.mjs` | Typed components owned by the team after design sign-off |
 | Data | `src/MscdApp.jsx` defines 3 sample organisations. `src/data/mscd-data.js` holds 4 management systems (ISMS, QMS, BCMS, ABMS), people, 4 personas, EN and ID strings and derivation helpers | REST API through TanStack Query; demos run on a seeded server (section 14.1) |
