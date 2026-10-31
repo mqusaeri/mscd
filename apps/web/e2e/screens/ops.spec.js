@@ -1,4 +1,4 @@
-import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow } from '../helpers.js';
+import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow, pageSettled } from '../helpers.js';
 
 // The operator console of the sample build (MILESTONE-2 M2-16), as a multi tenancy service: health, jobs,
 // organisations with Create and Install licence, and framework packs with Install pack. The organisation lifecycle of
@@ -104,7 +104,7 @@ test.describe('Operator console @sample-only', () => {
       for (const label of ['Kesehatan', 'Pekerjaan', 'Organisasi', 'Paket framework', 'Akun']) {
         await tab(page, label).click();
         await expect(page.locator('main [role="tabpanel"]')).not.toContainText('Memuat');
-        await page.waitForTimeout(300);
+        await pageSettled(page);
         await expectReadableText(page, 4.5);
       }
       await ui.pageAction(page, 'Buat organisasi').click();

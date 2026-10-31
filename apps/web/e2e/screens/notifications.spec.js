@@ -1,4 +1,4 @@
-import { test, expect, ui, openApp, expectToast, expectOverlayReadable, expectReadableText } from '../helpers.js';
+import { test, expect, ui, openApp, expectToast, expectOverlayReadable, expectReadableText, pageSettled } from '../helpers.js';
 
 // The notification bell of the sample build (MILESTONE-2 M2-16): the unread count in the top bar, the panel with Mark
 // read, Mark all read, the unread filter and Open to the record. @sample-only: the API project covers the bell in
@@ -57,7 +57,7 @@ test.describe('Notifications @sample-only', () => {
     test(`the panel is readable in Indonesian, ${theme} theme`, async ({ page }) => {
       await openApp(page, `?lang=id&theme=${theme}`);
       await expect(bell(page)).toHaveAttribute('title', 'Notifikasi');
-      await page.waitForTimeout(1300);
+      await pageSettled(page);
       await expectReadableText(page, 4.5);
       await bell(page).click();
       await expect(panel(page)).toContainText('Tandai semua dibaca');

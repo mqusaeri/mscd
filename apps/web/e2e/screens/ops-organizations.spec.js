@@ -1,4 +1,4 @@
-import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow } from '../helpers.js';
+import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow, pageSettled } from '../helpers.js';
 
 // The organisations of the operator console in the sample build (MILESTONE-2 M2-S12): the list with status, plan, users
 // against the limit, the last day with the days left and the verified domains, its status filter and search; "Create
@@ -296,7 +296,7 @@ test.describe('Operator console organisations @sample-only', () => {
       for (const label of ['Ringkasan', 'Status', 'Domain', 'Hak pakai', 'Riwayat']) {
         await drawerTab(page, label).click();
         await expect(drawer.locator('[role="tabpanel"]')).not.toContainText('Memuat');
-        await page.waitForTimeout(300);
+        await pageSettled(page);
         await expectOverlayReadable(page);
       }
       await drawerTab(page, 'Status').click();

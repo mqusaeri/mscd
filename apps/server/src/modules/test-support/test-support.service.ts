@@ -2,7 +2,11 @@
 // end-to-end tests, and `POST /test/session` signs a user in without a password or second factor. Both exist only
 // when the profile has `demo.enabled` and `test.endpoints_enabled` (the release flavour refuses both keys at start-up,
 // and the authorisation guard answers 404 for test routes otherwise); this service checks again.
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+//
+// The reset recreates the database only when the write tracker saw a write since the last reset (M2-21,
+// `write-tracker.ts`); otherwise it deletes the sessions `POST /test/session` minted and answers at once. The mock
+// providers and the in-memory caches are reset every time, since a test may change the mock providers directly.
+import { Inject, Injectable, Logger, Optional, type OnApplicationShutdown } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Me, TestResetResponse, TestSessionRequest } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -18,8 +22,10 @@ import { LicenceService } from '../license/licence.service';
 import { PackInstallerDatabase } from '../packs/pack-installer.service';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope } from '../tenancy/tenant-scope';
-import { databaseOf, recreateDatabase } from './database-reset';
-import { TestRequestGate, testEndpointsEnabled } from './request-gate';
+import { closeKeptConnections, databaseOf, deleteSessions, recreateDatabase } from './database-reset';
+import { TestRequestGate } from './request-gate';
+import { testEndpointsEnabled } from './test-mode';
+import { TestWriteTracker } from './write-tracker';
 
 /** How long the reset waits for running requests before it goes on. */
 const DRAIN_TIMEOUT_MS = 15_000;
@@ -32,7 +38,7 @@ const POOL_CHECK_ROUNDS = 5;
 const REAL_PROVIDER_HOSTS = new Set(['graph.microsoft.com', 'login.microsoftonline.com', 'www.googleapis.com', 'oauth2.googleapis.com']);
 
 @Injectable()
-export class TestSupportService {
+export class TestSupportService implements OnApplicationShutdown {
   private readonly logger = new Logger('TestSupport');
   /** Resets run one after the other. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -44,9 +50,15 @@ export class TestSupportService {
     private readonly tenants: TenantResolver,
     private readonly sessions: SessionService,
     private readonly clock: Clock,
+    private readonly tracker: TestWriteTracker,
     @Inject(ME_ASSEMBLER) private readonly me: MeAssembler,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
+
+  /** The kept administrator connection of the resets without a write is closed when the api stops. */
+  async onApplicationShutdown(): Promise<void> {
+    await closeKeptConnections();
+  }
 
   /** `POST /test/reset`. */
   reset(): Promise<TestResetResponse> {
@@ -101,6 +113,7 @@ export class TestSupportService {
         mfaAt: now,
       });
     });
+    this.tracker.rememberSession(issued.row.id_hash);
     this.sessions.setCookie(reply, issued);
     const principal: Principal = {
       user: { id: user.id, handle: user.handle, email: user.email, displayName: user.display_name, jobTitle: user.job_title, kind: user.kind },
@@ -123,25 +136,53 @@ export class TestSupportService {
     const started = Date.now();
     await this.gate.closeAndDrain(DRAIN_TIMEOUT_MS);
     try {
-      // The pack installer pool opens again on its next use; the app pool is checked below.
-      await this.optional(PackInstallerDatabase)?.onApplicationShutdown();
+      // The mock providers reset while the database is put back (they do not depend on each other); the reset answers
+      // when both are done.
+      const mock = this.resetMockProviders();
+      mock.catch(() => undefined);
       try {
-        await recreateDatabase({
-          adminUrl: this.config.readSecretFile(test.admin_database_url_file, 'test.admin_database_url_file'),
-          database: databaseOf(this.config.databaseUrl('app')),
-          template: test.template_database,
-        });
+        await this.resetDatabase(test.admin_database_url_file, test.template_database);
       } catch (error) {
-        this.logger.error(`Test reset: the database could not be recreated: ${(error as Error).message}`);
-        throw new DependencyUnavailableError('The database could not be recreated from the template', { cause: error });
+        await mock.catch(() => undefined);
+        throw error;
       }
-      await this.checkAppPool();
-      await this.resetMockProviders();
+      this.tracker.resetDone();
+      await mock;
       this.clearCaches();
     } finally {
       this.gate.open();
     }
     return { ok: true, durationMs: Date.now() - started };
+  }
+
+  /**
+   * Puts the database back to the template state: recreated after a write, else only the sessions this service minted
+   * are deleted.
+   */
+  private async resetDatabase(adminUrlFile: string, template: string): Promise<void> {
+    const adminUrl = this.config.readSecretFile(adminUrlFile, 'test.admin_database_url_file');
+    const database = databaseOf(this.config.databaseUrl('app'));
+    const changedBy = this.tracker.changedBy;
+    if (changedBy !== null) {
+      this.logger.debug(`Test reset recreates the database (first write since the last reset: ${changedBy})`);
+      // The pack installer pool opens again on its next use; the app pool is checked below.
+      await this.optional(PackInstallerDatabase)?.onApplicationShutdown();
+      try {
+        await recreateDatabase({ adminUrl, database, template });
+      } catch (error) {
+        this.logger.error(`Test reset: the database could not be recreated: ${(error as Error).message}`);
+        throw new DependencyUnavailableError('The database could not be recreated from the template', { cause: error });
+      }
+      await this.checkAppPool();
+    } else {
+      // Nothing wrote since the last reset: only the sessions this service minted differ from the template.
+      try {
+        await deleteSessions({ adminUrl, database, idHashes: this.tracker.mintedSessions() });
+      } catch (error) {
+        this.logger.error(`Test reset: the minted sessions could not be deleted: ${(error as Error).message}`);
+        throw new DependencyUnavailableError('The sessions of the last test could not be deleted', { cause: error });
+      }
+    }
   }
 
   /**

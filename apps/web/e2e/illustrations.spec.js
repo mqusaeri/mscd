@@ -1,10 +1,8 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import os from 'node:os';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, expect, metaById, openScreen, expectReadableText, expectNoHorizontalOverflow, expectToast } from './helpers.js';
+import { webBuild } from '../../../tools/scripts/e2e-cache.mjs';
+import { test, expect, metaById, openScreen, expectReadableText, expectNoHorizontalOverflow, expectToast, framesPass } from './helpers.js';
 
 // The illustration library in a real browser (MILESTONE-2 MOT-03, rules L-1 to L-5), through its gallery: the
 // sample-only host screen `?screen=illustrations`. The scenes play one short entrance (every animation ends within
@@ -160,7 +158,8 @@ test.describe('Illustration library @sample-only', () => {
     await hideTera(page);
     const first = [];
     for (let i = 0; i < SCENES.length; i++) first.push(await gallery(page).nth(i).screenshot());
-    await page.waitForTimeout(700);
+    // 42 frames later (0.7 s at 60 frames a second) the picture is still the same.
+    await framesPass(page, 42);
     for (let i = 0; i < SCENES.length; i++) {
       expect(await pixelDifference(page, first[i], await gallery(page).nth(i).screenshot()), `${SCENES[i]}: pixels that changed after the entrance`).toBe(0);
     }
@@ -173,9 +172,12 @@ test.describe('Illustration library @sample-only', () => {
       .map((el) => { const r = el.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)].join(','); }));
     const atRest = await boxes();
     await page.locator('main button', { hasText: 'Replay entrance' }).click();
-    await page.waitForTimeout(60);
+    // Early in the entrance (60 ms after the replay on the page's animation clock), then half a second into it.
+    const replayAt = await page.evaluate(() => document.timeline.currentTime);
+    const into = (ms) => page.waitForFunction((t) => document.timeline.currentTime >= t, replayAt + ms);
+    await into(60);
     expect(await boxes()).toEqual(atRest);
-    await page.waitForTimeout(500);
+    await into(500);
     expect(await boxes()).toEqual(atRest);
   });
 
@@ -251,21 +253,13 @@ test.describe('Illustration library @sample-only', () => {
 
   test('the API build holds no code of the gallery', async () => {
     test.setTimeout(180_000);
-    const outDir = mkdtempSync(path.join(os.tmpdir(), 'mot-03-api-build-'));
-    try {
-      const require = createRequire(path.join(WEB, 'package.json'));
-      const vite = path.join(path.dirname(require.resolve('vite/package.json')), 'bin/vite.js');
-      execFileSync(process.execPath, [vite, 'build', '--outDir', outDir, '--emptyOutDir', '--logLevel', 'warn'], {
-        cwd: WEB, env: { ...process.env, VITE_DATA_SOURCE: 'api' }, stdio: 'pipe',
-      });
-      const assets = readdirSync(path.join(outDir, 'assets')).filter((f) => /\.(js|css)$/.test(f));
-      const text = assets.map((f) => readFileSync(path.join(outDir, 'assets', f), 'utf8')).join('\n');
-      // The inert definition is there (the registry needs it), with its permission that no session holds.
-      expect(text).toContain('sample-build-only');
-      // The gallery page, its styles and the library stay out until a screen of the API build uses a scene.
-      for (const marker of ['Illustration library', 'Pustaka ilustrasi', 'ilg-grid', 'Name in code']) expect(text, marker).not.toContain(marker);
-    } finally {
-      rmSync(outDir, { recursive: true, force: true });
-    }
+    // The API build of the current sources (VITE_DATA_SOURCE=api), built once and kept while they stay the same (M2-21).
+    const outDir = await webBuild('api');
+    const assets = readdirSync(path.join(outDir, 'assets')).filter((f) => /\.(js|css)$/.test(f));
+    const text = assets.map((f) => readFileSync(path.join(outDir, 'assets', f), 'utf8')).join('\n');
+    // The inert definition is there (the registry needs it), with its permission that no session holds.
+    expect(text).toContain('sample-build-only');
+    // The gallery page, its styles and the library stay out until a screen of the API build uses a scene.
+    for (const marker of ['Illustration library', 'Pustaka ilustrasi', 'ilg-grid', 'Name in code']) expect(text, marker).not.toContain(marker);
   });
 });

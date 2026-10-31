@@ -1,11 +1,17 @@
 import {
   test, expect, SCREENS, SCREENS_ID, HOST_METAS, openApp, openScreen, go, ui, list, listRows, groupRows, tabs, switchMs, closeDrawer,
-  layerAfterAction,
+  layerAfterAction, pageLoaded,
 } from './helpers.js';
 import * as D from '../src/data/mscd-data.js';
 
 const SYSTEMS = ['ISMS', 'QMS', 'BCMS', 'ABMS'];
 const TAB_SCREENS = [2, 6, 9];
+// The walk of every screen of a system runs as PARTS tests (M2-21): part p compares its share of the sidebar of the
+// test's session in both languages, so the parts run on several workers at once and together cover every screen.
+const PARTS = 2;
+const PART_NUMBERS = Array.from({ length: PARTS }, (_, p) => p);
+/** The indexes of the sidebar entries that part `part` walks (a sidebar of n entries: n * part / PARTS onwards). */
+const range = (count, part) => [Math.floor((count * part) / PARTS), Math.floor((count * (part + 1)) / PARTS)];
 
 // Labels that are the same word in Indonesian, product and feature names, and storage mode names.
 const SAME = new Set([
@@ -57,15 +63,20 @@ function collectLabels() {
   return [...out];
 }
 
-// Walk one system in one language and record the labels of every state: each screen, each summary tab,
-// the first row's drawer and its Reassign form.
-async function walk(page, query, ms, labels) {
+// Walk one system in one language and record the labels of every state: each screen (of part `part`, or all), each
+// summary tab, the first row's drawer and its Reassign form.
+async function walk(page, query, ms, labels, part = null) {
   const states = new Map();
   const snap = async (key) => states.set(key, new Set(await page.evaluate(collectLabels)));
   await openApp(page, query);
   if (ms !== 'ISMS') await switchMs(page, ms);
+  const [from, to] = part === null ? [0, labels.length] : range(labels.length, part);
   for (const [i, label] of labels.entries()) {
+    if (i < from || i >= to) continue;
     await go(page, label);
+    // Both languages record the same states only when the data of the screen is in (M2-21: a list loaded from the api
+    // could still be empty in one walk).
+    await pageLoaded(page);
     await snap(`${SCREENS[i]}`);
     if (TAB_SCREENS.includes(i)) {
       const n = await tabs(page).count();
@@ -111,34 +122,36 @@ async function walkHost(page, meta, query) {
 
 test.describe('Indonesian interface', () => {
   for (const ms of SYSTEMS) {
-    test(`no ${ms} interface label stays in English`, async ({ page }) => {
-      // It walks every screen twice (English, then Indonesian); with ten workers on a busy host that takes more than 60 s.
-      test.slow();
-      const en = await walk(page, '', ms, SCREENS);
-      const id = await walk(page, '?lang=id', ms, SCREENS_ID);
-      expect([...id.keys()]).toEqual([...en.keys()]);
-      const untranslated = [];
-      for (const [state, labels] of id) {
-        for (const s of labels) if (en.get(state).has(s) && !allowed(s)) untranslated.push(`${state}: ${s}`);
-      }
-      expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
-    });
+    for (const part of PART_NUMBERS) {
+      test(`no ${ms} interface label stays in English, part ${part + 1} of ${PARTS}`, async ({ page }) => {
+        const en = await walk(page, '', ms, SCREENS, part);
+        const id = await walk(page, '?lang=id', ms, SCREENS_ID, part);
+        expect([...id.keys()]).toEqual([...en.keys()]);
+        // Each part walks its own screens; the parts together walk every screen of the sidebar.
+        expect(id.size).toBeGreaterThan(0);
+        const untranslated = [];
+        for (const [state, labels] of id) {
+          for (const s of labels) if (en.get(state).has(s) && !allowed(s)) untranslated.push(`${state}: ${s}`);
+        }
+        expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
+      });
+    }
   }
 
-  // Host screens (MILESTONE-2 C.2, C.7) as the persona of their meta.json, with the dialogs of their page actions.
-  test('no host screen label stays in English', { tag: '@sample-only' }, async ({ page }) => {
-    test.slow();
-    const untranslated = [];
-    for (const meta of HOST_METAS) {
+  // Host screens (MILESTONE-2 C.2, C.7) as the persona of their meta.json, with the dialogs of their page actions: one
+  // test per host screen (M2-21), so they run on several workers at once.
+  for (const meta of HOST_METAS) {
+    test(`no host screen label stays in English: ${meta.id}`, { tag: '@sample-only' }, async ({ page }) => {
+      const untranslated = [];
       const en = await walkHost(page, meta, '');
       const id = await walkHost(page, meta, 'lang=id');
       expect([...id.keys()]).toEqual([...en.keys()]);
       for (const [state, labels] of id) {
         for (const s of labels) if (en.get(state).has(s) && !allowed(s)) untranslated.push(`${state}: ${s}`);
       }
-    }
-    expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
-  });
+      expect(untranslated, 'labels identical in English and Indonesian').toEqual([]);
+    });
+  }
 
   test('generated sentences, dates and plurals follow the language', async ({ page }) => {
     await openApp(page, '?lang=id');

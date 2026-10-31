@@ -1,4 +1,4 @@
-import { test, expect, ui, openScreen, metaById, expectReadableText, expectNoHorizontalOverflow, expectNoTextOverflow } from '../helpers.js';
+import { test, expect, ui, openScreen, metaById, expectReadableText, expectNoHorizontalOverflow, expectNoTextOverflow, pageSettled } from '../helpers.js';
 
 // Getting started of the sample build (MILESTONE-2 M2-16): the onboarding checklist of the sample organisation, first
 // in the Administration group. @sample-only: the API project covers the screen in e2e/api-only/getting-started.spec.js.
@@ -56,7 +56,7 @@ test.describe('Getting started @sample-only', () => {
       await expect(main.locator('.mx-gs-progress')).toHaveText(/^\d+ dari \d+ langkah selesai$/);
       await expect(main).toContainText('Untuk Management System Manager');
       await expect(main.locator('a[href^="mailto:"]').first()).toContainText('Kirim email ke');
-      await page.waitForTimeout(1300);
+      await pageSettled(page);
       await expectReadableText(page, 4.5);
     });
   }

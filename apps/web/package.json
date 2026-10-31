@@ -16,6 +16,7 @@
     "test": "vitest run --dir test --passWithNoTests",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test -c playwright.api.config.js",
+    "test:e2e:all": "node ../../tools/scripts/e2e-all.mjs",
     "export:sample": "node scripts/export-sample-snapshot.mjs"
   },
   "dependencies": {

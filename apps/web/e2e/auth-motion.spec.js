@@ -1,16 +1,15 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './helpers.js';
+import { webBuild } from '../../../tools/scripts/e2e-cache.mjs';
+import { test, expect, framesPass } from './helpers.js';
 
 // The living brand panel of the sign-in pages (MILESTONE-2 MOT-02, rules L-1 to L-5) in a real browser.
 //
-// The sample build that the other specs use has no sign-in pages, so this spec builds the API bundle once
-// (`VITE_DATA_SOURCE=api`, into a temporary folder) and serves it on a free port the way the release image does:
+// The sample build that the other specs use has no sign-in pages, so this spec serves the API bundle
+// (`VITE_DATA_SOURCE=api`: the build of the current sources from tools/scripts/e2e-cache.mjs, built once and kept
+// while the sources stay the same, M2-21) on a free port the way the release image does:
 // the Google Fonts lines removed from index.html (deploy/docker/web.Dockerfile) and the Content-Security-Policy of
 // deploy/nginx/security-headers.conf on every answer. A small fake api answers the three calls of the sign-in page:
 // the system profile, `GET /me` (401, no session) and the sign-in methods.
@@ -39,14 +38,6 @@ function releaseCsp() {
   const policy = conf.match(/add_header Content-Security-Policy "([^"]+)"/)?.[1];
   if (!policy) throw new Error('No Content-Security-Policy in deploy/nginx/security-headers.conf');
   return policy.replace(/\$mscd_csp_\w+/g, '');
-}
-
-function buildApiBundle(outDir) {
-  const require = createRequire(path.join(WEB, 'package.json'));
-  const vite = path.join(path.dirname(require.resolve('vite/package.json')), 'bin/vite.js');
-  execFileSync(process.execPath, [vite, 'build', '--outDir', outDir, '--emptyOutDir', '--logLevel', 'warn'], {
-    cwd: WEB, env: { ...process.env, VITE_DATA_SOURCE: 'api' }, stdio: 'pipe',
-  });
 }
 
 function serve(root, csp) {
@@ -79,21 +70,18 @@ function serve(root, csp) {
 }
 
 let site = null;
-let outDir = null;
 
-test.describe.configure({ mode: 'default' });
+// The tests run in parallel (M2-21): each worker that runs one starts its own small server over the same build.
 test.use({ apiSession: null, viewport: { width: 1440, height: 900 } });
 
 test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
-  outDir = mkdtempSync(path.join(os.tmpdir(), 'mot-02-auth-motion-'));
-  buildApiBundle(outDir);
-  site = await serve(outDir, releaseCsp());
+  // The folder of the build is read only: the server below never writes to it.
+  site = await serve(await webBuild('api'), releaseCsp());
 });
 
 test.afterAll(async () => {
   if (site) await new Promise((resolve) => site.server.close(resolve));
-  if (outDir) rmSync(outDir, { recursive: true, force: true });
 });
 
 const canvas = (page) => page.locator('canvas.au-threads');
@@ -239,8 +227,7 @@ test('the brand panel moves behind the sign-in form without touching the form', 
   // The picture moves: two fingerprints a moment apart differ.
   const first = await canvasPrint(page);
   expect(first.lit).toBeGreaterThan(500);
-  await page.waitForTimeout(700);
-  expect((await canvasPrint(page)).sum).not.toBe(first.sum);
+  await expect.poll(async () => (await canvasPrint(page)).sum, { message: 'the canvas draws a new picture' }).not.toBe(first.sum);
 
   // The form works as before while the panel moves, and a frame of the motion takes a small part of the frame budget.
   await page.evaluate(() => {
@@ -250,7 +237,8 @@ test('the brand panel moves behind the sign-in form without touching the form', 
   await page.locator('#au-password').fill('correct horse battery staple');
   await page.locator('input[name="remember"]').check();
   await expect(page.locator('#au-email')).toHaveValue('rina.kusuma@nusantaradigital.co.id');
-  await page.waitForTimeout(1500);
+  // The frames of 1.5 s at 60 frames a second (a busy machine takes longer to draw them).
+  await page.waitForFunction(() => window.__frameCosts.length >= 90);
   const costs = await page.evaluate(() => window.__frameCosts.slice().sort((a, b) => a - b));
   expect(costs.length).toBeGreaterThan(10);
   expect(costs[Math.floor(costs.length / 2)]).toBeLessThan(4);
@@ -283,7 +271,8 @@ async function brandTextFailures(page) {
     (await brightestUnder(page, boxes, clip)).forEach((l, i) => {
       brightest[i] = Math.max(brightest[i], l);
     });
-    await page.waitForTimeout(250);
+    // The next sample a quarter of a second of motion later: 15 frames at 60 frames a second.
+    await framesPass(page, 15);
   }
   const failures = [];
   boxes.forEach((b, i) => {
@@ -340,7 +329,7 @@ test('the motion pauses while the tab is hidden and stands still where the panel
   await setHidden(true);
   await expect(canvas(page)).toHaveAttribute('data-motion', 'paused');
   const paused = await canvasPrint(page);
-  await page.waitForTimeout(600);
+  await framesPass(page, 36);
   expect((await canvasPrint(page)).sum).toBe(paused.sum);
   await setHidden(false);
   await expect(canvas(page)).toHaveAttribute('data-motion', 'running');
@@ -357,7 +346,7 @@ test('the motion pauses while the tab is hidden and stands still where the panel
     expect(bar.height).toBeLessThan(240);
     const still = await canvasPrint(page);
     expect(still.lit).toBeGreaterThan(200);
-    await page.waitForTimeout(500);
+    await framesPass(page, 30);
     expect((await canvasPrint(page)).sum).toBe(still.sum);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     // the product name in the bar keeps its contrast over the threads
@@ -385,7 +374,7 @@ test('reduced motion shows a complete still frame and runs no animation (L-2)', 
   expect(await page.evaluate(() => [...document.querySelectorAll('.au-chain-signal')].map((p) => getComputedStyle(p).opacity))).toEqual(['0', '0']);
   const still = await canvasPrint(page);
   expect(still.lit).toBeGreaterThan(500);
-  await page.waitForTimeout(800);
+  await framesPass(page, 48);
   expect((await canvasPrint(page)).sum).toBe(still.sum);
   expect(await page.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running').length)).toBe(0);
 

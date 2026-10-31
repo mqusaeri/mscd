@@ -1,4 +1,4 @@
-import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow } from '../helpers.js';
+import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow, pageSettled } from '../helpers.js';
 
 // My account of the sample build (MILESTONE-2 M2-16): opened from the top bar, with the password, recovery codes,
 // company sign-in, calendar feeds and preferences applied at once. @sample-only: the API project covers the screen in
@@ -90,7 +90,7 @@ test.describe('My account @sample-only', () => {
     await expect(ui.title(page)).toHaveText('Akun saya');
     await expect(root).toHaveAttribute('data-theme', 'dark');
     await expect(root).toHaveAttribute('data-density', 'dense');
-    await page.waitForTimeout(1300);
+    await pageSettled(page);
     await expectReadableText(page, 4.5);
   });
 

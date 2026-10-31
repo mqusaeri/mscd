@@ -104,7 +104,9 @@ test.describe('Controls and requirements forms against the api @api-only', () =>
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Add entry').click();
     // A new applicable entry may hold the gate until a risk is linked (BR-02 warning); the form then shows it.
-    await expect.poll(async () => (await dialog(page).count()) === 0 || (await dialog(page).innerText()).includes('Cl. 4.1 added')).toBe(true);
+    // The text is read without waiting (M2-21): `innerText()` waits up to the action timeout for a dialog that closed
+    // between the two reads, longer than the poll. No dialog left, or every one shows the message.
+    await expect.poll(async () => (await dialog(page).allInnerTexts()).every((text) => text.includes('Cl. 4.1 added'))).toBe(true);
     if (await dialog(page).count()) await button(dialog(page), 'Close').click();
     await expect.poll(() => chipCount(page, 'All')).toBe(all + 1);
     await chip(page, 'All').click();

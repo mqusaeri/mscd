@@ -1,4 +1,4 @@
-import { test, expect, ui, go, openApp, openRow, search, chip, expectToast, expectOverlayReadable } from '../helpers.js';
+import { test, expect, ui, go, openApp, openRow, search, chip, expectToast, expectOverlayReadable, pageSettled } from '../helpers.js';
 
 // Findings and actions against the api (MILESTONE-2 M2-14). In PT Nusantara Digital Teknologi rina is the MS Manager
 // of the ISMS, maya its Internal Auditor and hendra Top Management; the seed holds the ISMS findings NC-2025-02
@@ -13,6 +13,9 @@ const tab = (page, name) => page.locator('main [role="tab"]', { hasText: name })
 const owner = (scope) => scope.locator('select').filter({ has: scope.page().locator('option', { hasText: 'Bagus Prasetyo' }) }).first();
 
 async function signIn(page, baseURL, handle, org = 'ndt') {
+  // Requests of the open page still under way would meet the cleared cookies (a 401: "Sign-in required"); M2-21 runs
+  // tests in parallel, where the last reloads of a step can still run here.
+  await pageSettled(page);
   await page.context().clearCookies();
   const res = await page.request.post(`${baseURL}/api/v1/test/session`, { data: { handle, org }, headers: { origin: baseURL } });
   expect(res.ok(), await res.text()).toBe(true);
@@ -79,12 +82,18 @@ test.describe('Findings and actions against the api @api-only', () => {
     await drawer(page).locator('textarea[name="rcaText"]').fill('The risk procedure has no approval step for risk owners');
     await button(drawer(page), 'Save texts').click();
     await expectToast(page, 'Root cause and systemic check saved');
+    // The drawer reads the saved finding (and its version) again after the toast; Close uses that version (M2-21: on a
+    // busy machine a click before the read ended met a stale version).
+    await pageSettled(page);
     await tryClose(page);
     await expect(dialog(page)).toContainText('A major finding cannot be closed without a systemic check.');
     await page.keyboard.press('Escape');
     await drawer(page).locator('textarea[name="systemicCheckText"]').fill('Checked the risk registers of every system');
     await button(drawer(page), 'Save texts').click();
     await expectToast(page, 'Root cause and systemic check saved');
+    // The drawer reads the saved finding (and its version) again after the toast; Close uses that version (M2-21: on a
+    // busy machine a click before the read ended met a stale version).
+    await pageSettled(page);
     await tryClose(page);
     await expect(dialog(page)).toContainText('The finding needs a closed and effective corrective action');
     await expect(dialog(page)).toContainText('BR-08');

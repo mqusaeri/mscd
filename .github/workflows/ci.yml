@@ -1,7 +1,8 @@
 # MSCD continuous integration (build plan J.10).
 #
 # Every push and pull request: lint, typecheck and unit tests; integration tests
-# on PostgreSQL 15, 16 and 17; the web E2E suites (sample data and API); the
+# on PostgreSQL 15, 16 and 17; the web E2E suites (sample data and API, each as
+# shards of a matrix with a final merge job, M2-21); the
 # images (web, release server with rehearsal keys, demo server) with the release
 # artefact check (R-13) and a vulnerability scan; the full-stack smoke test; the
 # static Helm checks; the writing rules; the SaaS static checks (workflows,
@@ -136,10 +137,18 @@ jobs:
         if: always()
         run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
 
-  e2e-sample:
-    name: Web E2E (sample data)
+  # The browser suites run as shards of a matrix (Milestone 2 M2-21): each shard runs its share of the tests and
+  # writes a blob report; the final job of each suite, named as before so the required checks keep working, merges
+  # the blob reports into one HTML report and fails when any shard failed. Shards and their lanes or workers follow
+  # the memory budget of tools/scripts/e2e-budget.mjs on the runner (half the CPUs, at most 6 lanes or 10 workers).
+  e2e-sample-shard:
+    name: Web E2E (sample data) shard ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -159,59 +168,147 @@ jobs:
       - name: Install Chromium system packages
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
-      - name: E2E suite
+      - name: Web build cache (rebuilt only when the sources changed)
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/mscd/e2e
+          key: e2e-web-sample-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/index.html', 'apps/web/vite.config.js', 'apps/web/package.json', 'packages/shared/src/**', 'package-lock.json') }}
+      - name: E2E suite, one shard
         env:
           CI: '1'
-        run: npm run test:e2e
-      - name: Upload the Playwright report
+          TZ: UTC
+          E2E_REPORT: blob
+        run: npm run test:e2e -w @mscd/web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      - name: Upload the blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-sample-blob-${{ matrix.shard }}
+          path: apps/web/blob-report/sample
+          retention-days: 7
+      - name: Upload the traces of failed tests
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          name: e2e-sample-results-${{ matrix.shard }}
+          path: apps/web/test-results
+          retention-days: 7
+
+  e2e-sample:
+    name: Web E2E (sample data)
+    if: ${{ !cancelled() }}
+    needs: e2e-sample-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Download the blob reports of the shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-sample-blob-*
+          path: blob-reports
+          merge-multiple: true
+      - name: Merge them into one HTML report
+        run: npx --yes playwright@${{ env.PLAYWRIGHT_VERSION }} merge-reports --reporter html ./blob-reports
+      - name: Upload the Playwright report
+        uses: actions/upload-artifact@v4
+        with:
           name: e2e-sample-report
-          path: |
-            apps/web/playwright-report
-            apps/web/test-results
+          path: playwright-report
+          retention-days: 7
+      - name: Every shard passed
+        if: needs.e2e-sample-shard.result != 'success'
+        run: |
+          echo "A shard of the sample suite failed (result: ${{ needs.e2e-sample-shard.result }}); the merged report has the details."
+          exit 1
+
+  e2e-api-shard:
+    name: Web E2E (API) shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Playwright browsers cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium system packages
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Web build cache (rebuilt only when the sources changed)
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/mscd/e2e
+          key: e2e-web-api-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/index.html', 'apps/web/vite.config.js', 'apps/web/package.json', 'packages/shared/src/**', 'package-lock.json') }}
+      - name: E2E suite against the API, one shard
+        env:
+          CI: '1'
+          TZ: UTC
+          E2E_REPORT: blob
+        run: npm run test:e2e:api -w @mscd/web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      - name: Remove test containers
+        if: always()
+        run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
+      - name: Upload the blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-api-blob-${{ matrix.shard }}
+          path: apps/web/blob-report/api
+          retention-days: 7
+      - name: Upload the traces of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-api-results-${{ matrix.shard }}
+          path: apps/web/test-results
           retention-days: 7
 
   e2e-api:
     name: Web E2E (API)
+    if: ${{ !cancelled() }}
+    needs: e2e-api-shard
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: npm ci
-      - name: Playwright browsers cache
-        id: playwright-cache
-        uses: actions/cache@v4
+      - name: Download the blob reports of the shards
+        uses: actions/download-artifact@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
-      - name: Install Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - name: Install Chromium system packages
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-      - name: E2E suite against the API
-        env:
-          CI: '1'
-        run: npm run test:e2e:api
-      - name: Remove test containers
-        if: always()
-        run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
+          pattern: e2e-api-blob-*
+          path: blob-reports
+          merge-multiple: true
+      - name: Merge them into one HTML report
+        run: npx --yes playwright@${{ env.PLAYWRIGHT_VERSION }} merge-reports --reporter html ./blob-reports
       - name: Upload the Playwright report
-        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-api-report
-          path: |
-            apps/web/playwright-report
-            apps/web/test-results
+          path: playwright-report
           retention-days: 7
+      - name: Every shard passed
+        if: needs.e2e-api-shard.result != 'success'
+        run: |
+          echo "A shard of the API suite failed (result: ${{ needs.e2e-api-shard.result }}); the merged report has the details."
+          exit 1
 
   images:
     name: Images and release artefact check

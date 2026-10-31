@@ -1,11 +1,18 @@
 import {
   test, expect, SCREENS, SCREENS_ID, openApp, go, ui, list, listRows, tabs, switchMs, closeDrawer,
-  expectNoHorizontalOverflow, expectNoTextOverflow, expectReadableText, navFor,
+  expectNoHorizontalOverflow, expectNoTextOverflow, expectReadableText, navFor, pageLoaded,
 } from './helpers.js';
 
 const SYSTEMS = ['ISMS', 'QMS', 'BCMS', 'ABMS'];
 // Screens with summary cards used as tabs: Controls & requirements, Chain stages, Evidence freshness.
 const TAB_SCREENS = [2, 6, 9];
+// Each walk of every screen runs as PARTS tests (M2-21): part p walks its share of the sidebar of the test's session,
+// so the parts of one walk run on several workers at once and together cover every screen, each with the same checks.
+const PARTS = 2;
+const PART_NUMBERS = Array.from({ length: PARTS }, (_, p) => p);
+/** The indexes of the sidebar entries that part `part` walks (a sidebar of n entries: n * part / PARTS onwards). */
+const range = (count, part) => [Math.floor((count * part) / PARTS), Math.floor((count * (part + 1)) / PARTS)];
+const partTitle = (part) => `part ${part + 1} of ${PARTS}`;
 
 async function check(page, { textOverflow, contrast }) {
   await expectNoHorizontalOverflow(page);
@@ -13,12 +20,16 @@ async function check(page, { textOverflow, contrast }) {
   if (contrast) await expectReadableText(page, 3);
 }
 
-// Visit every screen of one management system and check the layout holds: each summary tab,
-// the first row's detail drawer and its Reassign form included, so states beyond the default view are covered.
-async function visitAll(page, labels, { textOverflow = true, contrast = false } = {}) {
+// Visit every screen of one management system (or the share of part `part`) and check the layout holds: each summary
+// tab, the first row's detail drawer and its Reassign form included, so states beyond the default view are covered.
+async function visitAll(page, labels, { textOverflow = true, contrast = false, part = null } = {}) {
   const opts = { textOverflow, contrast };
+  const [from, to] = part === null ? [0, labels.length] : range(labels.length, part);
   for (const [i, label] of labels.entries()) {
+    if (i < from || i >= to) continue;
     await go(page, label);
+    // The rows of a list loaded from the api are in before the walk decides whether to open one (M2-21).
+    await pageLoaded(page);
     await check(page, opts);
     if (TAB_SCREENS.includes(i)) {
       const n = await tabs(page).count();
@@ -51,16 +62,16 @@ async function openIn(page, query, ms) {
 
 test.describe('Display settings', () => {
   for (const ms of SYSTEMS) {
-    test(`dark theme renders every ${ms} screen with readable text`, async ({ page }) => {
-      // Every screen walk gets the slow test time: alone it takes up to 55 s, so a busy host passes 60 s.
-      test.slow();
-      await openIn(page, '?theme=dark', ms);
-      const root = page.locator('.mscd').first();
-      await expect(root).toHaveAttribute('data-theme', 'dark');
-      await expect(root).toHaveCSS('background-color', 'rgb(19, 18, 16)');
-      await expect(page.locator('main h1')).toHaveCSS('color', 'rgb(242, 238, 231)');
-      await visitAll(page, SCREENS, { contrast: true });
-    });
+    for (const part of PART_NUMBERS) {
+      test(`dark theme renders every ${ms} screen with readable text, ${partTitle(part)}`, async ({ page }) => {
+        await openIn(page, '?theme=dark', ms);
+        const root = page.locator('.mscd').first();
+        await expect(root).toHaveAttribute('data-theme', 'dark');
+        await expect(root).toHaveCSS('background-color', 'rgb(19, 18, 16)');
+        await expect(page.locator('main h1')).toHaveCSS('color', 'rgb(242, 238, 231)');
+        await visitAll(page, SCREENS, { contrast: true, part });
+      });
+    }
   }
 
   test('dark theme carries into the drawer and modals', async ({ page }) => {
@@ -89,22 +100,24 @@ test.describe('Display settings', () => {
   });
 
   for (const ms of SYSTEMS) {
-    test(`Indonesian renders every ${ms} screen with translated titles and no leftover keys`, async ({ page }) => {
-      // It visits every screen of the system; with ten workers on a busy host that takes more than 60 s.
-      test.slow();
-      await openIn(page, '?lang=id', ms);
-      await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
-      expect(SCREENS_ID).toHaveLength(await navFor(page, 'manager'));
-      for (const label of SCREENS_ID) {
-        await go(page, label);
-        const text = await page.locator('main').innerText();
-        // A leftover key shows as "showing <count>" in a list footer; pack titles may use the English word
-        // ("Records showing processes were carried out as planned", ISO 27001 and ISO 9001, M2-12).
-        expect(text, label).not.toMatch(/\bshowing\s+\d|\bundefined\b|\bNaN\b|\[object/);
-        if (await list(page).count()) await expect(list(page)).toContainText(/Menampilkan \d+ item/);
-      }
-      await visitAll(page, SCREENS_ID);
-    });
+    for (const part of PART_NUMBERS) {
+      test(`Indonesian renders every ${ms} screen with translated titles and no leftover keys, ${partTitle(part)}`, async ({ page }) => {
+        await openIn(page, '?lang=id', ms);
+        await expect(page.locator('aside nav button')).toHaveCount(await navFor(page, 'manager'));
+        expect(SCREENS_ID).toHaveLength(await navFor(page, 'manager'));
+        const [from, to] = range(SCREENS_ID.length, part);
+        for (const label of SCREENS_ID.slice(from, to)) {
+          await go(page, label);
+          await pageLoaded(page);
+          const text = await page.locator('main').innerText();
+          // A leftover key shows as "showing <count>" in a list footer; pack titles may use the English word
+          // ("Records showing processes were carried out as planned", ISO 27001 and ISO 9001, M2-12).
+          expect(text, label).not.toMatch(/\bshowing\s+\d|\bundefined\b|\bNaN\b|\[object/);
+          if (await list(page).count()) await expect(list(page)).toContainText(/Menampilkan \d+ item/);
+        }
+        await visitAll(page, SCREENS_ID, { part });
+      });
+    }
   }
 
   test('Indonesian translates statuses, chips and dates', async ({ page }) => {
@@ -130,11 +143,12 @@ test.describe('Display settings', () => {
       expect(await root.evaluate((e) => getComputedStyle(e).getPropertyValue('--pad').trim())).toBe(pad);
     });
     for (const ms of SYSTEMS) {
-      test(`${density} density renders every ${ms} screen`, async ({ page }) => {
-        test.slow();
-        await openIn(page, '?density=' + density, ms);
-        await visitAll(page, SCREENS);
-      });
+      for (const part of PART_NUMBERS) {
+        test(`${density} density renders every ${ms} screen, ${partTitle(part)}`, async ({ page }) => {
+          await openIn(page, '?density=' + density, ms);
+          await visitAll(page, SCREENS, { part });
+        });
+      }
     }
   }
 
@@ -147,16 +161,17 @@ test.describe('Display settings', () => {
     for (const ms of SYSTEMS) {
       // The pairing comes from Google Fonts and falls back to system fonts when that is unreachable
       // (the on-premise image does not load it by default), so the text must fit with either.
-      test(`${font} font pairing renders every ${ms} screen`, async ({ page }) => {
-        test.slow();
-        await openIn(page, '?font=' + font, ms);
-        await page.evaluate(() => document.fonts.ready);
-        await visitAll(page, SCREENS);
-      });
+      for (const part of PART_NUMBERS) {
+        test(`${font} font pairing renders every ${ms} screen, ${partTitle(part)}`, async ({ page }) => {
+          await openIn(page, '?font=' + font, ms);
+          await page.evaluate(() => document.fonts.ready);
+          await visitAll(page, SCREENS, { part });
+        });
+      }
     }
   }
 
-  test('IBM Plex is self-hosted and used by default', async ({ page }, testInfo) => {
+  test('IBM Plex is self-hosted and used by default', async ({ page, baseURL }) => {
     const fontRequests = [];
     page.on('requestfinished', (r) => { if (/ibm-plex/.test(r.url())) fontRequests.push(r.url()); });
     await openApp(page);
@@ -164,8 +179,8 @@ test.describe('Display settings', () => {
     await page.evaluate(() => document.fonts.ready);
     expect(await page.evaluate(() => document.fonts.check('600 16px "IBM Plex Sans"'))).toBe(true);
     expect(fontRequests.length).toBeGreaterThan(0);
-    // The configured base URL of the project (sample 4173, API 4174, build plan J.6).
-    const origin = new URL(testInfo.project.use.baseURL).origin + '/';
+    // The base URL of the test (sample 4173; API 4174 plus the lane, build plan J.6 and M2-21).
+    const origin = new URL(baseURL).origin + '/';
     expect(fontRequests.every((u) => u.startsWith(origin))).toBe(true);
   });
 
@@ -183,15 +198,15 @@ test.describe('Display settings', () => {
 test.describe('Viewport widths', () => {
   for (const width of [1280, 1920]) {
     for (const ms of SYSTEMS) {
-      test(`every ${ms} screen fits at ${width} px`, async ({ page }) => {
-        // The walk grows with every host screen of src/screens (MILESTONE-2 C.7), so it gets the slow test time.
-        test.slow();
-        await page.setViewportSize({ width, height: 900 });
-        await openIn(page, '', ms);
-        await visitAll(page, SCREENS);
-        await openIn(page, '?lang=id&density=airy', ms);
-        await visitAll(page, SCREENS_ID);
-      });
+      for (const part of PART_NUMBERS) {
+        test(`every ${ms} screen fits at ${width} px, ${partTitle(part)}`, async ({ page }) => {
+          await page.setViewportSize({ width, height: 900 });
+          await openIn(page, '', ms);
+          await visitAll(page, SCREENS, { part });
+          await openIn(page, '?lang=id&density=airy', ms);
+          await visitAll(page, SCREENS_ID, { part });
+        });
+      }
     }
   }
 

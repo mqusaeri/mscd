@@ -115,7 +115,9 @@ test.describe('Evidence forms against the api @api-only', () => {
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Add target').click();
     // A mapping marked not reusable gives the BR-23 warning; the form then stays open with it.
-    await expect.poll(async () => (await dialog(page).count()) === 0 || (await dialog(page).innerText()).includes('Saved. Check the warnings below.')).toBe(true);
+    // The text is read without waiting (M2-21): `innerText()` waits up to the action timeout for a dialog that closed
+    // between the two reads, longer than the poll. No dialog left, or every one shows the message.
+    await expect.poll(async () => (await dialog(page).allInnerTexts()).every((text) => text.includes('Saved. Check the warnings below.'))).toBe(true);
     if (await dialog(page).count()) await button(dialog(page), 'Close').click();
     const added = panel(page).locator('li', { hasText: 'in QMS' });
     await expect(added).toBeVisible();

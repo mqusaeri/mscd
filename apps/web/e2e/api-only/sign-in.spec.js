@@ -73,8 +73,15 @@ test.describe('Sign-in @api-only', () => {
     // The test reset recreates the database, which ends every session (as an idle or absolute timeout does).
     const reset = await page.request.post(baseURL + '/api/v1/test/reset', { headers: { origin: baseURL } });
     expect(reset.ok()).toBe(true);
-    await ui.roleButton(page).click();
-    await page.locator('header div[style*="width: 300px"] button').first().click();
+    // The person opens the menu and picks the first entry. A read the page itself starts after the reset (work it
+    // runs once idle, later than networkidle on a busy machine) can meet the ended session first and open the sign-in
+    // page while the menu is clicked (parallel runs, M2-21). Either way the person lands on sign-in with the notice.
+    const clicked = (async () => {
+      await ui.roleButton(page).click();
+      await page.locator('header div[style*="width: 300px"] button').first().click();
+    })();
+    clicked.catch(() => undefined);
+    await Promise.race([page.waitForURL(/\/login/), clicked]);
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByText('Your session has ended. Sign in again.')).toBeVisible();
   });

@@ -1,17 +1,18 @@
 // Request gate of the test reset (build plan D.3 "Test support"): `POST /test/reset` first drains the api's request
 // queue, that is, it holds every new request at the door and waits until the requests already inside have answered,
-// so no request runs while the database is dropped and recreated. The gate is a pair of Fastify hooks registered only
-// when the profile enables the test endpoints; without them it is never installed.
+// so no request runs while the database is dropped and recreated. Each request that passes the gate is shown to the
+// write tracker (`write-tracker.ts`, M2-21), which decides whether the next reset has to recreate the database. The
+// gate is a pair of Fastify hooks registered only when the profile enables the test endpoints; without them it is
+// never installed.
 import { Injectable, Logger, Optional, type OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { testResetRoute } from '@mscd/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { MscdConfig } from '../../config/mscd-config';
+import { testEndpointsEnabled } from './test-mode';
+import { TestWriteTracker, pathOf } from './write-tracker';
 
-/** True when the profile mounts the test routes (D.3): demo mode and `test.endpoints_enabled`. */
-export function testEndpointsEnabled(config: MscdConfig): boolean {
-  return config.profile.demo.enabled && config.profile.test?.endpoints_enabled === true;
-}
+export { testEndpointsEnabled } from './test-mode';
 
 /** The reset route itself passes the gate (it is the one that closes it). */
 const RESET_PATH = testResetRoute.path;
@@ -28,6 +29,7 @@ export class TestRequestGate implements OnModuleInit {
   constructor(
     private readonly config: MscdConfig,
     @Optional() private readonly adapterHost?: HttpAdapterHost,
+    @Optional() private readonly tracker?: TestWriteTracker,
   ) {}
 
   onModuleInit(): void {
@@ -40,6 +42,8 @@ export class TestRequestGate implements OnModuleInit {
       if (pathOf(request.url) === RESET_PATH) return;
       while (this.closed) await this.closed;
       this.enter(request);
+      // After the gate: a request held during a reset counts toward the next reset, not the one that held it.
+      this.tracker?.noteRequest(request.method, request.url, request.routeOptions?.url);
     });
     const leave = async (request: FastifyRequest) => {
       this.leave(request);
@@ -99,9 +103,4 @@ export class TestRequestGate implements OnModuleInit {
     this.release = null;
     release?.();
   }
-}
-
-function pathOf(url: string): string {
-  const query = url.indexOf('?');
-  return query === -1 ? url : url.slice(0, query);
 }

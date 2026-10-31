@@ -7,17 +7,33 @@ import { test as base, expect } from '@playwright/test';
 // Google Fonts only serves the optional alternative font pairings, so its failures are ignored.
 // The API project (playwright.api.config.js, build plan J.6) sets `dataSource: 'api'`: before every test the api is
 // reset to the seed state and a session of `apiSession` (default rina, null for none) is minted (e2e-api/fixtures.js).
+// The API stack runs one lane per worker (M2-21): `baseURL` is the web address of the worker's lane, so every page,
+// request and new context of a test talks to the api of its own lane.
 export const test = base.extend({
   dataSource: ['sample', { option: true }],
   apiSession: ['rina', { option: true }],
-  page: async ({ page, dataSource, apiSession, baseURL }, use) => {
+  baseURL: async ({ baseURL, dataSource }, use) => {
+    if (dataSource !== 'api') return use(baseURL);
+    const { laneBaseURL } = await import('../e2e-api/fixtures.js');
+    await use(laneBaseURL());
+  },
+  // The reset of the lane (API project), started before the browser context and its page are created so both happen
+  // at once (M2-21); the `page` fixture waits for it before it mints the session. Null in the sample project.
+  laneReset: async ({ dataSource, baseURL }, use) => {
+    if (dataSource !== 'api') return use(null);
+    const { startReset } = await import('../e2e-api/fixtures.js');
+    await use(startReset(baseURL));
+  },
+  // `laneReset` comes first: Playwright sets up a fixture's dependencies in the order they are named here.
+  page: async ({ laneReset, page, dataSource, apiSession, baseURL }, use) => {
+    let me = null;
     if (dataSource === 'api') {
       const { prepareApiTest } = await import('../e2e-api/fixtures.js');
-      await prepareApiTest(page, { baseURL, handle: apiSession });
+      me = await prepareApiTest(page, { baseURL, handle: apiSession, reset: laneReset });
     }
-    // The screens of the sidebar for this test: the host screens the session's persona (sample) or permissions (api)
-    // open, after the 14 built-in screens (MILESTONE-2 C.7).
-    await refreshScreens(page, dataSource, dataSource === 'api' && apiSession ? baseURL : null);
+    // The screens of the sidebar for this test: the host screens the session's persona (sample) or permissions (api:
+    // the `Me` of the session just minted) open, after the 14 built-in screens (MILESTONE-2 C.7).
+    await refreshScreens(page, dataSource, me);
     const problems = [];
     page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
     page.on('console', (m) => {
@@ -29,10 +45,16 @@ export const test = base.extend({
     // such a request is under way aborts it. The start of every page load is kept to tell those from real failures.
     const loads = [];
     const starts = new WeakMap();
+    // Requests under way, for `pageSettled` (M2-21).
+    const pending = new Set();
+    INFLIGHT.set(page, pending);
     page.on('request', (r) => {
       starts.set(r, Date.now());
+      pending.add(r);
       if (r.isNavigationRequest() && r.frame() === page.mainFrame()) loads.push(Date.now());
     });
+    page.on('requestfinished', (r) => pending.delete(r));
+    page.on('requestfailed', (r) => pending.delete(r));
     page.on('requestfailed', async (r) => {
       if (/fonts\.(googleapis|gstatic)\.com/.test(r.url())) return;
       if (r.failure()?.errorText === 'net::ERR_ABORTED') {
@@ -52,6 +74,172 @@ export const test = base.extend({
   },
 });
 export { expect };
+
+/** Requests each test page has under way (filled by the `page` fixture above). */
+const INFLIGHT = new WeakMap();
+
+/**
+ * The requests of `page` under way, as a function (M2-21). Server-sent event streams and other long polls stay open
+ * while the page is idle, so they do not count.
+ */
+function openRequests(page) {
+  const pending = INFLIGHT.get(page) ?? new Set();
+  return () => [...pending].filter((r) => !['eventsource', 'websocket'].includes(r.resourceType()) && !r.url().startsWith('data:'));
+}
+
+/**
+ * Resolves as soon as no request of `page` is under way: it listens for the end of each request instead of polling,
+ * so the wait ends with the last response (a poll waited 100 ms or more past it). Fails after `timeout` ms with the
+ * requests still under way.
+ */
+function requestsDone(page, timeout) {
+  const open = openRequests(page);
+  if (open().length === 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const stop = () => {
+      clearTimeout(timer);
+      page.off('requestfinished', check);
+      page.off('requestfailed', check);
+    };
+    // The page fixture registered its listeners first, so a finished request has left the set when this runs.
+    const check = () => {
+      if (open().length > 0) return;
+      stop();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      stop();
+      reject(new Error(`requests of the page under way after ${timeout} ms: ${open().map((r) => `${r.method()} ${r.url()}`).join(', ')}`));
+    }, timeout);
+    page.on('requestfinished', check);
+    page.on('requestfailed', check);
+  });
+}
+
+/**
+ * Waits in the page, checking at every animation frame, until the first element of `css` is shown (`kind` 'shown':
+ * rendered with a box and not hidden) or contains the text `arg` (`kind` 'text'), at most `timeout` ms (M2-21). A
+ * web-first assertion checks again only after 100, 350, 850 and 1850 ms, so a screen that is ready after 400 ms is
+ * seen at 850 ms; this wait ends in the frame the page is ready. It runs as a plain page script (no Playwright helper
+ * script to install in the page) and only waits: it never fails, and the assertion after it decides, as before.
+ */
+async function soon(page, kind, css, arg, timeout) {
+  await page
+    .evaluate(
+      ({ kind: what, css: selector, arg: value, timeout: ms }) =>
+        new Promise((resolve) => {
+          const ready = () => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            if (what === 'text') return (el.textContent ?? '').includes(value);
+            if (getComputedStyle(el).visibility !== 'visible') return false;
+            const box = el.getBoundingClientRect();
+            return box.width > 0 && box.height > 0;
+          };
+          const end = performance.now() + ms;
+          const step = () => {
+            if (ready()) resolve(true);
+            else if (performance.now() > end) resolve(false);
+            else requestAnimationFrame(step);
+          };
+          step();
+        }),
+      { kind, css, arg, timeout },
+    )
+    .catch(() => undefined);
+}
+
+/** Waits until the first element of `selector` (CSS) is shown, at most `timeout` ms (see `soon`). */
+export async function shownSoon(page, selector, { timeout = 10_000 } = {}) {
+  await soon(page, 'shown', selector, null, timeout);
+}
+
+/** Waits until the first element of `selector` (CSS) contains `text`, at most `timeout` ms (see `soon`). */
+export async function textSoon(page, selector, text, { timeout = 10_000 } = {}) {
+  await soon(page, 'text', selector, text, timeout);
+}
+
+/**
+ * Waits until the page has settled (M2-21, in place of fixed waits): no request of the page under way, every finite
+ * animation and transition at its end (finished at once, as `finishAnimations` does: the end state is what the waits
+ * used to wait for), and no change to the DOM for `quietMs`. Animations that repeat forever (a pulse, a spinner) and
+ * canvas drawing do not count. Fails after `timeout` ms when the page never settles.
+ */
+export async function pageSettled(page, { quietMs = 150, timeout = 15_000 } = {}) {
+  const open = openRequests(page);
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    await requestsDone(page, Math.max(1000, deadline - Date.now()));
+    const settled = await page.evaluate(async (quiet) => {
+      const running = () => document.getAnimations().filter((a) => a.playState === 'running' && a.effect && a.effect.getComputedTiming().iterations !== Infinity);
+      for (const a of running()) a.finish();
+      return new Promise((resolve) => {
+        let timer;
+        let mutated = false;
+        // After the quiet window, two more frames: work queued behind a long task (a lazy chunk being evaluated, then
+        // the render it starts) shows up there, and any change starts the window again.
+        const finish = () => {
+          mutated = false;
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (mutated) return;
+            observer.disconnect();
+            resolve(running().length === 0);
+          }));
+        };
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(finish, quiet);
+        };
+        const observer = new MutationObserver(() => {
+          mutated = true;
+          arm();
+        });
+        observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+        arm();
+      });
+    }, quietMs).catch((error) => {
+      // A page load during the wait starts it again on the new page.
+      if (/Execution context was destroyed|navigat/i.test(String(error?.message))) return false;
+      throw error;
+    });
+    if (settled && open().length === 0) return;
+    if (Date.now() > deadline) throw new Error(`The page did not settle within ${timeout} ms`);
+  }
+}
+
+/**
+ * Waits until the page has loaded what it asked for (M2-21): no request of the page under way, two animation frames
+ * later still none (a lazy chunk that starts the data request of its screen, then the render of that data). Cheaper
+ * than `pageSettled`: it neither finishes animations nor waits for a quiet DOM. A walk calls it after opening a screen,
+ * so the rows of a list loaded from the api are there before it decides whether to open one.
+ */
+export async function pageLoaded(page, { timeout = 15_000 } = {}) {
+  const open = openRequests(page);
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    await requestsDone(page, Math.max(1000, deadline - Date.now()));
+    await page
+      .evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      .catch((error) => {
+        if (!/Execution context was destroyed|navigat/i.test(String(error?.message))) throw error;
+      });
+    if (open().length === 0) return;
+    if (Date.now() > deadline) throw new Error(`The page did not load within ${timeout} ms`);
+  }
+}
+
+/**
+ * Waits until `frames` animation frames have been drawn (M2-21): the window in which a check sees that a picture stays
+ * still or keeps moving, counted in frames the page drew rather than in milliseconds, so a busy machine that draws
+ * fewer frames waits longer instead of checking less.
+ */
+export async function framesPass(page, frames) {
+  await page.evaluate((n) => new Promise((resolve) => {
+    let left = n;
+    const step = () => (--left <= 0 ? resolve() : requestAnimationFrame(step));
+    requestAnimationFrame(step);
+  }), frames);
+}
 
 // The 14 screens of the generated views, in sidebar order.
 export const BUILTIN_IDS = ['portfolio', 'm1overview', 'controls', 'phases', 'docs', 'audit', 'chain', 'gt', 'timeline', 'fresh', 'cal', 'mytasks', 'fw', 'storage'];
@@ -111,8 +299,8 @@ const dataSourceOf = () => base.info().project.use.dataSource || 'sample';
  */
 export const SCREENS = [...BUILTIN_SCREENS];
 export const SCREENS_ID = [...BUILTIN_SCREENS_ID];
-async function refreshScreens(page, dataSource, baseURL) {
-  const hosts = dataSource === 'api' ? (baseURL ? apiHostNav(await apiMe(page, baseURL)) : []) : sampleHostNav('manager');
+async function refreshScreens(page, dataSource, me) {
+  const hosts = dataSource === 'api' ? apiHostNav(me) : sampleHostNav('manager');
   SCREENS.splice(0, SCREENS.length, ...BUILTIN_SCREENS, ...hosts.map((m) => m.label[0]));
   SCREENS_ID.splice(0, SCREENS_ID.length, ...BUILTIN_SCREENS_ID, ...hosts.map((m) => m.label[1]));
 }
@@ -165,6 +353,8 @@ export const DRILL_SCREENS = ['Controls & requirements', 'Document register', 'C
 
 export async function openApp(page, query = '') {
   await page.goto('/' + query);
+  // The app starts (its session and data requests, then the first render) after the load event.
+  await shownSoon(page, 'main h1');
   await expect(page.locator('main h1')).toBeVisible();
 }
 // The drawer backdrop covers the page, so a user closes an open drawer before navigating.
@@ -182,6 +372,7 @@ export async function go(page, label) {
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const MS_SWITCH = 'header button[title="Switch management system"], header button[title="Ganti sistem manajemen"]';
 export const ui = {
   title: (page) => page.locator('main h1'),
   toast: (page) => page.locator('div[style*="z-index: 60"]'),
@@ -193,7 +384,7 @@ export const ui = {
   search: (page) => page.locator('main input[placeholder^="Search"]'),
   tera: (page) => page.locator('button[title="Ask Tera"]'),
   teraCard: (page) => page.locator('div[style*="z-index: 45"] > div[style*="width: 340px"]'),
-  msSwitch: (page) => page.locator('header button[title="Switch management system"], header button[title="Ganti sistem manajemen"]'),
+  msSwitch: (page) => page.locator(MS_SWITCH),
   pageAction: (page, label) => page.locator(`main button[title="${label}"]`).first(),
   nav: (page, label) => page.locator(`aside nav button[title="${label}"]`),
   navItems: (page) => page.locator('aside nav button'),
@@ -256,6 +447,8 @@ export async function switchMs(page, short) {
   await closeDrawerIfOpen(page);
   await ui.msSwitch(page).click();
   await page.locator('header div[style*="width: 420px"] button').filter({ has: page.locator('span', { hasText: new RegExp('^' + short + '$') }) }).click();
+  // The switch shows the system once its data has loaded from the api.
+  await textSoon(page, MS_SWITCH, short);
   await expect(ui.msSwitch(page)).toContainText(short);
 }
 export async function switchOrg(page, name) {
@@ -285,8 +478,11 @@ export async function finishAnimations(page) {
 }
 // Text that spills out of its box: an element wider than its own box while overflow stays visible.
 export async function expectNoTextOverflow(page) {
-  await finishAnimations(page);
   const spills = await page.evaluate((scope) => {
+    // As finishAnimations, in the same page script (M2-21: one round trip instead of two).
+    document.getAnimations().forEach((a) => {
+      if (a.effect && a.effect.getComputedTiming().iterations !== Infinity) a.finish();
+    });
     const out = [];
     for (const el of document.querySelectorAll(scope)) {
       if (['svg', 'path', 'g', 'circle', 'line', 'polygon', 'text', 'rect'].includes(el.tagName.toLowerCase())) continue;
@@ -301,8 +497,11 @@ export async function expectNoTextOverflow(page) {
 // Contrast between each visible text and the colour actually behind it (WCAG ratio). Backgrounds and
 // opacities of every ancestor are composited, so text on a filled badge or inside a faded card is measured as drawn.
 export async function contrastProblems(page, min = 3, scope = SCOPE) {
-  await finishAnimations(page);
   return page.evaluate(({ scope, min }) => {
+    // As finishAnimations, in the same page script (M2-21: one round trip instead of two).
+    document.getAnimations().forEach((a) => {
+      if (a.effect && a.effect.getComputedTiming().iterations !== Infinity) a.finish();
+    });
     const parse = (s) => { const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return { r: 0, g: 0, b: 0, a: 0 }; const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
     // premultiplied "source over destination"
     const over = (s, d) => ({ r: s.r * s.a + d.r * d.a * (1 - s.a), g: s.g * s.a + d.g * d.a * (1 - s.a), b: s.b * s.a + d.b * d.a * (1 - s.a), a: s.a + d.a * (1 - s.a) });
@@ -337,15 +536,12 @@ export async function expectReadableText(page, min = 3) {
 }
 
 // The modal or drawer a page action opened, or null when it opened none. A host screen opens its dialog after React
-// has handled the click (through the screen's params, C.6), so this waits a moment instead of counting at once.
-export async function layerAfterAction(page, timeout = 2000) {
+// has handled the click (through the screen's params, C.6), so this waits until the page has settled (its requests,
+// a lazy chunk among them, ended and the DOM is quiet, M2-21) instead of counting at once.
+export async function layerAfterAction(page) {
   const layer = page.locator('div[style*="z-index: 51"], div[style*="z-index: 41"]');
-  try {
-    await layer.first().waitFor({ state: 'visible', timeout });
-    return layer;
-  } catch {
-    return null;
-  }
+  await pageSettled(page);
+  return (await layer.first().isVisible()) ? layer : null;
 }
 
 // The open host modal or drawer (and the generated ones): every text at 4.5:1 and at least 12px (MILESTONE-2 C.7).
@@ -488,14 +684,18 @@ export async function clickClaimable(page, target, { id, toast, form } = {}) {
     else if (toasted && (await toasted.count())) outcome = 'toast';
     return outcome;
   }, { message: `${id} opens its form${toast ? ` or shows "${toast}"` : ''}` }).not.toBeNull();
-  // A claim that keeps its toast may open its form as well, once the form's lazy chunk is in (M2-12 deviation 2).
-  for (const end = Date.now() + 1500; outcome === 'toast' && Date.now() < end;) {
+  // A claim that keeps its toast may open its form as well, once the form's lazy chunk is in (M2-12 deviation 2): the
+  // page settles once that chunk has loaded and the form has rendered.
+  if (outcome === 'toast') {
+    await pageSettled(page);
     if ((await layers.count()) > before) outcome = 'form';
-    else await page.waitForTimeout(100);
   }
   if (outcome === 'form') {
     // A form opened from a drawer is a modal over it; a page action opens a modal or a drawer.
     if (form) await expect((before ? ui.modal(page) : layers).filter({ hasText: form }).first()).toBeVisible();
+    // A layer listens for Escape from an effect that runs after it shows; on a busy machine (M2-21 runs the tests in
+    // parallel) a key pressed at once can come first, so the page settles before the key.
+    await pageSettled(page);
     await page.keyboard.press('Escape');
     await expect(layers).toHaveCount(before);
   }
@@ -555,6 +755,7 @@ export async function runExtraPageAction(page, label, title) {
     return outcome;
   }, { message: `${label} on ${title} opens a form, a screen or a toast` }).not.toBeNull();
   if (outcome === 'form') {
+    await pageSettled(page);
     await page.keyboard.press('Escape');
     await expect(layers).toHaveCount(before);
   } else if (outcome === 'screen') {

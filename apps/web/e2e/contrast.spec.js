@@ -1,4 +1,4 @@
-import { test, expect, SCREENS, HOST_METAS, openApp, go, openScreen, layerAfterAction } from './helpers.js';
+import { test, expect, SCREENS, HOST_METAS, openApp, go, openScreen, layerAfterAction, pageSettled } from './helpers.js';
 
 // WCAG 2.1 AA: 4.5:1 for normal text, 3:1 for large text (24px, or 18.66px bold).
 // Every visible text element is measured against the first opaque background behind it. Text is also at least 12px
@@ -52,7 +52,7 @@ for (const theme of ['light', 'dark']) {
     const failures = {};
     for (const label of SCREENS) {
       await go(page, label);
-      await page.waitForTimeout(1200); // let entry animations finish
+      await pageSettled(page); // entry animations finished, data in, nothing changing
       const bad = await lowContrast(page);
       if (bad.length) failures[label] = bad;
     }
@@ -67,14 +67,14 @@ for (const theme of ['light', 'dark']) {
     const failures = {};
     for (const meta of HOST_METAS) {
       await openScreen(page, meta, `theme=${theme}`);
-      await page.waitForTimeout(1200);
+      await pageSettled(page);
       const bad = await lowContrast(page);
       if (bad.length) failures[meta.id] = bad;
       for (const [label] of meta.pageActions) {
         await page.locator(`main button[title="${label}"]`).first().click();
         const layer = await layerAfterAction(page);
         if (!layer) continue;
-        await page.waitForTimeout(400);
+        await pageSettled(page);
         const inDialog = await lowContrast(page);
         if (inDialog.length) failures[`${meta.id}, ${label}`] = inDialog;
         await page.keyboard.press('Escape');

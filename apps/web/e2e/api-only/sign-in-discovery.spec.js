@@ -1,4 +1,4 @@
-import { test, expect, ui, expectReadableText } from '../helpers.js';
+import { test, expect, ui, expectReadableText, pageSettled } from '../helpers.js';
 import { DEMO_PASSWORD, EMAILS, demoCode, freshTotpStep } from '../../e2e-api/fixtures.js';
 
 // Organisation discovery at sign-in (MILESTONE-2 M2-S11, D-S3): one sign-in page for every organisation. The work email
@@ -58,6 +58,8 @@ const lastOrg = (page) => page.evaluate(() => window.localStorage.getItem('mscd.
 test.describe('Organisation discovery at sign-in @api-only', () => {
   test('email and password show together, the email domain adds the buttons of its organisation, and the password hides only for single sign-on only', async ({ page }) => {
     const seen = await fakeDiscovery(page);
+    // The page's timers run on Playwright's clock (time flows as usual), so the last step can run them on at once.
+    await page.clock.install();
     await page.goto('/login');
     await expect(email(page)).toBeVisible();
     await expect(password(page)).toBeVisible();
@@ -85,10 +87,12 @@ test.describe('Organisation discovery at sign-in @api-only', () => {
     await expect(page.locator('a.au-sso-btn')).toHaveCount(0);
     await expect(password(page)).toBeVisible();
 
-    // Back to a domain already looked up: answered from the page, no new request.
+    // Back to a domain already looked up: answered from the page, no new request. A lookup would start 450 ms after the
+    // change (lookupDelay of LoginPage.tsx): the clock runs the page's timers 500 ms on, then no request is under way.
     await email(page).fill('andi@sso-corp.example');
     await expect(ssoButton(page, 'Sign in with Corp Microsoft')).toBeVisible();
-    await page.waitForTimeout(700);
+    await page.clock.runFor(500);
+    await pageSettled(page);
     expect(seen.domains.filter((d) => d === 'sso-corp.example')).toHaveLength(1);
     expect(seen.orgs).toEqual([]);
   });

@@ -58,40 +58,81 @@ npm run preview -w @mscd/web   # serves apps/web/dist on http://localhost:4173
 
 By default the app runs fully in the browser on a fictional sample organisation, so no back end is needed (to use the api instead, see [Run the web app against the api](#run-the-web-app-against-the-api)). Display settings come from the query string, for example `http://localhost:5173/?lang=id&theme=dark`; [apps/web/README.md](../apps/web/README.md) lists them.
 
-## End-to-end tests
+## Browser suites
 
-The Playwright suite in `apps/web/e2e` builds the app and serves the build on port 4173 for every run:
-
-```bash
-CI=1 npm run test:e2e
-```
-
-`npm run test:e2e` at the root runs `npm run test:e2e -w @mscd/web`. With `CI=1` Playwright never reuses a server that is already listening on port 4173, so the suite always tests the current build; a leftover `npm run preview` makes the run stop with an error instead. The full suite takes about 8 minutes on 4 CPUs. To pass Playwright options, call the workspace script directly:
+The Playwright specs in `apps/web/e2e` run in two suites: the sample suite against the sample build (`apps/web/playwright.config.js`) and the API suite against a seeded api (`apps/web/playwright.api.config.js`). Specs tagged `@api-only` (`e2e/api-only`) run only in the API suite, and tests tagged `@sample-only` only in the sample suite.
 
 ```bash
-CI=1 npm run test:e2e -w @mscd/web -- e2e/portfolio.spec.js   # one spec file
-CI=1 npm run test:e2e -w @mscd/web -- -g "Golden Thread"       # tests whose title matches
+CI=1 npm run test:e2e -w @mscd/web                                             # sample suite
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web                   # API suite (Docker)
+flock /tmp/mscd-stack.lock npm run test:e2e:all -w @mscd/web                   # both, inside the memory budget
+CI=1 npm run test:e2e -w @mscd/web -- e2e/portfolio.spec.js                    # one spec file
+CI=1 npm run test:e2e -w @mscd/web -- -g "Golden Thread"                       # tests whose title matches
+flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/license.spec.js
 ```
 
-Failures leave screenshots and traces in `apps/web/test-results/` and an HTML report in `apps/web/e2e-report/` (open it with `npx playwright show-report apps/web/e2e-report`). Both folders are git-ignored.
+`npm run test:e2e` and `npm run test:e2e:api` at the root run the workspace scripts. On a shared machine, wrap every API run in the lock: it keeps two stacks from fighting over the fixed ports.
 
-### API end-to-end project
+### Sample suite
 
-`npm run test:e2e:api` runs the same specs against a seeded api (`apps/web/playwright.api.config.js`). Its web server is `apps/web/e2e-api/stack.mjs`, which needs Docker and the ports 4174 (web), 3174 (api), 4310 (mock providers) and 4311 (storage gateway). It builds the server and the mock providers, starts PostgreSQL, SeaweedFS and Mailpit containers, migrates and seeds the demo data into a template database, starts the api, the gateway and the mock providers, and serves a `VITE_DATA_SOURCE=api` build of the web app on port 4174. Playwright stops the stack when the run ends, and the stack removes its containers.
+`tools/scripts/e2e-web-serve.mjs` builds the app with the sample data source and serves the build on port 4173 (`vite preview`). The build runs only when the sources of the app changed since the last build; otherwise the run reuses it. A server already listening on port 4173 (a leftover `npm run preview`, for example) makes the run stop with an error instead of testing a stale build. The suite runs fully parallel on up to 10 workers, as many as the memory budget allows.
 
-```bash
-flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web                                  # whole suite
-flock /tmp/mscd-stack.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/license.spec.js  # one spec file
-```
+### API suite and its lanes
 
-- The lock keeps two stacks on one host from fighting over the fixed ports. Wrap every run in it on a shared machine.
-- `MSCD_TEST_CONTAINER_PREFIX` names the containers `<prefix>e2e-<service>-<random>` (default `mscd-`). At start the stack removes containers of an earlier, killed run only when their `mscd.test.expires` label has passed (3 hours after they started) and their name has the same prefix. A stack still running in another session keeps its containers.
-- `E2E_STACK_SKIP_BUILD=1` skips the server and mock provider builds; `MSCD_TEST_PG_IMAGE` replaces the PostgreSQL image.
-- Every test starts from the seed state: the api recreates its database from the template and a session of `rina` is minted (`e2e-api/fixtures.js`). A spec picks another demo user with `test.use({ apiSession: 'maya' })`, or `null` for no session.
-- Tests whose title carries `@sample-only` are skipped in this project; specs in `e2e/api-only` carry `@api-only` and run only here. One worker runs the tests one after another.
+`apps/web/e2e-api/stack.mjs` is the web server of the API suite. It needs Docker. It runs several lanes so that the tests run in parallel, and Playwright runs one worker per lane: the worker with parallel index `n` uses lane `n` (`e2e-api/fixtures.js`). Each lane has its own database, api, storage gateway, mock providers (with their DNS responder), Mailpit and object store bucket, so nothing a test writes is visible to a test of another lane. The lanes share one PostgreSQL container, one SeaweedFS container and one API web build, served for every lane by one process (`e2e-api/web-server.mjs`).
+
+| Lane `n` | Port |
+|---|---|
+| Web app (`baseURL` of the tests) | 4174 + n |
+| api | 3174 + n |
+| Mock providers | 4310 + 10 x n |
+| Storage gateway | 4311 + 10 x n |
+| DNS responder of the mock providers (UDP) | 4312 + 10 x n |
+
+- Every test starts from the seed state: before each test the lane's api puts its database back to the seeded template and a session of `rina` is minted. A spec picks another demo user with `test.use({ apiSession: 'maya' })`, or `null` for no session. A test reaches its lane through `baseURL` (`page.goto('/')`, `page.request`, new contexts) and `stackState()` of `e2e-api/fixtures.js` (mock providers, Mailpit).
+- The reset recreates the database only when something wrote since the last reset: the test-support module of the api records every request other than GET or HEAD, the sign-in and storage consent callbacks, every audit entry and every job run (`apps/server/src/modules/test-support/write-tracker.ts`). A reset with nothing to undo deletes the minted sessions and answers at once. `E2E_STACK_RESET=always` recreates the database at every reset, as before.
+- The test PostgreSQL runs with `fsync`, `synchronous_commit` and `full_page_writes` off, and the reset clones with `STRATEGY FILE_COPY`. These settings exist only in this test stack.
+- `E2E_API_LANES` sets the number of lanes (default: what the memory budget allows, at most 6). Never run more workers than lanes.
+- `MSCD_TEST_CONTAINER_PREFIX` names the containers and run volumes `<prefix>e2e-<service>-<random>` (default `mscd-`). At start the stack removes containers and run volumes of an earlier, killed run only when their `mscd.test.expires` label has passed (3 hours after they started) and their name has the same prefix. A stack still running in another session keeps its containers.
+- The api and the reset reach PostgreSQL over its Unix socket (the container's socket folder is shared with the host), and the api, the storage gateway and the tests reach SeaweedFS and Mailpit on the containers' own addresses, so no query goes through Docker's port proxy. Where the host cannot reach them that way (Docker Desktop), the stack falls back to the published ports on 127.0.0.1; `E2E_STACK_DIRECT=off` always uses the published ports.
+- `e2e-api/web-server.mjs` (and `tools/scripts/e2e-web-serve.mjs` of the sample suite) serves the files of the build's `assets/` folder from memory with the headers NGINX gives them in production: pre-compressed with gzip, and cached for a year when the name carries a content hash (`tools/scripts/e2e-assets.mjs`).
+- `E2E_STACK_SKIP_BUILD=1` skips the server and mock provider builds; `MSCD_TEST_PG_IMAGE` replaces the PostgreSQL image; `E2E_STACK_TENANCY=multi` runs the stack with tenancy mode multi.
 - Failures leave traces in `apps/web/test-results/api/` and the report in `apps/web/e2e-report/api/`.
 
-The data source of a build is set by `VITE_DATA_SOURCE` when it is built. `npm run dev`, `npm run build` and the sample E2E suite use the sample data when it is unset. The `mscd-web` image and release bundles build with `api`, which is the default of `deploy/docker/web.Dockerfile`.
+### Memory budget
+
+The whole machine stays at or below `E2E_MEMORY_BUDGET_MB` in use (`MemTotal - MemAvailable`, default 12288). Each suite reads the memory in use when it starts and chooses its lanes or workers from `tools/scripts/e2e-budget.mjs`: about 1.1 GB per API lane (its api, gateway, mock providers and Mailpit with one worker and its Chromium) after a fixed 1.5 GB, and about 0.6 GB per sample worker after a fixed 1.2 GB, at most half the CPUs. Every container of the stack has a memory limit. `E2E_SAMPLE_WORKERS` and `E2E_API_LANES` override the choice.
+
+Both suites run Chromium with `--disable-gpu`: software compositing draws the same pictures (the app draws on 2D canvases only, and CI runners have no GPU) for about a tenth less browser CPU.
+
+Every run of either suite ends with a line that gives the peak memory in use during the run against the budget (`tools/scripts/e2e-memory-reporter.mjs`). `npm run test:e2e:all -w @mscd/web` (`tools/scripts/e2e-all.mjs`) runs both suites: side by side when both fit the budget, else one after the other. It samples the memory in use every 2 seconds and ends with a summary: wall time, test count and peak memory in use of each suite, and the peak of the whole run against the budget.
+
+### Build and template cache
+
+A cold start builds everything; later runs reuse what did not change. The keys and outputs are in `node_modules/.cache/mscd/e2e/`:
+
+- the server and the mock providers build again only when their sources changed (a SHA-256 of the source files; for the server also the migrations, `apps/server/scripts/gen-build-info.mjs` and the development keys in `packages/pack-tools/dev-keys`, which the prebuild writes into `src/generated`);
+- the web builds (`web-api-<key>`, `web-sample-<key>`) are kept for the current sources, three per data source;
+- the migrated and seeded template database lives in the Docker volume `mscd-e2e-cache-pg-<key>`, whose key covers the migrations, every server source (the key of the server build, so a change to code the seed runs builds the template again, in about 16 seconds), the packs, the test profile, the development secrets, the development licences in `packages/pack-tools/dev-licences` that `seed demo` loads, the PostgreSQL image and the tenancy mode. The cluster of a run is a copy of that volume.
+
+A normal run never removes a cache volume. To clear the cache:
+
+```bash
+docker volume ls -q --filter name=mscd-e2e-cache | xargs -r docker volume rm
+rm -rf node_modules/.cache/mscd/e2e
+```
+
+`E2E_STACK_CACHE=off` makes one run build the template and the web build again without using or changing the cache. Each server change leaves one older cache volume of about 115 MB behind; the commands above remove them.
+
+### Reports, traces and CI
+
+Failures leave screenshots in `apps/web/test-results/` and an HTML report in `apps/web/e2e-report/` (open it with `npx playwright show-report apps/web/e2e-report`). Both folders are git-ignored. Recording traces tripled the time of a local run, so a local run (also with `CI=1`) records them only on a retry; add `E2E_TRACE=retain-on-failure` (or `--trace retain-on-failure`) to keep the trace of a failure you look into. GitHub Actions keeps the traces of every failure.
+
+In CI each suite runs as shards of a matrix (`--shard=i/n`: 4 for the sample suite, 8 for the API suite); each shard writes a blob report (`E2E_REPORT=blob`), and the final jobs "Web E2E (sample data)" and "Web E2E (API)" merge them into one HTML report and fail when a shard failed. On a runner with 4 CPUs a shard runs 2 sample workers or 2 API lanes.
+
+### Data source of the web app
+
+The data source of a build is set by `VITE_DATA_SOURCE` when it is built. `npm run dev`, `npm run build` and the sample suite use the sample data when it is unset. The API suite, the `mscd-web` image and release bundles build with `api`, which is the default of `deploy/docker/web.Dockerfile`.
 
 ## Generated views
 
