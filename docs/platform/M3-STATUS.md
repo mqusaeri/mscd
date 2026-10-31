@@ -24,8 +24,8 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-04 Requests from one person | 3 | Done | Screens `privacy-requests` (register, system checks, correction, stop to the use, erasure under a pseudonym with the word ERASE) and `privacy-checks`; "My data" in My account (copy, correction, requests); `privacy.deadlines`; cleanup of old sessions and tokens (D.6.7); pseudonyms in every person column |
 | M3-07 Periodic access review | 3 | Done | Screens `access-reviews` (Tenant Admins) and `access-review` (each system's managers); daily `access-review.open` every 3 months with reminders; keep, change or revoke with the existing services; nobody decides on their own access; the report CSV is filed as evidence for A.5.18 |
 | M3-09 Export and deletion screens | 3 | Done | Screen "Organisation export" (request, approve or reject, parts and manifest with SHA-256, read-only banner); operator console columns "Read-only until" and "Deletion on", drawer tabs Export and Deletion (schedule, change date, cancel, retry, steps and checks, certificate), status moves of J.8 |
-| M3-10 Demo personas | 4 | Waiting | |
-| M3-11 Data lifecycle run and documents | 4 | Waiting | |
+| M3-10 Demo personas | 4 | Running | Started 2026-11-01 |
+| M3-11 Data lifecycle run and documents | 4 | Running | Started 2026-11-01 |
 | M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
 
 ## Product owner decisions for Milestone 3
