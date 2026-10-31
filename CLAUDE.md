@@ -114,6 +114,12 @@ Decided by the product owner on 2026-10-29:
 13. The orchestrator may make the release key set and the SSH keys on the build host and store them in GitHub environments with `gh` (owner, 2026-10-29). It never reads or prints a private value; the owner keeps offline copies and deletes the folder. The owner alone types server passwords and mail passwords, and approves releases and production deploys.
 14. The GitHub environments `release` and `production` have no required reviewer (owner, 2026-10-30, against the recommendation to keep production manual): releases build and production deploys run without an approval click. The release check of unsigned packs (decision 12) and the admin-only release tags stay.
 
+Decided by the product owner on 2026-10-31 and 2026-11-01 (Milestone 3, `docs/platform/MILESTONE-3.md` section H):
+
+15. Milestone 3 covers section 2 of `docs/ROADMAP.md` plus a maintenance track; every default of H.1 to H.12 is accepted (deletion 30 days after archiving, never below 7; export approved by a second Tenant Admin, downloadable 7 days; personal data requests due in 3 x 24 hours, lawyer confirms; erasure keeps records under a pseudonym; read confirmation within 14 days; retention 36 months by default with two-person disposal; access review every 3 months; no second approval for an erasure).
+16. H.13: a person erased in an organisation and later invited again rejoins with a fresh account; records from before the erasure keep the pseudonym.
+17. After sign-in a person lands on their role's home screen (M2-20, 2026-10-31).
+
 ## Open follow-ups
 
 - Installer: an option for the internal subnet (`MSCD_SUBNET`, `MSCD_WEB_ADDRESS`) of a new install. When `172.31.250.0/24` is taken on the host, the first run of `install.sh` fails when it starts the stack; the operator then edits `.env` and runs `install.sh` again.

@@ -32,7 +32,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 - 2026-10-31: scope is section 2 of `docs/ROADMAP.md` as listed, plus the maintenance track.
 - 2026-10-31: every default of section H (H.1 to H.11) accepted; H.12 (no second approval for an erasure) keeps its default unless the owner decides otherwise before M3-04.
-- Open question H.13 (from M3-04): a person erased in an organisation and later invited again; default to build: the invitation creates a fresh account, and records from before the erasure keep the pseudonym.
+- 2026-11-01, H.13: a person erased in an organisation and later invited again rejoins with a fresh account; records from before the erasure keep the pseudonym (built by the M3-04 follow-up).
 - Open questions for the owner from the plan review: the real versioning, lifecycle rule or object lock of the backup bucket (the deletion certificate date depends on it); `docs/saas/legal-inputs.md` and `records-of-processing.md` still say "about 12 months" for backups until M3-11 corrects them.
 
 ## Open items for later packages
