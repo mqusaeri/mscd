@@ -22,7 +22,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-05 Read confirmation of policies | 2 | Running | Started 2026-10-31 |
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
 | M3-04 Requests from one person | 3 | Waiting | |
-| M3-07 Periodic access review | 3 | Waiting | |
+| M3-07 Periodic access review | 3 | Running | Started 2026-10-31 in wave 2's free slot (it needs only M3-01) |
 | M3-09 Export and deletion screens | 3 | Waiting | |
 | M3-10 Demo personas | 4 | Waiting | |
 | M3-11 Data lifecycle run and documents | 4 | Waiting | |
