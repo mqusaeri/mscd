@@ -148,7 +148,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # 8 shards: Playwright gives each shard a consecutive range of tests, and the long screen walks of
+        # display.spec.js and contrast.spec.js sit together, so with 4 shards the first one took 11 minutes.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -51,7 +51,7 @@ The live progress of `docs/platform/MILESTONE-2.md`. The orchestrator updates th
 | M2-S13 SaaS end-to-end and go-live evidence | 6 | Done; security clean-up done (e5d11b0); GL-13 waits for a green security-scan.yml on main | Also assigned by the orchestrator: pass `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL` to the server as `MSCD__LEGAL__*` (M2-S11 follow-up 8) and start the mock DNS responder in `apps/web/e2e-api/stack.mjs` for the multi-tenant stack (M2-S11 deviation 4) |
 | M2-19 Operator accounts | 7 | Done (2caaaa8) | Owner request 2026-10-30 (staging review). Follow-up 8 open below (Idempotency-Key for operators without an organisation) |
 | M2-20 Screen addresses | 7 | Done (2caaaa8) | Owner request 2026-10-30. People land on their role's home (owner sign-off 2026-10-31). Back and Forward race across an organisation switch open below |
-| M2-21 Faster browser tests | 8 | Done | Owner request 2026-10-31. API suite 24 to about 6 min on the host (6 lanes; line 7 min, the CPU saturates), sample suite 8.3 to 3.7 min (10 workers), peak 10.2 GB; `npm run test:e2e:all -w @mscd/web`; CI 4 sample and 8 API shards |
+| M2-21 Faster browser tests | 8 | Done | Owner request 2026-10-31. API suite 24 to about 6 min on the host (6 lanes; line 7 min, the CPU saturates), sample suite 8.3 to 3.7 min (10 workers), peak 10.2 GB; `npm run test:e2e:all -w @mscd/web`; CI 8 sample and 8 API shards (first CI run 41192990867: API shards 3.8 to 6.1 min; with 4 sample shards one took 11.2 min, so 8 since 2026-10-31) |
 
 ## Open orchestrator items
 
