@@ -966,7 +966,7 @@ test -z "$(docker ps -q --filter label=mscd.test=true)"
 
 ### L. Additions after the staging review (product owner, 2026-10-30)
 
-The product owner tried staging and asked for two packages. They run together after the security clean-up of M2-S13 (wave 7). The orchestrator owns the shared web tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` while they run.
+The product owner tried staging and asked for two packages. They run together after the security clean-up of M2-S13 (wave 7). On 2026-10-31 the owner added a third, M2-21 (wave 8, alone), to make the browser suites much shorter. The orchestrator owns the shared web tests `apps/web/test/screens/host.test.tsx` and `apps/web/test/api/controller.test.ts` while they run.
 
 #### M2-19 Operator accounts
 
@@ -1024,6 +1024,50 @@ npm run check:text
 ```
 
 The new `e2e/routing.spec.js` proves: a refresh keeps screen, system and tab; Back and Forward; a copied address opens the same place after sign-in; an address the person cannot open goes to the start screen; the sample build works with the hash.
+
+#### M2-21 Faster browser tests
+
+| | |
+|---|---|
+| Wave, depends on | 8; M2-19 and M2-20 committed. Runs alone: it changes the browser test plumbing every package uses |
+| Owns | `apps/web/playwright.config.js`, `apps/web/playwright.api.config.js`, `apps/web/e2e-api/**`, `apps/web/e2e/helpers.js`, the specs of `apps/web/e2e/**` where it replaces fixed waits or splits a long walk into separate tests, the `test:e2e*` scripts of `apps/web/package.json`, `apps/server/src/modules/test-support/**`, the two browser jobs of `.github/workflows/ci.yml` (and a report merge job), `tools/scripts/e2e-*.mjs` (new), a "Browser suites" section of `docs/DEVELOPMENT.md`, `docs/platform/handoff/M2-21.md` |
+
+The product owner, 2026-10-31: the full browser suites were the slowest part of every package; make them much shorter, and keep the machine at or below 12 GB of memory in use.
+
+Today, at commit 8b2a98e: the API suite (`npm run test:e2e:api`) runs 397 tests with one worker in 24.2 minutes on the build host, because every test resets the one database of the stack. The sample suite (`npm run test:e2e`) runs 522 tests with 6 workers in 8.3 minutes. In CI the API job takes 31 minutes and the sample job 18 minutes. The build host has 20 cores and 15 GB of memory, of which about 3.5 GB are in use by other tools.
+
+Brief:
+- Targets: the full API suite in 4 minutes or less on the build host with a warm cache, the full sample suite in 3 minutes or less, and each browser job in CI in 6 minutes or less of wall time. Pass criteria are in the acceptance below.
+- Every test keeps running and keeps checking what it checks today. No test is skipped, deleted, retried into passing or weakened to win time. The number of tests stays the same or grows (count them on the commit before M2-21 and after).
+- Memory budget: during a full run of both suites the machine stays at or below 12 GB in use (`MemTotal - MemAvailable`), whatever else runs. The runners read `MemAvailable` at the start and choose the number of lanes and workers that fit (setting `E2E_MEMORY_BUDGET_MB`, default 12288), give every test container a memory limit, and log the peak in use at the end of a run.
+- API suite lanes: several lanes (up to 6 on this host, as the budget allows), each with its own database cloned from the template and its own api, storage gateway and mock providers on its own ports. The lanes share one PostgreSQL container, one object store and one API web build. Each Playwright worker uses the lane of its `parallelIndex`; tests run fully parallel. Nothing a lane writes (database rows, vault objects, mock provider state, mail) is visible to another lane.
+- Reset only when something changed: the test-support module of the api records whether a write happened since the last reset (any request other than GET or HEAD, or a job run); `POST /api/v1/test/reset` returns at once when nothing changed. Tests keep calling it before every test. The test-support routes stay refused outside test mode, as today.
+- Fast test database: the test PostgreSQL runs with `fsync`, `synchronous_commit` and `full_page_writes` off, and clones with `STRATEGY FILE_COPY`. These settings live only in the test stack, never in `deploy/` or the integration test containers.
+- Cached start: the migrated and seeded template database is kept (a dump or a Docker volume with the `mscd-e2e-cache` prefix) under a key made from the migrations, the seed, the packs and the server version, and reused while the key matches. The server, the mock providers and the API web build are rebuilt only when their sources changed. A cold start still works and stays under 3 minutes.
+- No fixed waits: replace each `waitForTimeout` in `apps/web/e2e` (19 today) with a wait on a condition. Split the long screen walks of `display.spec.js` and `i18n.spec.js` into one test per screen or per system so they spread across workers; keep `test.slow()` only where one test still needs it.
+- Traces stay on failure in CI. Measure their cost locally; if it is above 10 percent of the run, record them locally on the first retry only.
+- Sample suite: the number of workers comes from the budget (up to 10 on this host).
+- One command for the full check: `npm run test:e2e:all -w @mscd/web` runs both suites inside the budget, the sample suite next to the API suite when both fit, and prints the wall time, test count and peak memory of each.
+- CI: each browser job runs as shards of a matrix (`--shard=i/n`, with n chosen to meet the target), and a final job named as today ("Web E2E (sample data)", "Web E2E (API)") merges the blob reports into one HTML report and fails when any shard failed, so the check names other settings depend on keep working.
+- Leftovers: `e2e-api/stack.mjs` removes only leftover containers whose expiry label has passed (open follow-up in `CLAUDE.md`), and the new cache volumes are never removed by a normal run.
+- Docs: a "Browser suites" section in `docs/DEVELOPMENT.md` on lanes, the memory budget, the cache and how to clear it, running one spec, and the default data source of the web app (also an open follow-up in `CLAUDE.md`).
+
+Acceptance:
+
+```bash
+npm run typecheck && npm run lint && npm test
+flock /tmp/mscd-stack.lock flock /tmp/mscd-e2e.lock flock -s /tmp/mscd-npm.lock npm run test:e2e:all -w @mscd/web
+npm run check:text
+```
+
+The package passes when:
+- both full suites pass with at least as many tests as on the commit before M2-21;
+- with a warm cache, the API suite takes 5 minutes or less and the sample suite 4 minutes or less of wall time (the targets above are 4 and 3); a cold-cache API run takes 8 minutes or less;
+- the peak memory in use stays at or below 12 GB during the run (the runner's log line shows it);
+- two full runs in a row pass, so no test became flaky from running in parallel;
+- after the push, each browser job of the CI run on `main` takes 8 minutes or less of wall time (the orchestrator checks this run).
+
+The handoff lists the times, test counts and peak memory before and after, per suite, on the build host and in CI.
 
 ## H. Questions for the product owner
 

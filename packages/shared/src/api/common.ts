@@ -421,7 +421,7 @@ export type WorkPackageId = `WP-${string}` | `M2-${string}`;
 /** Work packages of the build plan (K.2) and of Milestone 2 (G.2, K.6); `RouteDef.owner` names one of them. */
 export const WORK_PACKAGE_IDS: readonly WorkPackageId[] = [
   ...Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const),
-  ...Array.from({ length: 20 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 21 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 13 }, (_, i) => `M2-S${String(i + 1).padStart(2, '0')}` as const),
 ];
 
