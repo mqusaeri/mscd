@@ -1,0 +1,13 @@
+{
+  "id": "my-confirmations",
+  "label": ["Policies to confirm", "Kebijakan untuk dikonfirmasi"],
+  "group": "tasks",
+  "order": 20,
+  "scope": "ms",
+  "perm": "ms.read",
+  "roles": ["manager", "owner", "auditor", "top"],
+  "nav": false,
+  "pageActions": [],
+  "sampleRole": "owner",
+  "open": "query"
+}

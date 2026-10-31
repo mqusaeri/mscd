@@ -1,28 +1,47 @@
-// A person's own read confirmations (Milestone 3 D.1, D.7): the list, opening the version and the confirmation. Stubs
-// of M3-01, answering 501 `not-implemented` after the guard (no body is read); M3-05 replaces them.
+// A person's own read confirmations (Milestone 3 D.1, D.7): the list, opening the version and the confirmation. The
+// routes need an active session only; the service acts on the caller's own rows (J.2).
 import { Controller } from '@nestjs/common';
 import {
   meAcknowledgementsConfirmRoute,
   meAcknowledgementsOpenRoute,
   meAcknowledgementsRoute,
+  type CommandResult,
+  type IdParams,
+  type MyAcknowledgementItem,
+  type ObjectOpenResponse,
 } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import { UnauthenticatedError } from '../../common/problems';
+import type { Principal } from '../../common/tokens';
+import { MeAcknowledgementsService } from './me-acknowledgements.service';
+
+function required(principal: Principal | null): Principal {
+  if (!principal) throw new UnauthenticatedError();
+  return principal;
+}
 
 @Controller()
 export class MeAcknowledgementsController {
+  constructor(private readonly mine: MeAcknowledgementsService) {}
+
   @ApiRoute(meAcknowledgementsRoute)
-  meAcknowledgements(): never {
-    return routeStub(meAcknowledgementsRoute);
+  meAcknowledgements(@CurrentPrincipal() principal: Principal | null): Promise<MyAcknowledgementItem[]> {
+    return this.mine.list(required(principal));
   }
 
   @ApiRoute(meAcknowledgementsOpenRoute)
-  meAcknowledgementsOpen(): never {
-    return routeStub(meAcknowledgementsOpenRoute);
+  meAcknowledgementsOpen(
+    @CurrentPrincipal() principal: Principal | null,
+    @RouteInputParam('params') params: IdParams,
+  ): Promise<ObjectOpenResponse> {
+    return this.mine.open(required(principal), params.id);
   }
 
   @ApiRoute(meAcknowledgementsConfirmRoute)
-  meAcknowledgementsConfirm(): never {
-    return routeStub(meAcknowledgementsConfirmRoute);
+  meAcknowledgementsConfirm(
+    @CurrentPrincipal() principal: Principal | null,
+    @RouteInputParam('params') params: IdParams,
+  ): Promise<CommandResult> {
+    return this.mine.confirm(required(principal), params.id);
   }
 }

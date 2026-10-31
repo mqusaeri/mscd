@@ -9,9 +9,14 @@
 // the versions of a document newest first, with the scope policy of the document (owner scope and classification).
 // Every document command queues `readiness.recompute` and `cycle.derive` (D.6) for the systems the document counts
 // in (its linked systems; every active system for an organisation-wide document), in the command's transaction.
+//
+// Milestone 3 (D.2, D.7, M3-05): a document carries its read confirmation settings (`acknowledgement`: required, the
+// audience scope, the roles of scope `roles`, the days to confirm), set on create and changed on update; the approval
+// of a new version of a document that asks for read confirmation opens the confirmation request of that version in the
+// same transaction (`AcknowledgementService`, which closes the request of the earlier version).
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
-import type { CommandResult, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest, DocumentVersionItem } from '@mscd/shared';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import type { CommandResult, DocumentAcknowledgement, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest, DocumentVersionItem } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { addDays } from '../../common/dates';
@@ -22,6 +27,7 @@ import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type AuthzState, type LicenceGate,
   type MembershipService, type PermissionEvaluator, type Principal, type RecordResolver, type TenantInfo, type Trx,
 } from '../../common/tokens';
+import { AcknowledgementService, DEFAULT_SETTINGS, sameSettings, settingsOfRow, type AcknowledgementSettings } from '../acknowledgements/acknowledgement.service';
 import { ScopePolicyService } from '../authz/scope-policy';
 import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
@@ -54,6 +60,15 @@ interface DocumentRow {
   external_source: string | null;
   external_ref: string | null;
   received_at: string | null;
+  acknowledgement_required: boolean;
+  acknowledgement_scope: 'system_roles' | 'roles' | 'organisation';
+  acknowledgement_roles: string[] | null;
+  acknowledgement_due_days: number;
+}
+
+/** The settings of the API (`DocumentAcknowledgement`) as stored settings. */
+function settingsOf(ack: DocumentAcknowledgement): AcknowledgementSettings {
+  return { required: ack.required, scope: ack.scope, roles: ack.scope === 'roles' && ack.roles ? [...ack.roles] : null, dueDays: ack.dueDays };
 }
 
 interface VersionRow {
@@ -76,6 +91,9 @@ export class DocumentCommandsService {
     @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
     @Inject(LICENCE_GATE) private readonly licence: LicenceGate,
     @Inject(JOB_QUEUE) private readonly queue: JobQueue,
+    // Milestone 3 D.7: given by `RegistersModule` (which imports `AcknowledgementsModule`). The bulk import module builds
+    // its own instance of this service for `create` only (imports.module.ts) and gives none; approval never runs there.
+    @Optional() private readonly acknowledgements?: AcknowledgementService,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -140,8 +158,31 @@ export class DocumentCommandsService {
       if (body.note) after.note = body.note;
       const updatedAt = await writeRow(trx, ENTITY, id, set, actor);
       await this.audit.record(trx, { action: 'document.transition', msId: record.ms.id, entityType: ENTITY, entityId: id, entityCode: doc.doc_code, before, after });
+      // Milestone 3 D.7: a new approved version of a document that asks for read confirmation opens its request.
+      const settings = settingsOfRow(doc);
+      const opened = to === 'approved' && inReview && settings.required && this.acknowledgements
+        ? await this.acknowledgements.openForApprovedVersion(trx, {
+            actorId: actor,
+            today,
+            document: { id, code: doc.doc_code, title: doc.title, isOrgWide: doc.is_org_wide },
+            version: { id: inReview.id, label: inReview.version_label },
+            scope: settings.scope,
+            roles: settings.roles,
+            dueDays: settings.dueDays,
+          })
+        : null;
       await this.queueDerived(trx, org, doc.is_org_wide, msIds, actor);
-      return commandResult(systems.length > 0 ? systems.map((s) => s.slug) : [record.ms.slug], { ref: refOf(ENTITY, id, doc.doc_code, updatedAt) });
+      return commandResult(systems.length > 0 ? systems.map((s) => s.slug) : [record.ms.slug], {
+        ref: refOf(ENTITY, id, doc.doc_code, updatedAt),
+        ...(opened
+          ? {
+              message: [
+                `${doc.doc_code} v${inReview!.version_label} approved. ${opened.audience === 1 ? '1 person is' : `${opened.audience} people are`} asked to confirm that they have read it.`,
+                `${doc.doc_code} v${inReview!.version_label} disetujui. ${opened.audience} orang diminta mengonfirmasi bahwa mereka telah membacanya.`,
+              ] as [string, string],
+            }
+          : {}),
+      });
     });
   }
 
@@ -176,12 +217,15 @@ export class DocumentCommandsService {
       const id = randomUUID();
       const origin = body.origin ?? 'internal';
       const position = await sql<{ next: number }>`select coalesce(max(position), -1)::int + 1 as next from document`.execute(trx);
+      const ack = body.acknowledgement ? settingsOf(body.acknowledgement) : DEFAULT_SETTINGS;
       const { rows } = await sql<{ updated_at: Date }>`
         insert into document (id, doc_code, title, doc_type, status, classification, owner_user_id, approver_user_id, next_review_at,
-                              is_org_wide, position, origin, external_source, external_ref, received_at, created_by, updated_by)
+                              is_org_wide, position, origin, external_source, external_ref, received_at, acknowledgement_required,
+                              acknowledgement_scope, acknowledgement_roles, acknowledgement_due_days, created_by, updated_by)
         values (${id}, ${body.docCode}, ${body.title}, ${body.docType}, 'draft', ${body.classification}, ${owner}, ${approver},
                 ${body.nextReviewAt ?? null}::date, ${body.orgWide}, ${position.rows[0]?.next ?? 0}, ${origin}, ${body.externalSource ?? null},
-                ${body.externalRef ?? null}, ${body.receivedAt ?? null}::date, ${actor}, ${actor})
+                ${body.externalRef ?? null}, ${body.receivedAt ?? null}::date, ${ack.required}, ${ack.scope}, ${ack.roles}::text[], ${ack.dueDays},
+                ${actor}, ${actor})
         returning updated_at`.execute(trx);
       for (const [i, s] of systems.entries()) {
         await sql`insert into entity_ms_link (entity_type, entity_id, management_system_id, is_primary, created_by, updated_by)
@@ -211,6 +255,7 @@ export class DocumentCommandsService {
                 ...(body.receivedAt ? { received_at: body.receivedAt } : {}),
               }
             : {}),
+          ...(body.acknowledgement ? { acknowledgement: ack } : {}),
         },
       });
       await this.queueDerived(trx, org, body.orgWide, systems.map((s) => s.id), actor);
@@ -271,6 +316,21 @@ export class DocumentCommandsService {
         const source = patch.externalSource !== undefined ? patch.externalSource : doc.external_source;
         if (!source) {
           throw unprocessable('documents.external_source_required', 'An external document names its source', 'Dokumen eksternal menyebutkan sumbernya');
+        }
+      }
+      // Milestone 3 D.7: the read confirmation settings change as one value.
+      if (patch.acknowledgement !== undefined) {
+        const current = settingsOfRow(doc);
+        const next = settingsOf(patch.acknowledgement);
+        if (!sameSettings(current, next)) {
+          Object.assign(set, {
+            acknowledgement_required: next.required,
+            acknowledgement_scope: next.scope,
+            acknowledgement_roles: next.roles,
+            acknowledgement_due_days: next.dueDays,
+          });
+          before.acknowledgement = current;
+          after.acknowledgement = next;
         }
       }
       const updatedAt = await writeRow(trx, ENTITY, id, set, actor);

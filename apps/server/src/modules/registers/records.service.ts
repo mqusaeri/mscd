@@ -8,6 +8,9 @@
 // Milestone 2 (M2-07): a competence record (code derived from its id) carries the renewal action that the daily
 // `tasks.overdue` job sets before it lapses; the action is completed like any pending action, and from the owner's
 // task list (its task id is the record's id, D-29).
+//
+// Milestone 3 (D.2, M3-05): `tasks.complete` refuses the stored tasks of a read confirmation, an access review and a
+// personal data check with 422 `task_completes_on_screen`: their own screen completes them (D3-13).
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ASSIGNMENT_KIND_ENTITY_TYPES,
@@ -50,6 +53,16 @@ const ASSIGNMENT_COLUMNS: Readonly<Record<AssignmentRequest['kind'], { holder: s
   prep: { holder: 'owner_user_id', due: 'due_at', dueRequired: true },
   cycle: { holder: 'owner_user_id', due: 'due_at', dueRequired: true },
   drift: { holder: 'holder_user_id', due: 'due_at' },
+};
+
+/**
+ * Stored tasks that `tasks.complete` refuses (Milestone 3 D.2, C.3): their source's own screen completes them, and the
+ * refusal names it (C.2 labels).
+ */
+const ON_SCREEN_TASKS: Readonly<Record<string, { en: string; id: string }>> = {
+  acknowledgement: { en: 'Policies to confirm', id: 'Kebijakan untuk dikonfirmasi' },
+  access_review: { en: 'Access review of this system', id: 'Tinjauan akses sistem ini' },
+  privacy_check: { en: 'Personal data checks', id: 'Pemeriksaan data pribadi' },
 };
 
 /** Tables whose open action is `pending_action` (C.10 chain records, and competence records since Milestone 2). */
@@ -282,10 +295,10 @@ export class RecordCommandsService {
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const { rows } = await sql<{
-        id: string; status: string; owner_user_id: string | null; entity_type: string; entity_code: string | null; management_system_id: string | null;
-        ms_slug: string | null; updated_at: Date;
+        id: string; status: string; owner_user_id: string | null; source_rule: string; entity_type: string; entity_code: string | null;
+        management_system_id: string | null; ms_slug: string | null; updated_at: Date;
       }>`
-        select t.id, t.status, t.owner_user_id, t.entity_type, t.entity_code, t.management_system_id, m.slug as ms_slug, t.updated_at
+        select t.id, t.status, t.owner_user_id, t.source_rule, t.entity_type, t.entity_code, t.management_system_id, m.slug as ms_slug, t.updated_at
           from task t left join management_system m on m.id = t.management_system_id
          where t.id = ${id} and t.deleted_at is null for update of t`.execute(trx);
       const task = rows[0];
@@ -293,6 +306,15 @@ export class RecordCommandsService {
       if (!task) return this.completeCompetenceAction(trx, actor, id, body);
       // Another person's task is not visible to the caller (D-29: tasks are listed for their owner only).
       if (task.owner_user_id !== actor) throw new NotFoundError();
+      // Milestone 3 D.2, D3-13: a confirmation, an access review or a personal data check is completed on its own screen.
+      const screen = ON_SCREEN_TASKS[task.source_rule];
+      if (screen) {
+        throw unprocessable(
+          'task_completes_on_screen',
+          `This task is completed on its own screen: ${screen.en}. Open that screen to finish it.`,
+          `Tugas ini diselesaikan di layarnya sendiri: ${screen.id}. Buka layar tersebut untuk menyelesaikannya.`,
+        );
+      }
       if (task.status !== 'open') throw new ConflictError('This task is not open', { messageKey: 'tasks.not_open' });
       const updatedAt = await writeRow(trx, 'task', id, { status: 'done', closed_by: actor, closed_at: new Date() }, actor);
       const code = task.entity_code ?? task.id;

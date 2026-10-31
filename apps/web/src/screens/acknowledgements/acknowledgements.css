@@ -1,0 +1,20 @@
+/* Policy read confirmations and the read confirmation section of a document (M3-05): tokens of src/styles.css only,
+   text of 12px or more, AA contrast in both themes. */
+.mx-ack-note{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.mx-ack-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:0;padding:0;list-style:none}
+.mx-ack-stat{display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 12px;border:1px solid var(--bd);border-radius:var(--r);background:var(--sur2)}
+.mx-ack-stat-label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--tx2)}
+.mx-ack-stat-value{font-size:22px;font-weight:700;line-height:1.2;color:var(--tx);font-variant-numeric:tabular-nums}
+.mx-ack-stat-value[data-tone="bad"]{color:var(--bad)}
+.mx-ack-stat-value[data-tone="ok"]{color:var(--ok)}
+.mx-ack-doc{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mx-ack-code{font-family:var(--ffm);font-weight:600;color:var(--tx)}
+.mx-ack-title{font-size:12px;color:var(--tx2);overflow-wrap:anywhere}
+.mx-ack-num{font-variant-numeric:tabular-nums}
+.mx-ack-overdue{font-weight:600;color:var(--bad);font-variant-numeric:tabular-nums}
+.mx-ack-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mx-ack-roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 12px}
+.mx-ack-section{display:flex;flex-direction:column;gap:8px;padding:14px 16px;margin-top:12px;border:1px solid var(--bd);border-radius:var(--r);background:var(--sur)}
+.mx-ack-section-title{margin:0;font-size:13px;font-weight:600;color:var(--tx)}
+.mx-ack-section p{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.mx-ack-section .mx-ack-latest{color:var(--tx)}

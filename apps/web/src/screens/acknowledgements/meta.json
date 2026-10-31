@@ -1,0 +1,13 @@
+{
+  "id": "acknowledgements",
+  "label": ["Policy read confirmations", "Konfirmasi baca kebijakan"],
+  "group": "impl",
+  "order": 45,
+  "scope": "ms",
+  "perm": ["acknowledgement.manage", "audit.pending.all", "audit.pending.aggregate"],
+  "roles": ["manager", "top"],
+  "nav": true,
+  "pageActions": [["Ask for confirmation", "Minta konfirmasi"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AcknowledgementsModule } from '../acknowledgements/acknowledgements.module';
 import { ReadModelModule } from '../read-model/read-model.module';
 import { AuditEventCommandsService } from './audit-events.service';
 import { DocumentCommandsService } from './documents.service';
@@ -15,8 +16,9 @@ import { SharedChangeGuard } from './shared-change';
  * WP-36 and WP-37.
  */
 @Module({
-  // Milestone 2 sub-module (D.3): holdings, handover and the document version history (M2-07).
-  imports: [ReadModelModule, HoldingsModule],
+  // Milestone 2 sub-module (D.3): holdings, handover and the document version history (M2-07). Milestone 3 (D.7, M3-05):
+  // the approval of a document version opens its read confirmation request through `AcknowledgementService`.
+  imports: [ReadModelModule, HoldingsModule, AcknowledgementsModule],
   controllers: [RegistersController],
   providers: [RecordCommandsService, DocumentCommandsService, AuditEventCommandsService, SharedChangeGuard, ...REGISTER_RULES],
   exports: [RecordCommandsService, DocumentCommandsService, AuditEventCommandsService, SharedChangeGuard],

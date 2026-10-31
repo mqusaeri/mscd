@@ -1,0 +1,66 @@
+// Texts of "Policies to confirm" (MILESTONE-3 M3-05, D.7) and of its banner in the host layer: every label in English
+// and Indonesian (R-22). Plain English, no em dash and no centre dot. `{name}` placeholders are filled with `ctx.fill`.
+export const TEXT = {
+  title: ['Policies to confirm', 'Kebijakan untuk dikonfirmasi'],
+  teraWhat: [
+    'The policies and other controlled documents you are asked to read. Open each new version and confirm that you have read and understood it.',
+    'Kebijakan dan dokumen terkendali lain yang diminta untuk Anda baca. Buka setiap versi baru dan konfirmasi bahwa Anda telah membaca dan memahaminya.',
+  ],
+  teraHow1: ['Choose "Open document" to read the version. It opens in a new tab.', 'Pilih "Buka dokumen" untuk membaca versi tersebut. Dokumen terbuka di tab baru.'],
+  teraHow2: [
+    'Tick "I have read and understood this document" and choose "Confirm". You can confirm only after you have opened the document.',
+    'Centang "Saya telah membaca dan memahami dokumen ini" lalu pilih "Konfirmasi". Anda baru dapat mengonfirmasi setelah membuka dokumen.',
+  ],
+  teraHow3: [
+    'Your confirmation is recorded with its date. The Management System Manager files the list of confirmations as audit evidence.',
+    'Konfirmasi Anda dicatat beserta tanggalnya. Management System Manager menyimpan daftar konfirmasi sebagai bukti audit.',
+  ],
+  intro: [
+    'Each of these documents was approved in a new version. Open it, read it, and confirm that you have read and understood it.',
+    'Setiap dokumen ini telah disetujui dalam versi baru. Buka, baca, lalu konfirmasi bahwa Anda telah membaca dan memahaminya.',
+  ],
+  openTitle: ['To confirm', 'Perlu dikonfirmasi'],
+  openSub: ['Open each document before you confirm it', 'Buka setiap dokumen sebelum Anda mengonfirmasinya'],
+  doneTitle: ['Done', 'Selesai'],
+  doneSub: ['Your confirmations of the last months', 'Konfirmasi Anda beberapa bulan terakhir'],
+  loading: ['Loading your confirmations', 'Memuat konfirmasi Anda'],
+  loadFailed: ['Your confirmations could not be loaded', 'Konfirmasi Anda tidak dapat dimuat'],
+  tryAgain: ['Try again', 'Coba lagi'],
+  allDone: ['Nothing to confirm', 'Tidak ada yang perlu dikonfirmasi'],
+  allDoneText: ['When a policy you must read gets a new approved version, it shows here.', 'Saat kebijakan yang harus Anda baca memiliki versi baru yang disetujui, kebijakan itu muncul di sini.'],
+  version: ['Version {version}', 'Versi {version}'],
+  dueOn: ['Confirm by {date}', 'Konfirmasi paling lambat {date}'],
+  overdue: ['Overdue since {date}', 'Terlambat sejak {date}'],
+  notOpened: ['Not opened yet', 'Belum dibuka'],
+  openedOn: ['Opened on {date}', 'Dibuka pada {date}'],
+  confirmedOn: ['Confirmed on {date}', 'Dikonfirmasi pada {date}'],
+  excused: ['No longer asked', 'Tidak lagi diminta'],
+  openDocument: ['Open document', 'Buka dokumen'],
+  openAgain: ['Open again', 'Buka lagi'],
+  statement: ['I have read and understood this document', 'Saya telah membaca dan memahami dokumen ini'],
+  confirm: ['Confirm', 'Konfirmasi'],
+  openFirst: ['Open the document first.', 'Buka dokumen terlebih dahulu.'],
+  tickFirst: ['Tick the statement first.', 'Centang pernyataan terlebih dahulu.'],
+  confirmed: ['You confirmed {code}', 'Anda telah mengonfirmasi {code}'],
+  sampleOpened: [
+    'The sample build has no stored files, so the document counts as opened.',
+    'Versi contoh tidak memiliki berkas tersimpan, sehingga dokumen dianggap sudah dibuka.',
+  ],
+  sampleNote: [
+    'This is sample data. Changes stay in this browser tab and are gone after a reload.',
+    'Ini data contoh. Perubahan hanya tersimpan di tab browser ini dan hilang setelah dimuat ulang.',
+  ],
+  colDocument: ['Document', 'Dokumen'],
+  colVersion: ['Version', 'Versi'],
+  colResult: ['Result', 'Hasil'],
+
+  // Banner of the host layer
+  region: ['Policies to confirm', 'Kebijakan untuk dikonfirmasi'],
+  bannerOne: ['You have 1 policy to confirm', 'Anda memiliki 1 kebijakan untuk dikonfirmasi'],
+  bannerMany: ['You have {n} policies to confirm', 'Anda memiliki {n} kebijakan untuk dikonfirmasi'],
+  bannerText: ['Open each one, read it and confirm that you have read it.', 'Buka setiap kebijakan, baca, lalu konfirmasi bahwa Anda telah membacanya.'],
+  bannerOverdue: ['{n} past the due date.', '{n} melewati tenggat.'],
+  bannerOpen: ['Open Policies to confirm', 'Buka Kebijakan untuk dikonfirmasi'],
+  later: ['Later', 'Nanti'],
+  unexpected: ['The server sent an answer this screen cannot read.', 'Server mengirim jawaban yang tidak dapat dibaca layar ini.'],
+} as const;

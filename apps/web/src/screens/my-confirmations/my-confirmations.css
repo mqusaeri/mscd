@@ -1,0 +1,19 @@
+/* Policies to confirm and its banner (M3-05): tokens of src/styles.css only, text of 12px or more, AA contrast in both
+   themes. The banner sits at the bottom right of the window, left of the Tera button and above the invitation banner
+   when that one shows, under the drawers and dialogs (z-index 35) and above the page. */
+.mx-myc-note{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.mx-myc-list{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none}
+.mx-myc-item{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px solid var(--bd);border-left:4px solid var(--acc);border-radius:var(--r);background:var(--sur)}
+.mx-myc-item[data-overdue="true"]{border-left-color:var(--bad)}
+.mx-myc-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px}
+.mx-myc-doc{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mx-myc-code{font-family:var(--ffm);font-weight:600;color:var(--tx)}
+.mx-myc-title{font-size:14px;font-weight:600;color:var(--tx);overflow-wrap:anywhere}
+.mx-myc-meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--tx2)}
+.mx-myc-meta [data-tone="bad"]{color:var(--bad);font-weight:600}
+.mx-myc-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.mx-myc-banner{position:fixed;right:96px;bottom:24px;z-index:35;box-sizing:border-box;width:400px;max-width:calc(100vw - 120px);display:flex;flex-direction:column;gap:8px;padding:14px 16px;background:var(--sur);color:var(--tx);border:1px solid var(--bd);border-left:4px solid var(--acc);border-radius:var(--r);box-shadow:var(--sh);font-family:var(--ff);font-size:var(--fs);line-height:1.45}
+.mx-myc-banner[data-stacked="true"]{bottom:200px}
+.mx-myc-banner-title{margin:0;font-size:15px;font-weight:600;color:var(--tx)}
+.mx-myc-banner-text{color:var(--tx2)}
+@media (prefers-reduced-motion:no-preference){.mx-myc-banner{animation:drawerIn .22s ease}}
