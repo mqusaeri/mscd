@@ -389,6 +389,16 @@ describe('storage gateway with the Managed Vault (D.5, D-10)', () => {
     expect((await gatewayCall(base, '/v1/anchors', { tenant: null, objectKey: 'audit-anchors/../tenants/x.json', body })).status).toBe(400);
   });
 
+  it('deletes an object of a bucket without versioning (Milestone 3 D.1 gateway.objects.delete)', async () => {
+    const own = PutResult.parse((await put(pdf(100))).json());
+    expect(await countObjects(own.externalItemId)).toBe(1);
+    const deleted = await gatewayCall(base, '/v1/objects/delete', { tenant, repository: vault(), object: objectRef(own) });
+    expect(deleted.status, deleted.body.toString('utf8')).toBe(200);
+    expect(deleted.json()).toEqual({ deleted: true, versions: 1 });
+    expect(await countObjects(own.externalItemId)).toBe(0);
+    expect((await gatewayCall(base, '/v1/objects/delete', { tenant, repository: vault(), object: objectRef(own) })).json()).toEqual({ deleted: false, versions: 0 });
+  });
+
   it('logs one gateway.call line per call and counts it, without secrets', async () => {
     const log = vi.spyOn(Logger.prototype, 'log');
     const warn = vi.spyOn(Logger.prototype, 'warn');

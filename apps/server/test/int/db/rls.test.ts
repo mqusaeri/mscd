@@ -237,16 +237,28 @@ describe('tenant isolation and privileges (J.5)', () => {
       expect(withOrg.rows[0]!.n).toBe('1');
     });
 
-    it('never let mscd_app DELETE or TRUNCATE a tenant table', async () => {
-      expect(tenantTables).toHaveLength(66 + 3); // Milestone 2 tenant 0008: document_code_link, competence_record, import_run
+    it('never let mscd_app TRUNCATE a tenant table, nor DELETE one other than notification and calendar_feed_token', async () => {
+      // Milestone 2 tenant 0008: document_code_link, competence_record, import_run; Milestone 3 tenant 0009: twelve tables.
+      expect(tenantTables).toHaveLength(66 + 3 + 12);
+      // Milestone 3 D.6.5, D.6.7 (platform 0007): read notifications after their retention and the rows of an erased person.
+      const deletable = new Set(['notification', 'calendar_feed_token']);
       for (const table of tenantTables) {
-        for (const statement of [sql`delete from ${sql.id(a.tenant.schemaName, table)}`, sql`truncate ${sql.id(a.tenant.schemaName, table)}`]) {
+        const statements = [sql`truncate ${sql.id(a.tenant.schemaName, table)}`, ...(deletable.has(table) ? [] : [sql`delete from ${sql.id(a.tenant.schemaName, table)}`])];
+        for (const statement of statements) {
           await expectPgError(
             rolledBack(db.app, { orgId: a.tenant.id }, (trx) => statement.execute(trx)),
             '42501',
             new RegExp(`permission denied for table ${table}$`),
           );
         }
+      }
+      for (const table of deletable) {
+        // Allowed, and still bound to the organisation by the tenant_isolation policy.
+        await rolledBack(db.app, { orgId: a.tenant.id }, (trx) => sql`delete from ${sql.id(a.tenant.schemaName, table)}`.execute(trx));
+        await rolledBack(db.app, { orgId: b.tenant.id }, async (trx) => {
+          const other = await sql`delete from ${sql.id(a.tenant.schemaName, table)}`.execute(trx);
+          expect(other.numAffectedRows, `${table} of another organisation`).toBe(0n);
+        });
       }
     });
 
@@ -259,8 +271,15 @@ describe('tenant isolation and privileges (J.5)', () => {
         where n.nspname = ${a.tenant.schemaName} and c.relkind in ('r', 'p')
         order by c.relname`.execute(admin);
       const appendOnly = new Set(['audit_trail', 'link_health_result', 'reminder']);
+      const deletable = new Set(['notification', 'calendar_feed_token']);
       for (const row of rows) {
-        const expected = row.relname.startsWith('kysely_') ? [] : appendOnly.has(row.relname) ? ['SELECT', 'INSERT'] : ['SELECT', 'INSERT', 'UPDATE'];
+        const expected = row.relname.startsWith('kysely_')
+          ? []
+          : appendOnly.has(row.relname)
+            ? ['SELECT', 'INSERT']
+            : deletable.has(row.relname)
+              ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE']
+              : ['SELECT', 'INSERT', 'UPDATE'];
         expect(row.privs, row.relname).toEqual(expected);
       }
       const usage = await sql<{ app: boolean; pack: boolean; publicUsage: boolean }>`
@@ -278,7 +297,7 @@ describe('tenant isolation and privileges (J.5)', () => {
                (select pg_get_expr(p.polqual, p.polrelid) from pg_policy p where p.polrelid = c.oid limit 1) as qual
         from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = ${a.tenant.schemaName} and c.relkind in ('r', 'p') and c.relname not like 'kysely\\_%'`.execute(admin);
-      expect(rows).toHaveLength(66 + 3);
+      expect(rows).toHaveLength(66 + 3 + 12);
       for (const row of rows) {
         expect({ table: row.relname, rls: row.rls, forced: row.forced, policies: row.policies }).toEqual({
           table: row.relname,
@@ -426,15 +445,16 @@ describe('tenant isolation and privileges (J.5)', () => {
         platform_role: ['SELECT'],
         verified_domain: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         identity_provider: ['SELECT', 'INSERT', 'UPDATE'],
-        user_identity: ['SELECT', 'INSERT', 'UPDATE'],
-        session: ['SELECT', 'INSERT', 'UPDATE'],
-        mfa_factor: ['SELECT', 'INSERT', 'UPDATE'],
-        mfa_recovery_code: ['SELECT', 'INSERT', 'UPDATE'],
+        // Milestone 3 platform 0007: DELETE for the account anonymiser (D.5.2), the unlinking of D.9 and the retention of D.6.7.
+        user_identity: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        session: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        mfa_factor: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        mfa_recovery_code: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         auth_transaction: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         saml_assertion_seen: ['SELECT', 'INSERT', 'DELETE'],
-        password_reset_token: ['SELECT', 'INSERT', 'UPDATE'],
-        invitation: ['SELECT', 'INSERT', 'UPDATE'],
-        user_preference: ['SELECT', 'INSERT', 'UPDATE'],
+        password_reset_token: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        invitation: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        user_preference: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
         licence: ['SELECT', 'INSERT'],
         clock_mark: ['SELECT', 'UPDATE'],
         pack_install: ['SELECT'],
@@ -451,6 +471,9 @@ describe('tenant isolation and privileges (J.5)', () => {
         entitlement: ['SELECT', 'INSERT', 'UPDATE'],
         // Milestone 2 platform 0006 (orchestrator decision between waves 2a and 2b): the run ledger of the daily jobs.
         daily_job_run: ['SELECT', 'INSERT', 'DELETE'],
+        // Milestone 3 platform 0007 (M3-01): organisation exports and deletions.
+        organization_export: ['SELECT', 'INSERT', 'UPDATE'],
+        organization_deletion: ['SELECT', 'INSERT', 'UPDATE'],
       };
       const packExpected: Record<string, string[]> = {
         pack_install: ['SELECT', 'INSERT', 'UPDATE'],
@@ -477,6 +500,8 @@ describe('tenant isolation and privileges (J.5)', () => {
         'licence.superseded_at',
         'organization.local_login',
         'organization.name',
+        // Milestone 3 platform 0007: the end of the read-only period, set with the move to offboarding (D.2).
+        'organization.offboarding_ends_at',
         'organization.site_count',
         // Milestone 2 platform 0005: the operator's status changes run in the api (J.8, M2-S09).
         'organization.status',
@@ -493,6 +518,8 @@ describe('tenant isolation and privileges (J.5)', () => {
         [
           'audit_log', 'identity_provider', 'idempotency_key', 'invitation', 'licence', 'org_membership', 'session', 'tenant_key', 'verified_domain',
           'organization_status_event', 'entitlement', 'daily_job_run',
+          // Milestone 3 platform 0007 (M3-01).
+          'organization_export', 'organization_deletion',
         ].sort(),
       );
     });

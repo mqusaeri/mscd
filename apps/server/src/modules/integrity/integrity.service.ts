@@ -62,6 +62,8 @@ export class IntegrityService {
           .where('r.adapter', '=', 'managed_vault')
           .where('r.deleted_at', 'is', null)
           .where('o.deleted_at', 'is', null)
+          // Milestone 3 D.2: content removed by an approved disposal is never re-hashed.
+          .where('o.content_disposed_at', 'is', null)
           .where('o.hash_source', '=', 'computed')
           .where('o.link_status', 'in', [...REHASH_STATUSES])
           .where(sql<boolean>`coalesce(${lastRehash} < ${since}::timestamptz, true)`)

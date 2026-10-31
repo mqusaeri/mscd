@@ -12,6 +12,7 @@ import {
   type CopyWithinResult,
   type GatewayObjectRef,
   type ListResponse,
+  type ObjectDeleteResult,
   type ObjectMetadata,
   type PutResult,
   type RehashResult,
@@ -38,6 +39,7 @@ import { OCTET_STREAM } from '../../file-type';
 import { badRequest, forbidden, GatewayError, notFound, outsideRoot, tooLarge, unsupported } from '../../problems';
 import { ContentMeter, HashingPassThrough } from '../../streams';
 import type { AdapterContext, AdapterFactory, PutInput, StorageAdapter, StreamResult } from '../types';
+import { deleteObjectVersions } from './vault-delete';
 import { VaultStore, type HeadResult, type ObjectMetadataMap } from './vault-store';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -365,6 +367,15 @@ export class ManagedVaultAdapter implements StorageAdapter {
     const hashValue = plainHash.sha256;
     const matches = object.hashAlgorithm === 'sha256' && object.hashValue !== null && object.hashValue.toLowerCase() === hashValue;
     return { hashValue, matches };
+  }
+
+  /**
+   * Removes every stored version of an object below the repository prefix (Milestone 3 D.1): the disposal of a record's
+   * content (M3-06) and the expiry of an export part (M3-02). Versions a retention rule of the bucket protects stay
+   * (`forbidden`).
+   */
+  async deleteObject(ctx: AdapterContext, object: GatewayObjectRef): Promise<ObjectDeleteResult> {
+    return deleteObjectVersions(this.store, this.keyOf(ctx, object.externalItemId));
   }
 
   async close(): Promise<void> {

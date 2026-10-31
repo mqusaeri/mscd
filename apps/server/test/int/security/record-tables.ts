@@ -1,6 +1,7 @@
 // The tables behind the record ids of the routes with `{ms}` and `{id}` (build plan D.1, F.7), shared by the
 // cross-system, cross-organisation and owner-scope tests of WP-30. Milestone 2 (F): each building package keeps the
-// entries of its routes in `record-tables/M2-nn.ts` (or `M2-Snn.ts`), merged here, so no two packages share a file.
+// entries of its routes in `record-tables/M2-nn.ts` (or `M2-Snn.ts`), merged here, so no two packages share a file;
+// Milestone 3 (D.3) adds `record-tables/M3-nn.ts` of M3-02 to M3-07 the same way.
 import { RECORD_TABLES as M2_05 } from './record-tables/M2-05';
 import { RECORD_TABLES as M2_06 } from './record-tables/M2-06';
 import { RECORD_TABLES as M2_07 } from './record-tables/M2-07';
@@ -8,6 +9,12 @@ import { RECORD_TABLES as M2_08 } from './record-tables/M2-08';
 import { RECORD_TABLES as M2_S09 } from './record-tables/M2-S09';
 import { RECORD_TABLES as M2_S10 } from './record-tables/M2-S10';
 import { RECORD_TABLES as M2_S11 } from './record-tables/M2-S11';
+import { RECORD_TABLES as M3_02 } from './record-tables/M3-02';
+import { RECORD_TABLES as M3_03 } from './record-tables/M3-03';
+import { RECORD_TABLES as M3_04 } from './record-tables/M3-04';
+import { RECORD_TABLES as M3_05 } from './record-tables/M3-05';
+import { RECORD_TABLES as M3_06 } from './record-tables/M3-06';
+import { RECORD_TABLES as M3_07 } from './record-tables/M3-07';
 
 /** The record tables of one Milestone 2 building package. */
 export interface RecordTables {
@@ -22,9 +29,13 @@ export interface RecordTables {
   reads: Readonly<Record<string, string | null>>;
 }
 
-/** The record tables of the Milestone 2 building packages, by package. */
+/**
+ * The record tables of the Milestone 2 building packages and, in the same form, of the Milestone 3 building packages
+ * M3-02 to M3-07 (`record-tables/M3-nn.ts`, Milestone 3 D.3), by package.
+ */
 export const M2_RECORD_TABLES: Readonly<Record<string, RecordTables>> = {
   'M2-05': M2_05, 'M2-06': M2_06, 'M2-07': M2_07, 'M2-08': M2_08, 'M2-S09': M2_S09, 'M2-S10': M2_S10, 'M2-S11': M2_S11,
+  'M3-02': M3_02, 'M3-03': M3_03, 'M3-04': M3_04, 'M3-05': M3_05, 'M3-06': M3_06, 'M3-07': M3_07,
 };
 const M2 = Object.values(M2_RECORD_TABLES);
 

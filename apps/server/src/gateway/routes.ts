@@ -18,6 +18,7 @@ import {
   RegisterClientUploadRequest,
   RepositoryCredential,
   SealCredentialRequest,
+  TenantPurgeRequest,
   TestConnectionRequest,
   type CredentialKind,
   type GatewayCallerName,
@@ -29,6 +30,8 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import type { ZodType } from 'zod';
 import type { AdapterRegistry } from './adapters';
 import type { AdapterContext, StorageAdapter } from './adapters/types';
+import { tenantPrefix } from './adapters/managed-vault/vault-adapter';
+import { purgeTenantObjects } from './adapters/managed-vault/vault-delete';
 import type { VaultStore } from './adapters/managed-vault/vault-store';
 import { authenticate, callerName, type GatewayTokens } from './auth';
 import { openCredential, sealCredential, type OpenedCredential } from './crypto/credentials';
@@ -53,7 +56,7 @@ export interface GatewayRouteDeps {
   tokens: GatewayTokens;
   dataKeys: DataKeyService;
   adapters: AdapterRegistry;
-  /** The vault bucket for audit anchors; null when the Managed Vault is not enabled. */
+  /** The vault bucket for audit anchors and tenant purges; null when the Managed Vault is not enabled. */
   anchorStore: VaultStore | null;
   /** Days of governance retention for anchors when the bucket has object lock without a default rule. */
   anchorLockDays: number;
@@ -97,6 +100,9 @@ const OPERATIONS: Readonly<Record<string, string>> = {
   'POST /v1/copy-within': 'copy-within',
   'POST /v1/rehash': 'rehash',
   'POST /v1/anchors': 'anchors',
+  // Milestone 3 D.1 (M3-01).
+  'POST /v1/objects/delete': 'objects.delete',
+  'POST /v1/tenants/purge': 'tenants.purge',
 };
 
 /** Largest `X-MSCD-Put` header value (base64 of the JSON descriptor). */
@@ -339,6 +345,29 @@ export function gatewayRoutes(deps: GatewayRouteDeps) {
       if (!deps.anchorStore) throw unsupported('The Managed Vault bucket is not enabled in this gateway');
       call.adapter = 'managed_vault';
       return writeAnchor(deps.anchorStore, body.objectKey, body.body, deps.anchorLockDays);
+    });
+
+    // Milestone 3 D.1: every stored version of one object; adapters without stored content answer `unsupported`.
+    fastify.post('/objects/delete', async (request, reply) => {
+      const body = parse(ObjectRequest, request.body, 'request body');
+      const { adapter, ctx } = await prepare(request, reply, body.tenant, body.repository);
+      if (!adapter.deleteObject) throw unsupported(`The ${adapter.adapter} adapter keeps no stored content to delete`);
+      return adapter.deleteObject(ctx, body.object);
+    });
+
+    // Milestone 3 D.1, D.5.2 step 4: every object version of one organisation in the vault bucket, then its cached data
+    // key. Only the worker purges (as only it writes anchors); without TLS (demo, test) there is no name to check.
+    fastify.post('/tenants/purge', async (request) => {
+      const body = parse(TenantPurgeRequest, request.body, 'request body');
+      const call = callOf(request);
+      call.orgId = body.orgId;
+      if (deps.tlsMode === 'mtls' && call.callerCn !== 'mscd-worker') throw forbidden('Only the worker purges an organisation', 'caller');
+      if (body.confirmOrgId !== body.orgId) throw badRequest('confirmOrgId does not name the organisation of orgId; nothing is purged');
+      if (!deps.anchorStore) throw unsupported('The Managed Vault bucket is not enabled in this gateway');
+      call.adapter = 'managed_vault';
+      const result = await purgeTenantObjects(deps.anchorStore, tenantPrefix(body.orgId));
+      deps.dataKeys.forget(body.orgId);
+      return result;
     });
   };
 }

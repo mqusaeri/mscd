@@ -1,5 +1,7 @@
 import type { Type } from '@nestjs/common';
 import { AdminIdpModule } from '../modules/admin-idp/admin-idp.module';
+import { AccessReviewsModule } from '../modules/access-reviews/access-reviews.module';
+import { AcknowledgementsModule } from '../modules/acknowledgements/acknowledgements.module';
 import { AdminUsersModule } from '../modules/admin-users/admin-users.module';
 import { AuditModule } from '../modules/audit/audit.module';
 import { AuditRegistersModule } from '../modules/audit-registers/audit-registers.module';
@@ -22,11 +24,14 @@ import { ManagementSystemsModule } from '../modules/management-systems/managemen
 import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { ObservabilityModule } from '../modules/observability/observability.module';
 import { OpsModule } from '../modules/ops/ops.module';
+import { OrgExportModule } from '../modules/org-export/org-export.module';
 import { PacksModule } from '../modules/packs/packs.module';
+import { PrivacyModule } from '../modules/privacy/privacy.module';
 import { ReadModelModule } from '../modules/read-model/read-model.module';
 import { ReadModelApiModule } from '../modules/read-model-api/read-model-api.module';
 import { RegistersModule } from '../modules/registers/registers.module';
 import { RemindersModule } from '../modules/reminders/reminders.module';
+import { RetentionModule } from '../modules/retention/retention.module';
 import { RiskRegistersModule } from '../modules/risk-registers/risk-registers.module';
 import { RulesModule } from '../modules/rules/rules.module';
 import { StorageModule } from '../modules/storage/storage.module';
@@ -75,6 +80,13 @@ const DOMAIN_MODULES: readonly Type<unknown>[] = [
   OpsModule,
   // Milestone 2 (D.1, D2-13): bulk import, built by M2-08.
   ImportsModule,
+  // Milestone 3 (D.3): one module per building package, written by M3-01 with stub controllers and jobs. The deletion
+  // module of M3-03 is a sub-module of OpsModule.
+  OrgExportModule,
+  PrivacyModule,
+  AcknowledgementsModule,
+  RetentionModule,
+  AccessReviewsModule,
 ];
 
 /** Modules that only serve HTTP reads or test routes; the worker does not load them. */

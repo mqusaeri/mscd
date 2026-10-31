@@ -84,6 +84,15 @@ const F6: Record<Permission, Partial<Record<Column, Cell>>> = {
   'internal_audit.manage': { MM: 'full', IA: 'full' },
   'ops.tenants.manage': { OP: 'full' },
   'ops.entitlements.manage': { OP: 'full' },
+  // Milestone 3 J.2
+  'org.export.manage': { TA: 'full' },
+  'privacy_request.manage': { TA: 'full' },
+  'privacy_request.assist': { MM: 'full' },
+  'acknowledgement.manage': { MM: 'full' },
+  'retention.manage': { MM: 'full' },
+  'retention.approve': { MM: 'full', PO: 'full' },
+  'access_review.manage': { TA: 'full' },
+  'access_review.decide': { MM: 'full', PO: 'full' },
 };
 
 /** Where each permission is checked with `tenancy.mode: single` (the test profile). */
@@ -91,6 +100,8 @@ const ORG_SCOPED = new Set<Permission>([
   'storage.repository.read', 'storage.repository.manage', 'storage.repository.test', 'storage.routing.manage', 'storage.object.metadata.read',
   'pack.read', 'pack.activate', 'pack.install', 'license.read', 'license.manage', 'user.manage', 'idp.manage', 'org.settings.manage', 'ms.admin',
   'audit_trail.metadata.read',
+  // Milestone 3 J.2
+  'org.export.manage', 'privacy_request.manage', 'access_review.manage',
 ]);
 const PLATFORM_SCOPED = new Set<Permission>(['ops.read', 'ops.jobs.run', 'ops.users.manage', 'ops.tenants.manage', 'ops.entitlements.manage']);
 

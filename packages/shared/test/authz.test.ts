@@ -1,10 +1,11 @@
-// The permission matrix against build plan F.6 and Milestone 2 J.2, the decision helpers of F.7 and the UI role mapping.
+// The permission matrix against build plan F.6, Milestone 2 J.2 and Milestone 3 J.2, the decision helpers of F.7 and the
+// UI role mapping.
 import { describe, expect, it } from 'vitest';
 import {
   BUSINESS_ROLES, PERMISSIONS, PERMISSION_MATRIX, effectiveGrant, evaluatePermission, permissionsFor, rolesHolding, uiRoleFor,
 } from '../src/index.js';
 import type { BusinessRole, OrgRole, Permission, PermissionGrant, PlatformRole, RoleContext, TenancyMode } from '../src/index.js';
-import { m2PermissionRows, planPermissionRows } from './helpers.js';
+import { m2PermissionRows, m3PermissionRows, planPermissionRows } from './helpers.js';
 
 const COLUMNS = [
   'ms_manager', 'programme_owner', 'domain_owner', 'risk_owner', 'internal_auditor', 'top_management', 'external_auditor',
@@ -44,11 +45,40 @@ describe('PERMISSION_MATRIX', () => {
   const rows = planPermissionRows();
   const planned = rows.flatMap((r) => r.permissions);
 
-  it('has exactly the permissions of F.6 and Milestone 2 J.2, in plan order', () => {
+  it('has exactly the permissions of F.6, Milestone 2 J.2 and Milestone 3 J.2, in plan order', () => {
     expect(planned.length).toBeGreaterThan(55);
     expect([...PERMISSIONS]).toEqual(planned);
     expect(Object.keys(PERMISSION_MATRIX).sort()).toEqual([...planned].sort());
     expect(m2PermissionRows().flatMap((r) => r.permissions)).toEqual(['internal_audit.manage', 'ops.tenants.manage', 'ops.entitlements.manage']);
+    expect(m3PermissionRows().flatMap((r) => r.permissions)).toEqual([
+      'org.export.manage', 'privacy_request.manage', 'privacy_request.assist', 'acknowledgement.manage', 'retention.manage', 'retention.approve',
+      'access_review.manage', 'access_review.decide',
+    ]);
+  });
+
+  it('gives the Milestone 3 rights to Tenant Admins, managers and Programme Owners only (Milestone 3 J.2, product decisions 3 and 6)', () => {
+    for (const p of ['org.export.manage', 'privacy_request.manage', 'access_review.manage'] as const) {
+      expect(evaluatePermission(p, ctx({ orgRoles: ['tenant_admin'] })), p).toBe('full');
+      expect(evaluatePermission(p, ctx({ orgRoles: ['storage_admin'] })), p).toBeNull();
+      expect(evaluatePermission(p, ctx({ anyMsRoles: ['ms_manager'] })), p).toBeNull();
+      // The platform operator starts an export through the operator routes and never holds org.export.manage.
+      expect(evaluatePermission(p, ctx({ tenancy: 'multi', platformRoles: ['platform_operator'] })), p).toBeNull();
+    }
+    for (const p of ['privacy_request.assist', 'acknowledgement.manage', 'retention.manage'] as const) {
+      expect(evaluatePermission(p, ctx({ msRoles: ['ms_manager'] })), p).toBe('full');
+      expect(evaluatePermission(p, ctx({ msRoles: ['programme_owner'] })), p).toBeNull();
+    }
+    for (const p of ['retention.approve', 'access_review.decide'] as const) {
+      expect(evaluatePermission(p, ctx({ msRoles: ['ms_manager'] })), p).toBe('full');
+      expect(evaluatePermission(p, ctx({ msRoles: ['programme_owner'] })), p).toBe('full');
+      for (const role of ['domain_owner', 'risk_owner', 'internal_auditor', 'top_management', 'external_auditor', 'compliance_investigator'] as const) {
+        expect(evaluatePermission(p, ctx({ msRoles: [role] })), `${p} ${role}`).toBeNull();
+      }
+    }
+    // Business permissions of Milestone 3 never go to an organisation role (TS 7.1).
+    for (const p of ['privacy_request.assist', 'acknowledgement.manage', 'retention.manage', 'retention.approve', 'access_review.decide'] as const) {
+      expect(evaluatePermission(p, ctx({ orgRoles: ['tenant_admin', 'storage_admin'] })), p).toBeNull();
+    }
   });
 
   it('lets MS Managers and Internal Auditors plan internal audits and keeps the new operator rights to the platform (Milestone 2 J.2)', () => {

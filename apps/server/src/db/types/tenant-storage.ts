@@ -108,6 +108,11 @@ export interface StorageObjectTable {
   next_check_at: Date | null;
   web_url: string | null;
   encryption: NullableJson;
+  /** Milestone 3 (tenant 0009): the file was replaced by a newer one (D.2 evidence.files, M3-06). */
+  replaced_at: Date | null;
+  /** Milestone 3 (tenant 0009, D.8): the content was removed by an approved disposal; open and download answer 404. */
+  content_disposed_at: Date | null;
+  content_disposed_by: string | null;
 }
 
 /** `link_health_result` */
@@ -204,7 +209,8 @@ export const TABLE_COLUMNS = tableColumns<TenantStorageTables>()({
     'storage_repository_id', 'external_item_id', 'external_version_id', 'version_label', 'display_name', 'mime_type',
     'size_bytes', 'hash_algorithm', 'hash_value', 'hash_source', 'provider_created_at', 'provider_modified_at',
     'provider_modified_by', 'folder_path', 'folder_id', 'link_status', 'link_status_since', 'link_status_reason',
-    'last_verified_at', 'last_good_check_at', 'next_check_at', 'web_url', 'encryption',
+    'last_verified_at', 'last_good_check_at', 'next_check_at', 'web_url', 'encryption', 'replaced_at', 'content_disposed_at',
+    'content_disposed_by',
   ],
   link_health_result: [
     'id', 'organization_id', 'storage_object_id', 'checked_at', 'outcome', 'status_before', 'status_after',

@@ -124,13 +124,19 @@ export interface ExportFileTable {
   created_by: string | null;
   updated_by: string | null;
   deleted_at: Date | null;
-  kind: 'portfolio_board' | 'readiness' | 'soa' | 'document_register' | 'audit_trail';
-  format: 'pdf' | 'xlsx' | 'csv';
+  /** `personal_data`: Milestone 3 J.7, the export of one person's data (D.6.3). */
+  kind: 'portfolio_board' | 'readiness' | 'soa' | 'document_register' | 'audit_trail' | 'personal_data';
+  /** `json`: Milestone 3 J.7, the format of a personal data export. */
+  format: 'pdf' | 'xlsx' | 'csv' | 'json';
   management_system_id: string | null;
   background_task_id: string | null;
   storage_object_id: string | null;
   file_name: string | null;
   expires_at: Date;
+  /** Milestone 3 D.3: the person a `personal_data` export is about. */
+  subject_user_id: string | null;
+  /** Milestone 3 D.3: the access request a `personal_data` export answers. */
+  privacy_request_id: string | null;
 }
 
 /** `auditor_access_grant` */
@@ -198,7 +204,7 @@ export const TABLE_COLUMNS = tableColumns<TenantWorkflowTables>()({
   ],
   export_file: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'kind', 'format',
-    'management_system_id', 'background_task_id', 'storage_object_id', 'file_name', 'expires_at',
+    'management_system_id', 'background_task_id', 'storage_object_id', 'file_name', 'expires_at', 'subject_user_id', 'privacy_request_id',
   ],
   auditor_access_grant: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',

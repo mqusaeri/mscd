@@ -1,4 +1,5 @@
 // Area `audit-trail` (owner from wave 4: WP-08): reading, exporting and verifying the audit chains (D.2, D.3, F.11).
+// Milestone 3 (D.2, D.5.4) adds the redaction marks of an entry and the count of attested redactions of a chain.
 import { z } from 'zod';
 import { ActorKind } from '../enums.js';
 import { Ed25519Signature, KeyId } from '../pack/licence.js';
@@ -19,6 +20,9 @@ const metaShape = {
   requestId: z.string().nullable().optional(),
   sourceIp: z.string().nullable().optional(),
   userAgent: z.string().nullable().optional(),
+  /** Milestone 3 D.5.4: personal values of the entry were removed by an attested redaction (optional until M3-03 fills it). */
+  redacted: z.boolean().optional(),
+  redactedAt: Instant.nullable().optional(),
 };
 
 const EXAMPLE_ENTRY = {
@@ -32,7 +36,10 @@ export const AuditEntry = named(
   'AuditEntry',
   z.object({ ...metaShape, entityCode: z.string().nullable(), before: z.unknown().optional(), after: z.unknown().optional() }),
   'Full audit entry with changed fields (audit_trail.read, F.11)',
-  { valid: [EXAMPLE_ENTRY], invalid: [{ ...EXAMPLE_ENTRY, seq: 0 }, { ...EXAMPLE_ENTRY, actor: { handle: 'rina', displayName: 'Rina', kind: 'admin' } }] },
+  {
+    valid: [EXAMPLE_ENTRY, { ...EXAMPLE_ENTRY, sourceIp: null, userAgent: null, redacted: true, redactedAt: '2026-11-02T03:00:00Z' }],
+    invalid: [{ ...EXAMPLE_ENTRY, seq: 0 }, { ...EXAMPLE_ENTRY, actor: { handle: 'rina', displayName: 'Rina', kind: 'admin' } }, { ...EXAMPLE_ENTRY, redactedAt: 'yesterday' }],
+  },
 );
 export type AuditEntry = z.infer<typeof AuditEntry>;
 
@@ -85,9 +92,13 @@ export type AuditAnchor = z.infer<typeof AuditAnchor>;
 
 export const AuditChainVerifyResult = named(
   'AuditChainVerifyResult',
-  z.object({ chain: z.string(), checked: z.int().min(0), firstBrokenSeq: z.int().min(1).nullable().optional(), anchorOk: z.boolean() }),
-  'Result of the chain verification query and the anchor comparison of one chain (F.11)',
-  { valid: [{ chain: 'platform.audit_log', checked: 120, firstBrokenSeq: null, anchorOk: true }], invalid: [{ chain: 'x', checked: -1, anchorOk: true }] },
+  z.object({
+    chain: z.string(), checked: z.int().min(0), firstBrokenSeq: z.int().min(1).nullable().optional(), anchorOk: z.boolean(),
+    /** Milestone 3 D.5.4: rows checked against an attestation instead of their columns (optional until M3-03 fills it). */
+    redacted: z.int().min(0).optional(),
+  }),
+  'Result of the chain verification query and the anchor comparison of one chain (F.11); redacted counts the attested redactions (Milestone 3 D.5.4)',
+  { valid: [{ chain: 'platform.audit_log', checked: 120, firstBrokenSeq: null, anchorOk: true }, { chain: 'org_ndt.audit_trail', checked: 4012, firstBrokenSeq: null, anchorOk: true, redacted: 14 }], invalid: [{ chain: 'x', checked: -1, anchorOk: true }, { chain: 'x', checked: 1, anchorOk: true, redacted: -1 }] },
 );
 export type AuditChainVerifyResult = z.infer<typeof AuditChainVerifyResult>;
 

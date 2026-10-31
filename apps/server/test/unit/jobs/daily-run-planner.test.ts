@@ -120,6 +120,8 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     expect(summary(next)).toEqual([
       ...names((j) => j.at < '03:00').map((n) => `${n}@2030-01-16 catch-up 0`),
       'cycle.derive@2030-01-16 due 0',
+      // Milestone 3 J.3 (M3-06): the disposal review shares the 03:15 slot.
+      'retention.review@2030-01-16 due 0',
     ]);
     expect(next.filter((r) => r.job.allSystems).map((r) => r.singletonKey)).toEqual(all);
   });
@@ -160,7 +162,11 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     const at0205 = plan('2030-01-16T02:05:00Z', 'UTC', ledger);
     expect(at0205.map((r) => r.job.name)).toContain('readiness.recompute');
     ledger = [...ledger, ...rowsOf(at0205.filter((r) => r.job.name !== 'readiness.recompute'), '2030-01-16T02:05:00Z')];
-    expect(summary(plan('2030-01-16T03:05:00Z', 'UTC', ledger))).toEqual(['readiness.recompute@2030-01-16 catch-up 0', 'cycle.derive@2030-01-16 due 600']);
+    expect(summary(plan('2030-01-16T03:05:00Z', 'UTC', ledger))).toEqual([
+      'readiness.recompute@2030-01-16 catch-up 0',
+      'cycle.derive@2030-01-16 due 600',
+      'retention.review@2030-01-16 due 600', // Milestone 3 J.3 (M3-06), 03:15
+    ]);
     // Kiritimati (UTC+14), a fresh ledger from 00:05 on 16 January there (10:05 UTC on 15 January); the tick of 03:05
     // (13:05 UTC) sent cycle.derive of 16 January for 03:15. At 13:10 UTC the organisation moves 24 hours west, to
     // Honolulu: 03:10 on 15 January. A tick at 13:20 UTC finds cycle.derive of 15 January due, but its run of 16 January
@@ -181,13 +187,19 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
     const west = fullDays('Etc/GMT+12', '2030-01-16');
     expect(west.every((r) => r.enqueuedAt >= new Date('2030-01-16T12:05:00Z'))).toBe(true);
     const east = plan('2030-01-16T20:05:00Z', 'Pacific/Kiritimati', west);
-    expect(east.map((r) => `${r.job.name}@${r.localDate} ${r.path}`)).toEqual(names((j) => j.at < '10:00').map((n) => `${n}@2030-01-17 catch-up`));
+    // A job whose run of 16 January there is younger than RECENT_RUN_SECONDS may still wait, so the tick holds it back
+    // for a later tick: since Milestone 3 J.3, privacy.deadlines (08:00 there, 20:00 UTC) and acknowledgement.reminders
+    // (08:10, 20:10 UTC).
+    const recent = new Set(west.filter((r) => r.enqueuedAt.getTime() > Date.parse('2030-01-16T20:05:00Z') - RECENT_RUN_SECONDS * 1000).map((r) => r.job));
+    expect([...recent].sort()).toEqual(['acknowledgement.reminders', 'privacy.deadlines']);
+    expect(east.map((r) => `${r.job.name}@${r.localDate} ${r.path}`)).toEqual(names((j) => j.at < '10:00' && !recent.has(j.name)).map((n) => `${n}@2030-01-17 catch-up`));
   });
 
   it('runs the weekly job on its weekday only, and catches it up on the day after', () => {
     // Sunday 20 January 2030, 03:05 in Jakarta: integrity.rehash and cycle.derive are due.
     const sunday = plan('2030-01-19T20:05:00Z', 'Asia/Jakarta', fullDays('Asia/Jakarta', '2030-01-18', '2030-01-19', '2030-01-20').filter((r) => r.scheduledFor < new Date('2030-01-19T20:00:00Z')));
-    expect(summary(sunday)).toEqual(['integrity.rehash@2030-01-20 due 0', 'cycle.derive@2030-01-20 due 600']);
+    // Milestone 3 J.3 (M3-06): retention.review shares the 03:15 slot every day.
+    expect(summary(sunday)).toEqual(['integrity.rehash@2030-01-20 due 0', 'cycle.derive@2030-01-20 due 600', 'retention.review@2030-01-20 due 600']);
     // Monday 00:05: the Sunday run did not happen (no tick at 03:05), so it is caught up; Monday has none.
     const missed = fullDays('Asia/Jakarta', '2030-01-18', '2030-01-19', '2030-01-20').filter((r) => r.job !== 'integrity.rehash' || r.localDate !== '2030-01-20');
     const monday = plan('2030-01-20T17:05:00Z', 'Asia/Jakarta', missed);
@@ -246,6 +258,7 @@ describe('planDailyRuns: the runs of one tick (Milestone 2 D.2)', () => {
       'drift.evaluate@2030-03-10 catch-up 0',
       'integrity.rehash@2030-03-10 due 0',
       'cycle.derive@2030-03-10 due 600',
+      'retention.review@2030-03-10 due 600', // Milestone 3 J.3 (M3-06), 03:15
     ]);
     // 3 November 2030: 01:00 to 01:59 come twice. The second 01:05 runs nothing.
     const fallBack = [...fullDays('America/New_York', '2030-11-01', '2030-11-02'), ...fullDays('America/New_York', '2030-11-03').filter((r) => r.job === 'freshness.sweep' || r.scheduledFor < new Date('2030-11-03T05:00:00Z'))];

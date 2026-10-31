@@ -3,9 +3,13 @@
 // building package in `m2-pending/`. This suite checks the lists against the route table, and that each listed route
 // (and each pending path value of an existing route) answers the stub's problem to a caller the guard admits. It also
 // checks the D.2 change for the platform operator in multi tenancy: `admin.packs.list` and `admin.packs.import` are
-// admitted without a membership.
+// admitted without a membership. Milestone 3 (D.3): M3-01 mounts the routes of M3-02 to M3-07 the same way and lists
+// them in `m2-pending/M3-nn.json`, so this suite covers them too.
 import { API_ROUTES, WORK_PACKAGE_IDS, type RouteDef } from '@mscd/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { JobHandlerRegistry } from '../../../src/common/jobs/job-handler';
+import { OrgLifecycleJob } from '../../../src/modules/ops/deletion/org-lifecycle.job';
+import { testTenancy } from '../../setup/tenancy';
 import { useTestDatabase } from '../../setup/test-db';
 import { PENDING_PATH_VALUES, PENDING_ROUTES, pendingFiles } from '../m2-pending/pending';
 import { expectedAllowed } from '../rbac/expectations';
@@ -56,7 +60,8 @@ describe('Milestone 2 pending lists (D.1)', () => {
     const packages = [...files.values()].map((f) => f.workPackage);
     expect(packages.filter((p) => !(WORK_PACKAGE_IDS as readonly string[]).includes(p))).toEqual([]);
     expect(new Set(packages).size).toBe(packages.length);
-    expect(packages.filter((p) => !p.startsWith('M2-'))).toEqual([]);
+    // Milestone 3 (D.3): the building packages M3-02 to M3-07 keep their stubs in the same folder.
+    expect(packages.filter((p) => !p.startsWith('M2-') && !p.startsWith('M3-'))).toEqual([]);
   });
 
   it('lists routes of the route table, each owned by the package whose file lists it, and none twice', () => {
@@ -132,6 +137,22 @@ describe('Milestone 2 stubs answer 501 not-implemented after the guard (D.1)', (
       });
     });
   }
+
+  it('runs org.lifecycle in both tenancy modes (it does nothing in single tenancy); org.purge has a handler in multi tenancy only (Milestone 3 D.5.1)', async () => {
+    const names = full.get<JobHandlerRegistry>(JobHandlerRegistry).discover().map((h) => h.metadata.name);
+    expect(names).toContain('org.lifecycle');
+    // `npm run test:int` runs this suite in single tenancy, `npm run test:int:saas` in multi tenancy.
+    expect(names.includes('org.purge')).toBe(testTenancy() === 'multi');
+    await expect(full.get<OrgLifecycleJob>(OrgLifecycleJob).handle({ id: 'job-m3-01', name: 'org.lifecycle', attempt: 1, env: { orgId: null, payload: {} } })).resolves.toBeUndefined();
+    // The operator console lists the job in "Run job" (OPS_RUNNABLE_JOBS): it is queued, not refused as unavailable.
+    await resetRateLimits(db);
+    const op = await addFixtureUser(db, 'tst', 'm3single-op', { platformOperator: true });
+    const operator = await sessionFor(full, op.id, null);
+    const def = BY_ID.get('ops.jobs.run')!;
+    const call = await callRoute(operator, def, exampleInput(def, { override: { params: { name: 'org.lifecycle' }, body: {} } }));
+    expect(call.violations).toEqual([]);
+    expect(call.status, call.text.slice(0, 200)).toBe(202);
+  });
 
   it('denies a stubbed route to a role the matrix does not admit before the stub runs', async () => {
     await resetRateLimits(db);

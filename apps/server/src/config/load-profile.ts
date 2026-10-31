@@ -3,6 +3,8 @@ import path from 'node:path';
 import { parse as parseYaml, YAMLParseError } from 'yaml';
 import type { z } from 'zod';
 import {
+  LIFECYCLE_TEST_MINIMUM,
+  LIFECYCLE_TEST_ONLY_KEYS,
   profileRules,
   profileSchema,
   releaseFlavourIssues,
@@ -69,12 +71,30 @@ export function loadProfile(options: { env: Env; flavor: BuildFlavor; cwd?: stri
   if (!isPlainObject(raw)) {
     throw new ProfileError(file, [{ path: '', message: 'must be a YAML mapping of sections' }]);
   }
-  const profile = validateProfile(applyOverrides(raw, env), flavor, file);
+  const profile = validateProfile(applyOverrides(raw, env), flavor, file, env);
   return { profile: resolveProfilePaths(profile, path.dirname(file)), file };
 }
 
-/** Validates a raw profile object (after overrides). Exported for tests and tooling. */
-export function validateProfile(raw: Record<string, unknown>, flavor: BuildFlavor, file?: string): Profile {
+/**
+ * The lifecycle check of Milestone 3 D.3: `lifecycle.offboarding_days`, `lifecycle.deletion_grace_days` and
+ * `lifecycle.deletion_min_grace_days` below 7 exist for the test stacks of M3-03 and M3-11 only. Such a value is refused
+ * unless the environment holds `MSCD_SAAS_TEST=1` (test stacks only, as `backup verify --write-probe`) or the profile is
+ * a test profile (it has the `test` section, which only development builds accept, `releaseFlavourIssues`). So a
+ * production server can never purge an organisation without the 7-day minimum and its two warning emails.
+ */
+export function lifecycleProfileIssues(profile: Profile, env: Env): ProfileIssue[] {
+  if (env.MSCD_SAAS_TEST === '1' || profile.test !== undefined) return [];
+  return LIFECYCLE_TEST_ONLY_KEYS.filter((key) => profile.lifecycle[key] < LIFECYCLE_TEST_MINIMUM).map((key) => ({
+    path: `lifecycle.${key}`,
+    message: `values below ${LIFECYCLE_TEST_MINIMUM} are for test stacks only, which run with the environment variable MSCD_SAAS_TEST=1; use ${LIFECYCLE_TEST_MINIMUM} or more (Milestone 3 D.3)`,
+  }));
+}
+
+/**
+ * Validates a raw profile object (after overrides). Exported for tests and tooling. `env` feeds the lifecycle check
+ * (`lifecycleProfileIssues`); without it the check runs as without `MSCD_SAAS_TEST`.
+ */
+export function validateProfile(raw: Record<string, unknown>, flavor: BuildFlavor, file?: string, env: Env = {}): Profile {
   const issues: ProfileIssue[] = [];
   const input = structuredClone(raw);
   for (const [dotted, message] of Object.entries(REMOVED_KEYS)) {
@@ -87,6 +107,7 @@ export function validateProfile(raw: Record<string, unknown>, flavor: BuildFlavo
   }
   issues.push(...profileRules(parsed.data));
   if (flavor === 'release') issues.push(...releaseFlavourIssues(parsed.data));
+  issues.push(...lifecycleProfileIssues(parsed.data, env));
   if (issues.length > 0) throw new ProfileError(file, issues);
   return parsed.data;
 }

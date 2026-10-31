@@ -158,8 +158,9 @@ describe(`migrations on ${EXTERNAL_SERVER ? 'the server of MSCD_TEST_DATABASE_UR
       expect(tenant.migrations).toEqual(TENANT);
       const applied = await sql<{ name: string }>`select name from ${sql.id(tenant.schemaName, 'kysely_migration')} order by name`.execute(migrator);
       expect(applied.rows.map((r) => r.name)).toEqual(TENANT);
-      // 66 tables of Milestone 1 and the three of tenant 0008 (document_code_link, competence_record, import_run).
-      expect(await schemaTables(migrator, tenant.schemaName)).toHaveLength(66 + 3);
+      // 66 tables of Milestone 1, the three of tenant 0008 (document_code_link, competence_record, import_run) and the
+      // twelve of tenant 0009 (Milestone 3 D.3).
+      expect(await schemaTables(migrator, tenant.schemaName)).toHaveLength(66 + 3 + 12);
     }
   });
 

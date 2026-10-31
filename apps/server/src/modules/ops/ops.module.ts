@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { OpsAccountsController } from './accounts.controller';
 import { OpsAccountsService } from './accounts.service';
+import { DeletionModule } from './deletion/deletion.module';
 import { DiagnosticsService } from './diagnostics.service';
 import { DomainsModule } from './domains/domains.module';
 import { OperatorAccountsService } from './operator-accounts.service';
@@ -24,8 +25,9 @@ import { TenantDataKeys } from './tenant-data-keys';
  * `OperatorsService`).
  */
 @Module({
-  // Milestone 2 sub-module (D.3): email domain verification of the SaaS track (M2-S11).
-  imports: [DomainsModule],
+  // Milestone 2 sub-module (D.3): email domain verification of the SaaS track (M2-S11). Milestone 3 sub-module (D.3):
+  // end of contract and verified deletion (M3-03).
+  imports: [DomainsModule, DeletionModule],
   controllers: [OpsController, OpsAccountsController],
   providers: [
     OpsMetricsCollector, OpsService, DiagnosticsService, OpsOrganizationsService, OrganizationStatusService, OperatorAccountsService, TenantDataKeys,

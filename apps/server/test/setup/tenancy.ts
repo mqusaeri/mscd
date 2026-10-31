@@ -17,11 +17,18 @@ export const SAAS_RUN_VARIABLE = 'MSCD_TEST_TENANCY';
 /** Multi tenancy with schema isolation, as saas.yaml runs (MSCD__<SECTION>__<KEY> overrides of the test profile). */
 export const MULTI_TENANCY_ENV = { MSCD__TENANCY__MODE: 'multi', MSCD__TENANCY__ISOLATION: 'schema' } as const;
 
-/** The suites (folders of test/int) that the SaaS run runs with tenancy mode multi. */
-export const MULTI_TENANCY_SUITES = ['security', 'rbac', 'contract'] as const;
+/**
+ * The suites (folders of test/int) that the SaaS run runs with tenancy mode multi. Milestone 3 (D.3): `privacy`
+ * (requests from one person, M3-04) runs in both modes, its files with the tenancy of the run.
+ */
+export const MULTI_TENANCY_SUITES = ['security', 'rbac', 'contract', 'privacy'] as const;
 
-/** The suites of the operator's organisation lifecycle that the SaaS run adds; they set the tenancy of each test. */
-export const OPERATOR_SUITES = ['saas-ops', 'entitlements', 'domains'] as const;
+/**
+ * The suites of the operator's organisation lifecycle that the SaaS run adds; they set the tenancy of each test.
+ * Milestone 3 (D.3): `org-export` (M3-02: the screen in both modes, the operator routes and the refused CLI in multi
+ * tenancy) and `org-deletion` (M3-03: multi tenancy, with the single-tenancy refusals).
+ */
+export const OPERATOR_SUITES = ['saas-ops', 'entitlements', 'domains', 'org-export', 'org-deletion'] as const;
 
 /** True in the SaaS run (`npm run test:int:saas`), in the global setup and in every test file of the run. */
 export function isSaasRun(env: NodeJS.ProcessEnv = process.env): boolean {

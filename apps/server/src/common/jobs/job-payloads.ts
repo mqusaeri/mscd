@@ -1,4 +1,4 @@
-// Payload of every job of build plan E.2 and Milestone 2 J.3, by job name. Producers and handlers share these types
+// Payload of every job of build plan E.2, Milestone 2 J.3 and Milestone 3 J.3, by job name. Producers and handlers share these types
 // through `JobQueue.send` and `@JobHandler`.
 import type { JobName } from '@mscd/shared';
 
@@ -50,6 +50,21 @@ export interface JobPayloads {
   'entitlement.expiry': DailyRun;
   /** One domain (add, verify now) or, when absent, the hourly sweep of pending and the monthly check of verified domains (M2-S11). */
   'domain.verify': { organizationId?: string; domain?: string };
+  // Milestone 3 J.3 (written by M3-01; filled by the package named in J.3).
+  /** One organisation export to build (M3-02, D.4); one build per installation at a time. */
+  'org-export.build': { exportId: string };
+  /** Hourly in platform scope (M3-03, D.5.1): ends read-only periods, schedules deletions, sends reminders, queues purges. */
+  'org.lifecycle': Empty;
+  /** One deletion to run from its first or failed step (M3-03, D.5.2). */
+  'org.purge': { deletionId: string };
+  /** Daily per organisation, on the date of its run (M3-04, D.6.2). */
+  'privacy.deadlines': DailyRun;
+  /** Daily per organisation, on the date of its run (M3-05, D.7). */
+  'acknowledgement.reminders': DailyRun;
+  /** Daily per organisation, on the date of its run (M3-06, D.8). */
+  'retention.review': DailyRun;
+  /** Daily per organisation, on the date of its run (M3-07, D.9). */
+  'access-review.open': DailyRun;
 }
 
 // Compile-time check: every job name of @mscd/shared has a payload type and nothing else does.

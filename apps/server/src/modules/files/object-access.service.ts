@@ -2,13 +2,14 @@
 // URL (the content route for Managed Vault and pass-through files, the api's own redirect for linked and
 // zero-transit files), `redirect` re-checks the token and the permission and sends the browser to the provider,
 // `content` streams the bytes through `FileResponder`. Every route checks `ScopePolicy.canReadObject`; external
-// auditors open pack copies only and never receive a provider URL; Top Management has no file access.
+// auditors open pack copies only and never receive a provider URL; Top Management has no file access. An object whose
+// content an approved disposal removed answers 404 `content_disposed` on every route (Milestone 3 D.2).
 import { Inject, Injectable } from '@nestjs/common';
 import type { GatewayRepository, GatewayTenant, ObjectOpenResponse, OpenUrlResult } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { sql } from 'kysely';
 import { FileResponder } from '../../common/file-response';
-import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../common/problems';
+import { BusinessRuleError, ForbiddenError, NotFoundError, ProblemError } from '../../common/problems';
 import { AUDIT_WRITER, GATEWAY_CLIENT, type AuditWriter, type GatewayClient, type Principal, type Trx } from '../../common/tokens';
 import { addAuditorReadRefs, type AuditorReadRef } from '../authz/auditor-read';
 import { ScopePolicyService, type ScopeContext } from '../authz/scope-policy';
@@ -26,6 +27,30 @@ interface ReadableObject {
   object: StorageObjectRow;
   repository: RepositoryRow;
   refs: AuditorReadRef[];
+}
+
+/**
+ * 404 `not-found` with `messageKey` `content_disposed` (Milestone 3 D.2, D.8): the object's content was removed by an
+ * approved disposal (`storage_object.content_disposed_at`). Every open and download path answers it, so the record keeps
+ * its history while nobody can reach the removed bytes.
+ */
+export class ContentDisposedError extends ProblemError {
+  constructor() {
+    super('not-found', {
+      detail: 'The content of this file was removed by an approved disposal',
+      messageKey: 'content_disposed',
+      messages: {
+        en: 'The content of this file was removed after its retention period, with approval. The record of the removal stays.',
+        id: 'Isi berkas ini telah dihapus setelah masa retensinya berakhir, dengan persetujuan. Catatan penghapusannya tetap tersimpan.',
+      },
+    });
+  }
+}
+
+/** Throws `ContentDisposedError` when the object's content was disposed of (D.2); objects that do not exist pass. */
+export async function assertContentNotDisposed(trx: Trx, objectId: string): Promise<void> {
+  const row = await trx.selectFrom('storage_object').select('content_disposed_at').where('id', '=', objectId).executeTakeFirst();
+  if (row?.content_disposed_at) throw new ContentDisposedError();
 }
 
 /** Whether the api streams the object itself: Managed Vault objects and pass-through uploads (hash computed). */
@@ -177,6 +202,8 @@ export class ObjectAccessService {
   private async readable(trx: Trx, principal: Principal, ms: string, id: string): Promise<ReadableObject> {
     const ctx = await this.scope.scopeContext(trx, principal, ms);
     if (!(await this.scope.canReadObjectIn(trx, ctx, id))) throw new NotFoundError();
+    // Milestone 3 D.2: content removed by an approved disposal answers 404 `content_disposed` on open, redirect and content.
+    await assertContentNotDisposed(trx, id);
     const object = await this.common.object(trx, id);
     const repository = await this.common.repositoryOf(trx, object);
     return { ctx, object, repository, refs: await this.recordsOf(trx, id, ctx.ms.id) };

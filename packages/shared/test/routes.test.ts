@@ -1,14 +1,17 @@
-// The route table against build plan D.1, D.3 and D.5 and the Milestone 2 endpoint table (J.1): every endpoint is
-// present once, with a valid owner, permission, machine and path parameter schema.
+// The route table against build plan D.1, D.3 and D.5 and the endpoint tables (J.1) of Milestone 2 and Milestone 3:
+// every endpoint is present once, with a valid owner, permission, machine and path parameter schema.
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
-  API_ROUTES, EXPORT_KINDS, ExportRequest, GATEWAY_ROUTES, MACHINES, PERMISSION_MATRIX, RECORD_ENTITY_TYPES, REGISTER_KINDS,
+  API_ROUTES, EXPORT_KINDS, EXPORT_REQUEST_KINDS, ExportRequest, GATEWAY_ROUTES, MACHINES, PERMISSION_MATRIX, RECORD_ENTITY_TYPES, REGISTER_KINDS,
   ROUTE_AREAS, WORK_PACKAGE_IDS, NoBody, evaluatePermission, evaluatePermissionInAnySystem, machinePermissions, pathParamNames,
   permissionCase, routeArea, routeById, routes, transitionsFor,
 } from '../src/index.js';
 import type { MachineEntity, Permission, PermissionCheckScope, RouteDef } from '../src/index.js';
-import { bpApiEndpoints, fastifyPath, m2PlanRoutes, planApiEndpoints, planGatewayEndpoints, planWorkPackages } from './helpers.js';
+import {
+  bpApiEndpoints, bpGatewayEndpoints, codesOf, fastifyPath, m2PlanRoutes, m3ApiRoutes, m3GatewayRoutes, m3PlanRoutes, m3Section, planApiEndpoints,
+  planGatewayEndpoints, planWorkPackages,
+} from './helpers.js';
 
 const key = (r: { method: string; path: string }) => `${r.method} ${r.path}`;
 
@@ -41,11 +44,16 @@ describe('route table against the plan', () => {
   const planApi = planApiEndpoints().map((e) => ({ method: e.method, path: fastifyPath(e.path, '/api/v1') }));
   const planGateway = planGatewayEndpoints();
 
-  it('reads the D.3 and D.5 tables and Milestone 2 J.1', () => {
+  it('reads the D.3 and D.5 tables, Milestone 2 J.1 and Milestone 3 J.1', () => {
     expect(bpApiEndpoints().length).toBeGreaterThan(150);
     expect(m2PlanRoutes()).toHaveLength(48);
-    expect(planApi.length).toBe(bpApiEndpoints().length + 48);
-    expect(planGateway.length).toBe(16);
+    // Milestone 3 J.1: 65 api routes and the 2 storage gateway routes (D.1).
+    expect(m3PlanRoutes()).toHaveLength(65 + 2);
+    expect(m3ApiRoutes()).toHaveLength(65);
+    expect(m3GatewayRoutes().map((r) => r.id)).toEqual(['gateway.objects.delete', 'gateway.tenants.purge']);
+    expect(planApi.length).toBe(bpApiEndpoints().length + 48 + 65);
+    expect(bpGatewayEndpoints().length).toBe(16);
+    expect(planGateway.length).toBe(16 + 2);
   });
 
   it('has every route of Milestone 2 J.1 with its route id and building package', () => {
@@ -58,6 +66,20 @@ describe('route table against the plan', () => {
     // Every route owned by a Milestone 2 package is a J.1 row.
     const ids = new Set(m2PlanRoutes().map((r) => r.id));
     expect(routes.filter((r) => r.owner.startsWith('M2-')).map((r) => r.id).filter((id) => !ids.has(id))).toEqual([]);
+  });
+
+  it('has every route of Milestone 3 J.1 with its route id and building package', () => {
+    for (const planned of m3PlanRoutes()) {
+      const r = routeById(planned.id);
+      const prefix = planned.path.startsWith('/v1/') ? '' : '/api/v1';
+      expect(`${r.method} ${r.path}`, planned.id).toBe(`${planned.method} ${fastifyPath(planned.path, prefix)}`);
+      expect(r.owner, planned.id).toBe(planned.owner);
+      expect(r.auth === 'gateway', `${planned.id} is a gateway route exactly when its path starts with /v1/`).toBe(prefix === '');
+    }
+    expect(new Set(m3PlanRoutes().map((r) => r.id)).size).toBe(65 + 2);
+    // Every route owned by a Milestone 3 package is a J.1 row.
+    const ids = new Set(m3PlanRoutes().map((r) => r.id));
+    expect(routes.filter((r) => r.owner.startsWith('M3-')).map((r) => r.id).filter((id) => !ids.has(id))).toEqual([]);
   });
 
   it('has every D.3 endpoint, with the parameter names of the plan', () => {
@@ -78,7 +100,7 @@ describe('route table against the plan', () => {
   it('names an existing work package as owner of every route', () => {
     const planned = new Set(planWorkPackages());
     expect(planned.size).toBe(WORK_PACKAGE_IDS.length);
-    expect(WORK_PACKAGE_IDS.length).toBe(39 + 21 + 13);
+    expect(WORK_PACKAGE_IDS.length).toBe(39 + 21 + 13 + 11 + 2);
     expect([...planned].sort()).toEqual([...WORK_PACKAGE_IDS].sort());
     for (const r of routes) {
       expect(WORK_PACKAGE_IDS, r.id).toContain(r.owner);
@@ -236,8 +258,12 @@ describe('authorisation metadata', () => {
   it('checks each anyOf alternative at a scope the matrix allows', () => {
     const anyOfRoutes = routes.filter((r) => r.anyOf);
     expect(anyOfRoutes.map((r) => r.id).sort()).toEqual([
+      // Milestone 3 D.1: the reads of the read confirmation and retention screens.
+      'acknowledgement-requests.get', 'acknowledgement-requests.list',
       'admin.packs.list', 'admin.users.reset-mfa', 'audit-activities.generate', 'audit-activities.update', 'audit-events.update', 'audit-trail.anchors',
-      'audit-trail.list', 'audit-trail.verify', 'storage.browse', 'storage.upload-intents.create',
+      'audit-trail.list', 'audit-trail.verify',
+      'retention.holds.list', 'retention.register', 'retention.reviews.list', 'retention.rules.list',
+      'storage.browse', 'storage.upload-intents.create',
     ]);
     for (const r of anyOfRoutes) {
       const checks = r.anyOf as NonNullable<RouteDef['anyOf']>;
@@ -303,6 +329,31 @@ describe('authorisation metadata', () => {
     const auditorInMs = { ...externalAuditor, msRoles: ['external_auditor'] } as const;
     expect(auditorPasses('audit-trail.list', externalAuditor, auditorInMs), 'external auditor in the audited query system').toBe(true);
     expect(auditorPasses('audit-trail.list', externalAuditor, externalAuditor), 'external auditor in another system').toBe(false);
+  });
+
+  it('checks every Milestone 3 route with the permission and in the area file of its D.1 row (J.2)', () => {
+    const rows = m3Section('### D.1 New routes', '### D.2').split('\n')
+      .filter((l) => l.startsWith('| `'))
+      .map((l) => l.split('|').slice(1, -1).map((c) => c.trim()))
+      .filter((cells) => cells.length === 7);
+    expect(rows).toHaveLength(65);
+    const isPermission = (c: string) => /^[a-z_]+(\.[a-z_]+)+$/.test(c);
+    for (const [idCell, , areaCell, permissionCell] of rows) {
+      const id = codesOf(idCell as string)[0] as string;
+      const r = routeById(id);
+      expect(`${routeArea(r)}.ts`, id).toBe(codesOf(areaCell as string)[0]);
+      const cell = permissionCell as string;
+      if (cell === 'active session') {
+        expect(r.permission ?? r.anyOf ?? r.permissionBy, `${id} needs an active session only`).toBeUndefined();
+        expect(r.auth, id).toBe('session');
+      } else if (cell.startsWith('`anyOf`')) {
+        expect(r.permission, id).toBeUndefined();
+        expect((r.anyOf ?? []).map((c) => c.permission).sort(), id).toEqual(codesOf(cell).filter(isPermission).sort());
+      } else {
+        expect(r.permission, id).toBe(codesOf(cell).filter(isPermission)[0]);
+        expect(r.scope, id).toBe(cell.includes('platform') ? 'platform' : PERMISSION_MATRIX[r.permission as Permission].scope);
+      }
+    }
   });
 
   it('resets the second factor with user.manage in the organisation or ops.users.manage on the platform (D.3)', () => {
@@ -401,7 +452,14 @@ describe('authorisation metadata', () => {
   it('checks exports per type: the portfolio board in any system, the audit trail and the rest in the body system (D.3)', () => {
     const by = routeById('exports.create').permissionBy as NonNullable<RouteDef['permissionBy']>;
     expect(by).toMatchObject({ source: 'body', member: 'type' });
-    for (const kind of EXPORT_KINDS) {
+    // Milestone 3 D.2: the body of POST /exports keeps the five Milestone 1 kinds; personal_data is refused there.
+    expect([...EXPORT_KINDS]).toEqual([...EXPORT_REQUEST_KINDS, 'personal_data']);
+    for (const ms of [{ ms: 'isms' }, {}]) {
+      expect(ExportRequest.safeParse({ type: 'personal_data', ...ms, format: 'json' }).success, 'personal_data with json').toBe(false);
+      expect(ExportRequest.safeParse({ type: 'personal_data', ...ms, format: 'csv' }).success, 'personal_data with csv').toBe(false);
+    }
+    expect(ExportRequest.safeParse({ type: 'readiness', ms: 'isms', format: 'json' }).success, 'json is no format of POST /exports').toBe(false);
+    for (const kind of EXPORT_REQUEST_KINDS) {
       const check = permissionCase(by, kind);
       if (kind === 'portfolio_board') expect(check).toEqual({ permission: 'export.run', scope: 'any_ms' });
       else if (kind === 'audit_trail') expect(check).toEqual({ permission: 'audit_trail.read', scope: 'ms' });

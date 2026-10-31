@@ -8,7 +8,8 @@ import type { HostContext, TextPair } from '../types';
 import type { Tone } from '../ui';
 import { ORG_TEXT } from './org-text';
 
-export const ORG_STATUSES = ['active', 'suspended', 'offboarding', 'archived'] as const;
+/** `deleted`: Milestone 3 J.7, set by the purge only (M3-03); no move of the operator leads to it or out of it. */
+export const ORG_STATUSES = ['active', 'suspended', 'offboarding', 'archived', 'deleted'] as const;
 export type OrgStatus = (typeof ORG_STATUSES)[number];
 
 export const DOMAIN_STATUSES = ['pending', 'verified', 'failed'] as const;
@@ -156,12 +157,17 @@ export interface EntitlementSaved {
 // Status (J.8)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** The moves of the machine `organization.status` (J.8); the unit test compares them with @mscd/shared. */
+/**
+ * The moves of the machine `organization.status` (J.8) that this screen offers; the unit test compares them with
+ * @mscd/shared. Milestone 3 J.8 adds `archived -> offboarding` while a deletion is scheduled, which M3-09 brings to the
+ * screen with the deletion tab.
+ */
 export const STATUS_MOVES: Readonly<Record<OrgStatus, readonly OrgStatus[]>> = {
   active: ['suspended', 'offboarding'],
   suspended: ['active', 'offboarding'],
   offboarding: ['active', 'archived'],
   archived: [],
+  deleted: [],
 };
 
 /** `offboarding` and `archived` need the slug typed again (`confirmSlug`). */
@@ -169,23 +175,29 @@ export const needsSlug = (to: OrgStatus): boolean => to === 'offboarding' || to 
 
 export const STATUS_LABEL: Readonly<Record<OrgStatus, TextPair>> = {
   active: ORG_TEXT.statusActive, suspended: ORG_TEXT.statusSuspended, offboarding: ORG_TEXT.statusOffboarding, archived: ORG_TEXT.statusArchived,
+  deleted: ORG_TEXT.statusDeleted,
 };
-export const STATUS_TONE: Readonly<Record<OrgStatus, Tone>> = { active: 'ok', suspended: 'bad', offboarding: 'warn', archived: 'mute' };
+export const STATUS_TONE: Readonly<Record<OrgStatus, Tone>> = { active: 'ok', suspended: 'bad', offboarding: 'warn', archived: 'mute', deleted: 'mute' };
 /** One plain sentence on what the members can do in each status. */
 export const STATUS_MEANING: Readonly<Record<OrgStatus, TextPair>> = {
   active: ORG_TEXT.meaningActive, suspended: ORG_TEXT.meaningSuspended, offboarding: ORG_TEXT.meaningOffboarding, archived: ORG_TEXT.meaningArchived,
+  deleted: ORG_TEXT.meaningDeleted,
 };
 /** The action that moves an organisation to a status. */
 export const MOVE_LABEL: Readonly<Record<OrgStatus, TextPair>> = {
   active: ORG_TEXT.moveReactivate, suspended: ORG_TEXT.moveSuspend, offboarding: ORG_TEXT.moveOffboard, archived: ORG_TEXT.moveArchive,
+  deleted: ORG_TEXT.moveDelete,
 };
-export const MOVE_TONE: Readonly<Record<OrgStatus, 'primary' | 'danger' | 'default'>> = { active: 'primary', suspended: 'danger', offboarding: 'default', archived: 'danger' };
+export const MOVE_TONE: Readonly<Record<OrgStatus, 'primary' | 'danger' | 'default'>> = {
+  active: 'primary', suspended: 'danger', offboarding: 'default', archived: 'danger', deleted: 'danger',
+};
 
 const EFFECTS: Readonly<Record<OrgStatus, readonly TextPair[]>> = {
   suspended: [ORG_TEXT.effectSuspended1, ORG_TEXT.effectSuspended2, ORG_TEXT.effectSuspended3, ORG_TEXT.effectSuspended4],
   active: [ORG_TEXT.effectActive1, ORG_TEXT.effectActive2],
   offboarding: [ORG_TEXT.effectOffboarding1, ORG_TEXT.effectOffboarding2, ORG_TEXT.effectOffboarding3, ORG_TEXT.effectOffboarding4],
   archived: [ORG_TEXT.effectArchived1, ORG_TEXT.effectArchived2, ORG_TEXT.effectArchived3, ORG_TEXT.effectArchived4],
+  deleted: [ORG_TEXT.effectDeleted1],
 };
 
 /** What a move does, listed before the operator confirms it (texts may hold `{days}`). */

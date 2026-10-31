@@ -1,0 +1,21 @@
+{
+  "workPackage": "M3-04",
+  "routes": [
+    "privacy-requests.list",
+    "privacy-requests.create",
+    "privacy-requests.get",
+    "privacy-requests.update",
+    "privacy-requests.rectify",
+    "privacy-requests.restrict",
+    "privacy-requests.erase",
+    "privacy-requests.close",
+    "exports.person.create",
+    "privacy-checks.list",
+    "privacy-checks.mentions",
+    "privacy-checks.done",
+    "me.privacy-requests.list",
+    "me.privacy-requests.create",
+    "exports.me.create",
+    "me.profile"
+  ]
+}

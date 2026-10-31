@@ -151,10 +151,13 @@ export interface OpsAdapter {
   removeOperator(id: string, reason: string): Promise<Result<OperatorRemoved>>;
 }
 
-/** The jobs `POST /ops/jobs/{name}/run` accepts (`OPS_RUNNABLE_JOBS` of @mscd/shared; the unit test compares them). */
+/**
+ * The jobs `POST /ops/jobs/{name}/run` accepts (`OPS_RUNNABLE_JOBS` of @mscd/shared; the unit test compares them).
+ * Milestone 3 J.3: `org.lifecycle` (M3-03).
+ */
 export const OPS_JOBS = [
   'freshness.sweep', 'link-health.plan', 'link-health.repository', 'audit.verify-chain', 'cleanup.expired',
-  'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive',
+  'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive', 'org.lifecycle',
 ] as const;
 
 /** Rows per page of the organisation list. */

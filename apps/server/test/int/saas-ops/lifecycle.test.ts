@@ -31,6 +31,8 @@ const ALLOWED: Readonly<Record<OrganizationStatus, readonly OrganizationStatus[]
   suspended: ['active', 'offboarding'],
   offboarding: ['active', 'archived'],
   archived: [],
+  // Milestone 3 J.7 (M3-01): the purge sets deleted; the operator's route never reaches or leaves it.
+  deleted: [],
 };
 
 describe('organisation lifecycle of the platform operator (Milestone 2 J.8, M2-S09)', () => {

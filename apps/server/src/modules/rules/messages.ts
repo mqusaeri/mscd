@@ -282,6 +282,44 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     en: 'You cannot decide a role grant that you requested or that names you. Another Tenant Admin must decide it.',
     id: 'Anda tidak dapat memutuskan pemberian peran yang Anda minta atau yang menyebut Anda. Admin Tenant lain harus memutuskannya.',
   },
+  // Milestone 3 J.6 (written by M3-01; used by M3-04 to M3-07)
+  'ACK-OPEN-FIRST': {
+    en: 'Open {document} first. You can confirm it only after you have opened the version you are asked to read.',
+    id: 'Buka {document} terlebih dahulu. Anda baru dapat mengonfirmasinya setelah membuka versi yang diminta untuk dibaca.',
+    defaults: { document: { en: 'the document', id: 'dokumen tersebut' } },
+  },
+  'RET-HOLD': {
+    en: '{item} is under a legal hold, so it cannot be disposed of. Release the hold first, with a reason.',
+    id: '{item} sedang ditahan karena alasan hukum, sehingga tidak dapat dimusnahkan. Lepaskan penahanan terlebih dahulu, dengan alasan.',
+    defaults: { item: { en: 'This item', id: 'Item ini' } },
+  },
+  'RET-NOT-DUE': {
+    en: 'The retention period of {item} ends on {date}. It can be disposed of only after that date.',
+    id: 'Masa retensi {item} berakhir pada {date}. Item ini baru dapat dimusnahkan setelah tanggal tersebut.',
+    defaults: { item: { en: 'this item', id: 'item ini' }, date: { en: 'a later date', id: 'tanggal yang akan datang' } },
+  },
+  'RET-CURRENT': {
+    en: '{item} is the current version of its record. Only earlier versions and replaced files can be disposed of.',
+    id: '{item} adalah versi terkini dari catatannya. Hanya versi sebelumnya dan berkas yang sudah diganti yang dapat dimusnahkan.',
+    defaults: { item: { en: 'This item', id: 'Item ini' } },
+  },
+  'SOD-SELF-APPROVE': {
+    en: 'You cannot approve what you asked for yourself. Another person with the approval right must decide it.',
+    id: 'Anda tidak dapat menyetujui apa yang Anda minta sendiri. Orang lain yang memiliki hak persetujuan harus memutuskannya.',
+  },
+  'REVIEW-OWN-ACCESS': {
+    en: 'You cannot decide on your own access. Another reviewer must decide this item.',
+    id: 'Anda tidak dapat memutuskan akses Anda sendiri. Peninjau lain harus memutuskan item ini.',
+  },
+  'ERASE-OPEN-ITEMS': {
+    en: '{person} still holds {count} open items. Hand them over to someone else first, then erase the person.',
+    id: '{person} masih memegang {count} item terbuka. Serahkan item tersebut kepada orang lain terlebih dahulu, lalu hapus orang tersebut.',
+    defaults: { person: { en: 'This person', id: 'Orang ini' }, count: { en: 'some', id: 'beberapa' } },
+  },
+  'REVIEW-SINGLE-ADMIN': {
+    en: 'The organisation has one Tenant Admin, so nobody else reviewed that admin\'s own access. Add a second Tenant Admin for the next review.',
+    id: 'Organisasi hanya memiliki satu Tenant Admin, sehingga tidak ada orang lain yang meninjau akses admin tersebut. Tambahkan Tenant Admin kedua untuk tinjauan berikutnya.',
+  },
 };
 
 for (const rule of RULE_IDS) {

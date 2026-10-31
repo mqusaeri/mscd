@@ -86,6 +86,33 @@ describe('J.5 records of another system of the same organisation', () => {
       case 'import_run':
         return insertReturning(sql`insert into import_run (management_system_id, kind, file_name, file_sha256, status)
           values (${qms}, 'documents', 'qms-documents.csv', ${'0'.repeat(64)}, 'validated') returning id`);
+      // Milestone 3 tables (record-tables/M3-nn.ts), written by M3-01 for the stubs of M3-04 to M3-07.
+      case 'privacy_check': {
+        const request = await insertReturning(sql`insert into privacy_request (request_no, request_type, subject_kind, subject_name, channel, received_at, due_at)
+          values ('PR-2026-901', 'access', 'other', 'QMS visitor', 'email', now(), now() + interval '72 hours') returning id`);
+        return insertReturning(sql`insert into privacy_check (privacy_request_id, management_system_id) values (${request}, ${qms}) returning id`);
+      }
+      case 'acknowledgement_request': {
+        const [version] = await rowsIn<{ id: string; document_id: string }>(db, ORG, sql`select v.id, v.document_id from document_version v
+          where v.deleted_at is null and exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = v.document_id
+            and l.management_system_id = ${qms} and l.deleted_at is null) order by v.id limit 1`);
+        if (!version) throw new Error('QMS has no document version');
+        return insertReturning(sql`insert into acknowledgement_request (management_system_id, document_id, document_version_id, audience_scope, due_on)
+          values (${qms}, ${version.document_id}, ${version.id}, 'organisation', current_date + 14) returning id`);
+      }
+      case 'retention_review':
+        return insertReturning(sql`insert into retention_review (management_system_id, record_class, item_id, item_code, retention_ends_on)
+          values (${qms}, 'finding', gen_random_uuid(), 'F-QMS-901', '2026-01-01') returning id`);
+      case 'retention_hold':
+        return insertReturning(sql`insert into retention_hold (management_system_id, record_class, item_id, reason)
+          values (${qms}, 'finding', gen_random_uuid(), 'QMS dispute') returning id`);
+      case 'access_review': {
+        // A review with a QMS part and no ISMS part (ISMS joined after it opened).
+        const review = await insertReturning(sql`insert into access_review (review_no, status, opened_on, due_on, cancel_reason)
+          values ('AR-2026-901', 'cancelled', '2026-01-01', '2026-01-15', 'QMS only') returning id`);
+        await inOrg(db, ORG, (trx) => sql`insert into access_review_part (access_review_id, management_system_id) values (${review}, ${qms})`.execute(trx));
+        return review;
+      }
       default:
         throw new Error(`No QMS-only ${table} in the demo data and no fixture for it`);
     }

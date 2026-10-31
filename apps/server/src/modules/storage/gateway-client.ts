@@ -5,7 +5,16 @@
 // the token on every call, so a rotated token (`keys rotate-gateway-token`) is used at once.
 import { Readable } from 'node:stream';
 import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
-import { GATEWAY_PROBLEM_STATUS, GATEWAY_PROBLEM_SLUGS, type GatewayProblemReason, type GatewayProblemSlug, type ProblemSlug } from '@mscd/shared';
+import {
+  GATEWAY_PROBLEM_STATUS,
+  GATEWAY_PROBLEM_SLUGS,
+  type GatewayProblemReason,
+  type GatewayProblemSlug,
+  type ObjectDeleteResult,
+  type ObjectRequest,
+  type ProblemSlug,
+  type TenantPurgeResult,
+} from '@mscd/shared';
 import { Agent, request, type Dispatcher } from 'undici';
 import { ConfigError, MscdConfig } from '../../config/mscd-config';
 import { currentRequestId } from '../../common/request-context';
@@ -218,4 +227,35 @@ export class HttpGatewayClient implements GatewayClient, OnApplicationShutdown {
     const text = await response.body.text().catch(() => '');
     throw problemOf(response.statusCode, text);
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Deletion of stored content (Milestone 3 D.1, M3-01). Typed calls over `GatewayClient.post`, so every client of the
+// interface (the HTTP client and the test doubles) can make them.
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * `POST /v1/objects/delete`: removes every stored version of a Managed Vault object (the disposal of M3-06, the export
+ * expiry of M3-02). Other adapters answer `unsupported`; a version that a retention rule of the bucket protects answers
+ * `forbidden`.
+ */
+export function deleteStoredObject(
+  client: GatewayClient,
+  body: ObjectRequest,
+  options: { requestId?: string; signal?: AbortSignal } = {},
+): Promise<ObjectDeleteResult> {
+  return client.post<ObjectDeleteResult>('/v1/objects/delete', body, options);
+}
+
+/**
+ * `POST /v1/tenants/purge`: removes every object version under `tenants/<orgId>/` of the vault bucket and drops the
+ * gateway's cached data key of the organisation (step 4 of the purge of M3-03, D.5.2). With mTLS only the worker's
+ * certificate may call it. The id is sent twice, as the gateway requires.
+ */
+export function purgeTenantStorage(
+  client: GatewayClient,
+  orgId: string,
+  options: { requestId?: string; signal?: AbortSignal } = {},
+): Promise<TenantPurgeResult> {
+  return client.post<TenantPurgeResult>('/v1/tenants/purge', { orgId, confirmOrgId: orgId }, options);
 }

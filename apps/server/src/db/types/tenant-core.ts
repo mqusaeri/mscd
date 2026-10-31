@@ -164,6 +164,9 @@ export interface AuditTrailTable {
   user_agent: string | null;
   prev_hash: GeneratedAlways<Buffer>;
   row_hash: GeneratedAlways<Buffer>;
+  /** Milestone 3 (tenant 0009, D.5.4): set by `platform.redact_audit_rows` only (outside the hashed columns). */
+  redacted_at: Date | null;
+  redaction_id: string | null;
 }
 
 /** Tables of this group as Kysely table keys (tenant tables are unqualified: the request transaction sets search_path, D-03). */
@@ -219,6 +222,6 @@ export const TABLE_COLUMNS = tableColumns<TenantCoreTables>()({
   audit_trail: [
     'seq', 'id', 'occurred_at', 'organization_id', 'management_system_id', 'actor_user_id', 'actor_kind', 'action',
     'entity_type', 'entity_id', 'entity_code', 'before_data', 'after_data', 'edition', 'request_id', 'source_ip',
-    'user_agent', 'prev_hash', 'row_hash',
+    'user_agent', 'prev_hash', 'row_hash', 'redacted_at', 'redaction_id',
   ],
 });

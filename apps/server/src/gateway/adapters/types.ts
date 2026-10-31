@@ -16,6 +16,7 @@ import type {
   GatewayObjectRef,
   GatewayRepository,
   ListResponse,
+  ObjectDeleteResult,
   ObjectMetadata,
   OpenUrlResult,
   PinVersionResult,
@@ -100,6 +101,8 @@ export interface StorageAdapter {
   stream?(ctx: AdapterContext, object: GatewayObjectRef): Promise<StreamResult>;
   copyWithin(ctx: AdapterContext, objects: GatewayObjectRef[], targetFolderPath: string): Promise<CopyWithinResult>;
   rehash?(ctx: AdapterContext, object: GatewayObjectRef): Promise<RehashResult>;
+  /** Removes every stored version of an object (Milestone 3 D.1 `gateway.objects.delete`); only stored content can go. */
+  deleteObject?(ctx: AdapterContext, object: GatewayObjectRef): Promise<ObjectDeleteResult>;
   /** Repository OAuth consent (F.8): exchanges a code with the client credential of `ctx.credential`. */
   exchangeOAuthCode?(ctx: AdapterContext, input: OAuthExchangeInput): Promise<OAuthExchangeOutput>;
   /** Readiness of the adapter's backing store (the vault bucket); omitted when there is nothing to check. */

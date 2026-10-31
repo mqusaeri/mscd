@@ -32,6 +32,11 @@ import { routes as storage } from './storage.js';
 import { routes as system } from './system.js';
 import { routes as testSupport } from './test-support.js';
 import { routes as ui } from './ui.js';
+import { routes as orgExport } from './org-export.js';
+import { routes as privacy } from './privacy.js';
+import { routes as acknowledgements } from './acknowledgements.js';
+import { routes as retention } from './retention.js';
+import { routes as accessReviews } from './access-reviews.js';
 
 /** Routes per area file (`packages/shared/src/api/<area>.ts`). */
 export const ROUTE_AREAS: Readonly<Record<string, readonly RouteDef[]>> = {
@@ -66,6 +71,12 @@ export const ROUTE_AREAS: Readonly<Record<string, readonly RouteDef[]>> = {
   'imports': imports,
   'ops-domains': opsDomains,
   'ops-entitlements': opsEntitlements,
+  // Milestone 3 (D.1)
+  'org-export': orgExport,
+  'privacy': privacy,
+  'acknowledgements': acknowledgements,
+  'retention': retention,
+  'access-reviews': accessReviews,
   'test-support': testSupport,
 };
 

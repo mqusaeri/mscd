@@ -81,6 +81,18 @@ export function batchesOf(rows: readonly { id: string; storage_repository_id: st
   return batches;
 }
 
+/** The ids among `ids` whose content an approved disposal removed (Milestone 3 D.2): never checked again. */
+async function disposedObjectIds(trx: Trx, ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await trx
+    .selectFrom('storage_object')
+    .select('id')
+    .where('id', 'in', [...ids])
+    .where('content_disposed_at', 'is not', null)
+    .execute();
+  return new Set(rows.map((r) => r.id));
+}
+
 /**
  * Maps a gateway problem of a `stat` call to the outcome it stands for (null: an error that changes nothing). An item
  * moved outside the root is already a `forbidden` outcome of the adapters; a refused `outside-root` problem means the
@@ -163,6 +175,7 @@ export class LinkHealthService {
         join storage_repository r on r.id = o.storage_repository_id and r.deleted_at is null
         left join evidence_objects eo on eo.id = o.id
         where o.deleted_at is null
+          and o.content_disposed_at is null
           and (eo.id is not null or o.id in (select id from document_objects))
       )
       select id, storage_repository_id, priority from candidates
@@ -176,7 +189,7 @@ export class LinkHealthService {
     const rows = await sql<{ id: string; storage_repository_id: string }>`
       select o.id, o.storage_repository_id from storage_object o
       join storage_repository r on r.id = o.storage_repository_id and r.deleted_at is null
-      where o.deleted_at is null and (
+      where o.deleted_at is null and o.content_disposed_at is null and (
         o.id in (select e.storage_object_id from evidence e join evidence_target t on t.evidence_id = e.id and t.deleted_at is null
                  where e.deleted_at is null and t.management_system_id = ${msId}::uuid)
         or o.id in (select v.storage_object_id from document_version v join document d on d.id = v.document_id and d.deleted_at is null
@@ -236,7 +249,9 @@ export class LinkHealthService {
           .where('deleted_at', 'is', null)
           .executeTakeFirst();
         if (!repository) return null;
-        const objects = (await this.writer.objects(trx, storageObjectIds)).filter((o) => o.storage_repository_id === repositoryId);
+        // Milestone 3 D.2: an object whose content an approved disposal removed is not checked (counted as missing).
+        const disposed = await disposedObjectIds(trx, storageObjectIds);
+        const objects = (await this.writer.objects(trx, storageObjectIds)).filter((o) => o.storage_repository_id === repositoryId && !disposed.has(o.id));
         const order = new Map(storageObjectIds.map((id, index) => [id, index]));
         objects.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
         if (taskId) await this.startTask(trx, taskId, job.id);

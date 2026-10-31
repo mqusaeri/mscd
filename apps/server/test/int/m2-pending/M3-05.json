@@ -1,0 +1,14 @@
+{
+  "workPackage": "M3-05",
+  "routes": [
+    "acknowledgement-requests.list",
+    "acknowledgement-requests.create",
+    "acknowledgement-requests.get",
+    "acknowledgement-requests.remind",
+    "acknowledgement-requests.close",
+    "acknowledgement-requests.export",
+    "me.acknowledgements",
+    "me.acknowledgements.open",
+    "me.acknowledgements.confirm"
+  ]
+}

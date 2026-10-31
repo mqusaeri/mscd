@@ -1,16 +1,19 @@
 // Area `exports` (owner from wave 9: WP-24): asynchronous exports, synchronous register exports and the review
 // calendar feed (D.2, D.3 "Page actions", E.2 export.build, F.13, F.15).
 import { z } from 'zod';
-import { BackgroundTaskKind, BackgroundTaskStatus, ExportFormat, ExportKind } from '../enums.js';
+import { BackgroundTaskKind, BackgroundTaskStatus, ExportRequestFormat, ExportRequestKind } from '../enums.js';
 import { BinaryBody, CommandResult, MsId, MsParams, Uuid, defineRoute, named } from './common.js';
 import type { RouteDef } from './common.js';
 
 export const ExportRequest = named(
   'ExportRequest',
-  z.strictObject({ type: ExportKind, ms: MsId.optional(), format: ExportFormat })
+  z.strictObject({ type: ExportRequestKind, ms: MsId.optional(), format: ExportRequestFormat })
     .refine((r) => (r.type === 'portfolio_board') === (r.ms === undefined), { message: 'portfolio_board is organisation-wide; every other type needs ms', path: ['ms'] }),
-  'POST /exports body: portfolio_board needs export.run in at least one system; audit_trail needs audit_trail.read in ms; other types export.run in ms',
-  { valid: [{ type: 'portfolio_board', format: 'pdf' }, { type: 'readiness', ms: 'isms', format: 'pdf' }, { type: 'audit_trail', ms: 'isms', format: 'csv' }], invalid: [{ type: 'readiness', format: 'pdf' }, { type: 'portfolio_board', ms: 'isms', format: 'pdf' }, { type: 'soa', ms: 'isms', format: 'docx' }] },
+  'POST /exports body: portfolio_board needs export.run in at least one system; audit_trail needs audit_trail.read in ms; other types export.run in ms. The personal data export of Milestone 3 is refused here (exports.person.create, exports.me.create)',
+  {
+    valid: [{ type: 'portfolio_board', format: 'pdf' }, { type: 'readiness', ms: 'isms', format: 'pdf' }, { type: 'audit_trail', ms: 'isms', format: 'csv' }],
+    invalid: [{ type: 'readiness', format: 'pdf' }, { type: 'portfolio_board', ms: 'isms', format: 'pdf' }, { type: 'soa', ms: 'isms', format: 'docx' }, { type: 'personal_data', ms: 'isms', format: 'json' }],
+  },
 );
 export type ExportRequest = z.infer<typeof ExportRequest>;
 

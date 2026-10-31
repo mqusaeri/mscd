@@ -12,6 +12,7 @@ import {
   adminUsersCreateRoute,
   adminUsersListRoute,
   adminUsersRegisterIdentityRoute,
+  adminUsersRemoveIdentityRoute,
   adminUsersResetMfaRoute,
   adminUsersUpdateRoute,
   type CommandResult,
@@ -28,6 +29,7 @@ import {
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ApiRoute, CurrentAuthz, CurrentPrincipal, IfMatchHeader, RouteInputParam } from '../../common/api-route';
+import { routeStub } from '../../common/problems';
 import type { AuthzState, Principal } from '../../common/tokens';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
@@ -75,6 +77,12 @@ export class AdminUsersController {
   ): Promise<CommandResult> {
     await this.users.registerIdentity(principal, params.id, body);
     return { ok: true, changed: [] };
+  }
+
+  /** Milestone 3 D.1: stub of M3-01 answering 501 `not-implemented` after the guard; M3-07 replaces it (D.9). */
+  @ApiRoute(adminUsersRemoveIdentityRoute)
+  removeIdentity(): never {
+    return routeStub(adminUsersRemoveIdentityRoute);
   }
 
   @ApiRoute(adminOrganizationUpdateRoute)

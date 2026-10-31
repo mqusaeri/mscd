@@ -1,7 +1,8 @@
 // Area `admin-users` (owner from wave 6: WP-39): members of the organisation, identity pre-registration, the local
 // sign-in policy, and role grants with the four-eyes approval flow (D.2, D.3 "Administration", F.6 Tenant Admin
 // limits, C.13 `user_ms_role.approval_status`). Milestone 2 (D.1, D.5) adds the organisation settings read and the
-// onboarding checklist, built by M2-06.
+// onboarding checklist, built by M2-06. Milestone 3 (D.1, D.2) adds the removal of a linked company sign-in (M3-07) and
+// the read-only end and deletion date of the organisation settings (optional until M3-03 fills them).
 import { z } from 'zod';
 import {
   AccountStatus, ApprovalStatus, BusinessRole, LocalLoginPolicy, MembershipStatus, OrgRole, TenancyMode, UserKind,
@@ -96,6 +97,14 @@ export const UserIdentityRegistration = named(
 );
 export type UserIdentityRegistration = z.infer<typeof UserIdentityRegistration>;
 
+export const UserIdentityRemoval = named(
+  'UserIdentityRemoval',
+  z.strictObject({ provider: ProviderSlug, reason: z.string().trim().min(3).max(500) }),
+  'POST /admin/users/{id}/identities/remove body: the provider of this organisation whose linked company sign-in is removed, and why (Milestone 3 D.9; audited identity.unlinked)',
+  { valid: [{ provider: 'keycloak', reason: 'Access review AR-2026-Q4: left the company' }], invalid: [{ provider: 'keycloak' }, { provider: 'Keycloak', reason: 'Left the company' }, { provider: 'keycloak', reason: 'no' }] },
+);
+export type UserIdentityRemoval = z.infer<typeof UserIdentityRemoval>;
+
 export const OrgPolicyPatch = named(
   'OrgPolicyPatch',
   z.strictObject({
@@ -164,10 +173,17 @@ export const OrganizationSettings = named(
     activeAdminCount: z.int().min(0),
     /** Weak ETag of the organisation row (`updated_at`), also sent as the `ETag` header; `PATCH` takes it as `If-Match`. */
     etag: z.string().regex(/^W\/"\d+"$/),
+    /** Milestone 3 D.2: while offboarding, when the read-only period ends; else null. */
+    offboardingEndsAt: Instant.nullable().optional(),
+    /** Milestone 3 D.2: while offboarding the planned deletion date, while archived the scheduled date, else null. */
+    deletionScheduledFor: Instant.nullable().optional(),
   }),
-  'GET /admin/organization: the organisation settings the Tenant Admin can see and their ETag; the slug is permanent (Milestone 2 D.1)',
+  'GET /admin/organization: the organisation settings the Tenant Admin can see and their ETag; the slug is permanent (Milestone 2 D.1); the read-only end and the deletion date (Milestone 3 D.2)',
   {
-    valid: [EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 }],
+    valid: [
+      EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 },
+      { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', offboardingEndsAt: '2026-11-30T03:00:00Z', deletionScheduledFor: '2026-12-30T03:00:00Z' },
+    ],
     invalid: [{ ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }, { ...EXAMPLE_ORG_SETTINGS, etag: undefined }],
   },
 );
@@ -397,8 +413,23 @@ export const adminRolesRevokeRoute = defineRoute({
   errors: [404],
 });
 
+export const adminUsersRemoveIdentityRoute = defineRoute({
+  id: 'admin.users.identities.remove',
+  owner: 'M3-07',
+  method: 'POST',
+  path: '/api/v1/admin/users/:id/identities/remove',
+  summary: 'Remove a linked company sign-in of this organisation\'s provider from a member (404 when not linked; audited identity.unlinked)',
+  auth: 'session',
+  permission: 'user.manage',
+  scope: 'org',
+  params: IdParams,
+  body: UserIdentityRemoval,
+  response: CommandResult,
+  errors: [404, 409],
+});
+
 export const routes: RouteDef[] = [
   adminUsersListRoute, adminUsersCreateRoute, adminUsersUpdateRoute, adminUsersResetMfaRoute, adminUsersRegisterIdentityRoute,
   adminOrganizationUpdateRoute, adminRolesGrantRoute, adminRolesApproveRoute, adminRolesRejectRoute, adminRolesRevokeRoute,
-  adminOrganizationGetRoute, adminOnboardingRoute,
+  adminOrganizationGetRoute, adminOnboardingRoute, adminUsersRemoveIdentityRoute,
 ];

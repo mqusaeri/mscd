@@ -3,7 +3,7 @@
 // competence records shared through entity_ms_link, RLS of the new tables, the append-only status history, verified
 // domains (one organisation per verified domain; the migration stops on duplicates), per-organisation entitlements,
 // and the platform scope that writes domains, entitlements, status history and the organisation status.
-import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { sql, type Kysely, type Transaction } from 'kysely';
@@ -203,7 +203,8 @@ describe('Milestone 2 platform schema (platform 0005)', () => {
       '42501',
       /append-only/,
     );
-    for (const [from, to, reason] of [['active', 'active', 'Same'], ['active', 'deleted', 'Unknown'], ['active', 'suspended', '  ']] as const) {
+    // Milestone 3 J.7 adds deleted to the lists (M3-01), so paused stands for a status the lists do not know.
+    for (const [from, to, reason] of [['active', 'active', 'Same'], ['active', 'paused', 'Unknown'], ['active', 'suspended', '  ']] as const) {
       await expectPgError(
         rolledBack(db.migrator, { platformScope: true }, (trx) => sql`insert into platform.organization_status_event (organization_id, from_status, to_status, reason)
           values (${alpha.id}, ${from}, ${to}, ${reason})`.execute(trx)),
@@ -345,7 +346,11 @@ describe('platform 0005 on a database with a domain verified for two organisatio
     migrator = connect(bare.urls.migrator, 'mscd-test-m2');
     tmp = await mkdtemp(path.join(os.tmpdir(), 'mscd-m2-migrations-'));
     await cp(MIGRATIONS_ROOT, tmp, { recursive: true });
-    await rm(path.join(tmp, 'platform', '0005_milestone2_saas.sql'));
+    // Platform 0005 and every later platform migration (they build on 0005, for example the status lists of
+    // Milestone 3 platform 0007), so the database stands as it did before Milestone 2.
+    for (const file of await readdir(path.join(tmp, 'platform'))) {
+      if (file >= '0005') await rm(path.join(tmp, 'platform', file));
+    }
     await migrateAll({ connectionString: bare.urls.migrator, migrationsRoot: tmp });
   });
 

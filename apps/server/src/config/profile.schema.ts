@@ -80,6 +80,32 @@ const dnsResolver = z.union(
   { error: 'must be an IPv4 or IPv6 address, optionally with a port' },
 );
 
+const MIB = 1024 * 1024;
+const GIB = 1024 * MIB;
+
+/** Defaults of the `lifecycle` section (Milestone 3 D.3): D-S5, H.1, H.3 and D.5.6 of the Milestone 3 plan. */
+export const LIFECYCLE_DEFAULTS = {
+  offboarding_days: 30,
+  deletion_grace_days: 30,
+  deletion_min_grace_days: 7,
+  export_part_bytes: 2 * GIB,
+  export_max_bytes: 100 * GIB,
+  export_link_days: 7,
+  backup_copies_end_days: 780,
+} as const;
+
+/** Defaults of the `privacy` section (Milestone 3 D.3): H.4 of the Milestone 3 plan for the request deadline. */
+export const PRIVACY_DEFAULTS = {
+  request_due_hours: 72,
+  session_retention_days: 90,
+  token_retention_days: 30,
+  notification_retention_days: 365,
+} as const;
+
+/** Lifecycle day counts that test stacks alone may set below `LIFECYCLE_TEST_MINIMUM` (Milestone 3 D.3). */
+export const LIFECYCLE_TEST_ONLY_KEYS = ['offboarding_days', 'deletion_grace_days', 'deletion_min_grace_days'] as const;
+export const LIFECYCLE_TEST_MINIMUM = 7;
+
 export const profileSchema = z.strictObject({
   tenancy: z.strictObject({
     mode: z.enum(['single', 'multi']),
@@ -154,6 +180,31 @@ export const profileSchema = z.strictObject({
       terms_url: httpUrl.nullable().default(null),
     })
     .default({ privacy_url: null, terms_url: null }),
+  /**
+   * End of contract, verified deletion and organisation export (Milestone 3 D.3, D.4, D.5). Values below 7 for the
+   * three day counts exist for test stacks only: the server refuses them unless `MSCD_SAAS_TEST=1` is set or the
+   * profile has the `test` section (`lifecycleProfileIssues` in load-profile.ts).
+   */
+  lifecycle: z
+    .strictObject({
+      offboarding_days: z.int().min(0).max(365).default(LIFECYCLE_DEFAULTS.offboarding_days),
+      deletion_grace_days: z.int().min(0).max(365).default(LIFECYCLE_DEFAULTS.deletion_grace_days),
+      deletion_min_grace_days: z.int().min(0).max(365).default(LIFECYCLE_DEFAULTS.deletion_min_grace_days),
+      export_part_bytes: z.int().min(64 * MIB).max(8 * GIB).default(LIFECYCLE_DEFAULTS.export_part_bytes),
+      export_max_bytes: z.int().min(GIB).default(LIFECYCLE_DEFAULTS.export_max_bytes),
+      export_link_days: z.int().min(1).max(90).default(LIFECYCLE_DEFAULTS.export_link_days),
+      backup_copies_end_days: z.int().min(0).max(3650).default(LIFECYCLE_DEFAULTS.backup_copies_end_days),
+    })
+    .default(LIFECYCLE_DEFAULTS),
+  /** Requests from one person and how long personal data in sessions, tokens and notifications is kept (Milestone 3 D.6). */
+  privacy: z
+    .strictObject({
+      request_due_hours: z.int().min(24).max(720).default(PRIVACY_DEFAULTS.request_due_hours),
+      session_retention_days: z.int().min(7).max(3650).default(PRIVACY_DEFAULTS.session_retention_days),
+      token_retention_days: z.int().min(1).max(3650).default(PRIVACY_DEFAULTS.token_retention_days),
+      notification_retention_days: z.int().min(30).max(3650).default(PRIVACY_DEFAULTS.notification_retention_days),
+    })
+    .default(PRIVACY_DEFAULTS),
   jobs: z.strictObject({
     driver: z.enum(['pgboss', 'bullmq']),
     schedules_enabled: z.boolean(),

@@ -88,7 +88,8 @@ export interface TaskTable {
   updated_by: string | null;
   deleted_at: Date | null;
   management_system_id: string | null;
-  source_rule: 'BR-10' | 'BR-11' | 'BR-15' | 'BR-31' | 'manual';
+  /** `acknowledgement`, `access_review`, `privacy_check`: Milestone 3 J.7 (tasks completed on their own screen). */
+  source_rule: 'BR-10' | 'BR-11' | 'BR-15' | 'BR-31' | 'manual' | 'acknowledgement' | 'access_review' | 'privacy_check';
   entity_type: string;
   entity_id: string;
   entity_code: string | null;

@@ -14,6 +14,7 @@ import { ConflictError, ForbiddenError, NotFoundError } from '../../common/probl
 import { GATEWAY_CLIENT, JOB_QUEUE, type GatewayClient, type JobQueue, type Principal, type Trx } from '../../common/tokens';
 import { addAuditorReadRefs } from '../authz/auditor-read';
 import { ScopePolicyService, type ScopeContext } from '../authz/scope-policy';
+import { ContentDisposedError } from '../files/object-access.service';
 import { StorageGatewayContext } from '../storage/gateway-context';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { downloadName, packUrls } from './pack-support';
@@ -166,6 +167,8 @@ export class EvidencePacksService {
       if (!objectId) throw new NotFoundError('This evidence pack has no such file');
       const object = await trx.selectFrom('storage_object').selectAll().where('id', '=', objectId).where('deleted_at', 'is', null).executeTakeFirst();
       if (!object) throw new NotFoundError('The file of this evidence pack is gone');
+      // Milestone 3 D.2: a copy whose content an approved disposal removed answers 404 `content_disposed`.
+      if (object.content_disposed_at) throw new ContentDisposedError();
       const repositoryRow = await this.storage.repositoryRow(trx, object.storage_repository_id);
       return {
         system,

@@ -1,4 +1,5 @@
-// Kysely row types of the platform tables (migrations/platform/0001 to 0006, build plan C.4 and Milestone 2 D.2, D.3).
+// Kysely row types of the platform tables (migrations/platform/0001 to 0007, build plan C.4, Milestone 2 D.2, D.3 and
+// Milestone 3 D.3).
 // Hand-maintained (C.7): a migration that adds or changes these tables updates this file in the same change;
 // test/int/db/schema-types.test.ts compares TABLE_COLUMNS with the migrated database and fails on any difference.
 // Conventions: columns with a database default are Generated<T>, columns only a trigger writes are
@@ -15,7 +16,8 @@ export interface OrganizationTable {
   schema_name: string;
   time_zone: Generated<string>;
   site_count: Generated<number>;
-  status: Generated<'active' | 'suspended' | 'offboarding' | 'archived'>;
+  /** `deleted`: Milestone 3 J.7, set by the purge only. */
+  status: Generated<'active' | 'suspended' | 'offboarding' | 'archived' | 'deleted'>;
   local_login: Generated<'allowed' | 'admins_only' | 'disabled'>;
   region: string | null;
   demo_deploy_label: 'saas' | 'onprem' | null;
@@ -23,6 +25,8 @@ export interface OrganizationTable {
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   deleted_at: Date | null;
+  /** Milestone 3 D.3: while `offboarding`, when the read-only period ends (D.5.1). */
+  offboarding_ends_at: Date | null;
 }
 
 /** `platform.verified_domain`; status, method and the DNS columns are Milestone 2 (0005, M2-S11). */
@@ -42,8 +46,8 @@ export interface VerifiedDomainTable {
 export interface OrganizationStatusEventTable {
   id: Generated<string>;
   organization_id: string;
-  from_status: 'active' | 'suspended' | 'offboarding' | 'archived';
-  to_status: 'active' | 'suspended' | 'offboarding' | 'archived';
+  from_status: 'active' | 'suspended' | 'offboarding' | 'archived' | 'deleted';
+  to_status: 'active' | 'suspended' | 'offboarding' | 'archived' | 'deleted';
   reason: string;
   actor_user_id: string | null;
   created_at: Generated<Date>;
@@ -93,6 +97,8 @@ export interface AppUserTable {
   created_by: string | null;
   updated_by: string | null;
   deleted_at: Date | null;
+  /** Milestone 3 D.3: when the account was anonymised (D.5.2 step 3, D.6.5); the row stays for its references. */
+  erased_at: Date | null;
 }
 
 /** `platform.org_membership` */
@@ -357,6 +363,9 @@ export interface AuditLogTable {
   user_agent: string | null;
   prev_hash: GeneratedAlways<Buffer>;
   row_hash: GeneratedAlways<Buffer>;
+  /** Milestone 3 D.3, D.5.4: set by `platform.redact_audit_rows` only (outside the hashed columns). */
+  redacted_at: Date | null;
+  redaction_id: string | null;
 }
 
 /** `platform.audit_anchor` */
@@ -425,6 +434,64 @@ export interface DailyJobRunTable {
   enqueued_at: Generated<Date>;
 }
 
+/** One part of an organisation export: its vault object, name, size and SHA-256 (Milestone 3 D.4). */
+export interface OrganizationExportPartRef {
+  part: number;
+  storageObjectId: string;
+  name: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/** `platform.organization_export` (Milestone 3 0007): a full export of one organisation (D.4, machine of J.8). */
+export interface OrganizationExportTable {
+  id: Generated<string>;
+  organization_id: string;
+  status: 'requested' | 'queued' | 'building' | 'ready' | 'failed' | 'rejected' | 'expired';
+  requested_via: 'tenant_admin' | 'operator' | 'offboarding';
+  requested_by: string | null;
+  requested_at: Generated<Date>;
+  decided_by: string | null;
+  decided_at: Date | null;
+  decision_note: string | null;
+  is_final: Generated<boolean>;
+  part_count: number | null;
+  file_count: number | null;
+  size_bytes: string | null;
+  parts: NullableJson<OrganizationExportPartRef[]>;
+  manifest_object_id: string | null;
+  manifest_sha256: string | null;
+  expires_at: Date | null;
+  completed_at: Date | null;
+  download_count: Generated<number>;
+  error: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+/** `platform.organization_deletion` (Milestone 3 0007): the verified deletion of one organisation (D.5, machine of J.8). */
+export interface OrganizationDeletionTable {
+  id: Generated<string>;
+  organization_id: string;
+  status: 'scheduled' | 'cancelled' | 'running' | 'completed' | 'failed';
+  scheduled_for: Date;
+  scheduled_by: string | null;
+  reason: string | null;
+  notify_emails_sealed: string | null;
+  final_export_id: string | null;
+  started_at: Date | null;
+  completed_at: Date | null;
+  failed_step: string | null;
+  error: string | null;
+  report: NullableJson;
+  vault_objects_deleted: string | null;
+  certificate: NullableJson;
+  certificate_signature: string | null;
+  certificate_key_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 /** Tables of this group as Kysely table keys. */
 export interface PlatformTables {
   'platform.organization': OrganizationTable;
@@ -457,6 +524,8 @@ export interface PlatformTables {
   'platform.organization_status_event': OrganizationStatusEventTable;
   'platform.entitlement': EntitlementTable;
   'platform.daily_job_run': DailyJobRunTable;
+  'platform.organization_export': OrganizationExportTable;
+  'platform.organization_deletion': OrganizationDeletionTable;
 }
 
 /**
@@ -480,7 +549,7 @@ declare module './index' {
 export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
   'platform.organization': [
     'id', 'slug', 'name', 'schema_name', 'time_zone', 'site_count', 'status', 'local_login', 'region',
-    'demo_deploy_label', 'position', 'created_at', 'updated_at', 'deleted_at',
+    'demo_deploy_label', 'position', 'created_at', 'updated_at', 'deleted_at', 'offboarding_ends_at',
   ],
   'platform.verified_domain': [
     'organization_id', 'domain', 'verified_at', 'verified_by', 'status', 'txt_token_hash', 'requested_at', 'last_checked_at', 'method',
@@ -488,7 +557,7 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
   'platform.app_user': [
     'id', 'handle', 'email', 'display_name', 'job_title', 'kind', 'status', 'password_hash', 'password_changed_at',
     'failed_login_count', 'locked_until', 'mfa_required', 'mfa_failed_count', 'mfa_lock_level', 'mfa_locked_until',
-    'is_demo', 'last_login_at', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
+    'is_demo', 'last_login_at', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'erased_at',
   ],
   'platform.org_membership': [
     'organization_id', 'user_id', 'admin_roles', 'status', 'is_default', 'invited_by', 'accepted_at', 'created_at',
@@ -543,7 +612,7 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
   'platform.audit_log': [
     'seq', 'id', 'occurred_at', 'organization_id', 'management_system_id', 'actor_user_id', 'actor_kind', 'action',
     'entity_type', 'entity_id', 'entity_code', 'before_data', 'after_data', 'edition', 'request_id', 'source_ip',
-    'user_agent', 'prev_hash', 'row_hash',
+    'user_agent', 'prev_hash', 'row_hash', 'redacted_at', 'redaction_id',
   ],
   'platform.audit_anchor': [
     'id', 'chain', 'seq', 'row_hash', 'anchored_at', 'payload', 'signature', 'key_id', 'exported_to',
@@ -562,4 +631,14 @@ export const TABLE_COLUMNS = tableColumns<PlatformTables>()({
     'rate_user_per_minute', 'rate_org_per_minute', 'valid_from', 'valid_until', 'grace_days', 'version', 'updated_at', 'updated_by',
   ],
   'platform.daily_job_run': ['organization_id', 'job', 'local_date', 'scheduled_for', 'enqueued_at'],
+  'platform.organization_export': [
+    'id', 'organization_id', 'status', 'requested_via', 'requested_by', 'requested_at', 'decided_by', 'decided_at', 'decision_note', 'is_final',
+    'part_count', 'file_count', 'size_bytes', 'parts', 'manifest_object_id', 'manifest_sha256', 'expires_at', 'completed_at', 'download_count',
+    'error', 'created_at', 'updated_at',
+  ],
+  'platform.organization_deletion': [
+    'id', 'organization_id', 'status', 'scheduled_for', 'scheduled_by', 'reason', 'notify_emails_sealed', 'final_export_id', 'started_at',
+    'completed_at', 'failed_step', 'error', 'report', 'vault_objects_deleted', 'certificate', 'certificate_signature', 'certificate_key_id',
+    'created_at', 'updated_at',
+  ],
 });

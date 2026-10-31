@@ -5,7 +5,7 @@ import {
   rejectionFor, routeById, transitionsFor, transitionsVia,
 } from '../src/index.js';
 import type { MachineEntity, Permission } from '../src/index.js';
-import { planMachines } from './helpers.js';
+import { m3Machines, planMachines } from './helpers.js';
 
 /** A row expectation: from, to, permission (null for the system), own flag, rules that must be present. */
 type Row = [from: string | null, to: string, permission: Permission | null, own?: boolean, rules?: string[]];
@@ -21,10 +21,16 @@ function expectNoRow(entity: MachineEntity, from: string | null, to: string): vo
 }
 
 describe('machines', () => {
-  it('cover every entity of C.13 and Milestone 2 J.8', () => {
+  it('cover every entity of C.13, Milestone 2 J.8 and Milestone 3 J.8', () => {
     const planned = planMachines();
     expect(planned.filter(([, owner]) => owner.startsWith('WP-')).length).toBe(12);
-    expect(planned.filter(([, owner]) => owner.startsWith('M2-'))).toEqual([['organization.status', 'M2-02'], ['certification_cycle.status', 'M2-02']]);
+    // Milestone 3 J.8 replaces the organisation status machine of M2-02.
+    expect(planned.filter(([, owner]) => owner.startsWith('M2-'))).toEqual([['certification_cycle.status', 'M2-02']]);
+    expect(m3Machines()).toEqual([
+      ['organization.status', 'M3-01'], ['organization_export.status', 'M3-01'], ['organization_deletion.status', 'M3-01'],
+      ['privacy_request.status', 'M3-01'], ['retention_review.status', 'M3-01'], ['access_review.status', 'M3-01'],
+    ]);
+    expect(planned.filter(([, owner]) => owner.startsWith('M3-'))).toEqual(m3Machines());
     expect(planned.map(([e]) => e).sort()).toEqual([...MACHINE_ENTITIES].sort());
     for (const [entity, owner] of planned) expect(MACHINES[entity as MachineEntity].owner, entity).toBe(owner);
   });
@@ -312,19 +318,131 @@ describe('C.13 rows', () => {
     expect(routeById('ms.cycles.create').permission).toBe('audit_event.manage');
   });
 
-  it('organisation status (Milestone 2 J.8)', () => {
+  it('organisation status (Milestone 3 J.8, which replaces the machine of Milestone 2 J.8)', () => {
     const e = 'organization.status';
+    // The operator's moves of Milestone 2 J.8 stay, through ops.organizations.status (or tenant set-status).
     const moves = [['active', 'suspended'], ['active', 'offboarding'], ['suspended', 'active'], ['suspended', 'offboarding'], ['offboarding', 'active'], ['offboarding', 'archived']] as const;
     for (const [from, to] of moves) {
       expectRow(e, [from, to, 'ops.tenants.manage']);
       const [row] = transitionsVia(e, from, to, 'ops.organizations.status');
       expect(row?.requires, `${from} to ${to}`).toEqual(to === 'offboarding' || to === 'archived' ? ['reason', 'confirmSlug'] : ['reason']);
     }
-    expect(MACHINES[e].transitions).toHaveLength(moves.length);
-    for (const to of ['active', 'suspended', 'offboarding']) expectNoRow(e, 'archived', to);
-    expectNoRow(e, 'active', 'archived');
-    expectNoRow(e, 'suspended', 'archived');
+    // Moving to offboarding sets the end of the read-only period (D.2, D.5.1).
+    for (const from of ['active', 'suspended', 'archived'] as const) {
+      expect(transitionsVia(e, from, 'offboarding', 'ops.organizations.status')[0]?.sets, `${from} to offboarding`).toEqual(['offboarding_ends_at']);
+    }
+    // Milestone 3: archived back to offboarding while the deletion is scheduled (reason and confirmSlug), which cancels it.
+    expectRow(e, ['archived', 'offboarding', 'ops.tenants.manage']);
+    expect(transitionsVia(e, 'archived', 'offboarding', 'ops.organizations.status')[0]?.requires).toEqual(['reason', 'confirmSlug']);
+    // The system ends the read-only period (org.lifecycle), purges on the date (org.purge) and re-applies a certificate.
+    expectRow(e, ['offboarding', 'archived', null]);
+    expectRow(e, ['archived', 'deleted', null]);
+    expectRow(e, ['active', 'archived', null]);
+    expectRow(e, ['suspended', 'archived', null]);
+    // deleted is final and never set by a caller.
+    for (const to of ['active', 'suspended', 'offboarding', 'archived']) expectNoRow(e, 'deleted', to);
+    expect(MACHINES[e].transitions.filter((t) => t.to === 'deleted').map((t) => t.permission)).toEqual([null]);
+    for (const to of ['active', 'suspended']) expectNoRow(e, 'archived', to);
+    // A caller archives only from offboarding; the other moves to archived are system re-applies.
+    for (const from of ['active', 'suspended'] as const) expect(transitionsVia(e, from, 'archived', 'ops.organizations.status')).toEqual([]);
+    expect(MACHINES[e].transitions).toHaveLength(moves.length + 5);
     expect(machinePermissions(e, 'ops.organizations.status')).toEqual(['ops.tenants.manage']);
+    expect(machinePermissions(e)).toEqual([]);
     expect(routeById('ops.organizations.status').permission).toBe('ops.tenants.manage');
+  });
+
+  it('organisation export (Milestone 3 J.8, D.4)', () => {
+    const e = 'organization_export.status';
+    expectRow(e, [null, 'requested', 'org.export.manage']);
+    expectRow(e, [null, 'queued', 'org.export.manage']);
+    expectRow(e, [null, 'queued', 'ops.tenants.manage']);
+    expectRow(e, [null, 'queued', null]);
+    for (const to of ['requested', 'queued'] as const) {
+      expect(transitionsVia(e, null, to, 'exports.organization.create').map((t) => t.permission), to).toEqual(['org.export.manage']);
+    }
+    expect(transitionsVia(e, null, 'queued', 'ops.exports.create').map((t) => t.permission)).toEqual(['ops.tenants.manage']);
+    for (const to of ['queued', 'rejected'] as const) {
+      expectRow(e, ['requested', to, 'org.export.manage', false, ['SOD-SELF-APPROVE']]);
+      expect(transitionsFor(e, 'requested', to)[0]?.via, to).toBe('exports.organization.decide');
+    }
+    expectRow(e, ['requested', 'expired', null]);
+    expectRow(e, ['queued', 'building', null]);
+    expectRow(e, ['building', 'ready', null]);
+    expectRow(e, ['building', 'failed', null]);
+    expectRow(e, ['ready', 'expired', null]);
+    expectNoRow(e, 'requested', 'building');
+    expectNoRow(e, 'ready', 'building');
+    expect(machinePermissions(e)).toEqual([]);
+  });
+
+  it('organisation deletion (Milestone 3 J.8, D.5)', () => {
+    const e = 'organization_deletion.status';
+    expectRow(e, [null, 'scheduled', null]);
+    expectRow(e, [null, 'scheduled', 'ops.tenants.manage']);
+    expect(transitionsFor(e, null, 'scheduled').find((t) => t.permission)?.requires).toEqual(['scheduledFor', 'reason', 'confirmSlug']);
+    expectRow(e, ['scheduled', 'cancelled', 'ops.tenants.manage']);
+    expectRow(e, ['scheduled', 'cancelled', null]);
+    expectRow(e, ['scheduled', 'running', null]);
+    expectRow(e, ['running', 'completed', null]);
+    expectRow(e, ['running', 'failed', null]);
+    expectRow(e, ['failed', 'running', 'ops.tenants.manage']);
+    expect(transitionsFor(e, 'failed', 'running')[0]?.via).toBe('ops.deletion.retry');
+    // Re-apply after a restore (D.5.6), system only.
+    expectRow(e, [null, 'running', null]);
+    expectRow(e, ['cancelled', 'running', null]);
+    // Nobody starts a purge before its date: no caller moves a deletion to running except the retry of a failed one.
+    expect(MACHINES[e].transitions.filter((t) => t.to === 'running' && t.permission).map((t) => t.from)).toEqual(['failed']);
+    expectNoRow(e, 'completed', 'running');
+    expectNoRow(e, 'completed', 'scheduled');
+    expect(machinePermissions(e, 'ops.deletion.schedule')).toEqual(['ops.tenants.manage']);
+    expect(machinePermissions(e, 'ops.deletion.cancel')).toEqual(['ops.tenants.manage']);
+  });
+
+  it('request from one person (Milestone 3 J.8, D.6)', () => {
+    const e = 'privacy_request.status';
+    expectRow(e, [null, 'received', 'privacy_request.manage']);
+    expect(transitionsFor(e, null, 'received').find((t) => t.permission)?.via).toBe('privacy-requests.create');
+    expectRow(e, [null, 'received', null]);
+    expectRow(e, ['received', 'in_progress', 'privacy_request.manage']);
+    expect(transitionsFor(e, 'received', 'in_progress')[0]?.requires).toEqual(['identityCheckNote']);
+    expectRow(e, ['in_progress', 'completed', 'privacy_request.manage']);
+    expect(transitionsFor(e, 'in_progress', 'completed')[0]?.via).toBe('privacy-requests.close');
+    for (const from of ['received', 'in_progress']) {
+      for (const to of ['refused', 'withdrawn']) {
+        expectRow(e, [from, to, 'privacy_request.manage']);
+        expect(transitionsFor(e, from, to)[0]?.requires, `${from} to ${to}`).toEqual(['reason']);
+      }
+    }
+    expectNoRow(e, 'received', 'completed');
+    for (const to of ['received', 'in_progress', 'refused', 'withdrawn']) expectNoRow(e, 'completed', to);
+  });
+
+  it('disposal review (Milestone 3 J.8, D.8)', () => {
+    const e = 'retention_review.status';
+    expectRow(e, [null, 'open', null]);
+    expectRow(e, ['open', 'kept', 'retention.manage']);
+    expectRow(e, ['open', 'extended', 'retention.manage']);
+    for (const to of ['kept', 'extended']) expect(transitionsFor(e, 'open', to)[0]?.requires, to).toContain('reason');
+    expectRow(e, ['open', 'awaiting_approval', 'retention.manage', false, ['RET-HOLD', 'RET-NOT-DUE', 'RET-CURRENT']]);
+    expectRow(e, ['awaiting_approval', 'disposed', 'retention.approve', false, ['SOD-SELF-APPROVE']]);
+    expect(transitionsFor(e, 'awaiting_approval', 'disposed')[0]?.via).toBe('retention.reviews.approve');
+    expectRow(e, ['awaiting_approval', 'open', 'retention.approve']);
+    expect(transitionsFor(e, 'awaiting_approval', 'open')[0]?.requires).toEqual(['note']);
+    expectRow(e, ['kept', 'open', null]);
+    expectRow(e, ['extended', 'open', null]);
+    expectNoRow(e, 'open', 'disposed');
+    for (const to of ['open', 'kept', 'extended', 'awaiting_approval']) expectNoRow(e, 'disposed', to);
+  });
+
+  it('access review (Milestone 3 J.8, D.9)', () => {
+    const e = 'access_review.status';
+    expectRow(e, [null, 'open', null]);
+    expectRow(e, [null, 'open', 'access_review.manage']);
+    expect(transitionsFor(e, null, 'open').find((t) => t.permission)?.via).toBe('access-reviews.create');
+    expectRow(e, ['open', 'completed', 'access_review.manage']);
+    expectRow(e, ['open', 'cancelled', 'access_review.manage']);
+    expect(transitionsFor(e, 'open', 'cancelled')[0]?.requires).toEqual(['reason']);
+    expectNoRow(e, 'completed', 'open');
+    expectNoRow(e, 'cancelled', 'open');
   });
 });

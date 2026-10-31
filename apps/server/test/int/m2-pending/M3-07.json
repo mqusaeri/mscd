@@ -1,0 +1,21 @@
+{
+  "workPackage": "M3-07",
+  "routes": [
+    "access-reviews.settings.get",
+    "access-reviews.settings.put",
+    "access-reviews.list",
+    "access-reviews.create",
+    "access-reviews.get",
+    "access-reviews.decide",
+    "access-reviews.apply",
+    "access-reviews.complete",
+    "access-reviews.cancel",
+    "access-reviews.report",
+    "access-reviews.ms.list",
+    "access-reviews.ms.get",
+    "access-reviews.ms.decide",
+    "access-reviews.ms.apply",
+    "access-reviews.ms.sign-off",
+    "admin.users.identities.remove"
+  ]
+}

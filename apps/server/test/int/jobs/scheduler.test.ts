@@ -76,10 +76,21 @@ describe('scheduler.tick (E.2)', () => {
     expect(due(sunday, 'Asia/Jakarta').map((d) => [d.job.name, d.singletonKey, d.path])).toEqual([
       ['integrity.rehash', `ir:${jakarta}:2030-01-20`, 'due'],
       ['cycle.derive', `cd:${jakarta}:all`, 'due'],
+      // Milestone 3 J.3 (M3-06): the disposal review at 03:15 every day.
+      ['retention.review', `rt:${jakarta}:2030-01-20`, 'due'],
     ]);
-    expect(due('2030-01-20T20:05:00Z', 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['cycle.derive']);
+    expect(due('2030-01-20T20:05:00Z', 'Asia/Jakarta').map((d) => d.job.name)).toEqual(['cycle.derive', 'retention.review']);
     // Milestone 2 J.3: readiness.recompute at 02:30 and certificate.expiry at 06:00 (M2-05), entitlement.expiry at 06:15 (M2-S10).
-    expect(DAILY_JOBS.map((d) => d.at)).toEqual(['00:05', '00:15', '00:30', '01:00', '02:00', '02:30', '02:30', '02:45', '03:00', '03:15', '06:00', '06:15', '06:30', '07:00']);
+    // Milestone 3 J.3: retention.review at 03:15, access-review.open at 06:30, privacy.deadlines at 08:00 and
+    // acknowledgement.reminders at 08:10.
+    expect(DAILY_JOBS.map((d) => d.at)).toEqual([
+      '00:05', '00:15', '00:30', '01:00', '02:00', '02:30', '02:30', '02:45', '03:00', '03:15', '03:15', '06:00', '06:15', '06:30', '06:30', '07:00', '08:00', '08:10',
+    ]);
+    expect(DAILY_JOBS.filter((d) => ['retention.review', 'access-review.open', 'privacy.deadlines', 'acknowledgement.reminders'].includes(d.name)).map((d) => [d.name, d.prefix])).toEqual([
+      ['retention.review', 'rt'], ['access-review.open', 'ax'], ['privacy.deadlines', 'pd'], ['acknowledgement.reminders', 'ak'],
+    ]);
+    // Every singleton key prefix is its job's own.
+    expect(new Set(DAILY_JOBS.map((d) => d.prefix)).size).toBe(DAILY_JOBS.length);
   });
 
   it('advances the clock high-water mark and never moves it back', async () => {
@@ -115,6 +126,8 @@ describe('scheduler.tick (E.2)', () => {
       ['notifications.dispatch', '*/5 * * * *'],
       // Milestone 2 J.3 (M2-S11): email domain checks, hourly; only scheduled where its handler exists (multi tenancy).
       ['domain.verify', '35 * * * *'],
+      // Milestone 3 J.3 (M3-03): the organisation lifecycle, hourly at minute 20; in single tenancy its runs do nothing.
+      ['org.lifecycle', '20 * * * *'],
     ]);
     expect(app.moduleRef.get(WorkerRuntime).state).toEqual({ queues: ['scheduler.tick'], schedules: [] });
     expect(app.queue.schedules).toEqual([]);

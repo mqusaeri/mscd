@@ -1,5 +1,6 @@
 // Enumerations of the MSCD contract (build plan C.4 to C.6, C.11, C.12, D.1, E.2, E.6, F.6, F.11), with the values
-// that Milestone 2 adds (docs/platform/MILESTONE-2.md D.3 and J; marked "Milestone 2" below).
+// that Milestone 2 adds (docs/platform/MILESTONE-2.md D.3 and J; marked "Milestone 2" below) and the values that
+// Milestone 3 adds (docs/platform/MILESTONE-3.md D.3 and J; marked "Milestone 3" below, written by M3-01).
 //
 // Every database enumeration is a `varchar` column with a CHECK constraint; the arrays below hold exactly the
 // values of those constraints, in the order the DDL lists them (R-07). Each array has a zod schema of the same
@@ -16,8 +17,9 @@ function enumSchema<const T extends readonly [string, ...string[]]>(id: string, 
 // Platform schema (C.4)
 // ---------------------------------------------------------------------------------------------------------------
 
-export const ORGANIZATION_STATUSES = ['active', 'suspended', 'offboarding', 'archived'] as const;
-export const OrganizationStatus = enumSchema('OrganizationStatus', ORGANIZATION_STATUSES, 'platform.organization.status');
+/** `deleted`: Milestone 3 J.7, the end of the lifecycle of D.5 (set by the purge only, never by a caller). */
+export const ORGANIZATION_STATUSES = ['active', 'suspended', 'offboarding', 'archived', 'deleted'] as const;
+export const OrganizationStatus = enumSchema('OrganizationStatus', ORGANIZATION_STATUSES, 'platform.organization.status (deleted: Milestone 3 J.7)');
 export type OrganizationStatus = z.infer<typeof OrganizationStatus>;
 
 export const LOCAL_LOGIN_POLICIES = ['allowed', 'admins_only', 'disabled'] as const;
@@ -116,6 +118,21 @@ export type DomainVerificationMethod = z.infer<typeof DomainVerificationMethod>;
 export const ENTITLEMENT_SOURCES = ['preset', 'manual', 'signed_licence'] as const;
 export const EntitlementSource = enumSchema('EntitlementSource', ENTITLEMENT_SOURCES, 'platform.entitlement.source (Milestone 2 J.7)');
 export type EntitlementSource = z.infer<typeof EntitlementSource>;
+
+/** State of a full organisation export (Milestone 3 J.7 `platform.organization_export.status`, machine of J.8). */
+export const ORGANIZATION_EXPORT_STATUSES = ['requested', 'queued', 'building', 'ready', 'failed', 'rejected', 'expired'] as const;
+export const OrganizationExportStatus = enumSchema('OrganizationExportStatus', ORGANIZATION_EXPORT_STATUSES, 'platform.organization_export.status (Milestone 3 J.7)');
+export type OrganizationExportStatus = z.infer<typeof OrganizationExportStatus>;
+
+/** Who asked for an organisation export: a Tenant Admin, the platform operator, or the move to offboarding (Milestone 3 J.7). */
+export const EXPORT_REQUEST_SOURCES = ['tenant_admin', 'operator', 'offboarding'] as const;
+export const ExportRequestSource = enumSchema('ExportRequestSource', EXPORT_REQUEST_SOURCES, 'platform.organization_export.requested_via (Milestone 3 J.7)');
+export type ExportRequestSource = z.infer<typeof ExportRequestSource>;
+
+/** State of the verified deletion of an organisation (Milestone 3 J.7 `platform.organization_deletion.status`). */
+export const ORGANIZATION_DELETION_STATUSES = ['scheduled', 'cancelled', 'running', 'completed', 'failed'] as const;
+export const OrganizationDeletionStatus = enumSchema('OrganizationDeletionStatus', ORGANIZATION_DELETION_STATUSES, 'platform.organization_deletion.status (Milestone 3 J.7)');
+export type OrganizationDeletionStatus = z.infer<typeof OrganizationDeletionStatus>;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Reference schema (C.5)
@@ -306,6 +323,95 @@ export const IMPORT_RUN_STATUSES = ['validated', 'committing', 'committed', 'fai
 export const ImportRunStatus = enumSchema('ImportRunStatus', IMPORT_RUN_STATUSES, 'import_run.status (Milestone 2 J.7)');
 export type ImportRunStatus = z.infer<typeof ImportRunStatus>;
 
+// Milestone 3 J.7: requests from one person about their own personal data (D.6).
+
+/** What the person asks for (Milestone 3 D.6.3): a copy, a correction, a stop of processing, or an erasure. */
+export const PRIVACY_REQUEST_TYPES = ['access', 'rectification', 'restriction', 'erasure'] as const;
+export const PrivacyRequestType = enumSchema('PrivacyRequestType', PRIVACY_REQUEST_TYPES, 'privacy_request.request_type (Milestone 3 J.7)');
+export type PrivacyRequestType = z.infer<typeof PrivacyRequestType>;
+
+export const PRIVACY_REQUEST_STATUSES = ['received', 'in_progress', 'completed', 'refused', 'withdrawn'] as const;
+export const PrivacyRequestStatus = enumSchema('PrivacyRequestStatus', PRIVACY_REQUEST_STATUSES, 'privacy_request.status (Milestone 3 J.7, J.8)');
+export type PrivacyRequestStatus = z.infer<typeof PrivacyRequestStatus>;
+
+/** The person is a member (an account of the organisation) or someone only named in the text of records. */
+export const PRIVACY_SUBJECT_KINDS = ['member', 'other'] as const;
+export const PrivacySubjectKind = enumSchema('PrivacySubjectKind', PRIVACY_SUBJECT_KINDS, 'privacy_request.subject_kind (Milestone 3 J.7)');
+export type PrivacySubjectKind = z.infer<typeof PrivacySubjectKind>;
+
+/** How the request reached the organisation. */
+export const PRIVACY_CHANNELS = ['self_service', 'email', 'letter', 'provider', 'other'] as const;
+export const PrivacyChannel = enumSchema('PrivacyChannel', PRIVACY_CHANNELS, 'privacy_request.channel (Milestone 3 J.7)');
+export type PrivacyChannel = z.infer<typeof PrivacyChannel>;
+
+/** One system check of a request, done by the system's manager (Milestone 3 D.6.4). */
+export const PRIVACY_CHECK_STATUSES = ['open', 'done'] as const;
+export const PrivacyCheckStatus = enumSchema('PrivacyCheckStatus', PRIVACY_CHECK_STATUSES, 'privacy_check.status (Milestone 3 J.7)');
+export type PrivacyCheckStatus = z.infer<typeof PrivacyCheckStatus>;
+
+// Milestone 3 J.7: read confirmation of policies (D.7).
+
+/** Who is asked to confirm a document: the holders of a role in its systems, chosen roles, or the whole organisation. */
+export const ACKNOWLEDGEMENT_SCOPES = ['system_roles', 'roles', 'organisation'] as const;
+export const AcknowledgementScope = enumSchema('AcknowledgementScope', ACKNOWLEDGEMENT_SCOPES, 'document.acknowledgement_scope and acknowledgement_request.audience_scope (Milestone 3 J.7)');
+export type AcknowledgementScope = z.infer<typeof AcknowledgementScope>;
+
+/** Business roles a document can ask to confirm it: every business role but the external auditor (Milestone 3 D.7). */
+export const ACKNOWLEDGEMENT_ROLES = [
+  'ms_manager', 'programme_owner', 'domain_owner', 'risk_owner', 'internal_auditor', 'top_management', 'compliance_investigator',
+] as const;
+export const AcknowledgementRole = enumSchema('AcknowledgementRole', ACKNOWLEDGEMENT_ROLES, 'document.acknowledgement_roles elements (Milestone 3 J.7)');
+export type AcknowledgementRole = z.infer<typeof AcknowledgementRole>;
+
+export const ACKNOWLEDGEMENT_REQUEST_STATUSES = ['open', 'closed'] as const;
+export const AcknowledgementRequestStatus = enumSchema('AcknowledgementRequestStatus', ACKNOWLEDGEMENT_REQUEST_STATUSES, 'acknowledgement_request.status (Milestone 3 J.7)');
+export type AcknowledgementRequestStatus = z.infer<typeof AcknowledgementRequestStatus>;
+
+export const ACKNOWLEDGEMENT_STATUSES = ['pending', 'confirmed', 'excused'] as const;
+export const AcknowledgementStatus = enumSchema('AcknowledgementStatus', ACKNOWLEDGEMENT_STATUSES, 'acknowledgement.status (Milestone 3 J.7)');
+export type AcknowledgementStatus = z.infer<typeof AcknowledgementStatus>;
+
+// Milestone 3 J.7: retention and disposal review (D.8).
+
+/** Kinds of record a retention rule covers (Milestone 3 D.8 "Record classes"). */
+export const RETENTION_RECORD_CLASSES = [
+  'document_version', 'evidence_file', 'evidence_pack', 'audit_event', 'finding', 'corrective_action', 'management_review', 'competence_record',
+] as const;
+export const RetentionRecordClass = enumSchema('RetentionRecordClass', RETENTION_RECORD_CLASSES, 'retention_rule, retention_review and retention_hold record_class (Milestone 3 J.7)');
+export type RetentionRecordClass = z.infer<typeof RetentionRecordClass>;
+
+export const RETENTION_REVIEW_STATUSES = ['open', 'kept', 'extended', 'awaiting_approval', 'disposed'] as const;
+export const RetentionReviewStatus = enumSchema('RetentionReviewStatus', RETENTION_REVIEW_STATUSES, 'retention_review.status (Milestone 3 J.7, J.8)');
+export type RetentionReviewStatus = z.infer<typeof RetentionReviewStatus>;
+
+export const RETENTION_DECISIONS = ['keep', 'extend', 'dispose'] as const;
+export const RetentionDecision = enumSchema('RetentionDecision', RETENTION_DECISIONS, 'retention_review.decision (Milestone 3 J.7)');
+export type RetentionDecision = z.infer<typeof RetentionDecision>;
+
+/** What a disposal did to the file: vault content deleted, the owner asked to delete it in the customer repository, or nothing. */
+export const DISPOSAL_FILE_ACTIONS = ['vault_content_deleted', 'owner_asked', 'none'] as const;
+export const DisposalFileAction = enumSchema('DisposalFileAction', DISPOSAL_FILE_ACTIONS, 'retention_review.file_action (Milestone 3 J.7)');
+export type DisposalFileAction = z.infer<typeof DisposalFileAction>;
+
+// Milestone 3 J.7: periodic access review (D.9).
+
+export const ACCESS_REVIEW_STATUSES = ['open', 'completed', 'cancelled'] as const;
+export const AccessReviewStatus = enumSchema('AccessReviewStatus', ACCESS_REVIEW_STATUSES, 'access_review.status (Milestone 3 J.7, J.8)');
+export type AccessReviewStatus = z.infer<typeof AccessReviewStatus>;
+
+export const ACCESS_REVIEW_PART_STATUSES = ['open', 'signed_off'] as const;
+export const AccessReviewPartStatus = enumSchema('AccessReviewPartStatus', ACCESS_REVIEW_PART_STATUSES, 'access_review_part.status (Milestone 3 J.7)');
+export type AccessReviewPartStatus = z.infer<typeof AccessReviewPartStatus>;
+
+/** The rights an access review takes a snapshot of (Milestone 3 D.9 "Opening"). */
+export const ACCESS_REVIEW_ITEM_KINDS = ['membership', 'admin_role', 'business_role', 'auditor_access', 'linked_sign_in'] as const;
+export const AccessReviewItemKind = enumSchema('AccessReviewItemKind', ACCESS_REVIEW_ITEM_KINDS, 'access_review_item.item_kind (Milestone 3 J.7)');
+export type AccessReviewItemKind = z.infer<typeof AccessReviewItemKind>;
+
+export const ACCESS_REVIEW_DECISIONS = ['keep', 'change', 'revoke'] as const;
+export const AccessReviewDecision = enumSchema('AccessReviewDecision', ACCESS_REVIEW_DECISIONS, 'access_review_item.decision (Milestone 3 J.7)');
+export type AccessReviewDecision = z.infer<typeof AccessReviewDecision>;
+
 export const ISSUE_TYPES = ['internal', 'external'] as const;
 export const IssueType = enumSchema('IssueType', ISSUE_TYPES, 'context_issue.issue_type');
 export type IssueType = z.infer<typeof IssueType>;
@@ -408,13 +514,25 @@ export const EVIDENCE_PACK_STATUSES = ['queued', 'building', 'ready', 'failed'] 
 export const EvidencePackStatus = enumSchema('EvidencePackStatus', EVIDENCE_PACK_STATUSES, 'evidence_pack.status');
 export type EvidencePackStatus = z.infer<typeof EvidencePackStatus>;
 
-export const EXPORT_KINDS = ['portfolio_board', 'readiness', 'soa', 'document_register', 'audit_trail'] as const;
-export const ExportKind = enumSchema('ExportKind', EXPORT_KINDS, 'export_file.kind; also ExportRequest.type');
+/** `personal_data`: Milestone 3 J.7, the export of one person's data (D.6.3), made only by `exports.person.create` and `exports.me.create`. */
+export const EXPORT_KINDS = ['portfolio_board', 'readiness', 'soa', 'document_register', 'audit_trail', 'personal_data'] as const;
+export const ExportKind = enumSchema('ExportKind', EXPORT_KINDS, 'export_file.kind (personal_data: Milestone 3 J.7)');
 export type ExportKind = z.infer<typeof ExportKind>;
 
-export const EXPORT_FORMATS = ['pdf', 'xlsx', 'csv'] as const;
-export const ExportFormat = enumSchema('ExportFormat', EXPORT_FORMATS, 'export_file.format');
+/** The kinds `POST /exports` accepts: the five of Milestone 1 (Milestone 3 D.2: its body refuses `personal_data`). */
+export const EXPORT_REQUEST_KINDS = ['portfolio_board', 'readiness', 'soa', 'document_register', 'audit_trail'] as const satisfies readonly ExportKind[];
+export const ExportRequestKind = enumSchema('ExportRequestKind', EXPORT_REQUEST_KINDS, 'ExportRequest.type: the export kinds of POST /exports (Milestone 1)');
+export type ExportRequestKind = z.infer<typeof ExportRequestKind>;
+
+/** `json`: Milestone 3 J.7, the format of a personal data export. */
+export const EXPORT_FORMATS = ['pdf', 'xlsx', 'csv', 'json'] as const;
+export const ExportFormat = enumSchema('ExportFormat', EXPORT_FORMATS, 'export_file.format (json: Milestone 3 J.7)');
 export type ExportFormat = z.infer<typeof ExportFormat>;
+
+/** The formats `POST /exports` accepts (Milestone 1). */
+export const EXPORT_REQUEST_FORMATS = ['pdf', 'xlsx', 'csv'] as const satisfies readonly ExportFormat[];
+export const ExportRequestFormat = enumSchema('ExportRequestFormat', EXPORT_REQUEST_FORMATS, 'ExportRequest.format: the formats of POST /exports (Milestone 1)');
+export type ExportRequestFormat = z.infer<typeof ExportRequestFormat>;
 
 export const SELF_ASSESSMENT_STATUSES = ['not_assessed', 'conforming', 'gap', 'not_applicable'] as const;
 export const SelfAssessmentStatus = enumSchema('SelfAssessmentStatus', SELF_ASSESSMENT_STATUSES, 'self_assessment.status (C.13)');
@@ -424,8 +542,12 @@ export const AUDIT_ACTIVITY_STATUSES = ['planned', 'done', 'cancelled'] as const
 export const AuditActivityStatus = enumSchema('AuditActivityStatus', AUDIT_ACTIVITY_STATUSES, 'audit_activity.status');
 export type AuditActivityStatus = z.infer<typeof AuditActivityStatus>;
 
-export const TASK_SOURCE_RULES = ['BR-10', 'BR-11', 'BR-15', 'BR-31', 'manual'] as const;
-export const TaskSourceRule = enumSchema('TaskSourceRule', TASK_SOURCE_RULES, 'task.source_rule (D-29)');
+/**
+ * `acknowledgement`, `access_review`, `privacy_check`: Milestone 3 J.7, stored tasks that are completed on their own
+ * screen and never with "Mark done" (D3-13, D.2 `tasks.complete`).
+ */
+export const TASK_SOURCE_RULES = ['BR-10', 'BR-11', 'BR-15', 'BR-31', 'manual', 'acknowledgement', 'access_review', 'privacy_check'] as const;
+export const TaskSourceRule = enumSchema('TaskSourceRule', TASK_SOURCE_RULES, 'task.source_rule (D-29, Milestone 3 J.7)');
 export type TaskSourceRule = z.infer<typeof TaskSourceRule>;
 
 export const TASK_STATUSES = ['open', 'done', 'cancelled'] as const;
@@ -440,8 +562,12 @@ export const NOTIFICATION_KINDS = [
   'role_grant_pending', 'export_ready', 'evidence_pack_ready', 'account', 'security',
   // Milestone 2 J.4
   'membership_invited', 'certificate_expiring', 'import_finished', 'pack_content_updated', 'organization_status_changed',
+  // Milestone 3 J.4
+  'organization_export_requested', 'organization_export_ready', 'organization_lifecycle', 'privacy_request_received', 'privacy_request_due',
+  'privacy_check_requested', 'acknowledgement_requested', 'acknowledgement_overdue', 'retention_review_due', 'disposal_approval_pending',
+  'access_review_due', 'access_review_overdue',
 ] as const;
-export const NotificationKind = enumSchema('NotificationKind', NOTIFICATION_KINDS, 'notification.kind (E.6, Milestone 2 J.4)');
+export const NotificationKind = enumSchema('NotificationKind', NOTIFICATION_KINDS, 'notification.kind (E.6, Milestone 2 J.4, Milestone 3 J.4)');
 export type NotificationKind = z.infer<typeof NotificationKind>;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -564,8 +690,11 @@ export const PERMISSIONS = [
   'ops.read', 'ops.jobs.run', 'ops.users.manage',
   // Milestone 2 J.2
   'internal_audit.manage', 'ops.tenants.manage', 'ops.entitlements.manage',
+  // Milestone 3 J.2
+  'org.export.manage', 'privacy_request.manage', 'privacy_request.assist', 'acknowledgement.manage', 'retention.manage', 'retention.approve',
+  'access_review.manage', 'access_review.decide',
 ] as const;
-export const Permission = enumSchema('Permission', PERMISSIONS, 'Permission code (F.6, Milestone 2 J.2)');
+export const Permission = enumSchema('Permission', PERMISSIONS, 'Permission code (F.6, Milestone 2 J.2, Milestone 3 J.2)');
 export type Permission = z.infer<typeof Permission>;
 
 export const PERMISSION_SCOPES = ['ms', 'org', 'platform'] as const;
@@ -642,21 +771,29 @@ export type BusinessRuleId = z.infer<typeof BusinessRuleId>;
 /**
  * Rule ids of the problem `rule` member besides the business rules (D.1), then the platform rule ids of Milestone 2
  * (J.6): `APPL-ASSESS` (a clause row can never be marked not applicable) and `PACK-ROW-REMOVED` (a pack version drops
- * a code without marking it retired).
+ * a code without marking it retired), then those of Milestone 3 (J.6): `ACK-OPEN-FIRST` (a policy is opened before it
+ * is confirmed), `RET-HOLD`, `RET-NOT-DUE` and `RET-CURRENT` (a disposal of an item under a hold, before its period
+ * ends, or of a current item), `SOD-SELF-APPROVE` (a person approves what they asked for), `REVIEW-OWN-ACCESS`
+ * (a person decides on their own access) and `ERASE-OPEN-ITEMS` (an erasure while the person holds open items).
  */
 export const PLATFORM_RULE_IDS = [
   'LIC-USERS', 'LIC-MS', 'LIC-FEATURE', 'LIC-BINDING', 'VERIFY-SELF', 'NOT-A-MEMBER', 'SOD-SELF-GRANT',
   'APPL-ASSESS', 'PACK-ROW-REMOVED',
+  'ACK-OPEN-FIRST', 'RET-HOLD', 'RET-NOT-DUE', 'RET-CURRENT', 'SOD-SELF-APPROVE', 'REVIEW-OWN-ACCESS', 'ERASE-OPEN-ITEMS',
 ] as const;
 
-/** Warning rule ids that are not business rules (Milestone 2 J.6): `AUD-INDEP`, auditor independence. */
-export const PLATFORM_WARNING_RULE_IDS = ['AUD-INDEP'] as const;
+/**
+ * Warning rule ids that are not business rules: `AUD-INDEP`, auditor independence (Milestone 2 J.6), and
+ * `REVIEW-SINGLE-ADMIN`, an access review that completes with the single Tenant Admin's own items not reviewed
+ * (Milestone 3 J.6).
+ */
+export const PLATFORM_WARNING_RULE_IDS = ['AUD-INDEP', 'REVIEW-SINGLE-ADMIN'] as const;
 
 export const RULE_IDS = [...BUSINESS_RULE_IDS, ...PLATFORM_RULE_IDS, ...PLATFORM_WARNING_RULE_IDS] as const;
-export const RuleId = enumSchema('RuleId', RULE_IDS, 'Rule id of a problem or warning (D.1, Milestone 2 J.6)');
+export const RuleId = enumSchema('RuleId', RULE_IDS, 'Rule id of a problem or warning (D.1, Milestone 2 J.6, Milestone 3 J.6)');
 export type RuleId = z.infer<typeof RuleId>;
 
-/** Warn-and-allow rules: the command succeeds with `warnings` (D.1, Milestone 2 J.6). */
+/** Warn-and-allow rules: the command succeeds with `warnings` (D.1, Milestone 2 J.6, Milestone 3 J.6). */
 export const WARNING_RULE_IDS = [
   'BR-03', 'BR-17', 'BR-23', 'BR-30', 'BR-32', 'BR-36', 'BR-41', 'BR-47', ...PLATFORM_WARNING_RULE_IDS,
 ] as const satisfies readonly RuleId[];
@@ -684,14 +821,17 @@ export const JOB_NAMES = [
   'audit.verify-chain', 'cleanup.expired',
   // Milestone 2 J.3
   'readiness.recompute', 'certificate.expiry', 'import.run', 'applicability.sync', 'entitlement.expiry', 'domain.verify',
+  // Milestone 3 J.3
+  'org-export.build', 'org.lifecycle', 'org.purge', 'privacy.deadlines', 'acknowledgement.reminders', 'retention.review', 'access-review.open',
 ] as const;
-export const JobName = enumSchema('JobName', JOB_NAMES, 'Worker job name (E.2, Milestone 2 J.3)');
+export const JobName = enumSchema('JobName', JOB_NAMES, 'Worker job name (E.2, Milestone 2 J.3, Milestone 3 J.3)');
 export type JobName = z.infer<typeof JobName>;
 
-/** Jobs an operator may start with `POST /ops/jobs/{name}/run` (D.3 Operations). */
+/** Jobs an operator may start with `POST /ops/jobs/{name}/run` (D.3 Operations); `org.lifecycle` joins in Milestone 3 (D.2). */
 export const OPS_RUNNABLE_JOBS = [
   'freshness.sweep', 'link-health.plan', 'link-health.repository', 'audit.verify-chain', 'cleanup.expired',
   'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive',
+  'org.lifecycle',
 ] as const satisfies readonly JobName[];
 export const OpsRunnableJob = enumSchema('OpsRunnableJob', OPS_RUNNABLE_JOBS, 'Job name accepted by POST /ops/jobs/{name}/run');
 export type OpsRunnableJob = z.infer<typeof OpsRunnableJob>;
@@ -735,8 +875,21 @@ export const AUDIT_ACTIONS = [
   'ops.domain_removed', 'ops.entitlements_changed',
   // Milestone 2 D.1 management review PATCH (M2-07, orchestrator decision)
   'management_review.updated',
+  // Milestone 3 J.5, tenant audit trail
+  'organization_export.requested', 'organization_export.decided', 'organization_export.built', 'organization_export.failed',
+  'organization_export.downloaded', 'privacy_request.created', 'privacy_request.updated', 'privacy_request.rectified',
+  'privacy_request.restricted', 'privacy_request.erased', 'privacy_request.closed', 'privacy_check.done', 'privacy.audit_redacted',
+  'acknowledgement_request.created', 'acknowledgement_request.reminded', 'acknowledgement_request.closed', 'acknowledgement.opened',
+  'acknowledgement.confirmed', 'retention_rule.changed', 'retention_review.decided', 'retention_review.approved', 'retention_review.rejected',
+  'retention_review.file_removed', 'retention_hold.created', 'retention_hold.released', 'record.disposed', 'access_review.settings_changed',
+  'access_review.opened', 'access_review.item_decided', 'access_review.item_applied', 'access_review.signed_off', 'access_review.completed',
+  'access_review.cancelled',
+  // Milestone 3 J.5, platform audit log
+  'ops.export_requested', 'ops.deletion_scheduled', 'ops.deletion_cancelled', 'ops.deletion_retried', 'tenant.offboarding_ended',
+  'tenant.purge_started', 'tenant.purged', 'tenant.purge_failed', 'tenant.audit_redacted', 'user.anonymised', 'user.audit_redacted',
+  'identity.unlinked',
 ] as const;
-export const AuditAction = enumSchema('AuditAction', AUDIT_ACTIONS, 'Audit trail action (F.11, Milestone 2 J.5)');
+export const AuditAction = enumSchema('AuditAction', AUDIT_ACTIONS, 'Audit trail action (F.11, Milestone 2 J.5, Milestone 3 J.5)');
 export type AuditAction = z.infer<typeof AuditAction>;
 
 /** Action prefixes written to `platform.audit_log`; every other action goes to the tenant `audit_trail` (F.11). */

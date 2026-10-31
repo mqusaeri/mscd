@@ -1,7 +1,7 @@
 // Gateway transport security (D.4, D.5, I.3): with `tls.mode: mtls` a client certificate of the installation CA is
 // required and verified, only `CN=mscd-api` and `CN=mscd-worker` are callers and only the worker writes anchors;
 // the api's gateway client presents its certificate and refuses http with mtls; the previous gateway token works
-// until the next rotation; demo mode alone allows TLS off.
+// until the next rotation; demo mode alone allows TLS off. Milestone 3 D.1: only the worker purges an organisation.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,7 +9,13 @@ import { rotateGatewayToken } from '../../../src/cli/keys';
 import { ConfigError, MscdConfig } from '../../../src/config/mscd-config';
 import { gatewayAdapterOptions } from '../../../src/gateway/gateway-app';
 import { checkGatewayProfile } from '../../../src/gateway/gateway-server.module';
-import { GatewayProblemError, GatewayUnavailableError, HttpGatewayClient, checkGatewayEndpoint } from '../../../src/modules/storage/gateway-client';
+import {
+  GatewayProblemError,
+  GatewayUnavailableError,
+  HttpGatewayClient,
+  checkGatewayEndpoint,
+  purgeTenantStorage,
+} from '../../../src/modules/storage/gateway-client';
 import { HttpDataKeyIssuer } from '../../../src/modules/storage/http-data-key-issuer';
 import {
   GATEWAY_TOKEN,
@@ -82,6 +88,39 @@ describe('mutual TLS and gateway tokens (D.4, D.5)', () => {
     expect(api.json()).toMatchObject({ reason: 'caller' });
     const worker = await gatewayCall(gateway.url, '/v1/anchors', body, { dispatcher: tlsAgent(certs, certs.client('mscd-worker')) });
     expect(worker.status).toBe(200);
+  });
+
+  it('lets only the worker purge an organisation, and only with the same id twice (Milestone 3 D.1)', async () => {
+    const body = { orgId: ORG, confirmOrgId: ORG };
+    const api = await gatewayCall(gateway.url, '/v1/tenants/purge', body, { dispatcher: tlsAgent(certs, certs.client('mscd-api')) });
+    expect(api.status).toBe(403);
+    expect(api.json()).toMatchObject({ reason: 'caller' });
+    const mismatch = await gatewayCall(gateway.url, '/v1/tenants/purge', { orgId: ORG, confirmOrgId: '00000000-0000-4000-8000-00000000c002' }, {
+      dispatcher: tlsAgent(certs, certs.client('mscd-worker')),
+    });
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.json()).toMatchObject({ type: expect.stringMatching(/bad-request$/), detail: expect.stringMatching(/confirmOrgId/) });
+    // The worker's typed call (storage/gateway-client.ts) sends the id twice and gets the purge result.
+    const worker = new HttpGatewayClient(
+      MscdConfig.load({
+        runMode: 'worker',
+        env: {
+          ...process.env,
+          MSCD_PROFILE_FILE: TEST_PROFILE_FILE,
+          MSCD__STORAGE__GATEWAY__URL: gateway.url,
+          MSCD__STORAGE__GATEWAY__TOKEN_FILE: currentToken,
+          MSCD__STORAGE__GATEWAY__TLS__MODE: 'mtls',
+          MSCD__STORAGE__GATEWAY__TLS__CA_FILE: certs.files.ca,
+          MSCD__STORAGE__GATEWAY__TLS__CERT_FILE: certs.client('mscd-worker').certFile,
+          MSCD__STORAGE__GATEWAY__TLS__KEY_FILE: certs.client('mscd-worker').keyFile,
+        },
+      }),
+    );
+    try {
+      expect(await purgeTenantStorage(worker, ORG)).toEqual({ objectsDeleted: 0, versionsDeleted: 0, retained: [] });
+    } finally {
+      await worker.onApplicationShutdown();
+    }
   });
 
   it('keeps the previous token valid until the next rotation (keys rotate-gateway-token)', async () => {

@@ -92,6 +92,27 @@ export class DataKeyService {
     return this.cache.size;
   }
 
+  /** Whether an unwrapped key of the organisation is held in memory (tests). */
+  holds(orgId: string): boolean {
+    for (const entry of this.cache.values()) if (entry.key.orgId === orgId) return true;
+    return false;
+  }
+
+  /**
+   * Drops the unwrapped keys of one organisation (Milestone 3 D.5.2 step 4, `gateway.tenants.purge`); the number
+   * dropped. A later call that still sends the wrapped key unwraps it again while `storage.key` opens it.
+   */
+  forget(orgId: string): number {
+    let dropped = 0;
+    for (const [cacheKey, entry] of this.cache) {
+      if (entry.key.orgId !== orgId) continue;
+      entry.key.key.fill(0);
+      this.cache.delete(cacheKey);
+      dropped += 1;
+    }
+    return dropped;
+  }
+
   /** Drops every unwrapped key. */
   clear(): void {
     for (const entry of this.cache.values()) entry.key.key.fill(0);

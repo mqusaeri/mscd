@@ -36,6 +36,13 @@ import { singleTenancyRefusal, unknownOrganisation, type OperatorActor } from '.
 /** The route whose rows of the J.8 machine the operator performs (the command line performs the same rows). */
 const STATUS_ROUTE = 'ops.organizations.status';
 
+/**
+ * Until M3-03 builds the deletion of Milestone 3 (D.2, D.5), archived stays final on this route: the J.8 machine of
+ * M3-01 adds `archived -> offboarding` (allowed only while a deletion is scheduled, which it cancels), and this
+ * service keeps refusing it until that check exists. `deleted` is never a target (the request schema refuses it).
+ */
+const FINAL_UNTIL_DELETION: ReadonlySet<OrganizationStatus> = new Set(['archived', 'deleted']);
+
 /** Moves that also need `confirmSlug` equal to the slug (J.8): they end the customer's use of the service. */
 const CONFIRMED_STATUSES: ReadonlySet<OrganizationStatus> = new Set(['offboarding', 'archived']);
 
@@ -75,6 +82,7 @@ export function confirmationMismatch(slug: string, to: OrganizationStatus): Prob
 
 /** The statuses the operator may move an organisation to from `from` (J.8). */
 export function allowedMoves(from: OrganizationStatus): OrganizationStatus[] {
+  if (FINAL_UNTIL_DELETION.has(from)) return [];
   const targets: OrganizationStatus[] = ['active', 'suspended', 'offboarding', 'archived'];
   return targets.filter((to) => to !== from && transitionsVia('organization.status', from, to, STATUS_ROUTE).length > 0);
 }
@@ -109,7 +117,9 @@ export class OrganizationStatusService {
           .executeTakeFirst();
         if (!org) throw unknownOrganisation(slug);
         const from = org.status;
-        if (from === to || transitionsVia('organization.status', from, to, STATUS_ROUTE).length === 0) throw invalidStatusTransition(org.slug, from, to);
+        if (from === to || FINAL_UNTIL_DELETION.has(from) || transitionsVia('organization.status', from, to, STATUS_ROUTE).length === 0) {
+          throw invalidStatusTransition(org.slug, from, to);
+        }
         if (CONFIRMED_STATUSES.has(to) && body.confirmSlug !== org.slug) throw confirmationMismatch(org.slug, to);
 
         await trx.updateTable('platform.organization').set({ status: to }).where('id', '=', org.id).execute();
@@ -183,7 +193,7 @@ export class OrganizationStatusService {
    */
   private async notifyTenantAdmins(
     org: { id: string; slug: string; name: string; schema_name: string },
-    status: OrganizationStatus,
+    status: OrganizationStatusChange['status'],
     reason: string,
     admins: readonly TenantAdmin[],
     actor: OperatorActor,

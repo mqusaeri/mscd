@@ -5,11 +5,15 @@
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
+  GetObjectLegalHoldCommand,
   GetObjectLockConfigurationCommand,
+  GetObjectRetentionCommand,
   HeadBucketCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  ListObjectVersionsCommand,
   PutObjectCommand,
   S3Client,
   type ObjectLockConfiguration,
@@ -59,6 +63,38 @@ export function s3Problem(error: unknown, what: string): GatewayError {
   }
   return new GatewayError('internal', `${what}: the object store answered ${status} (${name || 'unknown error'})`, {}, { cause: error });
 }
+
+/** One stored version or delete marker of an object (`ListObjectVersions`). */
+export interface StoredVersion {
+  key: string;
+  /** The version id; `null` (the string) for an object written while the bucket had no versioning. */
+  versionId: string;
+  deleteMarker: boolean;
+}
+
+/** What object lock says about one version: its retention end and whether a legal hold is on. */
+export interface VersionProtection {
+  /** The end of the version's retention; null when it has none (or the store does not say). */
+  retainUntil: Date | null;
+  legalHold: boolean;
+}
+
+/** A version the store refused to delete because object lock still protects it. */
+export interface RetainedVersion extends StoredVersion, VersionProtection {}
+
+/** Outcome of `deleteVersions`: the versions removed and those a retention rule of the bucket still protects. */
+export interface DeleteVersionsResult {
+  deleted: StoredVersion[];
+  retained: RetainedVersion[];
+}
+
+/** Whether object lock protects a version now: a retention end still ahead, or a legal hold. */
+export function isProtected(protection: VersionProtection, now: Date = new Date()): boolean {
+  return protection.legalHold || (protection.retainUntil !== null && protection.retainUntil.getTime() > now.getTime());
+}
+
+/** Largest batch of `DeleteObjects` (S3 limit). */
+const DELETE_BATCH = 1000;
 
 export interface VaultStoreOptions {
   endpoint: string;
@@ -197,6 +233,110 @@ export class VaultStore {
     } catch (error) {
       throw s3Problem(error, `Listing of ${prefix}`);
     }
+  }
+
+  /**
+   * One page of the stored versions and delete markers below a prefix (Milestone 3 D.1, `gateway.objects.delete` and
+   * `gateway.tenants.purge`). A bucket without versioning lists each object once with the version id `null`.
+   */
+  async listVersions(
+    prefix: string,
+    maxKeys: number,
+    marker?: { keyMarker?: string; versionIdMarker?: string },
+  ): Promise<{ versions: StoredVersion[]; next?: { keyMarker?: string; versionIdMarker?: string } }> {
+    try {
+      const result = await this.s3.send(
+        new ListObjectVersionsCommand({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          MaxKeys: maxKeys,
+          KeyMarker: marker?.keyMarker,
+          VersionIdMarker: marker?.versionIdMarker,
+        }),
+      );
+      const versions: StoredVersion[] = [];
+      for (const version of result.Versions ?? []) {
+        if (typeof version.Key === 'string') versions.push({ key: version.Key, versionId: version.VersionId ?? 'null', deleteMarker: false });
+      }
+      for (const deleteMarker of result.DeleteMarkers ?? []) {
+        if (typeof deleteMarker.Key === 'string') versions.push({ key: deleteMarker.Key, versionId: deleteMarker.VersionId ?? 'null', deleteMarker: true });
+      }
+      const next = result.IsTruncated ? { keyMarker: result.NextKeyMarker, versionIdMarker: result.NextVersionIdMarker } : undefined;
+      return { versions, ...(next ? { next } : {}) };
+    } catch (error) {
+      throw s3Problem(error, `Version listing of ${prefix}`);
+    }
+  }
+
+  /**
+   * Removes the given versions and delete markers for good (`DeleteObjects` with version ids, in batches of 1000). A
+   * version that a retention rule of the bucket still protects (object lock) is refused by the store and returned under
+   * `retained` with its end date; governance retention is never bypassed. A refusal counts as retention only when the
+   * store confirms it (`GetObjectRetention` names an end still ahead, or `GetObjectLegalHold` is on): an `AccessDenied`
+   * without that, such as a vault credential that lacks `s3:DeleteObjectVersion`, fails the call like any other refusal,
+   * so a purge never reports content as kept when it was simply not deleted.
+   */
+  async deleteVersions(versions: readonly StoredVersion[]): Promise<DeleteVersionsResult> {
+    const deleted: StoredVersion[] = [];
+    const retained: RetainedVersion[] = [];
+    for (let start = 0; start < versions.length; start += DELETE_BATCH) {
+      const batch = versions.slice(start, start + DELETE_BATCH);
+      const byName = new Map(batch.map((v) => [`${v.key}\n${v.versionId}`, v]));
+      let result;
+      try {
+        result = await this.s3.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: batch.map((v) => ({ Key: v.key, VersionId: v.versionId })), Quiet: false },
+          }),
+        );
+      } catch (error) {
+        throw s3Problem(error, `Delete of ${batch.length} object version(s)`);
+      }
+      for (const item of result.Deleted ?? []) {
+        const version = byName.get(`${item.Key}\n${item.VersionId ?? 'null'}`) ?? (item.Key ? { key: item.Key, versionId: item.VersionId ?? 'null', deleteMarker: false } : null);
+        if (version) deleted.push(version);
+      }
+      const failures: string[] = [];
+      for (const item of result.Errors ?? []) {
+        const version = byName.get(`${item.Key}\n${item.VersionId ?? 'null'}`) ?? { key: item.Key ?? '', versionId: item.VersionId ?? 'null', deleteMarker: false };
+        if (item.Code === 'AccessDenied' && !version.deleteMarker) {
+          const protection = await this.protection(version);
+          if (isProtected(protection)) {
+            retained.push({ ...version, ...protection });
+            continue;
+          }
+        }
+        failures.push(`${item.Key ?? '?'}: ${item.Code ?? 'error'}`);
+      }
+      if (failures.length > 0) {
+        throw new GatewayError('internal', `The object store refused to delete ${failures.length} object version(s): ${failures.slice(0, 3).join(', ')}`);
+      }
+    }
+    return { deleted, retained };
+  }
+
+  /**
+   * What object lock says about a version: the end of its retention (`GetObjectRetention`) and its legal hold
+   * (`GetObjectLegalHold`). A question the store does not answer (no object lock on the bucket, no retention on the
+   * version, a store without legal holds, or a credential that may not ask) counts as no protection, so the caller
+   * treats the refusal it is checking as a failure and not as retention.
+   */
+  async protection(version: StoredVersion): Promise<VersionProtection> {
+    const target = { Bucket: this.bucket, Key: version.key, ...(version.versionId === 'null' ? {} : { VersionId: version.versionId }) };
+    let retainUntil: Date | null = null;
+    try {
+      retainUntil = (await this.s3.send(new GetObjectRetentionCommand(target))).Retention?.RetainUntilDate ?? null;
+    } catch {
+      retainUntil = null;
+    }
+    let legalHold = false;
+    try {
+      legalHold = (await this.s3.send(new GetObjectLegalHoldCommand(target))).LegalHold?.Status === 'ON';
+    } catch {
+      legalHold = false;
+    }
+    return { retainUntil, legalHold };
   }
 
   /**

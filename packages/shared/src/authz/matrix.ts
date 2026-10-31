@@ -1,4 +1,4 @@
-// Permission matrix of build plan F.6 (with the rows of Milestone 2 J.2) as data, read by the authorisation guard, `Me.permissions`, the auth fakes of
+// Permission matrix of build plan F.6 (with the rows of Milestone 2 J.2 and Milestone 3 J.2) as data, read by the authorisation guard, `Me.permissions`, the auth fakes of
 // the tests (J.2) and the generated RBAC tests (J.5). F.7 states how the guard applies it.
 import { PERMISSIONS } from '../enums.js';
 import type { BusinessRole, OrgRole, Permission, PermissionScope, PlatformRole, TenancyMode, UiRole } from '../enums.js';
@@ -124,6 +124,18 @@ export const PERMISSION_MATRIX: Readonly<Record<Permission, PermissionGrant>> = 
   'internal_audit.manage': ms([MM, IA]),
   'ops.tenants.manage': platform([OP]),
   'ops.entitlements.manage': platform([OP]),
+  // Milestone 3 J.2: the Tenant Admins export the organisation, answer requests from one person and run the access
+  // review; the Management System Managers check their systems for a request, ask for read confirmations, set retention
+  // rules and decide disposals; a disposal and a system part of the access review are approved or decided by the
+  // managers and the Programme Owners (product decision 6). The operator routes use ops.read and ops.tenants.manage.
+  'org.export.manage': org([TA]),
+  'privacy_request.manage': org([TA]),
+  'privacy_request.assist': ms([MM]),
+  'acknowledgement.manage': ms([MM]),
+  'retention.manage': ms([MM]),
+  'retention.approve': ms([MM, PO]),
+  'access_review.manage': org([TA]),
+  'access_review.decide': ms([MM, PO]),
 };
 
 /** The row of a permission with the tenancy rule applied (`tenancy` of `PermissionGrant`). */

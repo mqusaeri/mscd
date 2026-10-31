@@ -1,8 +1,9 @@
 // Area `documents` (owner from wave 9: WP-35): document register commands (D.2, D.3, C.13 `document.status`,
 // A.4 5.7 and 5.8). Document versions are file commands (`files.ts`); Milestone 2 (D.1) adds the version history,
-// and Milestone 2 (D.2) external documents (origin, source, reference, date received), built by M2-07.
+// and Milestone 2 (D.2) external documents (origin, source, reference, date received), built by M2-07. Milestone 3
+// (D.2, D.7) adds the read confirmation settings of a document (built by M3-05).
 import { z } from 'zod';
-import { Classification, DocumentOrigin, DocumentVersionStatus } from '../enums.js';
+import { AcknowledgementRole, AcknowledgementScope, Classification, DocumentOrigin, DocumentVersionStatus } from '../enums.js';
 import {
   Code, CommandResult, Handle, Instant, IsoDate, MsId, MsParams, MsRecordParams, PersonId, Uuid, defineRoute, named,
 } from './common.js';
@@ -14,6 +15,27 @@ const DocType = z.string().regex(/^[a-z][a-z0-9_]{0,19}$/);
 const ExternalSource = z.string().trim().min(1).max(200);
 /** The issuer's own reference of an external document (its number, edition or version). */
 const ExternalRef = z.string().trim().min(1).max(120);
+
+/**
+ * Read confirmation of a document (Milestone 3 D.7): whether approving a new version asks people to confirm it, who
+ * (the holders of a role in the document's systems, the chosen roles, or every member with a role in the organisation)
+ * and in how many days (14 by default, H.7).
+ */
+export const DocumentAcknowledgement = named(
+  'DocumentAcknowledgement',
+  z.strictObject({
+    required: z.boolean(),
+    scope: AcknowledgementScope,
+    roles: z.array(AcknowledgementRole).min(1).nullable(),
+    dueDays: z.int().min(1).max(90),
+  }).refine((a) => (a.scope === 'roles') === (a.roles !== null), { message: 'Scope roles names the roles; the other scopes name none', path: ['roles'] }),
+  'Read confirmation settings of a document: required, audience scope, roles for scope roles, and the days to confirm (Milestone 3 D.7)',
+  {
+    valid: [{ required: true, scope: 'system_roles', roles: null, dueDays: 14 }, { required: true, scope: 'roles', roles: ['domain_owner', 'risk_owner'], dueDays: 21 }, { required: false, scope: 'system_roles', roles: null, dueDays: 14 }],
+    invalid: [{ required: true, scope: 'roles', roles: null, dueDays: 14 }, { required: true, scope: 'system_roles', roles: null, dueDays: 0 }, { required: true, scope: 'organisation', roles: ['external_auditor'], dueDays: 14 }],
+  },
+);
+export type DocumentAcknowledgement = z.infer<typeof DocumentAcknowledgement>;
 
 export const DocumentTransitionRequest = named(
   'DocumentTransitionRequest',
@@ -40,16 +62,18 @@ export const DocumentCreateRequest = named(
     externalSource: ExternalSource.optional(),
     externalRef: ExternalRef.optional(),
     receivedAt: IsoDate.optional(),
+    acknowledgement: DocumentAcknowledgement.optional(),
   })
     .refine((r) => r.origin === 'external' || (r.externalSource === undefined && r.externalRef === undefined && r.receivedAt === undefined), {
       message: 'externalSource, externalRef and receivedAt describe an external document (origin external)',
       path: ['origin'],
     })
     .refine((r) => r.origin !== 'external' || r.externalSource !== undefined, { message: 'An external document names its source', path: ['externalSource'] }),
-  'POST /ms/{ms}/documents body; docType is a doc_type lookup code of the active edition; origin internal (default) or external, an external document names its source and may give its reference and the date it was received (Milestone 2 D.2)',
+  'POST /ms/{ms}/documents body; docType is a doc_type lookup code of the active edition; origin internal (default) or external, an external document names its source and may give its reference and the date it was received (Milestone 2 D.2); acknowledgement sets the read confirmation (Milestone 3 D.7)',
   {
     valid: [
       { docCode: 'PRC-15', title: 'Secure Development Procedure', docType: 'procedure', ownerHandle: 'yusuf', approverHandle: 'hendra', nextReviewAt: '2027-10-01', classification: 'internal', orgWide: false, linkedMs: ['isms'] },
+      { docCode: 'POL-02', title: 'Acceptable Use Policy', docType: 'policy', ownerHandle: 'rina', classification: 'internal', orgWide: true, linkedMs: ['isms'], acknowledgement: { required: true, scope: 'organisation', roles: null, dueDays: 14 } },
       { docCode: 'EXT-07', title: 'Personal Data Protection Law', docType: 'policy', ownerHandle: 'rina', classification: 'public', orgWide: true, linkedMs: ['isms'], origin: 'external', externalSource: 'Republic of Indonesia', externalRef: 'UU 27/2022', receivedAt: '2022-10-17' },
     ],
     invalid: [
@@ -74,11 +98,15 @@ export const DocumentPatch = named(
     externalSource: ExternalSource.nullable().optional(),
     externalRef: ExternalRef.nullable().optional(),
     receivedAt: IsoDate.nullable().optional(),
+    acknowledgement: DocumentAcknowledgement.optional(),
     confirm: z.boolean().optional(),
   }).refine((p) => Object.entries(p).some(([k, v]) => k !== 'confirm' && v !== undefined), { message: 'Give at least one field' }),
-  'PATCH /ms/{ms}/documents/{id} body; confirm after 409 confirmation-required for shared documents (BR-22); origin and the external fields as on create (Milestone 2 D.2)',
+  'PATCH /ms/{ms}/documents/{id} body; confirm after 409 confirmation-required for shared documents (BR-22); origin and the external fields as on create (Milestone 2 D.2); acknowledgement as on create (Milestone 3 D.7)',
   {
-    valid: [{ nextReviewAt: '2027-09-24' }, { title: 'Access Control Procedure v4', confirm: true }, { origin: 'external', externalSource: 'Bank Indonesia', externalRef: 'PBI 23/2021' }, { externalRef: null }],
+    valid: [
+      { nextReviewAt: '2027-09-24' }, { title: 'Access Control Procedure v4', confirm: true }, { origin: 'external', externalSource: 'Bank Indonesia', externalRef: 'PBI 23/2021' }, { externalRef: null },
+      { acknowledgement: { required: true, scope: 'system_roles', roles: null, dueDays: 14 } },
+    ],
     invalid: [{}, { confirm: true }, { status: 'approved' }, { origin: 'supplier' }],
   },
 );

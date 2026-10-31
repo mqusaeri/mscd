@@ -9,6 +9,7 @@ import {
 import {
   Color, FreqId, Instant, IsoDate, IsoDateOrEmpty, MsId, OrgSlug, Pair, PersonId, RecordKey, RepositorySlug, StageKey, Text, named,
 } from '../api/common.js';
+import { DocumentAcknowledgement } from '../api/documents.js';
 import {
   EXAMPLE_ACTIVITY, EXAMPLE_CHAIN_ITEM, EXAMPLE_DOCUMENT, EXAMPLE_EVIDENCE, EXAMPLE_GATE_ITEM, EXAMPLE_MS, EXAMPLE_ORGANISATION,
   EXAMPLE_PHASE, EXAMPLE_REQUIREMENT, EXAMPLE_STAGE, EXAMPLE_X_RECORD,
@@ -188,12 +189,15 @@ export const Document = named(
     usedBy: z.array(z.string()).optional(),
     origin: DocumentOrigin.optional(),
     changeSummary: z.string().max(500).nullable().optional(),
+    /** Read confirmation settings of the document (Milestone 3 D.2, D.7); optional until M3-05 fills them. */
+    acknowledgement: DocumentAcknowledgement.optional(),
   }),
-  'Controlled document linked to a system (UI 1.6, G.5 bundle.docs); owner, approver and path are absent in the external auditor projection. origin says whether the document is internal or external, changeSummary is the change note of the current version (Milestone 2 D.2, D.3)',
+  'Controlled document linked to a system (UI 1.6, G.5 bundle.docs); owner, approver and path are absent in the external auditor projection. origin says whether the document is internal or external, changeSummary is the change note of the current version (Milestone 2 D.2, D.3); acknowledgement the read confirmation settings (Milestone 3 D.7)',
   {
     valid: [
       EXAMPLE_DOCUMENT, { ...EXAMPLE_DOCUMENT, id: 'IMS-01', st: 'approved', shared: true, usedBy: ['QMS', 'BCMS'] }, { ...EXAMPLE_DOCUMENT, ver: '-', appr: '', st: 'draft' },
       { ...EXAMPLE_DOCUMENT, origin: 'external', changeSummary: null }, { ...EXAMPLE_DOCUMENT, origin: 'internal', changeSummary: 'Section 4 rewritten for the new VPN' },
+      { ...EXAMPLE_DOCUMENT, acknowledgement: { required: true, scope: 'system_roles', roles: null, dueDays: 14 } },
     ],
     invalid: [{ ...EXAMPLE_DOCUMENT, st: 'in_review' }, { ...EXAMPLE_DOCUMENT, appr: '24 Sep 2025' }, { ...EXAMPLE_DOCUMENT, shared: undefined }, { ...EXAMPLE_DOCUMENT, origin: 'supplier' }],
   },

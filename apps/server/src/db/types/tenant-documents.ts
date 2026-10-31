@@ -36,6 +36,11 @@ export interface DocumentTable {
   external_source: string | null;
   external_ref: string | null;
   received_at: string | null;
+  /** Milestone 3 (tenant 0009, D.7): read confirmation settings. */
+  acknowledgement_required: Generated<boolean>;
+  acknowledgement_scope: Generated<'system_roles' | 'roles' | 'organisation'>;
+  acknowledgement_roles: string[] | null;
+  acknowledgement_due_days: Generated<number>;
 }
 
 /** `document_version` */
@@ -222,7 +227,8 @@ export const TABLE_COLUMNS = tableColumns<TenantDocumentTables>()({
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'doc_code', 'title',
     'doc_type', 'status', 'classification', 'owner_user_id', 'approver_user_id', 'current_version_id', 'approved_at',
     'next_review_at', 'is_org_wide', 'pending_holder_user_id', 'pending_due_at', 'review_started_at', 'position', 'origin',
-    'external_source', 'external_ref', 'received_at',
+    'external_source', 'external_ref', 'received_at', 'acknowledgement_required', 'acknowledgement_scope', 'acknowledgement_roles',
+    'acknowledgement_due_days',
   ],
   document_version: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'document_id',

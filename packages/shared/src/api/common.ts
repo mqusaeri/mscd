@@ -413,16 +413,19 @@ export const RequiredReason = named('RequiredReason', z.string().trim().min(10).
 // ---------------------------------------------------------------------------------------------------------------
 
 /**
- * A work package id: `WP-nn` of the build plan (K.2), or `M2-nn` (core track) and `M2-Snn` (SaaS track) of the
- * Milestone 2 plan (docs/platform/MILESTONE-2.md G.2, K.6).
+ * A work package id: `WP-nn` of the build plan (K.2), `M2-nn` (core track) and `M2-Snn` (SaaS track) of the
+ * Milestone 2 plan (docs/platform/MILESTONE-2.md G.2, K.6), or `M3-nn` (core track) and `M3-Mnn` (maintenance track)
+ * of the Milestone 3 plan (docs/platform/MILESTONE-3.md G.2, K.3).
  */
-export type WorkPackageId = `WP-${string}` | `M2-${string}`;
+export type WorkPackageId = `WP-${string}` | `M2-${string}` | `M3-${string}`;
 
-/** Work packages of the build plan (K.2) and of Milestone 2 (G.2, K.6); `RouteDef.owner` names one of them. */
+/** Work packages of the build plan (K.2), of Milestone 2 (G.2, K.6) and of Milestone 3 (G.2, K.3); `RouteDef.owner` names one of them. */
 export const WORK_PACKAGE_IDS: readonly WorkPackageId[] = [
   ...Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 21 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 13 }, (_, i) => `M2-S${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 11 }, (_, i) => `M3-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 2 }, (_, i) => `M3-M${String(i + 1).padStart(2, '0')}` as const),
 ];
 
 /** HTTP methods of the contract; `DELETE` serves the domain removal of the SaaS track (Milestone 2 D.1). */

@@ -14,13 +14,13 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 | Package | Wave | Status | Notes for the next session |
 |---|---|---|---|
-| M3-01 Contract, schema, permissions and storage functions | 1 | Running | Started 2026-10-31 next to M2-21 |
+| M3-01 Contract, schema, permissions and storage functions | 1 | Done | 65 routes and 2 gateway routes (stubs answer 501 until their package), migrations tenant/0009 and platform/0007, permissions, jobs, profile keys `lifecycle.*` and `privacy.*`, gateway delete and purge. Notes for wave 2 in its handoff decisions |
 | M3-08 Open work totals | 1 | Done | Screen `pending-totals` (`/ms/:ms/pending-totals`), opened from Chain stages and the Overview in API builds; totals only, no names (decision 2) |
 | M3-M01 Open follow-ups | 1 | Done | Installer saves the Compose project name, `install.sh --yes` default organisation, `THIRD-PARTY-NOTICES.md` with a CI check. Every dependency change regenerates the notices file |
-| M3-02 Organisation export | 2 | Next, after M3-01 | |
-| M3-03 End of contract and verified deletion | 2 | Next, after M3-01 | |
-| M3-05 Read confirmation of policies | 2 | Next, after M3-01 | |
-| M3-06 Retention and disposal review | 2 | Next, after M3-01 | |
+| M3-02 Organisation export | 2 | Running | Started 2026-10-31 |
+| M3-03 End of contract and verified deletion | 2 | Running | Started 2026-10-31 |
+| M3-05 Read confirmation of policies | 2 | Running | Started 2026-10-31 |
+| M3-06 Retention and disposal review | 2 | Running | Started 2026-10-31 |
 | M3-04 Requests from one person | 3 | Waiting | |
 | M3-07 Periodic access review | 3 | Waiting | |
 | M3-09 Export and deletion screens | 3 | Waiting | |

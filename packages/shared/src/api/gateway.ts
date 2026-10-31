@@ -1,6 +1,7 @@
 // Area `gateway` (owner from wave 5: WP-13): the storage gateway protocol of D.5. Base URL
 // https://storage-gateway:8443; every call carries the gateway bearer token and, in mtls mode, a client certificate.
-// The gateway keeps no state besides a short cache of unwrapped data keys.
+// The gateway keeps no state besides a short cache of unwrapped data keys. Milestone 3 (D.1, M3-01) adds the deletion of
+// a vault object with every stored version and the purge of every object of one organisation.
 import { z } from 'zod';
 import {
   ConnectionStatus, CredentialKind, HashAlgorithm, HashSource, OwnershipType, StorageAdapter, StorageMode,
@@ -298,6 +299,36 @@ export const AnchorWriteResult = named('AnchorWriteResult', z.object({ location:
   invalid: [{}],
 });
 
+export const ObjectDeleteResult = named(
+  'ObjectDeleteResult',
+  z.object({ deleted: z.boolean(), versions: z.int().min(0) }),
+  'Result of POST /v1/objects/delete: whether the object existed, and how many stored versions (delete markers included) were removed; no version is left (Milestone 3 D.1)',
+  { valid: [{ deleted: true, versions: 2 }, { deleted: false, versions: 0 }], invalid: [{ deleted: true }, { deleted: true, versions: -1 }] },
+);
+export const TenantPurgeRequest = named(
+  'TenantPurgeRequest',
+  z.strictObject({ orgId: Uuid, confirmOrgId: Uuid }),
+  'POST /v1/tenants/purge body (worker certificate only with mtls): the organisation id, repeated; a mismatch is refused (Milestone 3 D.1, D.5.2)',
+  {
+    valid: [{ orgId: '00000000-0000-4000-8000-00000000a001', confirmOrgId: '00000000-0000-4000-8000-00000000a001' }],
+    invalid: [{ orgId: '00000000-0000-4000-8000-00000000a001' }, { orgId: 'ndt', confirmOrgId: 'ndt' }],
+  },
+);
+export const TenantPurgeResult = named(
+  'TenantPurgeResult',
+  z.object({
+    objectsDeleted: z.int().min(0),
+    versionsDeleted: z.int().min(0),
+    /** Objects that a bucket retention rule still protects, with the date it ends (null when the rule names none). */
+    retained: z.array(z.object({ key: z.string().min(1), retainUntil: Instant.nullable() })),
+  }),
+  'Result of POST /v1/tenants/purge: every object version under tenants/<orgId>/ removed and the cached data key of the organisation dropped; protected objects listed (Milestone 3 D.5.2)',
+  {
+    valid: [{ objectsDeleted: 412, versionsDeleted: 415, retained: [] }, { objectsDeleted: 2, versionsDeleted: 2, retained: [{ key: 'tenants/00000000-0000-4000-8000-00000000a001/6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f', retainUntil: '2027-01-01T00:00:00Z' }] }],
+    invalid: [{ objectsDeleted: 1, versionsDeleted: 1 }, { objectsDeleted: -1, versionsDeleted: 0, retained: [] }],
+  },
+);
+
 export type DataKeyRequest = z.infer<typeof DataKeyRequest>;
 export type DataKeyResponse = z.infer<typeof DataKeyResponse>;
 export type SealCredentialRequest = z.infer<typeof SealCredentialRequest>;
@@ -319,6 +350,9 @@ export type CopyWithinResult = z.infer<typeof CopyWithinResult>;
 export type RehashResult = z.infer<typeof RehashResult>;
 export type AnchorWriteRequest = z.infer<typeof AnchorWriteRequest>;
 export type AnchorWriteResult = z.infer<typeof AnchorWriteResult>;
+export type ObjectDeleteResult = z.infer<typeof ObjectDeleteResult>;
+export type TenantPurgeRequest = z.infer<typeof TenantPurgeRequest>;
+export type TenantPurgeResult = z.infer<typeof TenantPurgeResult>;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Routes
@@ -349,9 +383,20 @@ export const gatewayStreamRoute = defineRoute({
 export const gatewayCopyWithinRoute = defineRoute({ ...gw, id: 'gateway.copy-within', path: '/v1/copy-within', summary: 'Copy items into a folder of the same repository (evidence packs)', body: CopyWithinRequest, response: CopyWithinResult, errors: [...REPO_ERRORS] });
 export const gatewayRehashRoute = defineRoute({ ...gw, id: 'gateway.rehash', path: '/v1/rehash', summary: 'Recompute the SHA-256 of a vault object', body: ObjectRequest, response: RehashResult, errors: [...REPO_ERRORS] });
 export const gatewayAnchorsRoute = defineRoute({ ...gw, id: 'gateway.anchors', path: '/v1/anchors', summary: 'Write a signed audit anchor to the vault bucket (worker certificate only)', body: AnchorWriteRequest, response: AnchorWriteResult, errors: [422, 502] });
+// Milestone 3 D.1 (M3-01): deletion of stored content, used by the disposal of M3-06, the export expiry of M3-02 and the purge of M3-03.
+export const gatewayObjectsDeleteRoute = defineRoute({
+  ...gw, owner: 'M3-01', id: 'gateway.objects.delete', path: '/v1/objects/delete',
+  summary: 'Remove every stored version of a Managed Vault object (other adapters answer 422 unsupported)', body: ObjectRequest, response: ObjectDeleteResult, errors: [...REPO_ERRORS],
+});
+export const gatewayTenantsPurgeRoute = defineRoute({
+  ...gw, owner: 'M3-01', id: 'gateway.tenants.purge', path: '/v1/tenants/purge',
+  summary: 'Remove every object version under tenants/<orgId>/ of the vault bucket and drop the cached data key (worker certificate only; orgId and confirmOrgId must match)',
+  body: TenantPurgeRequest, response: TenantPurgeResult, errors: [422, 429, 502],
+});
 
 export const routes: RouteDef[] = [
   gatewayDataKeyRoute, gatewaySealRoute, gatewayOauthExchangeRoute, gatewayTestConnectionRoute, gatewayListRoute, gatewayEnsureFolderRoute,
   gatewayPutObjectRoute, gatewayLinkRoute, gatewayRegisterClientUploadRoute, gatewayStatRoute, gatewayPinVersionRoute, gatewayOpenUrlRoute,
   gatewayStreamRoute, gatewayCopyWithinRoute, gatewayRehashRoute, gatewayAnchorsRoute,
+  gatewayObjectsDeleteRoute, gatewayTenantsPurgeRoute,
 ];

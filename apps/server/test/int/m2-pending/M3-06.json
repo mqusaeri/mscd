@@ -1,0 +1,16 @@
+{
+  "workPackage": "M3-06",
+  "routes": [
+    "retention.rules.list",
+    "retention.rules.put",
+    "retention.reviews.list",
+    "retention.reviews.decide",
+    "retention.reviews.approve",
+    "retention.reviews.reject",
+    "retention.reviews.file-removed",
+    "retention.register",
+    "retention.holds.list",
+    "retention.holds.create",
+    "retention.holds.release"
+  ]
+}

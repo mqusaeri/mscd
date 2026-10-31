@@ -22,6 +22,12 @@ storage:
              tls: { mode: "off", ca_file: null, cert_file: null, key_file: null } }
 network:   { egress_allowlist: [], dns_resolvers: [] }
 legal:     { privacy_url: null, terms_url: null }            # sign-in page footer links (Milestone 2 D.2)
+# End of contract, verified deletion and organisation export (Milestone 3 D.3, D.4, D.5). Values below 7 for the three
+# day counts are refused unless MSCD_SAAS_TEST=1 is set (test stacks only) or the profile has the test section.
+lifecycle: { offboarding_days: 30, deletion_grace_days: 30, deletion_min_grace_days: 7,
+             export_part_bytes: 2147483648, export_max_bytes: 107374182400, export_link_days: 7, backup_copies_end_days: 780 }
+# Requests from one person (due time) and how long sessions, tokens and notifications are kept (Milestone 3 D.6).
+privacy:   { request_due_hours: 72, session_retention_days: 90, token_retention_days: 30, notification_retention_days: 365 }
 jobs:      { driver: pgboss, schedules_enabled: true, bullmq: { url: null } }
 http:      { port: 3000, public_url: "http://localhost:18080", trust_proxy: { cidrs: ["172.31.250.10/32"] } }
 security:  { cookie_secure: false }

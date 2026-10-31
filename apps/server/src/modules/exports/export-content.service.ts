@@ -14,7 +14,9 @@
 // requester rebuilt from the task, `principalFor`).
 import type { Readable } from 'node:stream';
 import { Inject, Injectable } from '@nestjs/common';
-import type { ExportFormat, ExportKind } from '@mscd/shared';
+// The kinds and formats of POST /exports (Milestone 1). The personal data export of Milestone 3 (kind personal_data,
+// format json) is built elsewhere (M3-04), so these maps keep the five kinds and three formats.
+import type { ExportRequestFormat as ExportFormat, ExportRequestKind as ExportKind } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { fmtDay } from '../../common/dates';

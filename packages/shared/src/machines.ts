@@ -7,10 +7,13 @@
 // transition route performs the rows without `via`. A row with `permission: null` is performed by the system only
 // (jobs). The RBAC suite and the contract tests read the same tables (J.5). Milestone 2 (docs/platform/MILESTONE-2.md
 // J.8) adds the certification cycle and organisation status machines and moves the first certification of a system to
-// `ms.certification` (D.2).
+// `ms.certification` (D.2). Milestone 3 (docs/platform/MILESTONE-3.md J.8, M3-01) replaces the organisation status
+// machine with the lifecycle of D.5 and adds the machines of organisation exports, organisation deletions, requests
+// from one person, disposal reviews and access reviews.
 import {
-  ACTIVITY_STATUSES, APPROVAL_STATUSES, CERTIFICATION_CYCLE_STATUSES, CORRECTIVE_ACTION_STATUSES, DOCUMENT_STATUSES, FINDING_STATUSES,
-  IMPLEMENTATION_STATUSES, MANAGEMENT_REVIEW_STATUSES, MS_STATUSES, ORGANIZATION_STATUSES, SELF_ASSESSMENT_STATUSES,
+  ACCESS_REVIEW_STATUSES, ACTIVITY_STATUSES, APPROVAL_STATUSES, CERTIFICATION_CYCLE_STATUSES, CORRECTIVE_ACTION_STATUSES, DOCUMENT_STATUSES,
+  FINDING_STATUSES, IMPLEMENTATION_STATUSES, MANAGEMENT_REVIEW_STATUSES, MS_STATUSES, ORGANIZATION_DELETION_STATUSES,
+  ORGANIZATION_EXPORT_STATUSES, ORGANIZATION_STATUSES, PRIVACY_REQUEST_STATUSES, RETENTION_REVIEW_STATUSES, SELF_ASSESSMENT_STATUSES,
   TASK_PROGRESS_STATUSES, TREATMENT_STATUSES,
 } from './enums.js';
 import type { Permission, RuleId } from './enums.js';
@@ -32,6 +35,12 @@ export const MACHINE_ENTITIES = [
   // Milestone 2 J.8
   'certification_cycle.status',
   'organization.status',
+  // Milestone 3 J.8
+  'organization_export.status',
+  'organization_deletion.status',
+  'privacy_request.status',
+  'retention_review.status',
+  'access_review.status',
 ] as const;
 export type MachineEntity = (typeof MACHINE_ENTITIES)[number];
 
@@ -413,22 +422,195 @@ const certificationCycle: Machine = {
 
 type OrganizationState = (typeof ORGANIZATION_STATUSES)[number];
 const ORGANIZATION = 'organization.status' as const;
-/** Milestone 2 J.8 (SaaS track): the platform operator moves an organisation through `ops.organizations.status` or `tenant set-status`. */
+/**
+ * Milestone 3 J.8 (replaces the machine of Milestone 2 J.8, M2-02): the platform operator moves an organisation
+ * through `ops.organizations.status` or `tenant set-status`; the system ends the read-only period, purges an archived
+ * organisation on its date and archives an organisation again when a verified deletion certificate is re-applied after
+ * a restore (D.5.1, D.5.6).
+ */
 const STATUS_MOVE = { via: 'ops.organizations.status', requires: ['reason'], note: 'Also the operator command tenant set-status' } as const;
 const STATUS_MOVE_CONFIRMED = { ...STATUS_MOVE, requires: ['reason', 'confirmSlug'], note: 'confirmSlug equal to the slug; also the operator command tenant set-status' } as const;
 const organization: Machine = {
   entity: ORGANIZATION,
-  owner: 'M2-02',
+  owner: 'M3-01',
   states: ORGANIZATION_STATUSES,
   transitions: [
     ...rows<OrganizationState>(ORGANIZATION, 'active', 'suspended', 'ops.tenants.manage', STATUS_MOVE),
-    ...rows<OrganizationState>(ORGANIZATION, 'active', 'offboarding', 'ops.tenants.manage', STATUS_MOVE_CONFIRMED),
+    ...rows<OrganizationState>(ORGANIZATION, 'active', 'offboarding', 'ops.tenants.manage', {
+      ...STATUS_MOVE_CONFIRMED, sets: ['offboarding_ends_at'],
+      note: 'confirmSlug equal to the slug; also tenant set-status. Read-only for lifecycle.offboarding_days; queues the final export (D.4, D.5.1)',
+    }),
     ...rows<OrganizationState>(ORGANIZATION, 'suspended', 'active', 'ops.tenants.manage', STATUS_MOVE),
-    ...rows<OrganizationState>(ORGANIZATION, 'suspended', 'offboarding', 'ops.tenants.manage', STATUS_MOVE_CONFIRMED),
+    ...rows<OrganizationState>(ORGANIZATION, 'suspended', 'offboarding', 'ops.tenants.manage', {
+      ...STATUS_MOVE_CONFIRMED, sets: ['offboarding_ends_at'],
+      note: 'confirmSlug equal to the slug; also tenant set-status. Read-only for lifecycle.offboarding_days; queues the final export (D.4, D.5.1)',
+    }),
     ...rows<OrganizationState>(ORGANIZATION, 'offboarding', 'active', 'ops.tenants.manage', STATUS_MOVE),
     ...rows<OrganizationState>(ORGANIZATION, 'offboarding', 'archived', 'ops.tenants.manage', {
-      ...STATUS_MOVE_CONFIRMED, note: 'archived is final until the purge of Milestone 2 K.8; confirmSlug equal to the slug',
+      ...STATUS_MOVE_CONFIRMED, note: 'confirmSlug equal to the slug; also tenant set-status. Ends every session and schedules the deletion (D.5.1)',
     }),
+    ...rows<OrganizationState>(ORGANIZATION, 'offboarding', 'archived', null, {
+      note: 'org.lifecycle when offboarding_ends_at has passed (D.5.1); also tenant purge --reapply with a verified deletion certificate that names this organisation (D.5.6)',
+    }),
+    ...rows<OrganizationState>(ORGANIZATION, 'archived', 'offboarding', 'ops.tenants.manage', {
+      ...STATUS_MOVE_CONFIRMED, sets: ['offboarding_ends_at'],
+      note: 'Only while the deletion is scheduled, which it cancels; a new read-only end 7 days ahead and a new final export (D.2, D.5.1)',
+    }),
+    ...rows<OrganizationState>(ORGANIZATION, 'archived', 'deleted', null, { note: 'org.purge on the deletion date; deleted is final (D.5.2)' }),
+    ...rows<OrganizationState>(ORGANIZATION, ['active', 'suspended'], 'archived', null, {
+      note: 'tenant purge --reapply after a restore, with a deletion certificate whose signature verifies and that names this organisation (D.5.6)',
+    }),
+  ],
+  rejections: [],
+};
+
+type OrganizationExportState = (typeof ORGANIZATION_EXPORT_STATUSES)[number];
+const ORGANIZATION_EXPORT = 'organization_export.status' as const;
+/** Milestone 3 J.8, D.4: a full export of the organisation, approved by a second Tenant Admin when there is one. */
+const organizationExport: Machine = {
+  entity: ORGANIZATION_EXPORT,
+  owner: 'M3-01',
+  states: ORGANIZATION_EXPORT_STATUSES,
+  transitions: [
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, null, 'requested', 'org.export.manage', {
+      via: 'exports.organization.create', note: 'When another active Tenant Admin exists, who approves it (H.2)',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, null, 'queued', 'org.export.manage', {
+      via: 'exports.organization.create', note: 'With a single Tenant Admin, queued at once with a warning (H.2)',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, null, 'queued', 'ops.tenants.manage', {
+      via: 'ops.exports.create', requires: ['reason'], note: 'The platform operator queues an export for the Tenant Admins and never downloads it',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, null, 'queued', null, { sets: ['is_final'], note: 'The move to offboarding queues the final export (D.4)' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'requested', 'queued', 'org.export.manage', {
+      via: 'exports.organization.decide', rules: ['SOD-SELF-APPROVE'], sets: ['decided_by', 'decided_at'], note: 'Another Tenant Admin approves; the requester is refused',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'requested', 'rejected', 'org.export.manage', {
+      via: 'exports.organization.decide', rules: ['SOD-SELF-APPROVE'], sets: ['decided_by', 'decided_at', 'decision_note'], note: 'Another Tenant Admin rejects; the requester is refused',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'requested', 'expired', null, { note: '7 days without a decision' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'queued', 'building', null, { note: 'org-export.build starts' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'building', 'ready', null, {
+      sets: ['parts', 'manifest_object_id', 'manifest_sha256', 'expires_at', 'completed_at'], note: 'org-export.build stored every part and the manifest',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'building', 'failed', null, { sets: ['error'], note: 'org-export.build failed' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'ready', 'expired', null, { note: 'cleanup.expired deletes the content of an expired export (D.4)' }),
+  ],
+  rejections: [],
+};
+
+type OrganizationDeletionState = (typeof ORGANIZATION_DELETION_STATUSES)[number];
+const ORGANIZATION_DELETION = 'organization_deletion.status' as const;
+/** Milestone 3 J.8, D.5: the verified deletion of an archived organisation, run by the worker on its date. */
+const organizationDeletion: Machine = {
+  entity: ORGANIZATION_DELETION,
+  owner: 'M3-01',
+  states: ORGANIZATION_DELETION_STATUSES,
+  transitions: [
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, null, 'scheduled', null, {
+      sets: ['scheduled_for'], note: 'The move to archived schedules the deletion for archiving plus lifecycle.deletion_grace_days (D.5.1)',
+    }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, null, 'scheduled', 'ops.tenants.manage', {
+      via: 'ops.deletion.schedule', requires: ['scheduledFor', 'reason', 'confirmSlug'], sets: ['scheduled_for', 'scheduled_by'],
+      note: 'An archived organisation, not earlier than archiving plus lifecycle.deletion_min_grace_days; the date may change while scheduled',
+    }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'scheduled', 'cancelled', 'ops.tenants.manage', { via: 'ops.deletion.cancel', requires: ['reason'] }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'scheduled', 'cancelled', null, { note: 'The organisation returns to offboarding (D.5.1)' }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'scheduled', 'running', null, {
+      sets: ['started_at'], note: 'org.lifecycle on the date, which queues org.purge; also tenant purge --reapply with a verified deletion certificate (D.5.6)',
+    }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'running', 'completed', null, {
+      sets: ['completed_at', 'report', 'certificate', 'certificate_signature', 'certificate_key_id'], note: 'org.purge: every step and check passed, certificate signed (D.5.2 to D.5.5)',
+    }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'running', 'failed', null, { sets: ['failed_step', 'error'], note: 'org.purge: a step or a check failed; the operators are alerted' }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, 'failed', 'running', 'ops.tenants.manage', {
+      via: 'ops.deletion.retry', requires: ['reason'], note: 'Runs the purge again from failed_step',
+    }),
+    ...rows<OrganizationDeletionState>(ORGANIZATION_DELETION, [null, 'cancelled'], 'running', null, {
+      note: 'tenant purge --reapply after a restore, with a verified deletion certificate (D.5.6)',
+    }),
+  ],
+  rejections: [],
+};
+
+type PrivacyRequestState = (typeof PRIVACY_REQUEST_STATUSES)[number];
+const PRIVACY_REQUEST = 'privacy_request.status' as const;
+/** Milestone 3 J.8, D.6: a request from one person about their own personal data, answered by a Tenant Admin. */
+const privacyRequest: Machine = {
+  entity: PRIVACY_REQUEST,
+  owner: 'M3-01',
+  states: PRIVACY_REQUEST_STATUSES,
+  transitions: [
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, null, 'received', 'privacy_request.manage', {
+      via: 'privacy-requests.create', requires: ['type', 'subject', 'receivedAt', 'channel'], sets: ['request_no', 'due_at'],
+    }),
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, null, 'received', null, {
+      sets: ['request_no', 'due_at'], note: 'The person through me.privacy-requests.create (an active session acting on its own data, channel self_service)',
+    }),
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, 'received', 'in_progress', 'privacy_request.manage', {
+      via: 'privacy-requests.update', requires: ['identityCheckNote'], sets: ['identity_check_note', 'identity_checked_by', 'handled_by'],
+    }),
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, 'in_progress', 'completed', 'privacy_request.manage', {
+      via: 'privacy-requests.close', requires: ['outcome'], sets: ['closed_at', 'outcome', 'result'], note: 'After the action of its type (D.6.3)',
+    }),
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, ['received', 'in_progress'], 'refused', 'privacy_request.manage', {
+      via: 'privacy-requests.update', requires: ['reason'], sets: ['closed_at', 'outcome'],
+    }),
+    ...rows<PrivacyRequestState>(PRIVACY_REQUEST, ['received', 'in_progress'], 'withdrawn', 'privacy_request.manage', {
+      via: 'privacy-requests.update', requires: ['reason'], sets: ['closed_at', 'outcome'],
+    }),
+  ],
+  rejections: [],
+};
+
+type RetentionReviewState = (typeof RETENTION_REVIEW_STATUSES)[number];
+const RETENTION_REVIEW = 'retention_review.status' as const;
+/** Milestone 3 J.8, D.8: the disposal review of an item whose retention period ended. */
+const retentionReview: Machine = {
+  entity: RETENTION_REVIEW,
+  owner: 'M3-01',
+  states: RETENTION_REVIEW_STATUSES,
+  transitions: [
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, null, 'open', null, { note: 'retention.review: the retention period of the item ended, no hold, no keep-until date ahead' }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, 'open', 'kept', 'retention.manage', {
+      via: 'retention.reviews.decide', requires: ['reason', 'keepUntil'], sets: ['decision', 'decided_by', 'decided_at', 'reason', 'keep_until'],
+    }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, 'open', 'extended', 'retention.manage', {
+      via: 'retention.reviews.decide', requires: ['reason', 'extendMonths'], sets: ['decision', 'decided_by', 'decided_at', 'reason', 'retention_ends_on'],
+    }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, 'open', 'awaiting_approval', 'retention.manage', {
+      via: 'retention.reviews.decide', requires: ['reason'], rules: ['RET-HOLD', 'RET-NOT-DUE', 'RET-CURRENT'], sets: ['decision', 'decided_by', 'decided_at', 'reason'],
+      note: 'Decision dispose; disposal_approval_pending to the other managers and Programme Owners',
+    }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, 'awaiting_approval', 'disposed', 'retention.approve', {
+      via: 'retention.reviews.approve', rules: ['SOD-SELF-APPROVE'], sets: ['approved_by', 'approved_at', 'disposed_at', 'file_action'],
+      note: 'A second person approves; the disposal runs at once (D.8)',
+    }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, 'awaiting_approval', 'open', 'retention.approve', {
+      via: 'retention.reviews.reject', requires: ['note'], sets: ['rejected_note'],
+    }),
+    ...rows<RetentionReviewState>(RETENTION_REVIEW, ['kept', 'extended'], 'open', null, { note: 'retention.review on the keep-until date or the new end date' }),
+  ],
+  rejections: [],
+};
+
+type AccessReviewState = (typeof ACCESS_REVIEW_STATUSES)[number];
+const ACCESS_REVIEW = 'access_review.status' as const;
+/** Milestone 3 J.8, D.9: one periodic access review of the organisation, with one part per management system. */
+const accessReview: Machine = {
+  entity: ACCESS_REVIEW,
+  owner: 'M3-01',
+  states: ACCESS_REVIEW_STATUSES,
+  transitions: [
+    ...rows<AccessReviewState>(ACCESS_REVIEW, null, 'open', null, { sets: ['review_no', 'opened_on', 'due_on'], note: 'access-review.open on the due date, one open review at a time' }),
+    ...rows<AccessReviewState>(ACCESS_REVIEW, null, 'open', 'access_review.manage', {
+      via: 'access-reviews.create', sets: ['review_no', 'opened_on', 'due_on', 'opened_by'], note: 'One open review at a time',
+    }),
+    ...rows<AccessReviewState>(ACCESS_REVIEW, 'open', 'completed', 'access_review.manage', {
+      via: 'access-reviews.complete', sets: ['completed_at', 'completed_by', 'summary', 'report_object_id'],
+      note: 'Every part signed off and every revocation applied or explained; REVIEW-SINGLE-ADMIN warns when one Tenant Admin reviewed alone',
+    }),
+    ...rows<AccessReviewState>(ACCESS_REVIEW, 'open', 'cancelled', 'access_review.manage', { via: 'access-reviews.cancel', requires: ['reason'], sets: ['cancel_reason'] }),
   ],
   rejections: [],
 };
@@ -449,6 +631,11 @@ export const MACHINES: Readonly<Record<MachineEntity, Machine>> = {
   'management_system.status': managementSystem,
   'certification_cycle.status': certificationCycle,
   'organization.status': organization,
+  'organization_export.status': organizationExport,
+  'organization_deletion.status': organizationDeletion,
+  'privacy_request.status': privacyRequest,
+  'retention_review.status': retentionReview,
+  'access_review.status': accessReview,
 };
 
 /** Every transition row of every machine. */

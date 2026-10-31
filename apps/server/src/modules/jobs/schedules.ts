@@ -1,4 +1,4 @@
-// Schedules of build plan E.2 and Milestone 2 J.3. Installation-wide jobs run on cron schedules in UTC; daily jobs of
+// Schedules of build plan E.2, Milestone 2 J.3 and Milestone 3 J.3. Installation-wide jobs run on cron schedules in UTC; daily jobs of
 // an organisation are enqueued by `scheduler.tick` in the hour of the organisation's local time (D-07), with a
 // singleton key that includes the local date (or `all` for jobs that run for every system). Which runs a tick
 // enqueues, with the run ledger of Milestone 2 D.2, is decided by `planDailyRuns` (daily-run-planner.ts).
@@ -15,6 +15,9 @@ export const CRON_SCHEDULES: readonly { name: JobName; cron: string; retryLimit:
   // every 30 days for verified ones. It works on every organisation at once, so it is a cron job and not a daily job
   // of `scheduler.tick`. Its handler exists only with tenancy.mode multi, so single tenancy never schedules it.
   { name: 'domain.verify', cron: '35 * * * *', retryLimit: 1 },
+  // Milestone 3 J.3 (M3-03): the organisation lifecycle (D.5.1), hourly at minute 20 in platform scope, because the run
+  // ledger of the daily jobs skips organisations that are not active. In single tenancy its runs do nothing.
+  { name: 'org.lifecycle', cron: '20 * * * *', retryLimit: 3 },
 ];
 
 /** Retry limit of a cron job (E.2); 3 for a name without an entry in `CRON_SCHEDULES`. */
@@ -48,13 +51,21 @@ export const DAILY_JOBS: readonly DailyJob[] = [
   { name: 'drift.evaluate', at: '02:45', prefix: 'de', allSystems: true, retryLimit: 3 },
   { name: 'integrity.rehash', at: '03:00', prefix: 'ir', weekday: 0, retryLimit: 3 },
   { name: 'cycle.derive', at: '03:15', prefix: 'cd', allSystems: true, retryLimit: 3 },
+  // Milestone 3 J.3 (M3-06, D.8): opens the disposal reviews of records whose retention period has ended.
+  { name: 'retention.review', at: '03:15', prefix: 'rt', retryLimit: 3 },
   // Milestone 2 J.3 (M2-05): certificate notices 90, 30 and 7 days ahead and the lapse to expired (D.4).
   { name: 'certificate.expiry', at: '06:00', prefix: 'ce', retryLimit: 3 },
   // Milestone 2 J.3 (M2-S10): entitlement notices to the operators (30, 7, 1 days) and Tenant Admins (30, 7 days).
   // Its handler exists only with tenancy.mode multi, so single tenancy never schedules it.
   { name: 'entitlement.expiry', at: '06:15', prefix: 'ee', retryLimit: 3 },
   { name: 'documents.review-alerts', at: '06:30', prefix: 'dra', retryLimit: 3 },
+  // Milestone 3 J.3 (M3-07, D.9): opens the periodic access reviews that are due and sends their notices.
+  { name: 'access-review.open', at: '06:30', prefix: 'ax', retryLimit: 3 },
   { name: 'notifications.digest', at: '07:00', prefix: 'ndg', retryLimit: 3 },
+  // Milestone 3 J.3 (M3-04, D.6.2): notices of requests from one person due within 24 hours and overdue.
+  { name: 'privacy.deadlines', at: '08:00', prefix: 'pd', retryLimit: 3 },
+  // Milestone 3 J.3 (M3-05, D.7): read confirmation reminders, excusals and the overdue digest.
+  { name: 'acknowledgement.reminders', at: '08:10', prefix: 'ak', retryLimit: 3 },
 ];
 
 /** Local wall clock of an instant in a time zone. */

@@ -4,10 +4,13 @@
 // status history (M2-S09, SaaS track). Every organisation route answers 409 `conflict` with messageKey
 // `single_tenancy` when tenancy.mode is single (J.6). Milestone 2 section L (M2-19) adds the accounts of the service
 // and the platform operators: the account list and detail, the actions on one account and adding and removing an
-// operator. These work in both tenancy modes.
+// operator. These work in both tenancy modes. Milestone 3 (D.1, D.2, D.5) adds the verified deletion of an archived
+// organisation (built by M3-03), the status `deleted` (never accepted from a caller) and the offboarding end, deletion
+// and last export members of the organisation rows (optional until M3-03 fills them).
 import { z } from 'zod';
 import {
-  AccountStatus, AuthMethod, DomainStatus, EntitlementSource, MembershipStatus, OpsRunnableJob, OrgRole, OrganizationStatus, SessionState, UserKind,
+  AccountStatus, AuthMethod, DomainStatus, EntitlementSource, MembershipStatus, OpsRunnableJob, OrgRole, OrganizationDeletionStatus,
+  OrganizationExportStatus, OrganizationStatus, SessionState, UserKind,
 } from '../enums.js';
 import {
   BinaryBody, Instant, IsoDate, NoBody, OrgSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
@@ -78,9 +81,20 @@ export const OpsOrganizationListQuery = named(
   'OpsOrganizationListQuery',
   z.strictObject({ ...pageQueryShape, status: OrganizationStatus.optional(), q: z.string().trim().min(1).max(100).optional() }),
   'GET /ops/organizations query: status filter and search by slug or name',
-  { valid: [{}, { status: 'suspended', q: 'nusantara' }], invalid: [{ status: 'deleted' }, { sort: 'slug' }] },
+  { valid: [{}, { status: 'suspended', q: 'nusantara' }, { status: 'deleted' }], invalid: [{ status: 'paused' }, { sort: 'slug' }] },
 );
 export type OpsOrganizationListQuery = z.infer<typeof OpsOrganizationListQuery>;
+
+/** Milestone 3 D.2: the end of the read-only period, the deletion and the last export of an organisation. */
+const lifecycleShape = {
+  /** While `offboarding`: when the read-only period ends (D.5.1). */
+  offboardingEndsAt: Instant.nullable().optional(),
+  deletion: z.object({ status: OrganizationDeletionStatus, scheduledFor: Instant }).nullable().optional(),
+  lastExport: z.object({ status: OrganizationExportStatus, readyAt: Instant.nullable() }).nullable().optional(),
+};
+const EXAMPLE_LIFECYCLE = {
+  offboardingEndsAt: null, deletion: { status: 'scheduled', scheduledFor: '2026-12-30T00:00:00Z' }, lastExport: { status: 'ready', readyAt: '2026-11-01T03:10:00Z' },
+} as const;
 
 const EXAMPLE_OPS_ORG = {
   id: '00000000-0000-4000-8000-00000000a001', slug: 'ndt', name: 'PT Nusantara Digital Teknologi', status: 'active',
@@ -102,11 +116,15 @@ export const OpsOrganizationItem = named(
     validUntil: IsoDate.nullable(),
     verifiedDomains: z.array(z.string()),
     createdAt: Instant,
+    ...lifecycleShape,
   }),
-  'Organisation row of the operator console: status, licence state, plan and validity of the entitlement, members, systems, verified domains (Milestone 2 D.1, D.2)',
+  'Organisation row of the operator console: status, licence state, plan and validity of the entitlement, members, systems, verified domains (Milestone 2 D.1, D.2), and the read-only end, deletion and last export (Milestone 3 D.2)',
   {
-    valid: [EXAMPLE_OPS_ORG, { ...EXAMPLE_OPS_ORG, status: 'suspended', licence: null, plan: null, validUntil: null, verifiedDomains: [] }],
-    invalid: [{ ...EXAMPLE_OPS_ORG, status: 'deleted' }, { ...EXAMPLE_OPS_ORG, memberCount: -1 }],
+    valid: [
+      EXAMPLE_OPS_ORG, { ...EXAMPLE_OPS_ORG, status: 'suspended', licence: null, plan: null, validUntil: null, verifiedDomains: [] },
+      { ...EXAMPLE_OPS_ORG, status: 'archived', ...EXAMPLE_LIFECYCLE },
+    ],
+    invalid: [{ ...EXAMPLE_OPS_ORG, status: 'paused' }, { ...EXAMPLE_OPS_ORG, memberCount: -1 }, { ...EXAMPLE_OPS_ORG, deletion: { status: 'pending', scheduledFor: '2026-12-30T00:00:00Z' } }],
   },
 );
 export type OpsOrganizationItem = z.infer<typeof OpsOrganizationItem>;
@@ -189,10 +207,14 @@ export const OpsOrganizationDetail = named(
     }).nullable(),
     domains: z.array(z.object({ domain: z.string(), status: DomainStatus })),
     lastSignInAt: Instant.nullable(),
+    ...lifecycleShape,
   }),
-  'GET /ops/organizations/{org}: status, region, created date, member count, system count, entitlement summary, domains and last sign-in (Milestone 2 D.1)',
+  'GET /ops/organizations/{org}: status, region, created date, member count, system count, entitlement summary, domains and last sign-in (Milestone 2 D.1), and the read-only end, deletion and last export (Milestone 3 D.2)',
   {
-    valid: [EXAMPLE_OPS_DETAIL, { ...EXAMPLE_OPS_DETAIL, status: 'offboarding', region: null, entitlement: null, domains: [], lastSignInAt: null }],
+    valid: [
+      EXAMPLE_OPS_DETAIL, { ...EXAMPLE_OPS_DETAIL, status: 'offboarding', region: null, entitlement: null, domains: [], lastSignInAt: null },
+      { ...EXAMPLE_OPS_DETAIL, status: 'offboarding', ...EXAMPLE_LIFECYCLE, offboardingEndsAt: '2026-11-30T03:00:00Z', deletion: null },
+    ],
     invalid: [{ ...EXAMPLE_OPS_DETAIL, status: 'paused' }, { ...EXAMPLE_OPS_DETAIL, domains: [{ domain: 'x.id', status: 'ok' }] }],
   },
 );
@@ -200,8 +222,8 @@ export type OpsOrganizationDetail = z.infer<typeof OpsOrganizationDetail>;
 
 export const OrganizationStatusChange = named(
   'OrganizationStatusChange',
-  z.strictObject({ status: OrganizationStatus, reason: z.string().trim().min(3).max(500), confirmSlug: OrgSlug.optional() }),
-  'POST /ops/organizations/{org}/status body: the target status of J.8 with a reason; offboarding and archived also need confirmSlug equal to the slug (Milestone 2 D.1, J.8)',
+  z.strictObject({ status: OrganizationStatus.exclude(['deleted']), reason: z.string().trim().min(3).max(500), confirmSlug: OrgSlug.optional() }),
+  'POST /ops/organizations/{org}/status body: the target status of J.8 with a reason; offboarding and archived also need confirmSlug equal to the slug (Milestone 2 D.1, J.8); deleted is never accepted from a caller (Milestone 3 D.2)',
   {
     valid: [{ status: 'suspended', reason: 'Invoice overdue by 60 days' }, { status: 'offboarding', reason: 'Contract ended on 30 Sep 2026', confirmSlug: 'ndt' }],
     invalid: [{ status: 'deleted', reason: 'x'.repeat(10) }, { status: 'suspended' }, { status: 'suspended', reason: 'ok', extra: true }],
@@ -308,7 +330,6 @@ export const opsOrganizationsEventsRoute = defineRoute({
   summary: 'Status history of the organisation, newest first',
   permission: 'ops.read', params: OrgParams, query: OrganizationEventsQuery, response: pageOf(OrganizationStatusEventItem), errors: [404, 409],
 });
-
 
 // ---------------------------------------------------------------------------------------------------------------
 // Accounts and platform operators of the service (Milestone 2 section L, M2-19)
@@ -615,10 +636,113 @@ export const opsOperatorsRemoveRoute = defineRoute({
   permission: 'ops.users.manage', params: AccountParams, body: OpsReasonBody, response: OpsOperatorRemoveResult, errors: [404, 409, 503],
 });
 
+// ---------------------------------------------------------------------------------------------------------------
+// Verified deletion of an archived organisation (Milestone 3 D.1, D.5; built by M3-03, contract of M3-01). Single
+// tenancy answers 409 single_tenancy; refusals 409 deletion_not_archived, deletion_too_soon, deletion_in_progress (J.6).
+// ---------------------------------------------------------------------------------------------------------------
+
+export const OrganizationDeletionStep = named(
+  'OrganizationDeletionStep',
+  z.object({ step: z.string().min(1).max(40), status: z.enum(['pending', 'running', 'done', 'failed']), at: Instant.nullable(), detail: z.string().nullable() }),
+  'One step or check of a purge (D.5.2, D.5.3) with its result',
+  {
+    valid: [{ step: 'vault', status: 'done', at: '2026-12-30T00:05:00Z', detail: '412 objects, 415 versions removed' }, { step: 'checks', status: 'pending', at: null, detail: null }],
+    invalid: [{ step: '', status: 'done', at: null, detail: null }, { step: 'vault', status: 'skipped', at: null, detail: null }],
+  },
+);
+export type OrganizationDeletionStep = z.infer<typeof OrganizationDeletionStep>;
+
+const EXAMPLE_DELETION = {
+  id: '1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b', status: 'scheduled', scheduledFor: '2026-12-30T00:00:00Z', scheduledBy: null,
+  reason: 'Read-only period over on 30 Nov 2026', archivedAt: '2026-11-30T03:00:00Z', earliestAllowed: '2026-12-07T03:00:00Z',
+  finalExportId: '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d', startedAt: null, completedAt: null, failedStep: null, error: null, steps: [],
+  vaultObjectsDeleted: null, certificateId: null,
+} as const;
+
+export const OrganizationDeletionView = named(
+  'OrganizationDeletionView',
+  z.object({
+    id: Uuid,
+    status: OrganizationDeletionStatus,
+    scheduledFor: Instant,
+    /** Null when the system scheduled it at the move to archived. */
+    scheduledBy: z.object({ handle: z.string(), displayName: z.string() }).nullable(),
+    reason: z.string().nullable(),
+    archivedAt: Instant.nullable(),
+    /** Archiving plus lifecycle.deletion_min_grace_days: the earliest date the operator may choose. */
+    earliestAllowed: Instant.nullable(),
+    finalExportId: Uuid.nullable(),
+    startedAt: Instant.nullable(),
+    completedAt: Instant.nullable(),
+    failedStep: z.string().nullable(),
+    error: z.string().nullable(),
+    steps: z.array(OrganizationDeletionStep),
+    vaultObjectsDeleted: z.int().min(0).nullable(),
+    certificateId: Uuid.nullable(),
+  }),
+  'GET /ops/organizations/{org}/deletion: the deletion of the organisation with its dates, steps, checks and certificate id (Milestone 3 D.5)',
+  {
+    valid: [EXAMPLE_DELETION, { ...EXAMPLE_DELETION, status: 'completed', startedAt: '2026-12-30T00:00:00Z', completedAt: '2026-12-30T00:09:00Z', vaultObjectsDeleted: 412, certificateId: '2f3a4b5c-6d7e-4f8a-9b0c-1d2e3f4a5b6c' }],
+    invalid: [{ ...EXAMPLE_DELETION, status: 'done' }, { ...EXAMPLE_DELETION, scheduledFor: null }],
+  },
+);
+export type OrganizationDeletionView = z.infer<typeof OrganizationDeletionView>;
+
+export const OrganizationDeletionSchedule = named(
+  'OrganizationDeletionSchedule',
+  z.strictObject({ scheduledFor: Instant, reason: OpsActionReason, confirmSlug: OrgSlug }),
+  'POST /ops/organizations/{org}/deletion body: schedule or move the deletion of an archived organisation, not earlier than archiving plus lifecycle.deletion_min_grace_days; confirmSlug equal to the slug',
+  {
+    valid: [{ scheduledFor: '2026-12-10T00:00:00Z', reason: 'The customer asked in writing for an earlier deletion', confirmSlug: 'ndt' }],
+    invalid: [{ scheduledFor: '2026-12-10', reason: 'Earlier deletion', confirmSlug: 'ndt' }, { scheduledFor: '2026-12-10T00:00:00Z', reason: 'Earlier deletion' }],
+  },
+);
+export type OrganizationDeletionSchedule = z.infer<typeof OrganizationDeletionSchedule>;
+
+export const OrganizationDeletionResult = named(
+  'OrganizationDeletionResult',
+  commandResultWith(z.object({ id: Uuid, status: OrganizationDeletionStatus, scheduledFor: Instant })),
+  'Result of scheduling, cancelling or retrying a deletion (audited ops.deletion_scheduled, ops.deletion_cancelled, ops.deletion_retried)',
+  {
+    valid: [{ ok: true, changed: [], data: { id: '1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b', status: 'scheduled', scheduledFor: '2026-12-10T00:00:00Z' } }],
+    invalid: [{ ok: true, changed: [], data: { id: '1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b', status: 'pending', scheduledFor: '2026-12-10T00:00:00Z' } }],
+  },
+);
+export type OrganizationDeletionResult = z.infer<typeof OrganizationDeletionResult>;
+
+const opM3 = { auth: 'session' as const, scope: 'platform' as const, owner: 'M3-03' as const };
+
+export const opsDeletionGetRoute = defineRoute({
+  ...opM3, id: 'ops.deletion.get', method: 'GET', path: '/api/v1/ops/organizations/:org/deletion',
+  summary: 'The deletion of the organisation: status, dates, steps, checks, report and certificate id (404 when none; 409 single_tenancy)',
+  permission: 'ops.read', params: OrgParams, response: OrganizationDeletionView, errors: [404, 409],
+});
+export const opsDeletionScheduleRoute = defineRoute({
+  ...opM3, id: 'ops.deletion.schedule', method: 'POST', path: '/api/v1/ops/organizations/:org/deletion',
+  summary: 'Schedule or move the date of the deletion of an archived organisation (409 deletion_not_archived, deletion_too_soon, deletion_in_progress; 422 confirmation_mismatch; audited ops.deletion_scheduled)',
+  permission: 'ops.tenants.manage', params: OrgParams, body: OrganizationDeletionSchedule, response: OrganizationDeletionResult, errors: [404, 409, 422],
+});
+export const opsDeletionCancelRoute = defineRoute({
+  ...opM3, id: 'ops.deletion.cancel', method: 'POST', path: '/api/v1/ops/organizations/:org/deletion/cancel',
+  summary: 'Cancel a scheduled deletion (409 when it is not scheduled; audited ops.deletion_cancelled)',
+  permission: 'ops.tenants.manage', params: OrgParams, body: OpsReasonBody, response: OrganizationDeletionResult, errors: [404, 409],
+});
+export const opsDeletionRetryRoute = defineRoute({
+  ...opM3, id: 'ops.deletion.retry', method: 'POST', path: '/api/v1/ops/organizations/:org/deletion/retry',
+  summary: 'Run a failed purge again from its failed step (409 when it has not failed; audited ops.deletion_retried)',
+  permission: 'ops.tenants.manage', params: OrgParams, body: OpsReasonBody, response: OrganizationDeletionResult, errors: [404, 409],
+});
+export const opsDeletionCertificateRoute = defineRoute({
+  ...opM3, id: 'ops.deletion.certificate', method: 'GET', path: '/api/v1/ops/organizations/:org/deletion/certificate',
+  summary: 'The signed deletion certificate as a JSON attachment (409 when the deletion has not completed)',
+  permission: 'ops.read', params: OrgParams, response: BinaryBody, responseType: 'application/json', file: true, errors: [404, 409],
+});
+
 export const routes: RouteDef[] = [
   opsHealthRoute, opsQueuesRoute, opsJobRunRoute, opsDiagnosticsRoute,
   opsOrganizationsListRoute, opsOrganizationsCreateRoute, opsUsersResetMfaRoute,
   opsOrganizationsGetRoute, opsOrganizationsStatusRoute, opsOrganizationsEventsRoute,
   opsAccountsListRoute, opsAccountsGetRoute, opsAccountsResetMfaRoute, opsAccountsPasswordResetRoute, opsAccountsInvitationResendRoute,
   opsAccountsSessionsRevokeRoute, opsAccountsStatusRoute, opsOperatorsListRoute, opsOperatorsAddRoute, opsOperatorsRemoveRoute,
+  opsDeletionGetRoute, opsDeletionScheduleRoute, opsDeletionCancelRoute, opsDeletionRetryRoute, opsDeletionCertificateRoute,
 ];

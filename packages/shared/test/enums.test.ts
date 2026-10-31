@@ -1,6 +1,6 @@
 // Enumerations against the build plan: every DDL CHECK list of C.4 to C.6, the problem slugs and rule ids of D.1,
 // the gateway slugs of D.5, the jobs of E.2, the notification kinds of E.6 and the audit actions of F.11, each with
-// the values of Milestone 2 section J (J.3 to J.7) merged in by the helpers.
+// the values of Milestone 2 section J and Milestone 3 section J (J.3 to J.7) merged in by the helpers.
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as shared from '../src/index.js';
@@ -10,8 +10,8 @@ import {
   PROBLEM_STATUS, PROBLEM_TYPE_BASE, RULE_IDS, UI_ROLES, WARNING_RULE_IDS, isPlatformAuditAction, problemType,
 } from '../src/index.js';
 import {
-  m2CheckLists, m2Section, planAuditActions, planCheckLists, planJobNames, planNotificationKinds, planPlatformRuleIds, planProblemSlugs,
-  planSection, planWarningRuleIds, readRepoFile, tableRow,
+  m2CheckLists, m2Section, m3CheckLists, m3Section, planAuditActions, planCheckLists, planJobNames, planNotificationKinds, planPlatformRuleIds,
+  planProblemSlugs, planSection, planWarningRuleIds, readRepoFile, tableRow,
 } from './helpers.js';
 
 const codes = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1] as string);
@@ -31,9 +31,23 @@ describe('DDL CHECK lists (C.4 to C.6)', () => {
   it('include the Milestone 2 lists of J.7, which replace the BP list of the same column', () => {
     const m2 = m2CheckLists();
     expect(m2.size).toBe(15);
-    for (const [column, values] of m2) expect(lists.get(column), column).toEqual(values);
+    const m3 = m3CheckLists();
+    for (const [column, values] of m2) expect(lists.get(column), column).toEqual(m3.get(column) ?? values);
     expect(lists.get('audit_event.event_type')).toEqual([...AUDIT_EVENT_TYPES]);
     expect(lists.get('audit_activity_template.event_type')).toContain('internal_audit');
+  });
+
+  it('include the Milestone 3 lists of J.7, which replace the earlier list of the same column', () => {
+    const m3 = m3CheckLists();
+    expect(m3.size).toBe(29);
+    for (const [column, values] of m3) expect(lists.get(column), column).toEqual(values);
+    // Lists Milestone 3 replaces: organisation status (adds deleted), task sources and export kinds and formats.
+    expect(lists.get('organization.status')).toEqual(['active', 'suspended', 'offboarding', 'archived', 'deleted']);
+    expect(lists.get('organization_status_event.to_status')).toContain('deleted');
+    expect(lists.get('task.source_rule')).toEqual(['BR-10', 'BR-11', 'BR-15', 'BR-31', 'manual', 'acknowledgement', 'access_review', 'privacy_check']);
+    expect(lists.get('export_file.kind')).toContain('personal_data');
+    expect(lists.get('export_file.format')).toContain('json');
+    expect(lists.get('document.acknowledgement_roles')).not.toContain('external_auditor');
   });
 
   for (const [column, values] of lists) {
@@ -60,6 +74,8 @@ describe('problems and rules (D.1, D.5)', () => {
     const row = d1.split('\n').find((l) => l.startsWith('| Problem slugs')) as string;
     expect([...row.matchAll(/`([a-z-]+)` (\d{3})/g)].length).toBe(17);
     const planned = planProblemSlugs();
+    // Milestone 3 J.6 adds no problem slug.
+    expect(tableRow(m3Section('### J.6 Problems and rules', '### J.7'), 'Problem slugs')).toContain('none added');
     expect(planned.length).toBe(18);
     expect(planned.at(-1)).toEqual(['not-implemented', 501]);
     expect([...PROBLEM_SLUGS]).toEqual(planned.map(([slug]) => slug));
@@ -74,7 +90,10 @@ describe('problems and rules (D.1, D.5)', () => {
     const bp = codes(row.slice(row.indexOf('`rule`'))).filter((c) => /^[A-Z]+(-[A-Z]+)+$/.test(c));
     expect(PLATFORM_RULE_IDS.slice(0, bp.length)).toEqual(bp);
     expect([...PLATFORM_RULE_IDS]).toEqual(planPlatformRuleIds());
-    expect(PLATFORM_RULE_IDS.slice(bp.length)).toEqual(['APPL-ASSESS', 'PACK-ROW-REMOVED']);
+    expect(PLATFORM_RULE_IDS.slice(bp.length)).toEqual([
+      'APPL-ASSESS', 'PACK-ROW-REMOVED',
+      'ACK-OPEN-FIRST', 'RET-HOLD', 'RET-NOT-DUE', 'RET-CURRENT', 'SOD-SELF-APPROVE', 'REVIEW-OWN-ACCESS', 'ERASE-OPEN-ITEMS',
+    ]);
   });
 
   it('match the warning and confirmation rules of D.1 and Milestone 2 J.6', () => {
@@ -82,7 +101,11 @@ describe('problems and rules (D.1, D.5)', () => {
     const bp = [...warnings.matchAll(/BR-\d\d/g)].map((m) => m[0]);
     expect(WARNING_RULE_IDS.slice(0, bp.length)).toEqual(bp);
     expect([...WARNING_RULE_IDS]).toEqual(planWarningRuleIds());
-    expect([...PLATFORM_WARNING_RULE_IDS]).toEqual(codes(tableRow(m2Section('### J.6 Problems and rules', '### J.7'), 'Warnings')).filter((c) => /^[A-Z]+(-[A-Z]+)+$/.test(c)));
+    const warningIds = (section: string) => codes(tableRow(section, 'Warnings')).filter((c) => /^[A-Z]+(-[A-Z]+)+$/.test(c));
+    expect([...PLATFORM_WARNING_RULE_IDS]).toEqual([
+      ...warningIds(m2Section('### J.6 Problems and rules', '### J.7')), ...warningIds(m3Section('### J.6 Problems and rules', '### J.7')),
+    ]);
+    expect([...PLATFORM_WARNING_RULE_IDS]).toEqual(['AUD-INDEP', 'REVIEW-SINGLE-ADMIN']);
     for (const id of WARNING_RULE_IDS) expect(RULE_IDS, id).toContain(id);
     const slugs = d1.split('\n').find((l) => l.startsWith('| Problem slugs')) as string;
     expect([...CONFIRMATION_RULE_IDS]).toEqual([...(slugs.match(/confirmation-required` 409 \(([^)]*)\)/)?.[1] ?? '').matchAll(/BR-\d\d/g)].map((m) => m[0]));
@@ -91,8 +114,8 @@ describe('problems and rules (D.1, D.5)', () => {
   it('number the business rules BR-01 to BR-50', () => {
     expect(BUSINESS_RULE_IDS).toHaveLength(50);
     BUSINESS_RULE_IDS.forEach((id, i) => expect(id).toBe(`BR-${String(i + 1).padStart(2, '0')}`));
-    // 57 rule ids of the build plan plus the 3 of Milestone 2 J.6.
-    expect(RULE_IDS).toHaveLength(57 + 3);
+    // 57 rule ids of the build plan, the 3 of Milestone 2 J.6 and the 8 of Milestone 3 J.6.
+    expect(RULE_IDS).toHaveLength(57 + 3 + 8);
     expect(new Set(RULE_IDS).size).toBe(RULE_IDS.length);
     const digest = readRepoFile('docs/platform/spec-digest.md');
     for (const id of BUSINESS_RULE_IDS) expect(digest, id).toContain(`| ${id} |`);
@@ -111,14 +134,17 @@ describe('jobs, notifications and audit actions', () => {
     const bp = e2.split('\n').filter((l) => /^\| `[a-z-]+\.[a-z-]+`/.test(l)).map((l) => codes(l)[0] as string);
     expect(JOB_NAMES.slice(0, bp.length)).toEqual(bp);
     expect([...JOB_NAMES]).toEqual(planJobNames());
-    expect(JOB_NAMES.length).toBe(bp.length + 6);
+    expect(JOB_NAMES.length).toBe(bp.length + 6 + 7);
   });
 
   it('match the operator job allow-list of D.3', () => {
     const d3 = planSection('### D.3 Endpoints', '### D.4');
     const row = d3.split('\n').find((l) => l.startsWith('| `POST /ops/jobs/{name}/run`')) as string;
     const list = row.slice(row.indexOf('allow-list'), row.indexOf(';', row.indexOf('allow-list')));
-    expect([...OPS_RUNNABLE_JOBS]).toEqual(codes(list));
+    // Milestone 3 D.2: `org.lifecycle` joins OPS_RUNNABLE_JOBS.
+    const m3 = tableRow(m3Section('### D.2 Changed behaviour of existing routes', '### D.3'), '`ops.jobs.run`');
+    expect(codes(m3).slice(1, 3)).toEqual(['org.lifecycle', 'OPS_RUNNABLE_JOBS']);
+    expect([...OPS_RUNNABLE_JOBS]).toEqual([...codes(list), 'org.lifecycle']);
     for (const job of OPS_RUNNABLE_JOBS) expect(JOB_NAMES).toContain(job);
   });
 
@@ -127,7 +153,7 @@ describe('jobs, notifications and audit actions', () => {
     const bp = e6.split('\n').filter((l) => l.startsWith('| `')).flatMap((l) => codes(l.split('|')[1] ?? ''));
     for (const kind of bp) expect(NOTIFICATION_KINDS, kind).toContain(kind);
     expect([...NOTIFICATION_KINDS].sort()).toEqual([...new Set(planNotificationKinds())].sort());
-    expect(NOTIFICATION_KINDS.length).toBe(new Set(bp).size + 5);
+    expect(NOTIFICATION_KINDS.length).toBe(new Set(bp).size + 5 + 12);
   });
 
   it('match the audit actions of F.11 and Milestone 2 J.5', () => {
@@ -137,7 +163,8 @@ describe('jobs, notifications and audit actions', () => {
     const actions = all.filter((c) => /^[a-z_]+(\.[a-z_]+)+$/.test(c) && c !== 'platform.audit_log');
     for (const action of actions) expect(AUDIT_ACTIONS, action).toContain(action);
     expect([...AUDIT_ACTIONS].sort()).toEqual([...new Set(planAuditActions())].sort());
-    expect(AUDIT_ACTIONS.length).toBe(new Set(actions).size + 25);
+    // Milestone 2 J.5 adds 25 actions, Milestone 3 J.5 33 tenant and 12 platform actions.
+    expect(AUDIT_ACTIONS.length).toBe(new Set(actions).size + 25 + 33 + 12);
     expect([...PLATFORM_AUDIT_ACTION_PREFIXES]).toEqual(all.filter((c) => c.endsWith('.*')).map((c) => c.slice(0, -1)));
     expect(isPlatformAuditAction('auth.login')).toBe(true);
     expect(isPlatformAuditAction('licence.installed')).toBe(true);

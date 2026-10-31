@@ -17,6 +17,12 @@ import { RBAC_EXPECTATIONS as M2_19 } from './expectations/M2-19';
 import { RBAC_EXPECTATIONS as M2_S09 } from './expectations/M2-S09';
 import { RBAC_EXPECTATIONS as M2_S10 } from './expectations/M2-S10';
 import { RBAC_EXPECTATIONS as M2_S11 } from './expectations/M2-S11';
+import { RBAC_EXPECTATIONS as M3_02 } from './expectations/M3-02';
+import { RBAC_EXPECTATIONS as M3_03 } from './expectations/M3-03';
+import { RBAC_EXPECTATIONS as M3_04 } from './expectations/M3-04';
+import { RBAC_EXPECTATIONS as M3_05 } from './expectations/M3-05';
+import { RBAC_EXPECTATIONS as M3_06 } from './expectations/M3-06';
+import { RBAC_EXPECTATIONS as M3_07 } from './expectations/M3-07';
 
 /**
  * What a Milestone 2 building package adds to the generated RBAC tests (Milestone 2 F), in `expectations/M2-nn.ts`
@@ -40,9 +46,13 @@ export interface RbacExpectations {
   serviceRefusals: readonly ServiceRefusal[];
 }
 
-/** The RBAC expectations of the Milestone 2 building packages, by package. */
+/**
+ * The RBAC expectations of the Milestone 2 building packages and, in the same form, of the Milestone 3 building
+ * packages M3-02 to M3-07 (`expectations/M3-nn.ts`, Milestone 3 D.3), by package.
+ */
 export const M2_EXPECTATIONS: Readonly<Record<string, RbacExpectations>> = {
   'M2-05': M2_05, 'M2-06': M2_06, 'M2-07': M2_07, 'M2-08': M2_08, 'M2-19': M2_19, 'M2-S09': M2_S09, 'M2-S10': M2_S10, 'M2-S11': M2_S11,
+  'M3-02': M3_02, 'M3-03': M3_03, 'M3-04': M3_04, 'M3-05': M3_05, 'M3-06': M3_06, 'M3-07': M3_07,
 };
 
 /** Input overrides of the Milestone 2 packages, by route id. */

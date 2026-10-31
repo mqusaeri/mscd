@@ -4,6 +4,7 @@ import * as api from './cli/api';
 import * as backup from './cli/backup';
 import * as db from './cli/db';
 import * as diagnostics from './cli/diagnostics';
+import * as exportCli from './cli/export';
 import * as keys from './cli/keys';
 import * as license from './cli/license';
 import * as migrate from './cli/migrate';
@@ -30,6 +31,8 @@ const COMMANDS: readonly { register(program: Command): void }[] = [
   license,
   backup,
   diagnostics,
+  // Milestone 3 (D.3): stub of M3-01, filled by M3-02 (organisation export of single tenancy).
+  exportCli,
 ];
 
 /** The `mscd-server` command line: run modes and admin commands of D-01. */

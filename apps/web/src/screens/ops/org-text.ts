@@ -27,6 +27,7 @@ export const ORG_TEXT = {
   statusSuspended: ['Suspended', 'Ditangguhkan'],
   statusOffboarding: ['Offboarding', 'Pengakhiran'],
   statusArchived: ['Archived', 'Diarsipkan'],
+  statusDeleted: ['Deleted', 'Dihapus'],
   meaningActive: ['Members can use everything their roles allow.', 'Anggota dapat memakai semua yang diizinkan peran mereka.'],
   meaningSuspended: [
     'Members cannot open or change anything in this organisation until it is active again. Nothing is deleted.',
@@ -39,6 +40,10 @@ export const ORG_TEXT = {
   meaningArchived: [
     'Members can no longer open this organisation. Archived is final, so it cannot become active again.',
     'Anggota tidak dapat membuka organisasi ini lagi. Diarsipkan adalah status akhir, jadi organisasi tidak dapat aktif kembali.',
+  ],
+  meaningDeleted: [
+    'The organisation was deleted for good on its deletion date. Its data is gone and nobody can open it.',
+    'Organisasi telah dihapus permanen pada tanggal penghapusannya. Datanya sudah tidak ada dan tidak ada yang dapat membukanya.',
   ],
   // Drawer
   crumb: ['Organisation', 'Organisasi'],
@@ -78,6 +83,7 @@ export const ORG_TEXT = {
   moveReactivate: ['Reactivate', 'Aktifkan kembali'],
   moveOffboard: ['Start offboarding', 'Mulai pengakhiran'],
   moveArchive: ['Archive', 'Arsipkan'],
+  moveDelete: ['Delete for good', 'Hapus permanen'],
   moveTitle: ['{action}: {org}', '{action}: {org}'],
   moveSub: ['From {from} to {to}', 'Dari {from} ke {to}'],
   effectsTitle: ['What happens', 'Yang terjadi'],
@@ -96,6 +102,7 @@ export const ORG_TEXT = {
   effectArchived2: ['Every session in this organisation ends at once.', 'Setiap sesi di organisasi ini berakhir saat itu juga.'],
   effectArchived3: ['This is final: an archived organisation cannot become active again.', 'Ini final: organisasi yang diarsipkan tidak dapat aktif kembali.'],
   effectArchived4: ['The data stays until it is deleted as the contract says.', 'Data tetap ada sampai dihapus sesuai kontrak.'],
+  effectDeleted1: ['Only the deletion run on its date deletes an organisation. Nobody moves it to deleted by hand.', 'Hanya proses penghapusan pada tanggalnya yang menghapus organisasi. Tidak ada yang memindahkannya ke dihapus secara manual.'],
   effectEmail: ['The Tenant Admins get an email with the new status and your reason.', 'Tenant Admin menerima email berisi status baru dan alasan Anda.'],
   reason: ['Reason', 'Alasan'],
   reasonHint: ['3 to 500 characters. It goes into the status history, the audit trail and the email to the Tenant Admins. Name no person.', '3 sampai 500 karakter. Alasan masuk ke riwayat status, jejak audit dan email ke Tenant Admin. Jangan sebut nama orang.'],

@@ -88,7 +88,10 @@ describe('Organisation lifecycle contract', () => {
     expect([...ORG_STATUSES]).toEqual([...ORGANIZATION_STATUSES]);
     const rows = MACHINES['organization.status'].transitions.filter((r) => r.via === 'ops.organizations.status');
     const moves = Object.fromEntries(ORG_STATUSES.map((s) => [s, rows.filter((r) => r.from === s).map((r) => r.to).sort()]));
-    expect(moves).toEqual(Object.fromEntries(ORG_STATUSES.map((s) => [s, [...STATUS_MOVES[s]].sort()])));
+    // Milestone 3 J.8 (M3-01) adds archived -> offboarding while a deletion is scheduled; the screen offers it with the
+    // deletion tab of M3-09, so until then the screen's moves are the machine's without exactly that row.
+    const screenMoves = Object.fromEntries(ORG_STATUSES.map((s) => [s, [...STATUS_MOVES[s], ...(s === 'archived' ? ['offboarding'] : [])].sort()]));
+    expect(moves).toEqual(screenMoves);
     for (const r of rows) expect(needsSlug(r.to as (typeof ORG_STATUSES)[number]), `${r.from} to ${r.to}`).toBe(Boolean(r.requires?.includes('confirmSlug')));
     for (const r of rows) expect(r.permission).toBe('ops.tenants.manage');
   });
