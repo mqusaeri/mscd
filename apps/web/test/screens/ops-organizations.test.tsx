@@ -218,6 +218,9 @@ describe('Organisation lifecycle rules', () => {
     const taken: [string, string] = ['The domain x is already verified for another organisation.', 'Domain x sudah diverifikasi untuk organisasi lain.'];
     expect(refusalText({ status: 409, message: taken, messageKey: 'domain_taken' })).toBe(taken);
     expect(refusalText({ status: 409, message: ['Conflict', 'Conflict'], messageKey: 'organization_archived' })).toBe(ORG_TEXT.refusedArchived);
+    // The client shows the server's English detail where there is no message pair (M2-19); the console's text wins.
+    const detailed: [string, string] = ['The organisation is archived', 'Pesan dari server: The organisation is archived'];
+    expect(refusalText({ status: 409, message: detailed, messageKey: 'organization_archived' })).toBe(ORG_TEXT.refusedArchived);
     expect(refusalText({ status: 412, message: ['Precondition failed', 'Precondition failed'] })).toBe(ORG_TEXT.conflict);
     expect(refusalText({ status: 503, message: ['Unavailable', 'Unavailable'] }, { dns: true })).toBe(ORG_TEXT.dnsUnavailable);
     expect(refusalText({ status: 503, message: ['Unavailable', 'Unavailable'] })).toEqual(['Unavailable', 'Unavailable']);

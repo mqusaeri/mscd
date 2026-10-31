@@ -9,6 +9,7 @@ import type { HostContext, ScreenProps } from '../types';
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Pager, Table, Tabs } from '../ui';
 import type { Column } from '../ui';
 import { Illustration } from '../../illustrations';
+import { useScreenTab } from '../../routing';
 import { adapterFor } from './adapter';
 import { GrantDialog } from './GrantDialog';
 import { GRANT_STATE_TEXT, GRANT_STATE_TONE, PACK_FILE_TEXT, PACK_STATUS_TEXT, PACK_STATUS_TONE, asApiResult, grantState, mayGrant, settled } from './model';
@@ -18,6 +19,9 @@ import { grantsMade, noteGranted, subscribeGrant } from './store';
 import { TEXT } from './text';
 
 const PAGE_SIZE = 20;
+/** The tabs of the screen: Guest access and Evidence packs for the MS Manager, Evidence packs for everyone else. */
+const GRANT_TABS = ['grants', 'packs'] as const;
+const PACK_TABS = ['packs'] as const;
 const personName = (ctx: HostContext, handle: string | null | undefined) => (handle ? ctx.D?.PEOPLE?.[handle]?.[0] ?? handle : '-');
 
 type Loaded<T> = { loading: boolean; data: T | null; error: ApiError | null };
@@ -178,7 +182,8 @@ export function PacksTab({ ctx, ms }: { ctx: HostContext; ms: MsId }) {
 export default function AuditorAccessScreen({ ctx }: ScreenProps) {
   const ms = ctx.msObj?.id ?? null;
   const grants = mayGrant(ctx, ms);
-  const [tab, setTab] = useState<'grants' | 'packs'>(grants ? 'grants' : 'packs');
+  // The tab is part of the screen's address (`tab=grants|packs`, M2-20); without the right to grant only Packs shows.
+  const [tab, setTab] = useScreenTab<'grants' | 'packs'>(ctx, grants ? GRANT_TABS : PACK_TABS, grants ? 'grants' : 'packs');
   const [granting, setGranting] = useState(false);
   const asked = ctx.params.grant;
   useEffect(() => {

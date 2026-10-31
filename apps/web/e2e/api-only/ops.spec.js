@@ -1,10 +1,10 @@
-import { test, expect, ui, expectToast, expectOverlayReadable } from '../helpers.js';
+import { test, expect, ui, expectToast } from '../helpers.js';
 import { DEMO_PASSWORD, demoCode, freshTotpStep } from '../../e2e-api/fixtures.js';
 
 // The operator console against the api (MILESTONE-2 M2-16): the platform operator `ops` has no membership, so the test
 // session endpoint cannot mint its session; it signs in with its password and authenticator code and lands on the
 // first platform screen (C.3). The stack runs one organisation (single tenancy): health, jobs, diagnostics and the
-// factor reset work; organisations, licences and packs belong to the installer and the Tenant Admin there, which the
+// accounts work; organisations, licences and packs belong to the installer and the Tenant Admin there, which the
 // console says.
 const tab = (page, label) => page.locator('main [role="tab"]', { hasText: label });
 
@@ -44,21 +44,16 @@ test.describe('Operator console against the api @api-only', () => {
     await expectToast(page, 'Job cleanup.expired queued as');
   });
 
-  test('organisations and packs say that one organisation runs here; the factor reset works', async ({ page }) => {
+  test('organisations and packs say that one organisation runs here; the account drawer opens', async ({ page }) => {
     await signInAsOperator(page);
     const main = page.locator('main');
     await tab(page, 'Organisations').click();
     await expect(main).toContainText('This installation runs one organisation (single tenancy).');
     await tab(page, 'Framework packs').click();
     await expect(main).toContainText('On an installation with one organisation, its administrator installs packs in the Framework library.');
+    // The accounts of the service and their actions are in e2e/api-only/ops-accounts.spec.js (M2-19).
     await tab(page, 'Accounts').click();
-    await main.locator('input').fill('sari.wulandari@nusantaradigital.co.id');
-    await main.locator('textarea').fill('Lost phone, identity checked by video call');
-    await main.locator('button', { hasText: 'Reset factor' }).click();
-    await expect(ui.modal(page)).toContainText('sari.wulandari@nusantaradigital.co.id');
-    await expectOverlayReadable(page);
-    await ui.modal(page).locator('button', { hasText: 'Reset factor' }).click();
-    await expectToast(page, 'The sign-in factor of sari.wulandari@nusantaradigital.co.id was reset');
+    await expect(main.locator('[data-ops-accounts] table')).toContainText('sari.wulandari@nusantaradigital.co.id');
     await page.locator('header button[data-topbar="account"]').click();
     await expect(ui.drawer(page)).toContainText('ops@mscd.test');
     await expect(ui.drawer(page).locator('button', { hasText: 'Change password' })).toBeVisible();

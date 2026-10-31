@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { MsId } from '../../data/types';
 import { Illustration } from '../../illustrations';
+import { useScreenTab } from '../../routing';
 import type { HostContext, ScreenProps, TextPair } from '../types';
 import { Alert, Badge, Button, EmptyState, Pager, Tabs } from '../ui';
 import { adapterFor, settled } from './adapter';
@@ -218,7 +219,8 @@ export default function RegistersScreen({ ctx }: ScreenProps) {
   const { client } = ctx;
   const adapter: RegistersAdapter = useMemo(() => adapterFor(() => context.current), [client]);
   const ms = ctx.msObj?.id ?? null;
-  const [kind, setKind] = useState<RegisterKind>(() => (isKind(ctx.params.tab) ? ctx.params.tab : 'context-issues'));
+  // The register kind is the screen's tab and part of its address (`tab=<kind>`, M2-20).
+  const [kind, setKind] = useScreenTab<RegisterKind>(ctx, KINDS, isKind(ctx.params.tab) ? ctx.params.tab : 'context-issues');
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);

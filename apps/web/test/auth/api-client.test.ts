@@ -2,7 +2,7 @@
 // failures, the 401 listeners, `reauth-required` and sign-out.
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ApiClient, CONNECTION_LOST, SERVER_UNREACHABLE, buildPath, buildQuery, csrfTokenIn, parseRetryAfter, problemSlug, toApiError,
+  ApiClient, CONNECTION_LOST, SERVER_MESSAGE_ID, SERVER_UNREACHABLE, buildPath, buildQuery, csrfTokenIn, parseRetryAfter, problemSlug, problemText, toApiError,
 } from '../../src/data/api/ApiClient';
 import { ME, fakeFetch, json, problem } from './helpers';
 
@@ -105,6 +105,23 @@ describe('errors', () => {
   it('falls back to [title, title] without messages', () => {
     const e = toApiError(403, { type: 'https://mscd.cyberlentera.com/problems/csrf', title: 'Missing or invalid CSRF token', status: 403, requestId: 'r' });
     expect(e).toMatchObject({ status: 403, slug: 'csrf', message: ['Missing or invalid CSRF token', 'Missing or invalid CSRF token'] });
+  });
+
+  it('shows the detail of a problem without a message pair before its title, so a refusal never reads only "Conflict" (M2-19)', async () => {
+    const detail = 'Mail is required on this installation (mail.required) and the SMTP server smtp.example:587 does not answer. Configure mail.smtp first';
+    const { fetch } = fakeFetch({ 'POST /api/v1/ops/organizations': problem(409, 'conflict', { title: 'Conflict', detail, messageKey: 'mail_required' }) });
+    const r = await new ApiClient({ fetch }).post('/api/v1/ops/organizations', {});
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toMatchObject({ status: 409, slug: 'conflict', messageKey: 'mail_required', detail, message: [detail, `${SERVER_MESSAGE_ID} ${detail}`] });
+    expect(r.error.message.join(' ')).not.toMatch(/^Conflict\b/);
+    // The two languages differ, so a screen that adds the detail to a title-only message does not repeat it.
+    expect(r.error.message[0]).not.toBe(r.error.message[1]);
+    expect(SERVER_MESSAGE_ID).toBe('Pesan dari server:');
+    // A message pair still wins over the detail; without detail and messages the title is all there is.
+    expect(problemText({ title: 'Conflict', detail: 'd', messages: { en: 'English', id: 'Indonesia' } })).toEqual(['English', 'Indonesia']);
+    expect(problemText({ title: 'Conflict', detail: '  ' })).toEqual(['Conflict', 'Conflict']);
+    expect(problemText({ title: 'Not found' })).toEqual(['Not found', 'Not found']);
   });
 
   it('reads the retry time from the problem or from Retry-After', async () => {

@@ -43,8 +43,8 @@ describe('route table against the plan', () => {
 
   it('reads the D.3 and D.5 tables and Milestone 2 J.1', () => {
     expect(bpApiEndpoints().length).toBeGreaterThan(150);
-    expect(m2PlanRoutes()).toHaveLength(38);
-    expect(planApi.length).toBe(bpApiEndpoints().length + 38);
+    expect(m2PlanRoutes()).toHaveLength(48);
+    expect(planApi.length).toBe(bpApiEndpoints().length + 48);
     expect(planGateway.length).toBe(16);
   });
 
@@ -54,7 +54,7 @@ describe('route table against the plan', () => {
       expect(`${r.method} ${r.path}`, planned.id).toBe(`${planned.method} ${fastifyPath(planned.path, '/api/v1')}`);
       expect(r.owner, planned.id).toBe(planned.owner);
     }
-    expect(new Set(m2PlanRoutes().map((r) => r.id)).size).toBe(38);
+    expect(new Set(m2PlanRoutes().map((r) => r.id)).size).toBe(48);
     // Every route owned by a Milestone 2 package is a J.1 row.
     const ids = new Set(m2PlanRoutes().map((r) => r.id));
     expect(routes.filter((r) => r.owner.startsWith('M2-')).map((r) => r.id).filter((id) => !ids.has(id))).toEqual([]);

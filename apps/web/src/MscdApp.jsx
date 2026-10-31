@@ -13,6 +13,9 @@ import { findX, titleOf, overviewPhase } from './data/sample-derive.js';
 import { canOpenHost, claimed, createHostContext, detailNode, firstAdminScreen, firstPlatformScreen, hostById, hostExtraActions, hostNav, hostVals, slotNode } from './screens/host.tsx';
 import { heldRoleLabel } from './screens/roles.ts';
 import { BUILTIN_SCREEN_IDS } from './screens/types.ts';
+// Screen addresses (MILESTONE-2 M2-20): the screen, system, organisation and tab of the address, and the browser history.
+import { forgetOrgTried, historyStep, isStartQuery, locationUrl, orgTried, parseRoute, rememberOrgTried, routeUrl, sameRoute } from './routing/index.ts';
+import { authPageOf } from './auth/routes.ts';
 
 // Literals the controller used before the data carried them (UI 2.14). Each is read only as the fallback of its
 // optional data field (H.5 step 11), so a snapshot without the field renders as before.
@@ -42,7 +45,6 @@ const CLAUSE_GROUP = ['Clauses 4 to 10','Klausul 4 sampai 10'];
 const CONTROL_GROUP = ['Annex A controls','Kontrol Annex A'];
 const PLATFORM_ORG = ['Platform operations','Operasi platform'];
 const NEEDS_SYSTEM = ['This screen belongs to a management system. You hold no role in a management system of this organisation yet.','Layar ini milik sebuah sistem manajemen. Anda belum memiliki peran di sistem manajemen organisasi ini.'];
-const SAMPLE_PERSONAS = ['manager','owner','auditor','top'];
 // The placeholder system of the no-system path: the shell renders without a management system (C.3).
 const NO_MS = { id:'', code:'', ed:'', short:'', name:['',''], mgr:'none', mgrRole:'', color:'#6b655a', scope:'', certifier:'', lead:'', cert:'', stage:['',''], audit:null, clauses:[], findings:{open:0,major:0}, loc:'', locMode:'', pack:'-', phase:['',''], unit:'ctrl' };
 // A clause entry of a catalogue system has the key cl-<code> (D2-09) and is shown as Cl. <code>.
@@ -77,35 +79,125 @@ function withInk(root, theme) {
 
 export default class MscdApp extends React.Component {
   // `snap` is the snapshot of the data source; `D` is that snapshot merged with the static content and the date helpers.
-  state = { snap:null, D:null, screen:'portfolio', ms:'isms', lang:null, theme:null, deploy:null, role:'manager', msMenu:false, roleMenu:false, tab:{}, chip:{}, freq:null, q:'', sel:null, person:null, toast:null, modal:null, anim:0, expanded:{}, traceId:null, gtId:null, gtQ:'', evt:null, cycleAll:false, drift:null, org:'ndt', orgMenu:false, sb:true, tera:false, busy:0, progress:null, loadError:null, params:null };
+  state = { snap:null, D:null, screen:'portfolio', ms:'isms', lang:null, theme:null, deploy:null, role:'manager', msMenu:false, roleMenu:false, tab:{}, chip:{}, freq:null, q:'', sel:null, person:null, toast:null, modal:null, anim:0, expanded:{}, traceId:null, gtId:null, gtQ:'', evt:null, cycleAll:false, drift:null, org:'ndt', orgMenu:false, sb:true, tera:false, busy:0, progress:null, loadError:null, params:null, htab:null };
   ds = this.props.dataSource || null;
+  // Address writes wait until the first snapshot has opened the place of the address (M2-20); then each change of
+  // place writes the address. A navigation that loads first (an organisation switch, Back or Forward) holds them too.
+  _nav = 'start';
   // The source is created once per instance, also when React mounts the component twice in development (StrictMode).
-  componentDidMount(){ window.addEventListener('keydown',this.onKey);
-    // Sample builds open a screen and persona from the address (?screen=<id>&persona=<role>, MILESTONE-2 C.2).
+  // The first load runs once per instance too: a second load would run next to the organisation switch of the first
+  // (M2-20), and its reads would meet the session id that switch replaces.
+  componentDidMount(){ if(this._nav==='gone') this._nav=this.state.D?null:'start'; window.addEventListener('keydown',this.onKey);
+    // Back and Forward (M2-20). A fragment change of the sample build fires popstate and, in some browsers, hashchange.
+    window.addEventListener('popstate',this.onPop); if(this.addrMode==='hash') window.addEventListener('hashchange',this.onPop);
+    // Sample builds open a screen and persona from the address (#/<id>?persona=<role>, or the start query
+    // ?screen=<id>&persona=<role> of MILESTONE-2 C.2).
     const start=this.sampleStart(); if(start&&start.persona&&!this.ds) this.setState({role:start.persona});
     this._ds=this._ds||(this.ds?Promise.resolve(this.ds):createDataSource(start&&start.persona?{persona:start.persona}:undefined));
-    this._ds.then(ds=>{ this.ds=ds; this.attach(ds); this.firstLoad(); },e=>{ console.error('data source failed',e); this.setState({loadError:e}); }); }
-  componentWillUnmount(){ window.removeEventListener('keydown',this.onKey); if(this._offProgress) this._offProgress(); this._offProgress=null; }
+    this._ds.then(ds=>{ this.ds=ds; this.attach(ds); if(this._started) return; this._started=true; this.firstLoad(); },e=>{ if(this._started) return; this._started=true; console.error('data source failed',e); this.setState({loadError:e}); }); }
+  componentWillUnmount(){ window.removeEventListener('keydown',this.onKey); window.removeEventListener('popstate',this.onPop); window.removeEventListener('hashchange',this.onPop); this._nav='gone'; if(this._offProgress) this._offProgress(); this._offProgress=null; }
   // API mode: requests carry the interface language, and uploads report their progress to the busy bar (H.5 step 9).
   attach(ds){ if(ds.kind!=='api') return; if(ds.setLanguage) ds.setLanguage(this.L); if(ds.onProgress&&!this._offProgress) this._offProgress=ds.onProgress(p=>this.setState({progress:p})); }
-  // The first snapshot. In API mode the session decides the organisation, so no organisation is asked for.
-  firstLoad(){ const ds=this.ds; this.setState({loadError:null});
-    ds.load(this.api?undefined:this.state.org).then(snap=>this.setState(s=>this.applySnap(snap,s),()=>this.afterFirstLoad()),e=>{ console.error('data load failed',e); this.setState({loadError:e}); }); }
-  // `?screen=<id>` and `?persona=<role>` of a sample build (C.2), read once; null in API builds and outside a browser.
-  sampleStart(){ if(this._start!==undefined) return this._start; let start=null;
-    if(import.meta.env.VITE_DATA_SOURCE!=='api'&&typeof window!=='undefined'&&window.location){ const q=new URLSearchParams(window.location.search); const screen=q.get('screen'), persona=q.get('persona'); if(screen||persona) start={screen:screen||null,persona:SAMPLE_PERSONAS.includes(persona)?persona:null}; }
-    this._start=start; return start; }
-  isScreen(id){ return BUILTIN_SCREEN_IDS.includes(id)||!!hostById(id); }
-  // After the first snapshot: the screen of ?screen= (sample builds; a host screen of another persona switches to its
-  // first persona), else in API mode the landing of a user without a system role (C.3 administration landing).
-  // With ?persona= the persona rules of C.2 hold: a screen that persona cannot open is ignored, and the persona lands
-  // on its own first screen, as after a persona switch.
-  afterFirstLoad(){ const start=this.sampleStart();
-    if(!this.api&&start&&(start.persona||start.screen)){ const id=start.screen&&this.isScreen(start.screen)?start.screen:null; const def=id?hostById(id):null; const r=def&&!start.persona&&!def.roles.includes(this.state.role)?def.roles[0]:null;
-      if(r) return this.ds.switchPersona(r).then(snap=>this.setState(s=>({...this.applySnap(snap,s),role:r,screen:id})),e=>console.warn('persona switch failed',e));
-      if(!id&&!start.persona) return;
-      const role=this.state.role; const to=this.landing(role,id||(role==='owner'?'mytasks':'portfolio'),this.MSL.length<2);
-      if(to!==this.state.screen) this.setState({screen:to}); return; }
+  // The first snapshot. In API mode the session decides the organisation, so no organisation is asked for, unless the
+  // address names another organisation of the person (M2-20): the source switches before the first snapshot, so no
+  // screen of the old organisation is still loading with the session the switch replaces. A sample build loads the
+  // organisation of its address. An organisation the person does not belong to, or a switch that fails, loads the
+  // session's (sample: the first) organisation; a switch that needs a new sign-in leaves it to the boot router.
+  firstLoad(){ const ds=this.ds; this.setState({loadError:null}); const want=this.startOrg(this.startRoute()); const plain=()=>ds.load(this.api?undefined:this.state.org).then(snap=>({snap,org:null}));
+    const load=want?ds.load(want).then(snap=>{ if(this.api) forgetOrgTried(); return {snap,org:want}; },e=>{ if(this.api&&e&&e.reauth) return new Promise(()=>{}); if(this.api) forgetOrgTried(); return plain(); }):plain();
+    load.then(({snap,org})=>this.setState(s=>{ const next=this.applySnap(snap,s); const o=!this.api&&org?(snap.orgs||[]).find(x=>x.id===org):null; return o?{...next,org,ms:o.ms[0]||s.ms,deploy:o.deploy}:next; },()=>this.afterFirstLoad()),e=>{ console.error('data load failed',e); this.setState({loadError:e}); }); }
+  // The organisation the start address asks for, or null. API mode: the switch is remembered for this page while it
+  // runs (src/routing/memory.ts); when the same switch asked for a new sign-in before and the person went back to the
+  // old session (Cancel on the sign-in page, which opens the app again without loading the page), it is not asked
+  // again and the address is corrected instead. A new page starts without the memory, a start address without an
+  // organisation forgets it, and one of another organisation replaces it, so a tried switch never outlives its
+  // sign-in page.
+  startOrg(r){ if(!r) return null; if(!this.api) return r.org&&r.org!==this.state.org?r.org:null;
+    const tried=orgTried(); if(!r.org){ if(tried) forgetOrgTried(); return null; }
+    if(tried===r.org){ forgetOrgTried(); return null; } rememberOrgTried(r.org); return r.org; }
+  // ---------- screen addresses (MILESTONE-2 M2-20) ----------
+  // The API build writes paths (/controls?ms=isms), the sample build the hash (#/controls?ms=isms), see src/routing.
+  get addrMode(){ return import.meta.env.VITE_DATA_SOURCE==='api'?'path':'hash'; }
+  // The route of an address, with what the sample build needs to know about its form: `legacy` for the start query
+  // ?screen=<id>&persona=<role> (C.2), `hashed` for an address in the hash.
+  routeAt(loc){ const mode=this.addrMode; return {...parseRoute(loc,mode),legacy:mode==='hash'&&isStartQuery(loc),hashed:mode==='hash'&&String(loc.hash||'').startsWith('#/')}; }
+  // The route of the address the app opened with, read once; null outside a browser. The unit tests set `_start`
+  // ({screen, persona}) for the start query of the sample build.
+  startRoute(){ if(this._start!==undefined) return this._start?{screen:this._start.screen||null,ms:null,org:null,tab:null,persona:this._start.persona||null,legacy:true,hashed:false}:null;
+    if(this._route!==undefined) return this._route; this._route=typeof window!=='undefined'&&window.location&&window.history?this.routeAt(window.location):null; return this._route; }
+  // The screen and persona the sample build opens with (C.2); null in API builds and outside a browser.
+  sampleStart(){ if(import.meta.env.VITE_DATA_SOURCE==='api') return null; const r=this.startRoute(); return r&&(r.screen||r.persona)?{screen:r.screen,persona:r.persona}:null; }
+  // Built-in screens a role may open: those of its sidebar (visFor), the portfolio only with several systems; without a
+  // system only the Administration entries of a Tenant Admin or Storage Admin (C.3).
+  builtinOpen(id,role){ const admin=this.api&&!!this.D.me&&(this.D.me.adminRoles||[]).length>0&&(id==='fw'||id==='storage'); if(!this.MSL.length) return admin;
+    const vis=this.visFor(role); return (!vis||vis.includes(id)||admin)&&!(this.MSL.length<2&&id==='portfolio'); }
+  // Whether the session may open a screen of an address: a built-in screen of its sidebar or a host screen it may open.
+  openable(id){ if(hostById(id)) return canOpenHost(id,this.hostCtx(),this.state.role); return BUILTIN_SCREEN_IDS.includes(id)&&this.builtinOpen(id,this.state.role); }
+  // The start screen: the landing of the role, in both builds, as a persona switch lands (product owner, 2026-10-31):
+  // a Domain Owner opens My Tasks, an Internal Auditor of a single-system organisation Audit readiness, every other role
+  // the portfolio (shown as the overview with one system); a user without a system the landing of C.3. Opened by an
+  // address without a screen, or with a screen the person cannot open or that does not exist.
+  startScreen(){ if(!this.MSL.length) return (this.api&&this.landingWithoutSystem())||this.state.screen; const role=this.state.role; return this.landing(role,role==='owner'?'mytasks':'portfolio',this.MSL.length<2); }
+  // The screen the shell shows for the state: the portfolio of one system is its overview, and a host screen the session
+  // may not open gives way to the landing (C.2, C.3).
+  shownScreen(ctx){ const st=this.state; const noMs=!this.MSL.length; const single=this.MSL.length<2; let screen=st.screen==='portfolio'&&single?'m1overview':st.screen;
+    if(hostById(screen)&&!canOpenHost(screen,ctx,st.role)) screen=noMs?((this.api&&this.landingWithoutSystem())||''):this.landing(st.role,screen,single);
+    return screen; }
+  // The place the app shows, as a route: the shown screen, the system, the organisation of a person in several, the
+  // tab of a host screen and, in the sample build, a persona other than the manager.
+  routeNow(){ const st=this.state; const screen=this.shownScreen(this.hostCtx())||null; const o=this.org; const orgs=this.ORGS||[];
+    return {screen,ms:this.MSL.length&&this.msObj?this.msObj.id:null,org:orgs.length>1&&o&&o.id?o.id:null,tab:screen&&hostById(screen)&&st.htab&&st.htab.s===screen?st.htab.id:null,persona:!this.api&&st.role!=='manager'?st.role:null}; }
+  // Writes the address of the shown place: a new screen or organisation adds a history entry, a new system, tab or
+  // persona replaces it (`mode` forces one of them). Sign-in addresses belong to the boot router and stay as they are.
+  syncAddress(mode){ if(this._nav||!this.state.D||typeof window==='undefined'||!window.history||!window.location) return; const loc=window.location; const am=this.addrMode;
+    if(am==='path'&&authPageOf(loc.pathname)) return;
+    if(this.api&&!this.MSL.length&&!this.shellWithoutSystem()) return;
+    const next=this.routeNow(); if(!next.screen) return; const url=routeUrl(loc,am,next); if(url===locationUrl(loc)) return;
+    const step=mode||historyStep(this.routeAt(loc),next)||'replace';
+    try { window.history[step==='push'?'pushState':'replaceState'](null,'',url); } catch(e){ console.warn('address not written',e); } }
+  // Holds the address writes while a navigation loads, then writes the address of the place it opened.
+  beginNav(){ const t={}; this._nav=t; return t; }
+  endNav(t,mode){ if(this._nav!==t) return; this._nav=null; this.syncAddress(mode); }
+  // Opens the place of an address: its organisation (a switch), the persona (sample build), the system, the screen and
+  // the tab. A screen the session cannot open, or an unknown one, opens the start screen; the address is then
+  // corrected (replaced). `start` marks the address the app opened with. Only a switch of organisation or persona
+  // waits for the data source; everything else is applied at once.
+  applyRoute(r,how){ const t=this.beginNav(); const live=()=>this._nav===t; const start=!!(how&&how.start);
+    const done=()=>this.endNav(t,'replace'); const fail=e=>{ console.warn('address not opened',e); done(); };
+    const place=()=>{ if(!live()) return; try { this.openPlace(r,done); } catch(e){ fail(e); } };
+    const persona=()=>{ if(!live()) return; const want=this.addressPersona(r,start); if(!want) return place();
+      this.ds.switchPersona(want).then(snap=>this.setState(s=>({...this.applySnap(snap,s),role:want}),place),e=>{ console.warn('persona switch failed',e); place(); }); };
+    // The organisation of the start address was opened by the first load (firstLoad, startOrg).
+    const want=r.org; const cur=this.org&&this.org.id;
+    if(!start&&want&&want!==cur&&(this.ORGS||[]).some(o=>o.id===want)) return this.switchOrgTo(want).then(persona,fail);
+    persona(); }
+  // The sample persona an address asks for, when it is not the current one: the persona of the address; the start query
+  // opens a host screen of another persona as its first persona (C.2); an address in the hash without a persona is the
+  // manager's. The persona of the start address was applied when the data source was created (componentDidMount).
+  addressPersona(r,start){ if(this.api) return null; const role=this.state.role; const def=r.screen?hostById(r.screen):null;
+    const want=start&&r.persona?null:(r.persona||(r.legacy?(def&&!def.roles.includes(role)?def.roles[0]:null):(r.hashed?'manager':null)));
+    return want&&want!==role?want:null; }
+  // The system, screen and tab of an address: the system first (the role follows it in API mode), then the screen the
+  // session may open with that system, else the start screen. Calls done when both are applied.
+  openPlace(r,done){ const s0=this.state; const ms=r.ms&&r.ms!==s0.ms&&this.MSL.some(m=>m.id===r.ms)?r.ms:null;
+    const screen=()=>{ const s=this.state; const id=r.screen&&this.openable(r.screen)?r.screen:this.startScreen(); const htab=id&&r.tab&&id===r.screen&&hostById(id)?{s:id,id:r.tab}:null;
+      this.setState({screen:id,htab,msMenu:false,roleMenu:false,orgMenu:false,...(id===s.screen?{}:{sel:null,person:null,q:'',expanded:{},more:0,params:null})},done); };
+    if(!ms) return screen();
+    this.setState(s=>({ms,anim:s.anim+1,sel:null,person:null,q:'',tab:{},chip:{},freq:null,expanded:{},drift:null,evt:null,traceId:null,gtId:null,gtQ:'',...(this.api?{role:this.roleIn(this.D,ms,s.role)}:{})}),screen); }
+  // Back and Forward, and a hash typed in the address bar of the sample build: open the place of the address.
+  // A fragment of the sample build that is no address (an anchor such as #top) is left alone.
+  onPop=()=>{ if(!this.state.D||typeof window==='undefined') return; const loc=window.location; if(this.addrMode==='path'&&authPageOf(loc.pathname)) return;
+    if(this.addrMode==='hash'&&loc.hash&&loc.hash!=='#'&&!String(loc.hash).startsWith('#/')) return;
+    const r=this.routeAt(loc); if(!this._nav&&sameRoute(r,this.routeNow())&&routeUrl(loc,this.addrMode,r)===locationUrl(loc)) return;
+    if(this._nav&&this._popUrl===locationUrl(loc)) return; this._popUrl=locationUrl(loc); this.applyRoute(r,{}); };
+  // The tab of the open host screen (ctx.setTab, M2-20); null shows its first tab. The address is replaced.
+  setHostTab=(id)=>{ this.setState(s=>{ const next=id==null?null:{s:s.screen,id:String(id)}; const cur=s.htab; if(cur===next||(cur&&next&&cur.s===next.s&&cur.id===next.id)) return null; return {htab:next}; }); };
+  // After the first snapshot the place of the address opens (applyRoute, M2-20): its screen, system, organisation and
+  // tab, else the start screen. The sample start query keeps the persona rules of C.2: ?screen= of a host screen of
+  // another persona switches to its first persona; with ?persona= a screen that persona cannot open is ignored and the
+  // persona lands on its own first screen. Outside a browser (the unit tests) only the landing of a user without a
+  // system role applies (C.3 administration landing).
+  afterFirstLoad(){ const r=this.startRoute(); if(r) return this.applyRoute(r,{start:true}); this._nav=null;
     if(this.api&&!this.MSL.length){ const id=this.landingWithoutSystem(); if(id&&id!==this.state.screen) this.setState({screen:id}); } }
   // C.3: a Tenant Admin or Storage Admin without a business role lands on the first administration screen, a platform
   // operator without a membership on the first platform screen; everyone else keeps the no-system message.
@@ -142,8 +234,10 @@ export default class MscdApp extends React.Component {
   // Escape closes the top layer first: the modal, then the detail drawer, then any open menu.
   onKey=(e)=>{ if(e.key!=='Escape') return; const s=this.state;
     if(s.modal) this.dismissModal(); else if(s.sel) this.setState({sel:null}); else if(s.msMenu||s.roleMenu||s.orgMenu||s.tera) this.setState({msMenu:false,roleMenu:false,orgMenu:false,tera:false}); };
-  // A new screen starts at the top instead of keeping the previous screen's scroll offset.
-  componentDidUpdate(_,prev){ if(prev.screen!==this.state.screen&&typeof window!=='undefined') window.scrollTo(0,0); }
+  // A new screen starts at the top instead of keeping the previous screen's scroll offset. A change of place writes the
+  // address (M2-20).
+  componentDidUpdate(_,prev){ const st=this.state; if(prev.screen!==st.screen&&typeof window!=='undefined') window.scrollTo(0,0);
+    if(prev.screen!==st.screen||prev.ms!==st.ms||prev.org!==st.org||prev.htab!==st.htab||prev.role!==st.role||prev.D!==st.D) this.syncAddress(); }
   CountUp = ({value})=>{ const [v,setV]=React.useState(0); const ref=React.useRef(0); React.useEffect(()=>{ const from=ref.current, to=Number(value)||0; if(from===to) return; const t0=performance.now(), dur=650; let raf; const step=(t)=>{ const p=Math.min(1,(t-t0)/dur); const e=1-Math.pow(1-p,3); const cur=Math.round(from+(to-from)*e); setV(cur); ref.current=cur; if(p<1) raf=requestAnimationFrame(step); }; raf=requestAnimationFrame(step); return ()=>cancelAnimationFrame(raf); },[value]); return React.createElement('span',null,v); };
   num(n){ return n; }
   // Text of a clause readiness value: the label the API source mapped (data/api), else the value with %, and
@@ -165,9 +259,21 @@ export default class MscdApp extends React.Component {
   // The new organisation's snapshot and the state reset are applied together, so no frame mixes the two organisations.
   // API mode: the organisation, system and role come from the new session's Me (H.5 steps 2 and 5); a switch that needs
   // a new sign-in (409 reauth-required, D-26) is handled by the boot router, which shows the sign-in page.
-  setOrg(id){ const o=this.ORGS.find(x=>x.id===id); this.setState({orgMenu:false}); this.ds.switchOrg(id).then(snap=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,{...s,ms:null}):{org:id,ms:o.ms[0],role:s.role}; const no=(W.D.orgs||[]).find(x=>x.id===ap.org)||o; const n=no?no.ms.length:1;
-      return {...W,...ap,deploy:no?no.deploy:s.deploy,orgMenu:false,anim:s.anim+1,screen:this.landing(ap.role,n>1?'portfolio':'m1overview',n<2,W.D),sel:null,person:null,q:'',tab:{},chip:{},freq:null,expanded:{},evt:null,drift:null,traceId:null,gtId:null,gtQ:'',more:0,taskFilter:null,params:null}; },()=>{ if(this.api&&!this.MSL.length){ const to=this.landingWithoutSystem(); if(to&&to!==this.state.screen) this.setState({screen:to}); } }),
-      e=>{ console.warn('organisation switch failed',e); if(!(e&&e.reauth)) this.toast(this.li(errorText(e))); }); }
+  // M2-20: the menu adds a history entry with the new organisation's address before the switch, so a switch that needs
+  // a new sign-in returns to the new organisation afterwards; the entry gets the landing's address once switched, and
+  // a failed switch goes back to the previous entry.
+  setOrg(id){ this.setState({orgMenu:false}); const t=this.beginNav(); const pushed=this.pushOrgAddress(id);
+    this.switchOrgTo(id).then(ok=>{ if(ok) return this.endNav(t,'replace'); if(this._nav===t) this._nav=null; if(pushed&&typeof window!=='undefined') window.history.back(); }); }
+  // Adds the history entry of an organisation's start address (M2-20); false outside a browser.
+  pushOrgAddress(id){ if(typeof window==='undefined'||!window.history||!window.location) return false; const loc=window.location; if(this.addrMode==='path'&&authPageOf(loc.pathname)) return false;
+    try { window.history.pushState(null,'',routeUrl(loc,this.addrMode,{screen:null,ms:null,org:id,tab:null,persona:!this.api&&this.state.role!=='manager'?this.state.role:null})); return true; } catch(e){ console.warn('address not written',e); return false; } }
+  // The organisation switch of the menu and of an address: the snapshot and the state reset are applied together, and
+  // the screen is the landing of the new organisation. Resolves true when switched and false when the switch failed;
+  // a switch that needs a new sign-in never resolves, because the boot router shows the sign-in page instead.
+  switchOrgTo(id){ const o=this.ORGS.find(x=>x.id===id); if(this.api) rememberOrgTried(id);
+    return this.ds.switchOrg(id).then(snap=>new Promise(res=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,{...s,ms:null}):{org:id,ms:o.ms[0],role:s.role}; const no=(W.D.orgs||[]).find(x=>x.id===ap.org)||o; const n=no?no.ms.length:1;
+      return {...W,...ap,deploy:no?no.deploy:s.deploy,orgMenu:false,anim:s.anim+1,screen:this.landing(ap.role,n>1?'portfolio':'m1overview',n<2,W.D),htab:null,sel:null,person:null,q:'',tab:{},chip:{},freq:null,expanded:{},evt:null,drift:null,traceId:null,gtId:null,gtQ:'',more:0,taskFilter:null,params:null}; },()=>{ if(this.api) forgetOrgTried(); const to=this.api&&!this.MSL.length?this.landingWithoutSystem():null; if(to&&to!==this.state.screen) this.setState({screen:to},()=>res(true)); else res(true); })),
+      e=>{ console.warn('organisation switch failed',e); if(e&&e.reauth) return new Promise(()=>{}); if(this.api) forgetOrgTried(); this.toast(this.li(errorText(e))); return false; }); }
   // Screens each role can open; null means every screen.
   visFor(role){ return {manager:null,owner:['mytasks','m1overview','controls','docs','fresh'],auditor:['portfolio','audit','chain','gt','docs','controls','fresh','timeline','mytasks'],top:['portfolio','m1overview','timeline','audit','chain','mytasks']}[role]; }
   // Keep the wanted screen when the role may open it, otherwise fall back to the role's first screen. A host screen
@@ -230,10 +336,12 @@ export default class MscdApp extends React.Component {
   // extra.ms switches the management system as part of the navigation (used by cross-system lists such as Storage).
   // extra.params reach a host screen as ctx.params (C.4).
   go(screen,extra){ const x={params:null,...(extra||{})}; const sw=!!x.ms&&x.ms!==this.state.ms; if(x.gtId!==undefined&&x.gtQ===undefined) x.gtQ=x.gtId||''; if(sw&&this.api) x.role=this.roleIn(this.D,x.ms,this.state.role);
-    this.setState(s=>({screen,sel:null,person:null,q:'',expanded:{},msMenu:false,roleMenu:false,orgMenu:false,more:0,...(sw?{tab:{},chip:{},freq:null,drift:null,evt:null,traceId:null,gtId:null,gtQ:'',anim:s.anim+1}:{}),...x})); }
+    // M2-20: a host screen opened with params.tab shows that tab; another screen starts at its first tab.
+    const pt=hostById(screen)&&x.params&&typeof x.params.tab==='string'?x.params.tab:null;
+    this.setState(s=>({screen,sel:null,person:null,q:'',expanded:{},msMenu:false,roleMenu:false,orgMenu:false,more:0,htab:pt?{s:screen,id:pt}:screen===s.screen?s.htab:null,...(sw?{tab:{},chip:{},freq:null,drift:null,evt:null,traceId:null,gtId:null,gtQ:'',anim:s.anim+1}:{}),...x})); }
   goIn(ms){ return (screen,extra)=>this.go(screen,{...(extra||{}),ms:ms.id}); }
   // API mode: the UI role follows the system (H.5 step 5); a screen the new role cannot open falls back to its first one.
-  setMs(id){ this.setState(s=>{ const x={}; if(this.api){ x.role=this.roleIn(this.D,id,s.role); if(x.role!==s.role||hostById(s.screen)) x.screen=this.landing(x.role,s.screen,this.MSL.length<2); }
+  setMs(id){ this.setState(s=>{ const x={}; if(this.api){ x.role=this.roleIn(this.D,id,s.role); if(x.role!==s.role||hostById(s.screen)) x.screen=this.landing(x.role,s.screen,this.MSL.length<2); if(x.screen!==s.screen) x.htab=null; }
     return {ms:id,anim:s.anim+1,sel:null,person:null,q:'',tab:{},chip:{},freq:null,expanded:{},msMenu:false,more:0,drift:null,evt:null,traceId:null,gtId:null,gtQ:'',...x}; }); }
   openRow(key){ if(this.pat==='inline') this.setState(s=>({expanded:{...s.expanded,[key]:!s.expanded[key]}})); else this.setState(s=>({sel:s.sel===key?null:key})); }
   setTab(scr,id){ this.setState(s=>({tab:{...s.tab,[scr]: s.tab[scr]===id && !['controls','chain','phases'].includes(scr) ? null : id},chip:{...s.chip,[scr]:null},sel:null,expanded:{},person:null,more:0})); }
@@ -606,18 +714,16 @@ export default class MscdApp extends React.Component {
     const ctx=this._ctx=this.hostCtx();
     // No-system path (C.3): a user without a role in a system of this organisation sees the host screens only, and an
     // administrator the Framework library and Storage repositories as well.
-    const noMs=!this.MSL.length; const adminRoles=this.api&&D.me?(D.me.adminRoles||[]):[];
+    const noMs=!this.MSL.length;
     const L=this.L; const t=new Proxy({},{get:(_,k)=>this.t(k)}); const ms=noMs?NO_MS:this.msObj; const deploy=st.deploy??this.props.deploy??'saas'; const role=st.role; const meId=this.me; const meP=this.personOf(meId);
-    const single=this.MSL.length<2; let screen=st.screen==='portfolio'&&single?'m1overview':st.screen; const d=noMs?null:this.data(); const org=this.org;
-    // A host screen renders only for a session that may open it (C.2, C.3), whatever led to it (?screen=, ctx.go, a
-    // stale state): otherwise the role's landing renders, or the no-system landing (C.3) without a system.
-    if(hostById(screen)&&!canOpenHost(screen,ctx,role)) screen=noMs?((this.api&&this.landingWithoutSystem())||''):this.landing(role,screen,single);
+    // A host screen renders only for a session that may open it (C.2, C.3), whatever led to it (an address, ctx.go, a
+    // stale state): otherwise the role's landing renders, or the no-system landing (C.3) without a system (shownScreen).
+    const single=this.MSL.length<2; const screen=this.shownScreen(ctx); const d=noMs?null:this.data(); const org=this.org;
     const hv=hostVals(screen,ctx); const needsMs=!hv&&noMs&&screen!=='fw'&&screen!=='storage';
     const sbOpen=st.sb; const orgVals={sbOpen,sbClosed:!sbOpen,sbW:sbOpen?'224px':'68px',sbPad:sbOpen?'12px':'10px',logoMax:sbOpen?'90px':'40px',orgPad:sbOpen?'10px 10px':'8px 4px',orgInitials:org.name.replace(/^(PT|RS)\s+/,'').split(' ').map(w=>w[0]).slice(0,3).join(''),navJustify:sbOpen?'space-between':'center',navPx:sbOpen?'10px':'0px',toggleSb:()=>this.setState(x=>({sb:!x.sb})),orgName:org.name,orgSub:this.MSL.length+' '+this.li(this.MSL.length===1?['management system','sistem manajemen']:['management systems','sistem manajemen'])+', '+org.sites+' '+this.li(org.sites===1?['site','lokasi']:['sites','lokasi']),orgMenu:st.orgMenu,toggleOrgMenu:()=>this.setState(s=>({orgMenu:!s.orgMenu,msMenu:false,roleMenu:false})),msArrow:!single,msMenuOpen:st.msMenu&&!single,orgOptions:this.ORGS.map(o=>({name:o.name,sub:o.ms.length+' '+this.li(o.ms.length===1?['management system','sistem manajemen']:['management systems','sistem manajemen'])+', '+this.t(o.deploy==='saas'?'saas':'onprem').split(',')[0],bg:o.id===org.id?'var(--accbg)':'transparent',go:()=>this.setOrg(o.id)})),single};
     const NAV=[{id:'top',label:null,items:[{id:'portfolio',label:t.portfolio}]},{id:'impl',label:t.g_impl,items:[{id:'m1overview',label:t.nav_overview},{id:'controls',label:t.nav_controls},{id:'phases',label:t.nav_phases},{id:'docs',label:t.nav_docs}]},{id:'audit',label:t.g_audit,items:[{id:'audit',label:t.nav_audit},{id:'chain',label:t.nav_chain},{id:'gt',label:t.nav_gt}]},{id:'surv',label:t.g_surv,items:[{id:'timeline',label:t.nav_timeline},{id:'fresh',label:t.nav_fresh},{id:'cal',label:t.nav_cal}]},{id:'tasks',label:null,items:[{id:'mytasks',label:t.mytasks}]},{id:'admin',label:t.admin,items:[{id:'fw',label:t.nav_fw},{id:'storage',label:t.nav_storage}]}];
-    const vis=this.visFor(role); const adminSeen=id=>adminRoles.length>0&&(id==='fw'||id==='storage');
     // Built-in entries the role may open; Tenant Admins and Storage Admins also see the Administration entries (C.3).
-    const builtinShown=id=>noMs?adminSeen(id):((!vis||vis.includes(id)||adminSeen(id))&&!(single&&id==='portfolio'));
+    const builtinShown=id=>this.builtinOpen(id,role);
     const ch=d?this.chain(d):{items:[],recs:{}}; const myTasks=d?this.taskItems(meId).length:0; const counts=d?{controls:this.gateItems(d).length,chain:ch.items.filter(i=>i.st!=='pending').length,fresh:d.evs.filter(e=>e.fresh==='critical').length,mytasks:myTasks}:{};
     const navGroups=hostNav(NAV.map(g=>({...g,items:g.items.filter(i=>builtinShown(i.id))})),ctx,noMs&&this.api?null:role);
     const nav=navGroups.map(g=>({label:g.label,items:g.items.map(i=>{ const active=i.id===screen; return {label:i.label,go:()=>this.go(i.id),fw:active?600:400,bg:active?'var(--accbg)':'transparent',fg:active?'var(--acc)':'var(--tx)',icon:i.host?i.icon:(this.ICONS[i.id]||''),iop:active?1:.6,n:i.host?(i.n||0):(counts[i.id]||0),nbg:i.id==='mytasks'?'var(--accbg)':'var(--badbg)',nfg:i.id==='mytasks'?'var(--acc)':'var(--bad)'}; })}));
@@ -671,7 +777,7 @@ export default class MscdApp extends React.Component {
   // Persona switch (demo): the source acts as the new persona from now on; the snapshot and the state change together.
   // API mode: the new session's Me decides the role in the current system (H.5 step 5).
   setRole(id,screen,single){ this.ds.switchPersona(id).then(snap=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,s):{role:id}; const r=ap.role;
-      return {...W,...ap,roleMenu:false,screen:this.landing(r,r==='owner'?'mytasks':r==='top'?'portfolio':screen,single,W.D),sel:null,expanded:{},person:null,taskFilter:null}; }),
+      const to=this.landing(r,r==='owner'?'mytasks':r==='top'?'portfolio':screen,single,W.D); return {...W,...ap,roleMenu:false,screen:to,htab:to===s.screen?s.htab:null,sel:null,expanded:{},person:null,taskFilter:null}; }),
       e=>{ console.warn('persona switch failed',e); this.toast(this.li(errorText(e))); }); }
   // Interface language; API requests follow it (Accept-Language).
   setLang(l){ this.setState({lang:l}); if(this.api&&this.ds.setLanguage) this.ds.setLanguage(l); }

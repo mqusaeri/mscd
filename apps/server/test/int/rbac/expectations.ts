@@ -13,6 +13,7 @@ import { RBAC_EXPECTATIONS as M2_05 } from './expectations/M2-05';
 import { RBAC_EXPECTATIONS as M2_06 } from './expectations/M2-06';
 import { RBAC_EXPECTATIONS as M2_07 } from './expectations/M2-07';
 import { RBAC_EXPECTATIONS as M2_08 } from './expectations/M2-08';
+import { RBAC_EXPECTATIONS as M2_19 } from './expectations/M2-19';
 import { RBAC_EXPECTATIONS as M2_S09 } from './expectations/M2-S09';
 import { RBAC_EXPECTATIONS as M2_S10 } from './expectations/M2-S10';
 import { RBAC_EXPECTATIONS as M2_S11 } from './expectations/M2-S11';
@@ -41,7 +42,7 @@ export interface RbacExpectations {
 
 /** The RBAC expectations of the Milestone 2 building packages, by package. */
 export const M2_EXPECTATIONS: Readonly<Record<string, RbacExpectations>> = {
-  'M2-05': M2_05, 'M2-06': M2_06, 'M2-07': M2_07, 'M2-08': M2_08, 'M2-S09': M2_S09, 'M2-S10': M2_S10, 'M2-S11': M2_S11,
+  'M2-05': M2_05, 'M2-06': M2_06, 'M2-07': M2_07, 'M2-08': M2_08, 'M2-19': M2_19, 'M2-S09': M2_S09, 'M2-S10': M2_S10, 'M2-S11': M2_S11,
 };
 
 /** Input overrides of the Milestone 2 packages, by route id. */

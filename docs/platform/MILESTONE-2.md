@@ -521,7 +521,7 @@ npm run openapi
 npm run test:int -w @mscd/server -- test/int/db test/int/contract test/int/rbac test/int/security
 npm run test:int -w @mscd/server
 test "$(ls apps/server/test/int/m2-pending/*.json | wc -l)" -eq 7
-test "$(ls apps/server/test/int/security/record-tables/M2-*.ts apps/server/test/int/rbac/expectations/M2-*.ts | wc -l)" -eq 14
+test "$(ls apps/server/test/int/security/record-tables/M2-*.ts apps/server/test/int/rbac/expectations/M2-*.ts | wc -l)" -eq 15
 node -e "const s=require('fs').readFileSync('apps/server/test/int/contract/__snapshots__/routes.test.ts.snap','utf8');for(const id of ['ms.certification','admin.onboarding','imports.commit','records.holdings.reassign','applicability.targets','documented-info.link','ops.users.reset-mfa','ops.organizations.status','ops.domains.add','ops.entitlements.set','ops.plans.list'])if(!s.includes(id+' '))process.exit(1)"
 test -e apps/server/migrations/platform/0005_milestone2_saas.sql && test "$(ls apps/server/migrations/platform/0005_*.sql | wc -l)" -eq 1
 npm run build -w @mscd/server && node apps/server/dist/main.js backup --help >/dev/null && node apps/server/dist/main.js diagnostics --help >/dev/null && git diff --quiet HEAD -- apps/server/src/main.ts
@@ -1129,6 +1129,16 @@ Paths below `/api/v1`, in the BP D.3 notation.
 | `GET /ops/organizations/{org}/entitlements` | `ops.entitlements.get` | M2-S10 |
 | `PUT /ops/organizations/{org}/entitlements` | `ops.entitlements.set` | M2-S10 |
 | `GET /ops/plans` | `ops.plans.list` | M2-S10 |
+| `GET /ops/accounts` | `ops.accounts.list` | M2-19 |
+| `GET /ops/accounts/{id}` | `ops.accounts.get` | M2-19 |
+| `POST /ops/accounts/{id}/reset-mfa` | `ops.accounts.reset-mfa` | M2-19 |
+| `POST /ops/accounts/{id}/password-reset` | `ops.accounts.password-reset` | M2-19 |
+| `POST /ops/accounts/{id}/invitations/{org}/resend` | `ops.accounts.invitation-resend` | M2-19 |
+| `POST /ops/accounts/{id}/sessions/revoke` | `ops.accounts.sessions-revoke` | M2-19 |
+| `POST /ops/accounts/{id}/status` | `ops.accounts.status` | M2-19 |
+| `GET /ops/operators` | `ops.operators.list` | M2-19 |
+| `POST /ops/operators` | `ops.operators.add` | M2-19 |
+| `DELETE /ops/operators/{id}` | `ops.operators.remove` | M2-19 |
 
 ### J.2 Permission matrix
 

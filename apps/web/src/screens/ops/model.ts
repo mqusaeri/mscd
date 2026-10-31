@@ -1,8 +1,12 @@
 // The model of the operator console (MILESTONE-2 M2-16, M2-S12) and the interface both adapters implement (api.ts in
 // API builds, sample.ts in the sample build). M2-S12 adds the organisation lifecycle: status, plan, domains and
-// entitlements (org-model.ts).
+// entitlements (org-model.ts). M2-19 adds the accounts and the platform operators (account-model.ts); the factor reset
+// by email (`ops.users.reset-mfa`) stays on the server for `saas-ops.sh` and is no longer in the console.
 import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext, TextPair } from '../types';
+import type {
+  AccountDetail, AccountPage, AccountQuery, ActionDone, OperatorAdded, OperatorItem, OperatorRemoved,
+} from './account-model';
 import type {
   Domain, DomainAdded, DomainCheck, EntitlementInput, EntitlementRead, EntitlementSaved, EventPage, OrgDetail, OrgStatus, PlanPreset,
   StatusChange, StatusChanged,
@@ -123,7 +127,28 @@ export interface OpsAdapter {
   installLicence(org: string, licence: unknown): Promise<Result<null>>;
   packs(): Promise<Result<PackItem[]>>;
   importPack(file: Blob, fileName: string, idempotencyKey: string): Promise<Result<PackImported>>;
-  resetMfa(email: string, reason: string): Promise<Result<null>>;
+  /** The organisations of the account filter: one read of `ops.organizations.list`, slug and name only. */
+  organizationNames(): Promise<Result<{ slug: string; name: string }[]>>;
+  /** `ops.accounts.list`. */
+  accounts(query: AccountQuery): Promise<Result<AccountPage>>;
+  /** `ops.accounts.get`: the account, its open sessions and its recent audit entries. */
+  account(id: string): Promise<Result<AccountDetail>>;
+  /** `ops.accounts.reset-mfa`. */
+  resetMfa(id: string, reason: string, idempotencyKey: string): Promise<Result<ActionDone>>;
+  /** `ops.accounts.password-reset`. */
+  sendPasswordLink(id: string, reason: string, idempotencyKey: string): Promise<Result<ActionDone>>;
+  /** `ops.accounts.invitation-resend` for the pending membership of `org`. */
+  resendInvitation(id: string, org: string, reason: string, idempotencyKey: string): Promise<Result<ActionDone>>;
+  /** `ops.accounts.sessions-revoke`. */
+  endSessions(id: string, reason: string, idempotencyKey: string): Promise<Result<ActionDone>>;
+  /** `ops.accounts.status` with `If-Match` (the account's ETag). */
+  setAccountStatus(id: string, status: 'active' | 'disabled', reason: string, ifMatch: string): Promise<Result<ActionDone>>;
+  /** `ops.operators.list`. */
+  operators(): Promise<Result<OperatorItem[]>>;
+  /** `ops.operators.add`. */
+  addOperator(body: { email: string; name: string; reason: string }, idempotencyKey: string): Promise<Result<OperatorAdded>>;
+  /** `ops.operators.remove`. */
+  removeOperator(id: string, reason: string): Promise<Result<OperatorRemoved>>;
 }
 
 /** The jobs `POST /ops/jobs/{name}/run` accepts (`OPS_RUNNABLE_JOBS` of @mscd/shared; the unit test compares them). */

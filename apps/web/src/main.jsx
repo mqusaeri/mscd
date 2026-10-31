@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import MscdApp from './MscdApp.jsx';
 import { createDataSource } from './data/createDataSource.js';
+import { tidyScreenPath } from './routing/index.ts';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
@@ -67,6 +68,11 @@ function LoadFailure({ dark }) {
 // then the sign-in pages or the app with the API data source. The sample build renders the app at once, as before;
 // the auth pages are a separate chunk it never loads.
 if (import.meta.env.VITE_DATA_SOURCE === 'api') {
+  // An application address with a folder part (`/controls/`, `/controls/x`) is written without it before anything
+  // renders, so the relative image paths of the generated views resolve from the site root (M2-20). Sign-in addresses
+  // stay with the boot router.
+  const tidy = tidyScreenPath(location.pathname);
+  if (tidy) history.replaceState(history.state, '', tidy + location.search + location.hash);
   import('./auth/boot.tsx').then(
     ({ boot }) => boot({ container, settings, App: MscdApp, createDataSource }),
     (error) => {

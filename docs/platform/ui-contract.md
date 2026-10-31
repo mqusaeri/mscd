@@ -706,6 +706,36 @@ Task card text by kind: evidence `Re-link the file for <title>` or `Upload this 
 
 These never reach the server: `go`, `goIn`, `setMs`, `setOrg` (on the API, an organisation switch reloads the snapshot), `setTab`, `setChip`, `openRow`, search (`setQ`), person filter, frequency filter, drift selection, `cycleAll`, timeline event selection, trace chain selection and Random, golden thread query (`gtQ`, `gtId`), task filter, theme, language, sidebar, Tera panel, menus, Show more, close panel and modal, the persona switcher (`roleOptions`) and the deploy toggle (`toggleDeploy`). The last two are demo features; on the API the role comes from the session and the deploy mode from `GET /system/profile`.
 
+Since Milestone 2 package M2-20, `go`, `setMs`, `setOrg`, the persona switcher and the tab of a host screen also write the address of the screen (3.8). Writing the address never calls the server.
+
+### 3.8 Screen addresses
+
+Every screen has an address (Milestone 2 M2-20). The address names the place, so a refresh opens the same place, Back and Forward move between screens, and a copied address opens the same place for another person who may see it.
+
+| Part | Value | Present |
+|---|---|---|
+| Screen | The screen id: one of the 14 built-in ids or a host screen id of the registry (`/controls`, `/registers`, `/ops`) | Always |
+| `ms` | Slug of the selected management system | When the organisation has a system for the person |
+| `org` | Slug of the organisation | When the person belongs to several organisations |
+| `tab` | Id of the tab of a host screen with tabs: `findings` (`findings`, `actions`, `self`), `registers` (the register kind), `routing` (`rules`, `files`) and `auditor-access` (`grants`, `packs`), and `ops` (its sections, for example `/ops?tab=orgs`) | When a tab was chosen or the screen was opened with `params.tab` |
+| `persona` | Sample persona other than the manager | Sample build only |
+
+| Build | Form | Example |
+|---|---|---|
+| API (`VITE_DATA_SOURCE=api`) | The screen id as the path, the values as the query | `/controls?ms=isms&org=ndt` |
+| Sample | The path of `index.html` stays; the address is in the hash | `/?lang=id#/controls?ms=isms&org=ndt` |
+
+Rules:
+
+- A change of screen or organisation adds a history entry. A change of system, tab or persona replaces the current one.
+- The other query values of the address (`lang`, `theme`, `density`, `drill`, `layout`, `font`, `deploy`) stay as they are. The sample start query `?screen=<id>&persona=<role>` (Milestone 2 C.2) still opens a screen and becomes a hash address.
+- An address without a screen, of an unknown screen, or of a screen the session cannot open (the sidebar rule of `visFor` and `canOpenHost`), opens the start screen and the address is replaced. The start screen is the landing of the role (`landing()`), in both builds, as a persona switch lands (product owner, 2026-10-31): a Domain Owner opens My Tasks, an Internal Auditor of a single-system organisation Audit readiness, every other role the portfolio (the overview with one system); a person without a system gets the landing of Milestone 2 C.3.
+- An unknown tab shows the first tab of the screen and the address loses it. An unknown system or organisation is ignored and corrected.
+- An address of another organisation of the person switches organisation (`PUT /me/org`). When that organisation asks for a new sign-in (D-26), the sign-in page opens and returns to the address. When the person cancels that sign-in, the app keeps the old organisation and corrects the address; the tried slug is kept in the memory of the page (`src/routing/memory.ts`), so a new page (a typed or pasted address, a reload) asks again and nothing is left in the tab's storage. The organisation menu writes the new organisation's address before it switches, for the same reason.
+- The sign-in pages keep their addresses (`/login`, `/login/mfa`, `/login/enrol`, `/forgot-password`, `/reset-password`, `/invite`, `/guest`). An application address opened without a session opens the sign-in page and returns to it after sign-in (`storeReturnTo` of the boot router: a relative path of this site only, never another host).
+- NGINX (`deploy/nginx/site.conf`) and `vite preview` serve `index.html` for every path without a file extension, so every screen path reaches the app. No screen id is a sign-in path, `api`, `assets` or `healthz` (`test/routing/address.test.ts`). An application path with a folder part is written without it before the app renders (`main.jsx`, `tidyScreenPath`), because the generated views load some images with a relative path: `/controls/` becomes `/controls`, and a deeper path (`/controls/x`) becomes `/`, the start screen it would open anyway.
+- Screens read and change their tab through `useScreenTab(ctx, ids, fallback)` of `src/routing`; a context built without the controller keeps the tab in the component.
+
 ## 4. DataSource interface
 
 ### 4.1 Approach

@@ -38,7 +38,17 @@ export function deferredAdapter(load: () => Promise<OpsAdapter>): OpsAdapter {
     installLicence: (org, licence) => settled(get().then((a) => a.installLicence(org, licence))),
     packs: () => settled(get().then((a) => a.packs())),
     importPack: (file, name, key) => settled(get().then((a) => a.importPack(file, name, key))),
-    resetMfa: (email, reason) => settled(get().then((a) => a.resetMfa(email, reason))),
+    organizationNames: () => settled(get().then((a) => a.organizationNames())),
+    accounts: (q) => settled(get().then((a) => a.accounts(q))),
+    account: (id) => settled(get().then((a) => a.account(id))),
+    resetMfa: (id, reason, key) => settled(get().then((a) => a.resetMfa(id, reason, key))),
+    sendPasswordLink: (id, reason, key) => settled(get().then((a) => a.sendPasswordLink(id, reason, key))),
+    resendInvitation: (id, org, reason, key) => settled(get().then((a) => a.resendInvitation(id, org, reason, key))),
+    endSessions: (id, reason, key) => settled(get().then((a) => a.endSessions(id, reason, key))),
+    setAccountStatus: (id, status, reason, ifMatch) => settled(get().then((a) => a.setAccountStatus(id, status, reason, ifMatch))),
+    operators: () => settled(get().then((a) => a.operators())),
+    addOperator: (body, key) => settled(get().then((a) => a.addOperator(body, key))),
+    removeOperator: (id, reason) => settled(get().then((a) => a.removeOperator(id, reason))),
   };
 }
 

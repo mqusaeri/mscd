@@ -2,9 +2,13 @@
 // "Operations"). Milestone 2 (D.1, D.2) adds the organisation lifecycle of the platform operator: list and create
 // (M2-06), the second-factor reset of an account with several memberships (M2-06), and detail, status changes and
 // status history (M2-S09, SaaS track). Every organisation route answers 409 `conflict` with messageKey
-// `single_tenancy` when tenancy.mode is single (J.6).
+// `single_tenancy` when tenancy.mode is single (J.6). Milestone 2 section L (M2-19) adds the accounts of the service
+// and the platform operators: the account list and detail, the actions on one account and adding and removing an
+// operator. These work in both tenancy modes.
 import { z } from 'zod';
-import { DomainStatus, EntitlementSource, OpsRunnableJob, OrganizationStatus } from '../enums.js';
+import {
+  AccountStatus, AuthMethod, DomainStatus, EntitlementSource, MembershipStatus, OpsRunnableJob, OrgRole, OrganizationStatus, SessionState, UserKind,
+} from '../enums.js';
 import {
   BinaryBody, Instant, IsoDate, NoBody, OrgSlug, Uuid, commandResultWith, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
@@ -305,8 +309,316 @@ export const opsOrganizationsEventsRoute = defineRoute({
   permission: 'ops.read', params: OrgParams, query: OrganizationEventsQuery, response: pageOf(OrganizationStatusEventItem), errors: [404, 409],
 });
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// Accounts and platform operators of the service (Milestone 2 section L, M2-19)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The reason of an operator action on an account, kept in its platform audit entry (3 to 500 characters). */
+export const OpsActionReason = named('OpsActionReason', z.string().trim().min(3).max(500), 'Reason of an operator action, 3 to 500 characters, recorded in the platform audit entry', {
+  valid: ['Lost phone, identity checked by video call', 'Fix'],
+  invalid: ['ok', '', 'x'.repeat(501)],
+});
+
+export const OpsReasonBody = named('OpsReasonBody', z.strictObject({ reason: OpsActionReason }), 'Body of an operator action on an account: the reason (Milestone 2 M2-19)', {
+  valid: [{ reason: 'Asked by the Tenant Admin of ndt in ticket 4411' }],
+  invalid: [{}, { reason: 'no' }, { reason: 'Asked by the Tenant Admin', extra: true }],
+});
+export type OpsReasonBody = z.infer<typeof OpsReasonBody>;
+
+export const AccountParams = named('AccountParams', z.strictObject({ id: Uuid }), 'Path parameter {id}: the account (platform.app_user.id)', {
+  valid: [{ id: '00000000-0000-4000-8000-0000000f0019' }],
+  invalid: [{ id: 'rina' }, {}],
+});
+export type AccountParams = z.infer<typeof AccountParams>;
+
+export const AccountInvitationParams = named(
+  'AccountInvitationParams',
+  z.strictObject({ id: Uuid, org: OrgSlug }),
+  'Path parameters {id} and {org}: the account and the organisation of its pending membership',
+  { valid: [{ id: '00000000-0000-4000-8000-0000000f0019', org: 'ndt' }], invalid: [{ id: '00000000-0000-4000-8000-0000000f0019' }, { id: 'x', org: 'ndt' }] },
+);
+export type AccountInvitationParams = z.infer<typeof AccountInvitationParams>;
+
+export const OpsAccountListQuery = named(
+  'OpsAccountListQuery',
+  z.strictObject({
+    ...pageQueryShape,
+    q: z.string().trim().min(1).max(100).optional(),
+    org: OrgSlug.optional(),
+    status: AccountStatus.optional(),
+    kind: UserKind.optional(),
+  }),
+  'GET /ops/accounts query: search by name or email, filters by organisation, account status and kind, paging',
+  { valid: [{}, { q: 'rina', org: 'ndt', status: 'active', kind: 'person', page: '2', pageSize: '25' }], invalid: [{ status: 'locked' }, { kind: 'robot' }, { org: 'NDT' }, { sort: 'email' }] },
+);
+export type OpsAccountListQuery = z.infer<typeof OpsAccountListQuery>;
+
+export const OpsAccountMembership = named(
+  'OpsAccountMembership',
+  z.object({ org: OrgSlug, orgName: z.string(), status: MembershipStatus, adminRoles: z.array(OrgRole) }),
+  'One membership of an account: the organisation, the membership status and the admin roles; never the business roles inside the organisation',
+  { valid: [{ org: 'ndt', orgName: 'PT Nusantara Digital Teknologi', status: 'active', adminRoles: ['tenant_admin'] }], invalid: [{ org: 'ndt', orgName: 'x', status: 'gone', adminRoles: [] }] },
+);
+export type OpsAccountMembership = z.infer<typeof OpsAccountMembership>;
+
+const EXAMPLE_ACCOUNT = {
+  id: '00000000-0000-4000-8000-0000000f0019', handle: 'rina', email: 'rina.kusuma@nusantaradigital.co.id', displayName: 'Rina Kusuma', kind: 'person',
+  status: 'active', mfaEnrolled: true, locked: false, lastSignInAt: '2026-10-29T02:10:00Z', createdAt: '2026-02-01T03:00:00Z', platformOperator: false,
+  memberships: [{ org: 'ndt', orgName: 'PT Nusantara Digital Teknologi', status: 'active', adminRoles: ['tenant_admin'] }], etag: 'W/"1793239800000"',
+} as const;
+
+const accountShape = {
+  id: Uuid,
+  handle: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  kind: UserKind,
+  status: AccountStatus,
+  /** A confirmed second factor is set up. */
+  mfaEnrolled: z.boolean(),
+  /** Locked now after failed passwords or second-factor codes. */
+  locked: z.boolean(),
+  lastSignInAt: Instant.nullable(),
+  createdAt: Instant,
+  platformOperator: z.boolean(),
+  memberships: z.array(OpsAccountMembership),
+  /** Weak ETag of the account row, for `If-Match` of the status change. */
+  etag: z.string(),
+};
+
+export const OpsAccountItem = named(
+  'OpsAccountItem',
+  z.object(accountShape),
+  'Account row of the operator console: who, kind and status, second factor, lock, last sign-in, operator role and memberships; no password hash, factor secret or business role (Milestone 2 M2-19)',
+  {
+    valid: [EXAMPLE_ACCOUNT, { ...EXAMPLE_ACCOUNT, kind: 'system', status: 'active', mfaEnrolled: false, lastSignInAt: null, memberships: [] }],
+    invalid: [{ ...EXAMPLE_ACCOUNT, status: 'locked' }, { ...EXAMPLE_ACCOUNT, memberships: [{ org: 'ndt', orgName: 'x', status: 'active', adminRoles: ['ms_manager'] }] }],
+  },
+);
+export type OpsAccountItem = z.infer<typeof OpsAccountItem>;
+
+export const OpsAccountSession = named(
+  'OpsAccountSession',
+  z.object({
+    startedAt: Instant,
+    lastSeenAt: Instant,
+    method: AuthMethod,
+    state: SessionState,
+    /** The network address cut to /24 (IPv4) or /48 (IPv6); null when unknown. */
+    network: z.string().nullable(),
+    /** Browser and system read from the user agent, such as "Chrome 130, Windows"; null when unknown. */
+    browser: z.string().nullable(),
+    /** The current organisation of the session; null without one. */
+    org: OrgSlug.nullable(),
+  }),
+  'An open session of an account as the operator sees it: start, last activity, sign-in method, network and browser (Milestone 2 M2-19)',
+  {
+    valid: [{ startedAt: '2026-10-29T02:10:00Z', lastSeenAt: '2026-10-29T02:40:00Z', method: 'local', state: 'active', network: '203.0.113.0/24', browser: 'Firefox 131, Linux', org: 'ndt' }],
+    invalid: [{ startedAt: '2026-10-29T02:10:00Z', lastSeenAt: '2026-10-29T02:40:00Z', method: 'magic', state: 'active', network: null, browser: null, org: null }],
+  },
+);
+export type OpsAccountSession = z.infer<typeof OpsAccountSession>;
+
+export const OpsAccountAuditEntry = named(
+  'OpsAccountAuditEntry',
+  z.object({
+    at: Instant,
+    action: z.string(),
+    actorKind: z.enum(['user', 'system', 'guest', 'operator']),
+    actor: z.object({ handle: z.string(), displayName: z.string() }).nullable(),
+    org: OrgSlug.nullable(),
+    /** The reason of an operator action; null for other entries. */
+    reason: z.string().nullable(),
+  }),
+  'A platform audit entry about an account, newest first (Milestone 2 M2-19)',
+  {
+    valid: [{ at: '2026-10-29T02:10:00Z', action: 'auth.mfa_reset', actorKind: 'operator', actor: { handle: 'ops.owner', displayName: 'Platform owner' }, org: null, reason: 'Lost phone, identity checked by video call' }],
+    invalid: [{ at: '2026-10-29T02:10:00Z', action: 'auth.login', actorKind: 'robot', actor: null, org: null, reason: null }],
+  },
+);
+export type OpsAccountAuditEntry = z.infer<typeof OpsAccountAuditEntry>;
+
+export const OpsAccountDetail = named(
+  'OpsAccountDetail',
+  z.object({ ...accountShape, sessions: z.array(OpsAccountSession), audit: z.array(OpsAccountAuditEntry) }),
+  'GET /ops/accounts/{id}: the account row, its open sessions and the latest platform audit entries about it (Milestone 2 M2-19)',
+  {
+    valid: [{ ...EXAMPLE_ACCOUNT, sessions: [], audit: [] }],
+    invalid: [{ ...EXAMPLE_ACCOUNT, sessions: [{ startedAt: 'yesterday' }], audit: [] }, EXAMPLE_ACCOUNT],
+  },
+);
+export type OpsAccountDetail = z.infer<typeof OpsAccountDetail>;
+
+export const OpsAccountStatusChange = named(
+  'OpsAccountStatusChange',
+  z.strictObject({ status: z.enum(['active', 'disabled']), reason: OpsActionReason }),
+  'POST /ops/accounts/{id}/status body: disabled ends every session of the account; active enables it again (Milestone 2 M2-19)',
+  { valid: [{ status: 'disabled', reason: 'The person left every customer organisation' }], invalid: [{ status: 'invited', reason: 'Not possible' }, { status: 'disabled' }] },
+);
+export type OpsAccountStatusChange = z.infer<typeof OpsAccountStatusChange>;
+
+export const OpsAccountActionResult = named(
+  'OpsAccountActionResult',
+  commandResultWith(z.object({
+    id: Uuid,
+    /** Sessions of the account this action ended. */
+    sessionsRevoked: z.int().min(0),
+    /** True when the email of the action went out. */
+    emailed: z.boolean(),
+    /** The one-time link, only when mail.required is false and the email did not go out (never on SaaS). */
+    link: z.url().optional(),
+    /** When the link stops working. */
+    expiresAt: Instant.optional(),
+    /** The account status after the action. */
+    status: AccountStatus,
+  })),
+  'Result of an operator action on an account: the sessions ended, whether the email went out and the account status (Milestone 2 M2-19)',
+  {
+    valid: [
+      { ok: true, changed: [], message: ['The account was disabled. 2 sessions were ended.', 'Akun dinonaktifkan. 2 sesi diakhiri.'], data: { id: '00000000-0000-4000-8000-0000000f0019', sessionsRevoked: 2, emailed: false, status: 'disabled' } },
+      { ok: true, changed: [], data: { id: '00000000-0000-4000-8000-0000000f0019', sessionsRevoked: 0, emailed: false, link: 'https://mscd.example.id/reset-password#token=abc', expiresAt: '2026-10-29T03:00:00Z', status: 'active' } },
+    ],
+    invalid: [{ ok: true, changed: [], data: { id: '00000000-0000-4000-8000-0000000f0019', sessionsRevoked: -1, emailed: false, status: 'active' } }],
+  },
+);
+export type OpsAccountActionResult = z.infer<typeof OpsAccountActionResult>;
+
+const EXAMPLE_OPERATOR = {
+  id: '00000000-0000-4000-8000-0000000f0001', handle: 'ops.owner', email: 'owner@mscd.example', displayName: 'Platform owner', status: 'active',
+  mfaEnrolled: true, passwordSet: true, lastSignInAt: '2026-10-29T01:00:00Z', grantedAt: '2026-09-01T03:00:00Z', grantedBy: null, self: true,
+} as const;
+
+export const OpsOperatorItem = named(
+  'OpsOperatorItem',
+  z.object({
+    id: Uuid,
+    handle: z.string(),
+    email: z.string(),
+    displayName: z.string(),
+    status: AccountStatus,
+    mfaEnrolled: z.boolean(),
+    /** False while the set-password link of a new operator is not used yet. */
+    passwordSet: z.boolean(),
+    lastSignInAt: Instant.nullable(),
+    grantedAt: Instant,
+    /** Who granted the role; null for the command line. */
+    grantedBy: z.object({ handle: z.string(), displayName: z.string() }).nullable(),
+    /** The signed-in operator's own account. */
+    self: z.boolean(),
+  }),
+  'A platform operator of the service (platform.platform_role), Milestone 2 M2-19',
+  {
+    valid: [EXAMPLE_OPERATOR, { ...EXAMPLE_OPERATOR, passwordSet: false, mfaEnrolled: false, lastSignInAt: null, grantedBy: { handle: 'ops.owner', displayName: 'Platform owner' }, self: false }],
+    invalid: [{ ...EXAMPLE_OPERATOR, status: 'gone' }, { ...EXAMPLE_OPERATOR, grantedAt: null }],
+  },
+);
+export type OpsOperatorItem = z.infer<typeof OpsOperatorItem>;
+
+export const OpsOperatorAdd = named(
+  'OpsOperatorAdd',
+  z.strictObject({ email: z.email().max(254), name: z.string().trim().min(1).max(150), reason: OpsActionReason }),
+  'POST /ops/operators body: the email and name of the operator (a new account gets a set-password link by email) and the reason (Milestone 2 M2-19)',
+  {
+    valid: [{ email: 'nadia.operator@mscd.example', name: 'Nadia Putri', reason: 'Second operator for the on-call rota' }],
+    invalid: [{ email: 'nadia', name: 'Nadia', reason: 'On-call rota' }, { email: 'nadia@mscd.example', name: '', reason: 'On-call rota' }, { email: 'nadia@mscd.example', name: 'Nadia' }],
+  },
+);
+export type OpsOperatorAdd = z.infer<typeof OpsOperatorAdd>;
+
+export const OpsOperatorAddResult = named(
+  'OpsOperatorAddResult',
+  commandResultWith(z.object({
+    id: Uuid,
+    handle: z.string(),
+    email: z.string(),
+    /** True when the account was created now. */
+    newAccount: z.boolean(),
+    /** True when the email (set-password link, or the notice of the new role) went out. */
+    emailed: z.boolean(),
+    /** The one-time set-password link, only when mail.required is false and the email did not go out (never on SaaS). */
+    link: z.url().optional(),
+    expiresAt: Instant.optional(),
+  })),
+  'Result of POST /ops/operators (Milestone 2 M2-19)',
+  {
+    valid: [{ ok: true, changed: [], message: ['nadia.operator@mscd.example is now a platform operator.', 'nadia.operator@mscd.example sekarang operator platform.'], data: { id: '00000000-0000-4000-8000-0000000f0002', handle: 'nadia.operator', email: 'nadia.operator@mscd.example', newAccount: true, emailed: true } }],
+    invalid: [{ ok: true, changed: [], data: { id: '00000000-0000-4000-8000-0000000f0002' } }],
+  },
+);
+export type OpsOperatorAddResult = z.infer<typeof OpsOperatorAddResult>;
+
+export const OpsOperatorRemoveResult = named(
+  'OpsOperatorRemoveResult',
+  commandResultWith(z.object({ id: Uuid, sessionsRevoked: z.int().min(0), operatorsLeft: z.int().min(0) })),
+  'Result of DELETE /ops/operators/{id}: the sessions of the account ended and the active operators left (Milestone 2 M2-19)',
+  {
+    valid: [{ ok: true, changed: [], data: { id: '00000000-0000-4000-8000-0000000f0002', sessionsRevoked: 1, operatorsLeft: 2 } }],
+    invalid: [{ ok: true, changed: [], data: { id: '00000000-0000-4000-8000-0000000f0002', sessionsRevoked: 1 } }],
+  },
+);
+export type OpsOperatorRemoveResult = z.infer<typeof OpsOperatorRemoveResult>;
+
+const opAccounts = { auth: 'session' as const, scope: 'platform' as const, owner: 'M2-19' as const };
+
+export const opsAccountsListRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.list', method: 'GET', path: '/api/v1/ops/accounts',
+  summary: 'Every account of the service, paged, with search by name or email and filters by organisation, account status and kind',
+  permission: 'ops.read', query: OpsAccountListQuery, response: pageOf(OpsAccountItem), errors: [],
+});
+export const opsAccountsGetRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.get', method: 'GET', path: '/api/v1/ops/accounts/:id',
+  summary: 'One account with its open sessions (network cut to /24 or /48) and the latest platform audit entries about it',
+  permission: 'ops.read', params: AccountParams, response: OpsAccountDetail, errors: [404],
+});
+export const opsAccountsResetMfaRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.reset-mfa', method: 'POST', path: '/api/v1/ops/accounts/:id/reset-mfa',
+  summary: 'Reset the second factor of the account, ending its sessions and emailing it after the commit (emailed says whether the email went out); never the operator\'s own (403 own_account, 409 no_second_factor, system_account; audited auth.mfa_reset with the reason)',
+  permission: 'ops.users.manage', params: AccountParams, body: OpsReasonBody, response: OpsAccountActionResult, errors: [404, 409], idempotent: true,
+});
+export const opsAccountsPasswordResetRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.password-reset', method: 'POST', path: '/api/v1/ops/accounts/:id/password-reset',
+  summary: 'Email a one-time link to set a new password (409 mail_required, account_not_active, guest_account, no_membership, local_login_not_allowed, system_account; audited auth.password_reset with the reason)',
+  permission: 'ops.users.manage', params: AccountParams, body: OpsReasonBody, response: OpsAccountActionResult, errors: [404, 409], idempotent: true,
+});
+export const opsAccountsInvitationResendRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.invitation-resend', method: 'POST', path: '/api/v1/ops/accounts/:id/invitations/:org/resend',
+  summary: 'Send a new invitation link for a pending membership; the older links stop working (409 mail_required, membership_not_invited, organization_archived; audited user.invited with the reason)',
+  permission: 'ops.users.manage', params: AccountInvitationParams, body: OpsReasonBody, response: OpsAccountActionResult, errors: [404, 409], idempotent: true,
+});
+export const opsAccountsSessionsRevokeRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.sessions-revoke', method: 'POST', path: '/api/v1/ops/accounts/:id/sessions/revoke',
+  summary: 'End every session of the account; never the operator\'s own (403 own_account, 409 system_account; audited auth.session_revoked with the reason)',
+  permission: 'ops.users.manage', params: AccountParams, body: OpsReasonBody, response: OpsAccountActionResult, errors: [404, 409], idempotent: true,
+});
+export const opsAccountsStatusRoute = defineRoute({
+  ...opAccounts, id: 'ops.accounts.status', method: 'POST', path: '/api/v1/ops/accounts/:id/status',
+  summary:
+    'Disable the account (every session ends) or enable it again (403 own_account, 409 last_operator, system_account, account_invited for an invited account either way, status_unchanged, 412 with a stale If-Match, 422 LIC-USERS; audited user.updated with the reason)',
+  permission: 'ops.users.manage', params: AccountParams, body: OpsAccountStatusChange, response: OpsAccountActionResult, errors: [404, 409, 412, 422], ifMatch: true,
+});
+export const opsOperatorsListRoute = defineRoute({
+  ...opAccounts, id: 'ops.operators.list', method: 'GET', path: '/api/v1/ops/operators',
+  summary: 'The platform operators of the service with their second factor, last sign-in and who granted the role',
+  permission: 'ops.read', response: z.array(OpsOperatorItem), errors: [],
+});
+export const opsOperatorsAddRoute = defineRoute({
+  ...opAccounts, id: 'ops.operators.add', method: 'POST', path: '/api/v1/ops/operators',
+  summary:
+    'Make an account a platform operator; a new account gets a set-password link by email (409 mail_required, already_operator, account_disabled, system_account; 503 without the database owner role; audited ops.operator_created with the reason)',
+  permission: 'ops.users.manage', body: OpsOperatorAdd, response: OpsOperatorAddResult, status: 201, errors: [409, 503], idempotent: true,
+});
+export const opsOperatorsRemoveRoute = defineRoute({
+  ...opAccounts, id: 'ops.operators.remove', method: 'DELETE', path: '/api/v1/ops/operators/:id',
+  summary:
+    'End the platform operator role of an account and its sessions; never the operator\'s own, never the last active operator (403 own_account, 409 last_operator; 503 without the database owner role; audited ops.operator_revoked with the reason)',
+  permission: 'ops.users.manage', params: AccountParams, body: OpsReasonBody, response: OpsOperatorRemoveResult, errors: [404, 409, 503],
+});
+
 export const routes: RouteDef[] = [
   opsHealthRoute, opsQueuesRoute, opsJobRunRoute, opsDiagnosticsRoute,
   opsOrganizationsListRoute, opsOrganizationsCreateRoute, opsUsersResetMfaRoute,
   opsOrganizationsGetRoute, opsOrganizationsStatusRoute, opsOrganizationsEventsRoute,
+  opsAccountsListRoute, opsAccountsGetRoute, opsAccountsResetMfaRoute, opsAccountsPasswordResetRoute, opsAccountsInvitationResendRoute,
+  opsAccountsSessionsRevokeRoute, opsAccountsStatusRoute, opsOperatorsListRoute, opsOperatorsAddRoute, opsOperatorsRemoveRoute,
 ];

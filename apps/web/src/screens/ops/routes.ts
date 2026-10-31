@@ -1,4 +1,4 @@
-// Routes of the operator console (MILESTONE-2 M2-16, M2-S12): `[method, path]` constants for `call()` of screens/api.ts
+// Routes of the operator console (MILESTONE-2 M2-16, M2-S12, M2-19): `[method, path]` constants for `call()` of screens/api.ts
 // and the shared route ids, which test/screens/ops.test.tsx compares with the route table of @mscd/shared.
 import type { RouteRef } from '../api';
 
@@ -19,7 +19,16 @@ export const ROUTES = {
   entitlementGet: ['GET', '/api/v1/ops/organizations/:org/entitlements'],
   entitlementSet: ['PUT', '/api/v1/ops/organizations/:org/entitlements'],
   plans: ['GET', '/api/v1/ops/plans'],
-  resetMfa: ['POST', '/api/v1/ops/users/reset-mfa'],
+  accounts: ['GET', '/api/v1/ops/accounts'],
+  account: ['GET', '/api/v1/ops/accounts/:id'],
+  accountResetMfa: ['POST', '/api/v1/ops/accounts/:id/reset-mfa'],
+  accountPassword: ['POST', '/api/v1/ops/accounts/:id/password-reset'],
+  accountResend: ['POST', '/api/v1/ops/accounts/:id/invitations/:org/resend'],
+  accountSessions: ['POST', '/api/v1/ops/accounts/:id/sessions/revoke'],
+  accountStatus: ['POST', '/api/v1/ops/accounts/:id/status'],
+  operators: ['GET', '/api/v1/ops/operators'],
+  operatorAdd: ['POST', '/api/v1/ops/operators'],
+  operatorRemove: ['DELETE', '/api/v1/ops/operators/:id'],
   licensePut: ['PUT', '/api/v1/admin/license'],
   packsList: ['GET', '/api/v1/admin/packs'],
   packsImport: ['POST', '/api/v1/admin/packs/import'],
@@ -42,7 +51,16 @@ export const ROUTE_IDS: Record<keyof typeof ROUTES, string> = {
   entitlementGet: 'ops.entitlements.get',
   entitlementSet: 'ops.entitlements.set',
   plans: 'ops.plans.list',
-  resetMfa: 'ops.users.reset-mfa',
+  accounts: 'ops.accounts.list',
+  account: 'ops.accounts.get',
+  accountResetMfa: 'ops.accounts.reset-mfa',
+  accountPassword: 'ops.accounts.password-reset',
+  accountResend: 'ops.accounts.invitation-resend',
+  accountSessions: 'ops.accounts.sessions-revoke',
+  accountStatus: 'ops.accounts.status',
+  operators: 'ops.operators.list',
+  operatorAdd: 'ops.operators.add',
+  operatorRemove: 'ops.operators.remove',
   licensePut: 'admin.license.put',
   packsList: 'admin.packs.list',
   packsImport: 'admin.packs.import',

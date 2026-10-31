@@ -1,8 +1,10 @@
 // "Findings and actions" (MILESTONE-2 M2-14, `/ms/:ms/findings`): the tabs Findings, Corrective actions and
 // Self-assessment of the selected management system. "Raise finding" is a page action (finding.raise); the drawers of
 // a finding and of a corrective action carry their moves. Opened with `params.finding` (the Open findings panel of a
-// clause or control) it opens that finding's drawer; `params.tab` picks a tab.
+// clause or control) it opens that finding's drawer; `params.tab` picks a tab. The tab is part of the screen's address
+// (`tab=findings|actions|self`, M2-20).
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useScreenTab } from '../../routing';
 import type { ScreenProps } from '../types';
 import { Tabs } from '../ui';
 import { ActionDrawer, ActionFormDialog, ActionsList } from './ActionsTab';
@@ -28,7 +30,7 @@ export default function FindingsScreen({ ctx }: ScreenProps) {
   const ms = ctx.msObj?.id ?? null;
   const org = ctx.org?.id ?? '';
   const requestedTab = TABS.includes(ctx.params.tab as TabId) ? (ctx.params.tab as TabId) : null;
-  const [tab, setTab] = useState<TabId>(requestedTab ?? 'findings');
+  const [tab, setTab] = useScreenTab<TabId>(ctx, TABS, requestedTab ?? 'findings');
   const findings = useLoad(() => adapter.findings(ms!), `${org}:${ms}`, Boolean(ms));
   const actions = useLoad(() => adapter.actions(ms!), `${org}:${ms}`, Boolean(ms));
   const self = useLoad(() => adapter.selfAssessment(ms!), `${org}:${ms}`, Boolean(ms) && tab === 'self');

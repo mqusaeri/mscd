@@ -5,6 +5,7 @@ import { Suspense } from 'react';
 import type { ReactNode } from 'react';
 import type { ApiClient } from '../data/api/ApiClient';
 import type { CommandResult, ControllerData, DataSource, ManagementSystem, MeView, MsId, Organisation, UiRole } from '../data/types';
+import { withScreenTab } from '../routing/tab';
 import { claimFor, detailExtensionsFor, extraPageActionsFor, slotItems } from './actions';
 import type { ActionId } from './actions';
 import { HOST_SCREENS, hostById } from './registry';
@@ -281,7 +282,14 @@ export interface HostApp {
   readonly MSL: ManagementSystem[];
   readonly msObj: ManagementSystem | undefined;
   readonly org: Organisation | undefined;
-  readonly state: { theme?: Theme | null; role: UiRole; screen: string; params?: Record<string, unknown> | null };
+  readonly state: {
+    theme?: Theme | null;
+    role: UiRole;
+    screen: string;
+    params?: Record<string, unknown> | null;
+    /** The tab of a host screen named in the address (M2-20): the screen it belongs to and the tab id. */
+    htab?: { s: string; id: string } | null;
+  };
   readonly props: { theme?: Theme };
   personOf(id: string): [string, string];
   toast(text: string): void;
@@ -291,9 +299,20 @@ export interface HostApp {
   command(run: (ds: DataSource) => Promise<CommandResult>, done?: (result: CommandResult) => void): void;
   pickFileFor(options: PickerOptions): Promise<PickedFile | null>;
   layerElement(): HTMLElement | null;
+  /**
+   * Shows a tab of the open host screen and writes it to the address (M2-20); null shows the screen's first tab.
+   * Without it the context carries no tab and screens keep their tab themselves (`useScreenTab`).
+   */
+  setHostTab?(id: string | null): void;
 }
 
-/** The host context of the current render. */
+/** The tab of the open screen named in the address (M2-20), or null. */
+export function tabOfState(state: HostApp['state']): string | null {
+  const htab = state.htab;
+  return htab && htab.s === state.screen ? htab.id : null;
+}
+
+/** The host context of the current render, with the tab of the open screen when the controller keeps one (M2-20). */
 export function createHostContext(app: HostApp): HostContext {
   const lang: Lang = app.L === 'id' ? 'id' : 'en';
   const D = app.D;
@@ -334,5 +353,5 @@ export function createHostContext(app: HostApp): HostContext {
     openPicker: (options) => app.pickFileFor(options),
     layer: () => app.layerElement(),
   };
-  return ctx;
+  return app.setHostTab ? withScreenTab(ctx, { tab: tabOfState(app.state), setTab: app.setHostTab }) : ctx;
 }

@@ -1,8 +1,9 @@
 import { test, expect, ui, openScreen, metaById, expectToast, expectOverlayReadable, expectReadableText, expectNoHorizontalOverflow } from '../helpers.js';
 
 // The operator console of the sample build (MILESTONE-2 M2-16), as a multi tenancy service: health, jobs,
-// organisations with Create and Install licence, framework packs with Install pack, and the factor reset. The
-// organisation lifecycle of M2-S12 (status, plan, domains, entitlements) is in e2e/screens/ops-organizations.spec.js.
+// organisations with Create and Install licence, and framework packs with Install pack. The organisation lifecycle of
+// M2-S12 (status, plan, domains, entitlements) is in e2e/screens/ops-organizations.spec.js, the accounts and platform
+// operators of M2-19 in e2e/screens/ops-accounts.spec.js.
 // @sample-only: the API project covers the console of a single tenancy installation in e2e/api-only/ops.spec.js.
 const meta = metaById('ops');
 const dialog = (page) => ui.modal(page);
@@ -94,22 +95,6 @@ test.describe('Operator console @sample-only', () => {
     await expect(main).toContainText('ISO27001-2022 1.3.0 was verified and is being installed.');
     await expect(main).toContainText('ISO27001-2022 1.3.0 is installed.', { timeout: 15_000 });
     await expect(main.locator('table tbody tr', { hasText: '1.3.0' })).toContainText('Installed');
-  });
-
-  test('Reset sign-in factor asks for a confirmation and names the account', async ({ page }) => {
-    await openScreen(page, meta);
-    await tab(page, 'Accounts').click();
-    const main = page.locator('main');
-    await main.locator('input').fill('rina.kusuma@nusantaradigital.co.id');
-    await main.locator('textarea').fill('short');
-    await main.locator('button', { hasText: 'Reset factor' }).click();
-    await expect(main).toContainText('Give a reason of at least 10 characters.');
-    await main.locator('textarea').fill('Lost phone, identity checked by video call');
-    await main.locator('button', { hasText: 'Reset factor' }).click();
-    await expect(dialog(page)).toContainText('rina.kusuma@nusantaradigital.co.id');
-    await expectOverlayReadable(page);
-    await dialog(page).locator('button', { hasText: 'Reset factor' }).click();
-    await expectToast(page, 'The sign-in factor of rina.kusuma@nusantaradigital.co.id was reset');
   });
 
   for (const theme of ['light', 'dark']) {

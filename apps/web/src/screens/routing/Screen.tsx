@@ -4,6 +4,7 @@
 // tab "Stored files" over the storage object metadata (name, place and hash, never the content).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiError } from '../../data/api/ApiClient';
+import { useScreenTab } from '../../routing';
 import { newIdempotencyKey, useMutation } from '../api';
 import type { HostContext, ScreenProps, TextPair } from '../types';
 import {
@@ -33,6 +34,9 @@ export const STATE_LABELS: Readonly<Record<ApprovalCode, { label: TextPair; tone
 const CLASSIFICATIONS = ['public', 'internal', 'confidential', 'restricted'] as const;
 const KINDS = ['document', 'evidence'] as const;
 const LINK_STATES = Object.keys(LINK_STATUS_LABELS) as LinkStatusCode[];
+/** The tabs of the screen: Rules, and Stored files with the metadata permission (M2-20 addresses). */
+const ROUTING_TABS = ['rules', 'files'] as const;
+const RULE_TABS = ['rules'] as const;
 
 const nameOf = (ctx: HostContext, handle: string | null) => (handle ? ctx.D?.PEOPLE?.[handle]?.[0] ?? handle : '-');
 
@@ -359,7 +363,9 @@ export default function RoutingScreen({ ctx }: ScreenProps) {
   const { client } = ctx;
   const adapter = useMemo(() => adapterFor(() => context.current), [client]);
   const [state, setState] = useState<LoadState>({ loading: true, data: null, error: null });
-  const [tab, setTab] = useState('rules');
+  const canFiles = ctx.orgCan('storage.object.metadata.read');
+  // The tab is part of the screen's address (`tab=rules|files`, M2-20); Stored files needs the metadata permission.
+  const [tab, setTab] = useScreenTab<'rules' | 'files'>(ctx, canFiles ? ROUTING_TABS : RULE_TABS, 'rules');
   const [showReplaced, setShowReplaced] = useState(false);
   const [editing, setEditing] = useState<{ rule: RuleModel | null } | null>(null);
   const [rejecting, setRejecting] = useState<RuleModel | null>(null);
@@ -391,7 +397,6 @@ export default function RoutingScreen({ ctx }: ScreenProps) {
       else setDecisionError(res.error);
     });
   };
-  const canFiles = ctx.orgCan('storage.object.metadata.read');
   const manage = ctx.orgCan('storage.routing.manage');
   const { data } = state;
   let body;
@@ -412,7 +417,7 @@ export default function RoutingScreen({ ctx }: ScreenProps) {
           <Tabs
             label={TEXT.tabsLabel}
             active={tab}
-            onChange={setTab}
+            onChange={(id) => setTab(id as 'rules' | 'files')}
             tabs={[{ id: 'rules', label: TEXT.tabRules, count: rules.length }, { id: 'files', label: TEXT.tabFiles }]}
           />
         ) : null}

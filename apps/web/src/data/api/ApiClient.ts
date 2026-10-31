@@ -154,16 +154,37 @@ export function problemSlug(type: string): string | undefined {
   return type.startsWith(PROBLEM_TYPE_BASE) ? type.slice(PROBLEM_TYPE_BASE.length) : undefined;
 }
 
+/** The Indonesian lead of a server sentence that has no translation (`problemText`). */
+export const SERVER_MESSAGE_ID = 'Pesan dari server:';
+
 /**
- * The `ApiError` of an error answer (H.4): a problem body gives its slug, rule, messages (or `[title, title]`),
- * message key, methods, retry time and field errors; any other body gives a generic text for the status.
+ * The text of a problem (M2-19): its message pair; without one its `detail`, the server's own sentence, so a refusal
+ * such as `mail_required` never shows only its title ("Conflict", the same few words for every problem of a slug);
+ * the title only when the problem carries neither. The detail is English, so the Indonesian text names it as the
+ * server's message. The two texts then differ, so the screens that add the detail after a title-only message (the
+ * pair holds the same text twice) do not repeat it.
+ */
+export function problemText(body: Pick<Problem, 'title' | 'detail' | 'messages'>): Pair {
+  if (body.messages) return [body.messages.en, body.messages.id];
+  const detail = body.detail?.trim();
+  return detail ? [detail, `${SERVER_MESSAGE_ID} ${detail}`] : [body.title, body.title];
+}
+
+/** True when a problem text has no Indonesian of its own: the title, or the server's English detail (`problemText`). */
+export function untranslated(message: readonly [string, string]): boolean {
+  return message[0] === message[1] || message[1] === `${SERVER_MESSAGE_ID} ${message[0]}`;
+}
+
+/**
+ * The `ApiError` of an error answer (H.4): a problem body gives its slug, rule, text (`problemText`), message key,
+ * detail, methods, retry time and field errors; any other body gives a generic text for the status.
  */
 export function toApiError(status: number, body: unknown, headers?: { get(name: string): string | null }): ApiError {
   const retryHeader = parseRetryAfter(headers?.get('retry-after') ?? null);
   if (isProblem(body)) {
     const error: ApiError = {
       status: body.status || status,
-      message: body.messages ? [body.messages.en, body.messages.id] : [body.title, body.title],
+      message: problemText(body),
     };
     const slug = problemSlug(body.type);
     if (slug) error.slug = slug;

@@ -2,6 +2,7 @@
 // history models both adapters answer, and the pure rules of the drawer: the status machine of J.8 with the slug
 // confirmation and the effects listed before a move, days left of a plan, the entitlement form with its plan picker and
 // its body, the ETag of an entitlement, the texts of a domain check and of the refusals.
+import { untranslated } from '../../data/api/ApiClient';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext, TextPair } from '../types';
 import type { Tone } from '../ui';
@@ -446,13 +447,13 @@ const LOCAL_REFUSALS: Readonly<Record<string, TextPair>> = {
 /**
  * The text of a refusal: the server's `messages` (409 `domain_taken`, `invalid_status_transition`, 422
  * `confirmation_mismatch`, `domain_not_allowed` and the others carry both languages), the console's text where the
- * answer has none (412, 503 of a DNS check, `organization_archived`), else the problem title.
+ * answer has none (412, 503 of a DNS check, `organization_archived`), else the server's text: its detail, or the problem title.
  */
 export function refusalText(error: ApiError, options: { dns?: boolean } = {}): TextPair {
   if (error.status === 412) return ORG_TEXT.conflict;
   if (options.dns && error.status === 503) return ORG_TEXT.dnsUnavailable;
   const local = error.messageKey ? LOCAL_REFUSALS[error.messageKey] : undefined;
-  if (local && error.message[0] === error.message[1]) return local;
+  if (local && untranslated(error.message)) return local;
   return error.message;
 }
 

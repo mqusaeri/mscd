@@ -6,3 +6,7 @@ export { OpsService, manualRunKey, retryLimitOf } from './ops.service';
 export { SecretScrubber, redactQueryValues, secretFilesOf } from './secret-scrubber';
 export { OrganizationStatusService, allowedMoves, confirmationMismatch, invalidStatusTransition, type StatusChangeOutcome } from './organization-status.service';
 export { CLI_OPERATOR, OpsOrganizationsService, operatorOf, singleTenancyRefusal, type OperatorActor } from './organizations.service';
+export { OpsAccountsController } from './accounts.controller';
+export { ACCOUNT_AUDIT_ENTRIES, ACCOUNT_SESSIONS, OpsAccountsService } from './accounts.service';
+export { OPERATOR_LINK_TTL_MS, OperatorsService } from './operators.service';
+export { OPERATOR_REVOKED, browserOf } from './account-support';

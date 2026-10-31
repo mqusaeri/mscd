@@ -1,9 +1,10 @@
 // Operator console (MILESTONE-2 M2-16, M2-S12): routes against the shared table and the job allow-list, the API adapter
 // over a fake fetch (health, queues, Run job, diagnostics archive, organisations with the status filter, the user limit
 // of each row and the single tenancy answer, Create with its idempotency key, plan preset and one-time link, Install
-// licence with {org, licence}, packs and the multipart import, factor reset), the following of a pack installation,
-// the multi tenancy rule, the page action, the console parts in both languages and themes, and the sample adapter.
-// The organisation drawer (status, domains, entitlements, history) is tested in ops-organizations.test.tsx.
+// licence with {org, licence}, packs and the multipart import), the following of a pack installation, the multi
+// tenancy rule, the page action, the console parts in both languages and themes, and the sample adapter. The
+// organisation drawer (status, domains, entitlements, history) is tested in ops-organizations.test.tsx, the accounts
+// and platform operators (M2-19) in ops-accounts.test.tsx.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OPS_RUNNABLE_JOBS, routeById } from '@mscd/shared';
 import type { OpsHealth, OpsOrganizationItem, PackSummary } from '@mscd/shared';
@@ -18,7 +19,6 @@ import { createSampleAdapter, resetSampleOps } from '../../src/screens/ops/sampl
 import { HealthView, QueuesTable, RunJobCard } from '../../src/screens/ops/Health';
 import { CreateDialog, LicenceDialog, OrganizationsTab } from '../../src/screens/ops/Organizations';
 import { PacksTable, followInstall, listBefore, progressText } from '../../src/screens/ops/Packs';
-import { ResetMfaCard } from '../../src/screens/ops/Accounts';
 import { tabsOf } from '../../src/screens/ops/Screen';
 import { TEXT } from '../../src/screens/ops/text';
 import type { Lang } from '../../src/screens/types';
@@ -61,7 +61,8 @@ describe('Operator console routes and definition', () => {
       expect([route.method, route.path], name).toEqual([method, path]);
     }
     expect(routeById(ROUTE_IDS.orgCreate).permission).toBe('ops.tenants.manage');
-    expect(routeById(ROUTE_IDS.resetMfa).permission).toBe('ops.users.manage');
+    expect(routeById(ROUTE_IDS.accountResetMfa).permission).toBe('ops.users.manage');
+    expect(routeById(ROUTE_IDS.accounts).permission).toBe('ops.read');
   });
 
   it('offers exactly the jobs of the allow-list', () => {
@@ -82,8 +83,8 @@ describe('Operator console routes and definition', () => {
   it('multi tenancy follows the platform rights of licences and packs (F.6 D-17, D-32)', () => {
     expect(multiTenancy(ctxOf({ mode: 'api', org: MULTI }))).toBe(true);
     expect(multiTenancy(ctxOf({ mode: 'api', org: SINGLE }))).toBe(false);
-    expect(tabsOf(true).map((x) => x.id)).toEqual(['health', 'jobs', 'orgs', 'packs', 'accounts']);
-    expect(tabsOf(false).map((x) => x.id)).toEqual(['health', 'jobs', 'orgs', 'packs']);
+    // Every operator reads every section (`ops.read`, M2-19); the actions check their own rights.
+    expect(tabsOf().map((x) => x.id)).toEqual(['health', 'jobs', 'orgs', 'packs', 'accounts']);
   });
 
   it('every text has both languages, Indonesian that differs, and no em dash or centre dot', () => {
@@ -227,14 +228,6 @@ describe('Operator console API adapter', () => {
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.message[0]).toBe('This pack needs a newer server version.');
   });
-
-  it('resets the factor of an account with the reason', async () => {
-    const f = client({ 'POST /api/v1/ops/users/reset-mfa': [{ status: 204 }, problem(404, 'not-found')] });
-    const adapter = createApiAdapter(f.client);
-    expect(await adapter.resetMfa('rina@x.id', 'Lost phone, identity checked by video call')).toEqual({ ok: true, data: null });
-    expect((await adapter.resetMfa('nobody@x.id', 'Lost phone, identity checked')).ok).toBe(false);
-    expect(f.calls[0].body).toEqual({ email: 'rina@x.id', reason: 'Lost phone, identity checked by video call' });
-  });
 });
 
 describe('Operator console model', () => {
@@ -315,13 +308,12 @@ describe('Operator console parts', () => {
             <QueuesTable ctx={ctx} queues={[{ name: 'freshness.recompute', waiting: 2, active: 1, failed: 1, oldestAgeSeconds: 4.2 }]} />
             <RunJobCard ctx={ctx} adapter={adapter} onRun={() => undefined} />
             <PacksTable ctx={ctx} packs={[fromPack(PACK), fromPack({ ...PACK, version: '1.4.0', status: 'validating', preRelease: true, installedAt: null })]} />
-            <ResetMfaCard ctx={ctx} adapter={adapter} />
             <CreateDialog ctx={ctx} adapter={adapter} open onClose={() => undefined} onCreated={() => undefined} />
           </>,
           ctx,
           theme,
         );
-        for (const text of [TEXT.statusOk, TEXT.statusDegraded, TEXT.upToDate, TEXT.behind, TEXT.stateGrace, TEXT.noEndDate, TEXT.packValidating, TEXT.preRelease, TEXT.slugWarning, TEXT.resetMfaSub, TEXT.run]) {
+        for (const text of [TEXT.statusOk, TEXT.statusDegraded, TEXT.upToDate, TEXT.behind, TEXT.stateGrace, TEXT.noEndDate, TEXT.packValidating, TEXT.preRelease, TEXT.slugWarning, TEXT.run]) {
           expect(html, text[0]).toContain(esc(t(text, lang)));
         }
         expect(html).toContain('<option value="cycle.derive">cycle.derive</option>');
@@ -350,7 +342,7 @@ describe('Operator console parts', () => {
 });
 
 describe('Operator console sample adapter', () => {
-  it('creates an organisation once, installs its licence, imports a pack and resets a factor', async () => {
+  it('creates an organisation once, installs its licence and imports a pack', async () => {
     const adapter = createSampleAdapter(() => sampleD());
     const before = await adapter.organizations({ page: 1, pageSize: 25 });
     // The organisations of the snapshot, then the two of the sample service only (M2-S12).
@@ -371,8 +363,6 @@ describe('Operator console sample adapter', () => {
     expect(state).toBe('done');
     const unchanged = await adapter.importPack(new Blob([]), 'ISO27001-2022-1.3.0.bundle', 'k');
     expect(unchanged.ok && unchanged.data.status).toBe('unchanged');
-    expect((await adapter.resetMfa('rina.kusuma@nusantaradigital.co.id', 'Lost phone, identity checked')).ok).toBe(true);
-    expect((await adapter.resetMfa('nobody@example.id', 'Lost phone, identity checked')).ok).toBe(false);
     expect((await adapter.diagnostics()).ok).toBe(false);
   });
 

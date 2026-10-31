@@ -1,6 +1,7 @@
 // Sample adapter of the operator console: a healthy installation, the queues of a quiet afternoon, the organisations of
 // the sample service (the three of the snapshot and two more, sample-orgs.ts) with their status, plan, domains and
-// history, the D-S4 plan presets, and the packs of the sample (ISO 9001 and ISO 37001 in their newer editions). Created
+// history, the D-S4 plan presets, the packs of the sample (ISO 9001 and ISO 37001 in their newer editions), and the
+// accounts and platform operators of the sample service (sample-accounts.ts, M2-19). Created
 // organisations, status changes, domains, entitlements, licences and packs stay for the browser session; an imported
 // bundle shows as "Installing" on the next read and as installed on the one after, as the worker would do it. The
 // state belongs to the installation (the operator sees every organisation), so it is not kept per organisation.
@@ -8,6 +9,7 @@ import type { ControllerData } from '../../data/types';
 import type { Health, LicenceState, OpsAdapter, OrgItem, PackItem, Result } from './model';
 import { NO_END, STATUS_MOVES, daysBetween, entitlementEtag, localIso, needsSlug, presetUntil } from './org-model';
 import type { Domain, Entitlement, EntitlementInput, OrgDetail } from './org-model';
+import { resetSampleAccounts, sampleAccounts } from './sample-accounts';
 import { EXTRA_ORGS, FREE_MAIL, SAMPLE_PRESETS, cloneOrg, snapshotOrg } from './sample-orgs';
 import type { SampleEntitlement, SampleOrg } from './sample-orgs';
 
@@ -32,6 +34,7 @@ let state: State | null = null;
 /** Forgets the changes of the session (unit tests). */
 export function resetSampleOps(): void {
   state = null;
+  resetSampleAccounts();
 }
 
 function initialPacks(): PackItem[] {
@@ -442,10 +445,10 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
       s.installing.set(`${packId}@${version}`, 1);
       return { ok: true, data: { packId, version, status: 'queued', message: [`${packId} ${version} was verified and is being installed`, `${packId} ${version} telah diverifikasi dan sedang dipasang`] } };
     },
-    async resetMfa(email) {
-      const people = Object.values(getD()?.PEOPLE ?? {}).map(([name]) => `${name.toLowerCase().replace(/[^a-z\s]/g, '').trim().split(/\s+/).join('.')}@nusantaradigital.co.id`);
-      if (!people.includes(email.trim().toLowerCase())) return refuse(404, ['No account with this email has a second factor.', 'Tidak ada akun dengan email ini yang memiliki faktor kedua.']);
-      return { ok: true, data: null };
+    async organizationNames() {
+      return { ok: true, data: orgsOf(getD()).map((o) => ({ slug: o.slug, name: o.name })) };
     },
+    // The accounts and platform operators of the sample service (M2-19).
+    ...sampleAccounts(getD, nowIso),
   };
 }
