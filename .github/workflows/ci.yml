@@ -52,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -96,8 +96,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: No em dash or centre dot in the documents
@@ -123,8 +123,8 @@ jobs:
     env:
       MSCD_TEST_PG_IMAGE: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -152,15 +152,15 @@ jobs:
         # display.spec.js and contrast.spec.js sit together, so with 4 shards the first one took 11 minutes.
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
       - name: Playwright browsers cache
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
@@ -171,7 +171,7 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
       - name: Web build cache (rebuilt only when the sources changed)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: node_modules/.cache/mscd/e2e
           key: e2e-web-sample-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/index.html', 'apps/web/vite.config.js', 'apps/web/package.json', 'packages/shared/src/**', 'package-lock.json') }}
@@ -183,14 +183,14 @@ jobs:
         run: npm run test:e2e -w @mscd/web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       - name: Upload the blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-sample-blob-${{ matrix.shard }}
           path: apps/web/blob-report/sample
           retention-days: 7
       - name: Upload the traces of failed tests
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-sample-results-${{ matrix.shard }}
           path: apps/web/test-results
@@ -203,11 +203,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Download the blob reports of the shards
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: e2e-sample-blob-*
           path: blob-reports
@@ -215,7 +215,7 @@ jobs:
       - name: Merge them into one HTML report
         run: npx --yes playwright@${{ env.PLAYWRIGHT_VERSION }} merge-reports --reporter html ./blob-reports
       - name: Upload the Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-sample-report
           path: playwright-report
@@ -235,15 +235,15 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
       - name: Playwright browsers cache
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
@@ -254,7 +254,7 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
       - name: Web build cache (rebuilt only when the sources changed)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: node_modules/.cache/mscd/e2e
           key: e2e-web-api-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/index.html', 'apps/web/vite.config.js', 'apps/web/package.json', 'packages/shared/src/**', 'package-lock.json') }}
@@ -269,14 +269,14 @@ jobs:
         run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
       - name: Upload the blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-api-blob-${{ matrix.shard }}
           path: apps/web/blob-report/api
           retention-days: 7
       - name: Upload the traces of failed tests
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-api-results-${{ matrix.shard }}
           path: apps/web/test-results
@@ -289,11 +289,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Download the blob reports of the shards
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: e2e-api-blob-*
           path: blob-reports
@@ -301,7 +301,7 @@ jobs:
       - name: Merge them into one HTML report
         run: npx --yes playwright@${{ env.PLAYWRIGHT_VERSION }} merge-reports --reporter html ./blob-reports
       - name: Upload the Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-api-report
           path: playwright-report
@@ -317,8 +317,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -387,8 +387,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -401,7 +401,7 @@ jobs:
           echo "MSCD_BUILD_CA=$RUNNER_TEMP/build-ca.pem" >> "$GITHUB_ENV"
       - name: Playwright browsers cache
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
@@ -415,7 +415,7 @@ jobs:
         run: npm run test:smoke
       - name: Upload the smoke results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-results
           path: tools/smoke/test-results
@@ -426,14 +426,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
       - name: Kubernetes schema cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deploy/helm/mscd/ci/.schema-cache
           key: kubeconform-1.34.1-${{ hashFiles('deploy/helm/mscd/ci/validate.sh') }}
@@ -445,8 +445,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -488,8 +488,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -511,8 +511,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -531,7 +531,7 @@ jobs:
           df -h /
       - name: Playwright browsers cache
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
@@ -566,7 +566,7 @@ jobs:
         run: docker ps -aq --filter label=mscd.test=true | xargs -r docker rm -f
       - name: Upload the SaaS run results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: saas-results
           path: tools/smoke/test-results/saas
@@ -579,7 +579,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build CA
         env:
           BUILD_CA: ${{ secrets.MSCD_BUILD_CA }}
@@ -596,8 +596,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -653,7 +653,7 @@ jobs:
           sudo ./uninstall.sh --dir "$RUNNER_TEMP/mscd" --purge --yes
       - name: Upload the build logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-logs
           path: deploy/dist/*.logs
