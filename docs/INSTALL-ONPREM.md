@@ -24,10 +24,11 @@ This guide installs and runs MSCD on your own servers: with Docker Compose on on
 16. [Everyday operations](#16-everyday-operations)
 17. [Troubleshooting](#17-troubleshooting)
 18. [Network and firewall](#18-network-and-firewall)
-19. [Uninstall](#19-uninstall)
-20. [Security summary](#20-security-summary)
-21. [Try MSCD on a test server](#21-try-mscd-on-a-test-server)
-22. [Not yet available](#22-not-yet-available)
+19. [Export all data](#19-export-all-data)
+20. [Uninstall](#20-uninstall)
+21. [Security summary](#21-security-summary)
+22. [Try MSCD on a test server](#22-try-mscd-on-a-test-server)
+23. [Not yet available](#23-not-yet-available)
 
 ## 1. What you receive
 
@@ -433,7 +434,7 @@ MSCD uses an app registration with the `Sites.Selected` permission, so it reache
 4. Find the ids with Graph Explorer: the site id (`GET https://graph.microsoft.com/v1.0/sites/acme.sharepoint.com:/sites/compliance`), the document library (`GET .../sites/<site id>/drives`) and the folder ids (`GET .../drives/<drive id>/root:/Compliance` and one folder per system, for example `Compliance/ISMS`).
 5. In MSCD, open **Storage repositories** and choose **Connect repository**. The wizard has four steps:
    1. Storage type: Microsoft 365 (SharePoint or OneDrive).
-   2. Settings: a name and short id, the Microsoft 365 tenant id, the SharePoint site id, the document library (drive) id, the root folder id, and under "Folder per management system" the folder id and path of each system that exists already. Choose the storage modes: **Link** (files stay in the library; MSCD pins the version and its hash) and, if you want it, **Pass-through** (files pass through the storage gateway into the library). Leave **Zero-transit** off (section 22). Confirm that the retention settings of the library keep files long enough, then choose **Save and continue**.
+   2. Settings: a name and short id, the Microsoft 365 tenant id, the SharePoint site id, the document library (drive) id, the root folder id, and under "Folder per management system" the folder id and path of each system that exists already. Choose the storage modes: **Link** (files stay in the library; MSCD pins the version and its hash) and, if you want it, **Pass-through** (files pass through the storage gateway into the library). Leave **Zero-transit** off (section 23). Confirm that the retention settings of the library keep files long enough, then choose **Save and continue**.
    3. Credential: the application (client) id, the certificate (`mscd-sp.crt`) and the private key (`mscd-sp.key`), pasted as PEM text. **Save credential** sends them straight to the storage gateway, which seals them; MSCD never stores or shows them in clear text.
    4. Test connection: MSCD checks the credential, the root folder and every system folder, and shows "Connected to <library>".
 
@@ -882,7 +883,90 @@ Outbound, only for what you use (from the `egress` network of the server):
 
 MSCD sends no telemetry and contacts CyberLentera for nothing. Licences and packs arrive as files. Browsers load everything from the MSCD server; the optional Google Fonts stay off unless you turn on `--external-fonts on`.
 
-## 19. Uninstall
+## 19. Export all data
+
+A Tenant Admin can download everything the organisation keeps in MSCD at any time, for an archive, an audit or a move to another system. The export holds every register and record as spreadsheet files (CSV) and data files (JSON Lines), the audit trail with its hashes and signed anchors, every document and evidence file kept in the Managed Vault, a list of the files kept in your own SharePoint or Google Drive, and a manifest with the size and SHA-256 fingerprint of every file. Passwords, second factor secrets, session ids, tokens, sealed credentials and keys are never exported; the manifest lists what is left out and why.
+
+### 19.1 In the browser
+
+1. A Tenant Admin opens **Organisation export** in the administration area and requests an export.
+2. When the organisation has two or more Tenant Admins, another Tenant Admin approves the request first. The person who asked can never approve it. With one Tenant Admin the export starts at once, and the screen says that nobody else approved it.
+3. The worker builds the export in the background. The Tenant Admin who asked gets a notification and an email when it is ready.
+4. Any Tenant Admin downloads the parts (`.tar.gz` files of at most 2 GiB each) and the manifest. Every request, approval and download is recorded in the audit trail and announced to every Tenant Admin and every primary Management System Manager.
+
+An export can be downloaded for 7 days. A new request is refused while another export waits for approval or is being built, and for an organisation whose stored files are larger than the export limit (100 GiB by default, `lifecycle.export_max_bytes`).
+
+The worker builds one part at a time in its temporary folder (`TMPDIR`, otherwise `/tmp`), uploads it to the Managed Vault and deletes it before it starts the next one. The folder needs free space for one part, 2 GiB by default (`lifecycle.export_part_bytes`), plus room for the largest table, or less for a small organisation. The worker checks this before it starts, and the export fails with a message that names the space it needs. As a guide, 1 GiB of files in three parts took about 40 seconds and 385 MiB of temporary space on a test server. One export is built at a time in the installation; another one waits and is tried again every two minutes until the first has finished.
+
+In the Compose stack, `/tmp` of every MSCD container is a memory disk of 64 MiB, which holds the export of a small organisation only. For a larger organisation, use the command line (section 19.2), which builds in the folder you give it, or give the worker a folder on the server's disk:
+
+1. Create the folder on a disk with enough free space and let the MSCD user own it:
+
+   ```bash
+   sudo mkdir -p /srv/mscd-worker-tmp
+   sudo chown 10001:0 /srv/mscd-worker-tmp && sudo chmod 0700 /srv/mscd-worker-tmp
+   ```
+
+2. Create `/opt/mscd/docker-compose.override.yml` with this content:
+
+   ```yaml
+   services:
+     worker:
+       environment:
+         TMPDIR: /var/lib/mscd/tmp
+       volumes:
+         - /srv/mscd-worker-tmp:/var/lib/mscd/tmp
+   ```
+
+3. Apply it with `cd /opt/mscd && sudo docker compose up -d worker`.
+
+`install.sh` starts the stack from `docker-compose.yml` alone, so run step 3 again after every upgrade. Check the free space with `df -h /srv/mscd-worker-tmp`.
+
+### 19.2 On the command line
+
+Your IT team can also write the export straight into a folder of the server:
+
+```bash
+sudo mkdir -p /srv/mscd-export && sudo chown 10001:0 /srv/mscd-export
+cd /opt/mscd
+sudo docker compose run --rm -v /srv/mscd-export:/export \
+  -v /opt/mscd/secrets/audit-anchor.pub:/run/anchor/audit-anchor.pub:ro \
+  cli export organization --out /export --anchor-key /run/anchor/audit-anchor.pub
+```
+
+The folder must be empty. The command prints each part with its size and SHA-256, writes the manifest next to the parts, and records the export in the audit trail. When the installation holds more than one organisation, add `--org <slug>`. The `cli` service holds no private anchor key, so `--anchor-key` gives the export the public key that checks its anchors (`audit/audit-anchor.pub`). Without it, the export lists the key id of the anchors without the key, and the command says so.
+
+### 19.3 Check an export
+
+Your installation made its own anchor key pair when it was installed, and the worker signs the anchors with it. Check every part, every file, every audit trail hash and every anchor of an export with the public half of that key, `secrets/audit-anchor.pub`:
+
+```bash
+cd /opt/mscd
+sudo docker compose run --rm -v /srv/mscd-export:/export \
+  -v /opt/mscd/secrets/audit-anchor.pub:/run/anchor/audit-anchor.pub:ro \
+  cli export verify --dir /export --anchor-key /run/anchor/audit-anchor.pub
+```
+
+The command reads the manifest (the downloaded `*-manifest.json`, or the copy in the last part), compares the size and SHA-256 of every part and every file with it, recomputes the hash of every audit trail entry from its canonical text, and checks every signed anchor. It trusts only the anchor keys built into your MSCD release and the public keys you name with `--anchor-key`. Repeat the option for a key your installation used before, for example after its anchor key was replaced, and keep every public anchor key for as long as you keep exports of its time. The command never uses a key from the export itself: the manifest and the parts are not signed, so anyone who changes the audit trail could also change them, but nobody without the private anchor key can sign a new anchor. An anchor signed with a key that is not trusted, a key file whose key id does not match its key, or an anchor that does not match its audit trail entry is a problem. The command ends with `OK`, or with `FAILED` and each problem, and then exits with status 1. When `FAILED` names a key that is not trusted, check that you gave `--anchor-key` with the right file.
+
+An anchor proves its audit trail entry and every entry before it. The worker writes one anchor a night, so no signature covers the entries made since the newest anchor; the command says up to which entry (its `seq`) the anchors prove the trail and how many entries come after it. Someone who rewrites the audit trail can also remove the newest anchors from the export. The command then still ends with `OK`, but it names an older anchor as the newest one, or says that no anchor proves the trail. So compare the newest anchor of the export with the anchors kept outside MSCD (section 14): when your log platform or your downloaded anchor files hold a later anchor of the same chain, or another hash for the same entry, the audit trail of the export was changed.
+
+To see by hand which key the export names, compare the key id of `audit/audit-anchor.pub` in the export with the key id of your `secrets/audit-anchor.pub` (the first 16 characters of each line):
+
+```bash
+openssl pkey -pubin -in /opt/mscd/secrets/audit-anchor.pub -outform DER | sha256sum
+openssl pkey -pubin -in audit/audit-anchor.pub -outform DER | sha256sum
+```
+
+Check an export with the MSCD release that made it or a later one.
+
+The tables are read one after another while the organisation keeps working, so a change saved during the build may be in one file and missing from another; the audit trail shows when each change was made. For an export that matches one moment, ask the users to pause their work while it is built.
+
+Without MSCD, compare the SHA-256 of each part with the manifest (`sha256sum` on Linux, `Get-FileHash -Algorithm SHA256` in PowerShell) and unpack the parts with `tar -xzf`. The `README.txt` in the first part explains every file in English and Indonesian, and how to check the anchors with the public anchor key of the installation that signed them (`secrets/audit-anchor.pub` of your installation).
+
+## 20. Uninstall
+
+Before you remove an installation for good, export the data of the organisation (section 19).
 
 Stop and remove the containers and networks, keeping the data, settings, secrets and images:
 
@@ -906,7 +990,7 @@ Both commands ask for confirmation. Add `--yes` to skip it. For an installation 
 
 On Kubernetes: `helm uninstall mscd -n mscd`, then delete the Secrets and the database when you no longer need them.
 
-## 20. Security summary
+## 21. Security summary
 
 Built in:
 
@@ -929,7 +1013,7 @@ Recommended:
 7. Rotate the gateway token every year (section 13).
 8. Keep the host operating system and Docker Engine patched, and install new MSCD releases when they are published.
 
-## 21. Try MSCD on a test server
+## 22. Try MSCD on a test server
 
 For evaluations, MSCD can run with its demo organisations on a test server directly from the source repository, without a bundle. The demo uses public demo keys and sample data: never put real data into it, and never expose it as a production system.
 
@@ -949,7 +1033,7 @@ The script builds the demo images from the checkout, starts the stack (`deploy/c
 
 The repository also has a GitHub Actions workflow "Deploy demo" (`.github/workflows/deploy-demo.yml`), started by hand from the Actions tab. It connects to the test server over SSH and runs the same script. It needs the repository secrets `VPS_HOST`, `VPS_USER` and `VPS_SSH_KEY`, optionally the variables `VPS_PORT` and `MSCD_DEMO_PUBLIC_URL`, and a clone of the repository in `~/mscd` on the server.
 
-## 22. Not yet available
+## 23. Not yet available
 
 These features are not part of this release. Nothing in MSCD offers them, and this guide does not describe them:
 

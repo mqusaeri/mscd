@@ -1,7 +1,7 @@
 // Organisation export routes of the Tenant Admins (Milestone 3 D.1, D.4): list, request, read, decide, manifest and
-// part download. Stubs of M3-01, answering 501 `not-implemented` after the guard (no body is read); M3-02 replaces
-// them.
-import { Controller } from '@nestjs/common';
+// part download (`org.export.manage`). Routes whose id starts with `exports.` stay usable while the organisation is
+// `offboarding` (session resolver, `offboardingAllows`).
+import { Controller, Res } from '@nestjs/common';
 import {
   orgExportCreateRoute,
   orgExportDecideRoute,
@@ -9,39 +9,59 @@ import {
   orgExportGetRoute,
   orgExportListRoute,
   orgExportManifestRoute,
+  type IdParams,
+  type OrganizationExportCreate,
+  type OrganizationExportCreated,
+  type OrganizationExportDecided,
+  type OrganizationExportDecision,
+  type OrganizationExportDetail,
+  type OrganizationExportItem,
+  type OrganizationExportPartParams,
 } from '@mscd/shared';
-import { ApiRoute } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
+import type { FastifyReply } from 'fastify';
+import { ApiRoute, CurrentPrincipal, RouteInputParam } from '../../common/api-route';
+import type { Principal } from '../../common/tokens';
+import { OrgExportService } from './org-export.service';
 
 @Controller()
 export class OrgExportController {
+  constructor(private readonly exports: OrgExportService) {}
+
   @ApiRoute(orgExportListRoute)
-  orgExportList(): never {
-    return routeStub(orgExportListRoute);
+  orgExportList(@CurrentPrincipal() principal: Principal): Promise<OrganizationExportItem[]> {
+    return this.exports.list(principal);
   }
 
   @ApiRoute(orgExportCreateRoute)
-  orgExportCreate(): never {
-    return routeStub(orgExportCreateRoute);
+  orgExportCreate(@CurrentPrincipal() principal: Principal, @RouteInputParam('body') body: OrganizationExportCreate): Promise<OrganizationExportCreated> {
+    return this.exports.create(principal, body);
   }
 
   @ApiRoute(orgExportGetRoute)
-  orgExportGet(): never {
-    return routeStub(orgExportGetRoute);
+  orgExportGet(@CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: IdParams): Promise<OrganizationExportDetail> {
+    return this.exports.get(principal, params.id);
   }
 
   @ApiRoute(orgExportDecideRoute)
-  orgExportDecide(): never {
-    return routeStub(orgExportDecideRoute);
+  orgExportDecide(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: IdParams,
+    @RouteInputParam('body') body: OrganizationExportDecision,
+  ): Promise<OrganizationExportDecided> {
+    return this.exports.decide(principal, params.id, body);
   }
 
   @ApiRoute(orgExportManifestRoute)
-  orgExportManifest(): never {
-    return routeStub(orgExportManifestRoute);
+  async orgExportManifest(@Res() reply: FastifyReply, @CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: IdParams): Promise<void> {
+    await this.exports.manifest(reply, principal, params.id);
   }
 
   @ApiRoute(orgExportDownloadRoute)
-  orgExportDownload(): never {
-    return routeStub(orgExportDownloadRoute);
+  async orgExportDownload(
+    @Res() reply: FastifyReply,
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: OrganizationExportPartParams,
+  ): Promise<void> {
+    await this.exports.download(reply, principal, params.id, Number(params.part));
   }
 }

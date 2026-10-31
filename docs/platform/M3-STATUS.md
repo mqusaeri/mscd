@@ -17,7 +17,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-01 Contract, schema, permissions and storage functions | 1 | Done | 65 routes and 2 gateway routes (stubs answer 501 until their package), migrations tenant/0009 and platform/0007, permissions, jobs, profile keys `lifecycle.*` and `privacy.*`, gateway delete and purge. Notes for wave 2 in its handoff decisions |
 | M3-08 Open work totals | 1 | Done | Screen `pending-totals` (`/ms/:ms/pending-totals`), opened from Chain stages and the Overview in API builds; totals only, no names (decision 2) |
 | M3-M01 Open follow-ups | 1 | Done | Installer saves the Compose project name, `install.sh --yes` default organisation, `THIRD-PARTY-NOTICES.md` with a CI check. Every dependency change regenerates the notices file |
-| M3-02 Organisation export | 2 | Running | Started 2026-10-31 |
+| M3-02 Organisation export | 2 | Done, follow-up running | Requests with a second Tenant Admin's approval, build job (CSV and JSON Lines, files, audit trail with anchors, manifest), 7-day download, `export organization` and `export verify`. Follow-up: verify must require an anchor over each redaction attestation (major), worker scratch folder in the deploy files |
 | M3-03 End of contract and verified deletion | 2 | Running | Started 2026-10-31 |
 | M3-05 Read confirmation of policies | 2 | Done, follow-up running | Register screen, "Policies to confirm", banner, daily reminders, close and file as evidence. Follow-up: people without file rights must be able to open the version (major finding) |
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
@@ -35,6 +35,12 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 - Open questions for the owner from the plan review: the real versioning, lifecycle rule or object lock of the backup bucket (the deletion certificate date depends on it); `docs/saas/legal-inputs.md` and `records-of-processing.md` still say "about 12 months" for backups until M3-11 corrects them.
 
 ## Open items for later packages
+
+- From M3-02: a REPEATABLE READ read-only option of `withTenant` (owner of `modules/tenancy/**`) so the export reads every table in one snapshot.
+- From M3-02: `GRANT SELECT` on each tenant schema's `kysely_migration` to `mscd_app` in `platform.apply_tenant_grants` (a later platform migration); the manifest then names the migrations from the schema.
+- From M3-02: keep retired anchor keys in `TRUSTED_KEYS` (D-16) for as long as exports signed with them are kept; the in-app anchor checks (`AuditChainVerifier`, `audit.verify-chain`) still trust only the compiled keys, so on-premise they reject the installation's own anchor key (owner of `modules/audit/**`, next to the M2-S05 K.9 item).
+- For M3-11: `KIND_SCREENS` entries for `organization_export_requested` and `organization_export_ready` (screen `org-export`).
+- For the orchestrator: `host.test.tsx` and `controller.test.ts` need the sidebar entries of M3-07 (`access-reviews`) and of the M3-05 follow-up (`my-confirmations`).
 
 - For M3-04 (owns `read-model/**` in wave 3): fill the `acknowledgement` member of the document record in the snapshot, so the document detail shows its read confirmation settings after a reload (M3-05 follow-up 2).
 

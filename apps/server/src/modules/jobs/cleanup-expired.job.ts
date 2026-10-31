@@ -2,7 +2,9 @@
 // idempotency keys, sign-in and link transactions and SAML assertion ids, and relayed outbox rows older than 7 days;
 // revokes expired sessions; marks expired upload intents (`expired`) and export files (soft-deleted) in every
 // organisation, and runs the tenant cleanup steps other modules register (`TenantCleanupRegistry`, for example the
-// closing of expired guest auditor grants, F.14 step 5) in every active organisation. Every statement is idempotent.
+// closing of expired guest auditor grants, F.14 step 5) in every organisation whose status the step names (active
+// only by default; the expiry of exports of the org-export module, which deletes their vault content, runs for every
+// status but deleted, Milestone 3 D.4). Every statement is idempotent.
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
@@ -11,7 +13,7 @@ import type { JobRun } from '../../common/jobs/job-queue';
 import { SYSTEM_USER_ID } from '../../common/tokens';
 import { RateLimitBucketStore } from '../tenancy/rate-limit-store';
 import { TENANT_SCHEMA, TenantScope } from '../tenancy/tenant-scope';
-import { TenantCleanupRegistry } from './tenant-cleanup';
+import { stepRunsFor, TenantCleanupRegistry } from './tenant-cleanup';
 
 /** Relayed outbox rows are kept this long (E.2). */
 export const OUTBOX_RETENTION_DAYS = 7;
@@ -116,20 +118,20 @@ export class CleanupExpiredJob implements JobHandlerInstance<'cleanup.expired'> 
         });
         uploadIntentsExpired += tenant.intents;
         exportFilesExpired += tenant.exports;
-        // Registered steps run for active organisations only (a suspended one keeps its state until it returns), each
-        // in its own tenant transaction, so a failing step rolls back neither the expiries above nor the other steps.
-        if (org.status === 'active') {
-          let stepFailed = false;
-          for (const step of steps) {
-            try {
-              tenantSteps[step.name] = (tenantSteps[step.name] ?? 0) + (await this.scope.withTenant(tenantContext, (trx) => step.run(trx, org.id, now)));
-            } catch (error) {
-              stepFailed = true;
-              this.logger.error({ orgId: org.id, step: step.name, error: (error as Error).message }, 'cleanup.expired step failed for an organisation');
-            }
+        // Registered steps run for the statuses they name (active only by default: a suspended organisation keeps its
+        // state until it returns), each in its own tenant transaction, so a failing step rolls back neither the
+        // expiries above nor the other steps.
+        let stepFailed = false;
+        for (const step of steps) {
+          if (!stepRunsFor(step, org.status)) continue;
+          try {
+            tenantSteps[step.name] = (tenantSteps[step.name] ?? 0) + (await this.scope.withTenant(tenantContext, (trx) => step.run(trx, org.id, now)));
+          } catch (error) {
+            stepFailed = true;
+            this.logger.error({ orgId: org.id, step: step.name, error: (error as Error).message }, 'cleanup.expired step failed for an organisation');
           }
-          if (stepFailed) failedOrganisations.push(org.id);
         }
+        if (stepFailed) failedOrganisations.push(org.id);
       } catch (error) {
         failedOrganisations.push(org.id);
         this.logger.error({ orgId: org.id, error: (error as Error).message }, 'cleanup.expired failed for an organisation');
