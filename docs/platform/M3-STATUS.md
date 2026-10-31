@@ -21,7 +21,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-03 End of contract and verified deletion | 2 | Done | Offboarding sets the end of the read-only period and queues the final export; `org.lifecycle` archives, schedules and reminds; `org.purge` removes schema, vault objects, keys and platform rows, anonymises accounts, redacts platform audit entries under one attestation and sends a signed deletion certificate. `restore.sh --reapply-deletions` and a purge step in `restore-test.sh --local` |
 | M3-05 Read confirmation of policies | 2 | Done, follow-up running | Register screen, "Policies to confirm", banner, daily reminders, close and file as evidence. Follow-up: people without file rights must be able to open the version (major finding) |
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
-| M3-04 Requests from one person | 3 | Waiting | |
+| M3-04 Requests from one person | 3 | Running | Started 2026-10-31 after M3-03 |
 | M3-07 Periodic access review | 3 | Running | Started 2026-10-31 in wave 2's free slot (it needs only M3-01) |
 | M3-09 Export and deletion screens | 3 | Waiting | |
 | M3-10 Demo personas | 4 | Waiting | |
