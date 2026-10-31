@@ -88,7 +88,7 @@ export class AckClient {
     readonly userId: string,
   ) {}
 
-  async call<T = Json>(method: 'GET' | 'POST' | 'PATCH', url: string, payload?: unknown, headers: Record<string, string> = {}): Promise<Answer<T>> {
+  async call<T = Json>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, payload?: unknown, headers: Record<string, string> = {}): Promise<Answer<T>> {
     const all: Record<string, string> = { cookie: `${COOKIE}=${this.cookie}`, ...headers };
     if (method !== 'GET') {
       all.origin = APP_ORIGIN;
@@ -114,6 +114,23 @@ export class AckClient {
   patch<T = Json>(url: string, payload: unknown, headers?: Record<string, string>): Promise<Answer<T>> {
     return this.call<T>('PATCH', url, payload, headers);
   }
+
+  put<T = Json>(url: string, payload: Buffer, headers?: Record<string, string>): Promise<Answer<T>> {
+    return this.call<T>('PUT', url, payload, headers);
+  }
+}
+
+/**
+ * Uploads `content` for a record through an upload intent (D.5) as `client`, without attaching it, and returns the new
+ * storage object: a file the storage gateway can stream, unlike the seeded objects, which have no content in the test
+ * stack's vault.
+ */
+export async function uploadFile(client: AckClient, ms: string, kind: 'document' | 'evidence', recordId: string, fileName: string, content: Buffer): Promise<string> {
+  const intent = await client.post('/api/v1/storage/upload-intents', { ms, kind, recordId, fileName, size: content.length });
+  if (intent.status !== 201) throw new Error(`upload intent: ${intent.status} ${intent.text}`);
+  const put = await client.put(intent.body.contentUrl, content, { 'content-type': 'application/octet-stream' });
+  if (put.status !== 200) throw new Error(`upload content: ${put.status} ${put.text}`);
+  return put.body.storageObjectId as string;
 }
 
 /** A client signed in as a demo user in an organisation (session written through `SessionService`). */
@@ -155,12 +172,12 @@ export async function documentOf(db: TestDatabase, org: DemoOrg, code: string): 
 
 /**
  * Puts a new version of a document in review, submitted by `submitter`, with the file of its current version, or of
- * the current version of `fileOf` for a document without one (as `POST .../versions` leaves it, A.4 5.7). Returns the
- * version id.
+ * the current version of `fileOf` for a document without one (as `POST .../versions` leaves it, A.4 5.7), or the
+ * storage object `withObject`. Returns the version id.
  */
-export async function versionInReview(db: TestDatabase, org: DemoOrg, code: string, label: string, submitter: string, fileOf?: string): Promise<string> {
+export async function versionInReview(db: TestDatabase, org: DemoOrg, code: string, label: string, submitter: string, fileOf?: string, withObject?: string): Promise<string> {
   const doc = await documentOf(db, org, code);
-  const objectId = fileOf ? (await documentOf(db, org, fileOf)).objectId : doc.objectId;
+  const objectId = withObject ?? (fileOf ? (await documentOf(db, org, fileOf)).objectId : doc.objectId);
   const submitterId = await userId(db, submitter);
   const [version] = await rowsOf<{ id: string }>(db, org, sql`
     insert into document_version (document_id, version_label, storage_object_id, status, submitted_by, submitted_at)

@@ -19,7 +19,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-M01 Open follow-ups | 1 | Done | Installer saves the Compose project name, `install.sh --yes` default organisation, `THIRD-PARTY-NOTICES.md` with a CI check. Every dependency change regenerates the notices file |
 | M3-02 Organisation export | 2 | Done (follow-up done) | Requests with a second Tenant Admin's approval, build job (CSV and JSON Lines, files, audit trail with anchors, manifest), 7-day download, `export organization` and `export verify`. The follow-up made verify require a trusted anchor over each redaction attestation and gave the worker a scratch folder (`/var/lib/mscd/tmp`) |
 | M3-03 End of contract and verified deletion | 2 | Done | Offboarding sets the end of the read-only period and queues the final export; `org.lifecycle` archives, schedules and reminds; `org.purge` removes schema, vault objects, keys and platform rows, anonymises accounts, redacts platform audit entries under one attestation and sends a signed deletion certificate. `restore.sh --reapply-deletions` and a purge step in `restore-test.sh --local` |
-| M3-05 Read confirmation of policies | 2 | Done, follow-up running | Register screen, "Policies to confirm", banner, daily reminders, close and file as evidence. Follow-up: people without file rights must be able to open the version (major finding) |
+| M3-05 Read confirmation of policies | 2 | Done (follow-up done) | Register screen, "Policies to confirm", banner, daily reminders, close and file as evidence. The follow-up lets audience members without file rights open the version through a short-lived token address, and added the sidebar entry in the tasks group |
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
 | M3-04 Requests from one person | 3 | Running | Started 2026-10-31 after M3-03 |
 | M3-07 Periodic access review | 3 | Done | Screens `access-reviews` (Tenant Admins) and `access-review` (each system's managers); daily `access-review.open` every 3 months with reminders; keep, change or revoke with the existing services; nobody decides on their own access; the report CSV is filed as evidence for A.5.18 |
@@ -36,6 +36,8 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 ## Open items for later packages
 
+- For M3-10 (after M3-04 releases `read-model/**`): link My Tasks rows of entity type acknowledgement to "Policies to confirm" (optional `TaskItem.screen` set in `read-model/derive/tasks.ts`, a branch in the My Tasks screen of `MscdApp.jsx`; follow-up 3 of the M3-05 handoff). Today the generic Done button there is refused with 422 `task_completes_on_screen`.
+- For M3-11: the `errors` list of `me.acknowledgements.open` may add 422 (`no_file`, `file_not_readable`).
 - Optional, for the owner of `jobs/cleanup-expired.job.ts` (M3-04 in wave 3): call `removeStaleWorkDirs` on every hourly `cleanup.expired` run, so a stopped export build's scratch files do not wait for the next export.
 - From M3-02: a REPEATABLE READ read-only option of `withTenant` (owner of `modules/tenancy/**`) so the export reads every table in one snapshot.
 - From M3-02: `GRANT SELECT` on each tenant schema's `kysely_migration` to `mscd_app` in `platform.apply_tenant_grants` (a later platform migration); the manifest then names the migrations from the schema.

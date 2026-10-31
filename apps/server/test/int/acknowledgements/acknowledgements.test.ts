@@ -2,21 +2,25 @@
 // storage stack of the file tests: the settings of a document on create and update; the request that the approval of
 // a new version opens (audience, tasks, notifications, audit) and the close of the earlier version's request; opening
 // a version (the provider's address for a person without file rights, the api's redirect for a reader, the content
-// route of the Managed Vault and its refusal for a person without file rights there); ACK-OPEN-FIRST; the stored task
+// route of the Managed Vault for a reader, and for a person without file rights there the content route with the
+// token that names their row, which opens that version for that person only); ACK-OPEN-FIRST; the stored task
 // that `tasks.complete` refuses; the register with the person list split of D.7; reminders by the manager; the CSV;
-// close and file as evidence; a request by hand; where a request shows; the `acknowledgement.reminders` job
-// (reminders, excusals, the overdue digest); and the audit chain after the run.
+// close and file as evidence; a request by hand; where a request shows; a `restricted` document (only its owner and
+// the managers of its systems are asked and may open it, the others are excused when it becomes restricted); the
+// `acknowledgement.reminders` job (reminders, excusals, the overdue digest); a person whose role in their task's system
+// ended opening the version through another system of the document; and the audit chain after the run.
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AcknowledgementRequestDetail, AcknowledgementRequestItem, CommandResult, MyAcknowledgementItem, ObjectOpenResponse,
 } from '@mscd/shared';
-import { acknowledgementFileGrant } from '../../../src/modules/acknowledgements/acknowledgement-file-grant';
+import { acknowledgementFileGrant, acknowledgementFileGrantOf } from '../../../src/modules/acknowledgements/acknowledgement-file-grant';
+import { RedirectTokens } from '../../../src/modules/files/redirect-token';
 import { AcknowledgementRemindersJob, reminderDateOn, reminderDue } from '../../../src/modules/acknowledgements/acknowledgement-reminders.job';
 import { useTestDatabase } from '../../setup/test-db';
 import { inScope } from '../db/helpers';
 import {
-  auditOf, createAckApp, documentOf, expectedAudience, inOrg, ORG_IDS, peopleOfRequest, rowsOf, signIn, startStorageStack, TODAY, userId,
+  auditOf, createAckApp, documentOf, expectedAudience, inOrg, ORG_IDS, peopleOfRequest, rowsOf, signIn, startStorageStack, TODAY, uploadFile, userId,
   verifyChain, versionInReview, type AckApp, type AckClient, type StorageStack,
 } from './helpers';
 
@@ -311,15 +315,21 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
 
   describe('Managed Vault, close and file as evidence', () => {
     let qmRequest: string;
+    /** The address `open` gave bagus (a Domain Owner who does not own QM-01): the content route with his token. */
+    let bagusAddress: string;
 
-    it('opens a vault version through the content route for a reader and refuses a person without file rights there', async () => {
+    it('opens a vault version through the content route for a reader, and through a token of the read confirmation for a person without file rights there', async () => {
       const doc = await documentOf(db, 'ndt', 'QM-01');
       const [repo] = await rowsOf<{ adapter: string }>(db, 'ndt', sql`
         select r.adapter from storage_object o join storage_repository r on r.id = o.storage_repository_id where o.id = ${doc.objectId}`);
       expect(repo!.adapter).toBe('managed_vault');
       await rina.patch(DOC('qms', doc.id), { acknowledgement: SETTINGS });
-      await versionInReview(db, 'ndt', 'QM-01', '5.1', 'yusuf');
+      // Version 5.1 holds a file uploaded to the vault of the test stack, so the content route can stream it.
+      const pdf = Buffer.from('%PDF-1.4\n% MSCD quality manual 5.1\n%%EOF\n');
+      const objectId = await uploadFile(sari, 'qms', 'document', doc.id, 'Quality-Manual-5.1.pdf', pdf);
+      await versionInReview(db, 'ndt', 'QM-01', '5.1', 'yusuf', undefined, objectId);
       expect((await rina.post(`${DOC('qms', doc.id)}/transitions`, { to: 'approved' })).status).toBe(200);
+      doc.objectId = objectId;
       const opened0 = await rowsOf<{ id: string }>(db, 'ndt', sql`select id from acknowledgement_request where document_id = ${doc.id} and status = 'open'`);
       qmRequest = opened0[0]!.id;
       const sariRow = await myRow(sari, 'QM-01');
@@ -327,13 +337,60 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       const opened = await sari.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${sariRow!.id}/open`);
       expect(opened.status, opened.text).toBe(200);
       expect(opened.body.url).toBe(`/api/v1/storage/objects/${doc.objectId}/content?ms=qms&inline=true`);
+      // bagus (a Domain Owner who does not own QM-01) has no file rights on it: the address is the content route with
+      // a token that names his row (D.7), and it opens the version for him.
       const bagusRow = await myRow(bagus, 'QM-01');
-      const refused = await bagus.post(`/api/v1/me/acknowledgements/${bagusRow!.id}/open`);
-      expect(refused.status).toBe(422);
-      expect(refused.body.messageKey).toBe('acknowledgements.file_not_readable');
-      expect((await peopleOfRequest(db, 'ndt', qmRequest)).find((p) => p.handle === 'bagus')!.opened_at).toBeNull();
-      // The check a redirect token naming the row asks (follow-up 1 of the handoff): bagus's own row grants the
-      // version's file; another person, another file or an unknown row grants nothing.
+      const plain = `/api/v1/storage/objects/${doc.objectId}/content?ms=qms&inline=true`;
+      expect([403, 404]).toContain((await bagus.get(plain)).status);
+      const viaToken = await bagus.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${bagusRow!.id}/open`);
+      expect(viaToken.status, viaToken.text).toBe(200);
+      expect(ObjectOpenResponse.safeParse(viaToken.body).success).toBe(true);
+      bagusAddress = viaToken.body.url;
+      expect(bagusAddress).toMatch(new RegExp(`^/api/v1/storage/objects/${doc.objectId}/content\\?ms=qms&inline=true&via=acknowledgement&t=[A-Za-z0-9_.-]+$`));
+      const bytes = await bagus.get(bagusAddress);
+      expect(bytes.status, bytes.text.slice(0, 200)).toBe(200);
+      expect(bytes.text).toBe(pdf.toString('utf8'));
+      expect(String(bytes.headers['content-disposition'])).toMatch(/^inline; filename="/);
+      expect((await peopleOfRequest(db, 'ndt', qmRequest)).find((p) => p.handle === 'bagus')!.opened_at).not.toBeNull();
+      expect((await auditOf(db, 'ndt', bagusRow!.id)).at(-1)).toMatchObject({ action: 'acknowledgement.opened', actor: 'bagus', after: { via: 'acknowledgement_token', first: true } });
+      expect((await auditOf(db, 'ndt', doc.objectId!)).at(-1)).toMatchObject({
+        action: 'file.downloaded', actor: 'bagus', after: { via: 'acknowledgement', acknowledgement: bagusRow!.id, records: ['document:QM-01'] },
+      });
+      // The reader's own address streams the same file.
+      expect((await sari.get(opened.body.url)).text).toBe(pdf.toString('utf8'));
+      // The token opens this one version for this person: not for another person, not in another system, not
+      // without the token, and a token without his row or with another person's row opens nothing.
+      expect((await hendra.get(bagusAddress)).status).toBe(403);
+      expect((await bagus.get(bagusAddress.replace('?ms=qms&', '?ms=isms&'))).status).toBe(403);
+      expect((await bagus.get(`${plain}&via=acknowledgement`)).status).toBe(400);
+      const tokens = ctx.moduleRef.get(RedirectTokens, { strict: false });
+      const forBagus = (k?: string) => tokens.issue({ u: bagus.userId, g: ORG_IDS.ndt, m: 'qms', o: doc.objectId!, ...(k ? { k } : {}) }, new Date()).token;
+      expect((await bagus.get(`${plain}&via=acknowledgement&t=${forBagus()}`)).status).toBe(403);
+      expect((await bagus.get(`${plain}&via=acknowledgement&t=${forBagus(sariRow!.id)}`)).status).toBe(403);
+      const token = bagusAddress.split('&t=')[1]!;
+      expect((await bagus.get(`${plain}&via=acknowledgement&t=${token.slice(0, -1)}${token.endsWith('0') ? '1' : '0'}`)).status).toBe(403);
+      // A token of a read confirmation does not open the api's redirect to a provider either.
+      expect((await bagus.get(`/api/v1/storage/objects/${doc.objectId}/redirect?t=${forBagus(bagusRow!.id)}`)).status).toBe(403);
+
+      // hendra (Top Management) has no file rights in any system: he opens the version the same way and confirms it.
+      expect((await hendra.get(plain)).status).toBe(403);
+      const hendraRow = await myRow(hendra, 'QM-01');
+      expect(hendraRow, 'hendra is asked to confirm QM-01').toBeDefined();
+      expect((await hendra.post(`/api/v1/me/acknowledgements/${hendraRow!.id}/confirm`)).body.rule).toBe('ACK-OPEN-FIRST');
+      const hendraOpen = await hendra.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${hendraRow!.id}/open`);
+      expect(hendraOpen.status, hendraOpen.text).toBe(200);
+      expect(hendraOpen.body.url).toContain('&via=acknowledgement&t=');
+      expect(hendraOpen.body.url).not.toBe(bagusAddress);
+      expect((await hendra.get(hendraOpen.body.url)).status).toBe(200);
+      expect((await bagus.get(hendraOpen.body.url)).status).toBe(403);
+      const hendraConfirmed = await hendra.post(`/api/v1/me/acknowledgements/${hendraRow!.id}/confirm`);
+      expect(hendraConfirmed.status, hendraConfirmed.text).toBe(200);
+      expect(hendraConfirmed.body.message[0]).toBe('You confirmed QM-01 version 5.1');
+      expect((await taskOf('hendra', hendraRow!.id))!.status).toBe('done');
+      expect((await peopleOfRequest(db, 'ndt', qmRequest)).find((p) => p.handle === 'hendra')).toMatchObject({ status: 'confirmed' });
+
+      // The check behind the token (acknowledgementFileGrant): bagus's own row grants the version's file; another
+      // person, another file or an unknown row grants nothing.
       const pol01 = await documentOf(db, 'ndt', 'POL-01');
       const grants = await inOrg(db, 'ndt', async (trx) => ({
         own: await acknowledgementFileGrant(trx, bagus.userId, bagusRow!.id, doc.objectId!),
@@ -383,6 +440,14 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect((await mine(bagus)).some((m) => m.id === bagusLeft[0]!.id)).toBe(false);
       const qm01 = await documentOf(db, 'ndt', 'QM-01');
       expect(await inOrg(db, 'ndt', (trx) => acknowledgementFileGrant(trx, bagus.userId, bagusLeft[0]!.id, qm01.objectId!))).toBeNull();
+      // The grant is checked again at use: bagus's address of a pending row of the closed request opens nothing now,
+      // while hendra, who confirmed, may open his version again.
+      expect((await bagus.get(bagusAddress)).status).toBe(403);
+      const hendraDone = (await mine(hendra)).find((m) => m.requestId === qmRequest);
+      expect(hendraDone).toMatchObject({ status: 'confirmed' });
+      const again = await hendra.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${hendraDone!.id}/open`);
+      expect(again.status, again.text).toBe(200);
+      expect((await hendra.get(again.body.url)).status).toBe(200);
     });
 
     it('refuses an evidence item of another system without closing the request', async () => {
@@ -456,6 +521,105 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect((await rina.get(`${REQUESTS('isms')}/${request!.id}`)).status).toBe(200);
       expect((await rina.get(`${REQUESTS('bcms')}/${request!.id}`)).status).toBe(404);
       expect((await rina.post(REQUESTS('bcms'), { documentId: doc!.id })).status).toBe(404);
+    });
+  });
+
+  describe('a restricted document (F.7 classification)', () => {
+    it('asks only its owner and the managers of its systems, excuses the others when it becomes restricted, and opens its file for nobody else', async () => {
+      const [qm01] = await rowsOf<{ doc_type: string }>(db, 'ndt', sql`select doc_type from document where doc_code = 'QM-01' and deleted_at is null`);
+      const created = await rina.post('/api/v1/ms/qms/documents', {
+        docCode: 'QP-91', title: 'Supplier Pricing Procedure', docType: qm01!.doc_type, ownerHandle: 'yusuf', classification: 'internal', orgWide: false,
+        linkedMs: ['qms'], acknowledgement: SETTINGS,
+      }, { 'idempotency-key': 'ack-restricted-create-1' });
+      expect(created.status, created.text).toBe(201);
+      const docId = created.body.ref.id as string;
+      const pdf = Buffer.from('%PDF-1.4\n% MSCD supplier pricing 1.0\n%%EOF\n');
+      const objectId = await uploadFile(sari, 'qms', 'document', docId, 'Supplier-Pricing-1.0.pdf', pdf);
+      await versionInReview(db, 'ndt', 'QP-91', '1.0', 'andi', undefined, objectId);
+      expect((await rina.post(`${DOC('qms', docId)}/transitions`, { to: 'approved' })).status).toBe(200);
+      const openRequest = async () =>
+        (await rowsOf<{ id: string }>(db, 'ndt', sql`select id from acknowledgement_request where document_id = ${docId} and status = 'open'`))[0]!.id;
+      const first = await openRequest();
+      const everyone = await expectedAudience(db, 'ndt', ['qms']);
+      // The people a restricted document is for: its owner and the QMS Management System Managers and Programme Owners.
+      const allowed = [...new Set(['yusuf', ...(await expectedAudience(db, 'ndt', ['qms'], ['ms_manager', 'programme_owner']))])]
+        .filter((h) => everyone.includes(h)).sort();
+      expect(allowed).toEqual(expect.arrayContaining(['rina', 'sari', 'yusuf']));
+      expect(allowed).not.toContain('bagus');
+      expect(allowed).not.toContain('hendra');
+      // Internal: every role holder of the QMS is asked, bagus (a Domain Owner who does not own it) and hendra among them.
+      expect((await peopleOfRequest(db, 'ndt', first)).map((p) => p.handle)).toEqual(everyone);
+      const bagusRow = await myRow(bagus, 'QP-91');
+      const hendraRow = await myRow(hendra, 'QP-91');
+      const rinaRow = await myRow(rina, 'QP-91');
+      const address = (await bagus.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${bagusRow!.id}/open`)).body.url;
+      expect(address).toContain('&via=acknowledgement&t=');
+      expect((await bagus.get(address)).text).toBe(pdf.toString('utf8'));
+      expect((await bagus.post(`/api/v1/me/acknowledgements/${bagusRow!.id}/confirm`)).status).toBe(200);
+
+      // It becomes restricted: everyone pending whom the rule hides it from is excused at once with the reason and
+      // their task cancelled; the owner and the managers stay asked; bagus's confirmation stays on the record.
+      const changed = await rina.patch(DOC('qms', docId), { classification: 'restricted' });
+      expect(changed.status, changed.text).toBe(200);
+      const people = await peopleOfRequest(db, 'ndt', first);
+      const hidden = everyone.filter((h) => !allowed.includes(h) && h !== 'bagus');
+      expect(hidden).toEqual(expect.arrayContaining(['hendra', 'maya']));
+      for (const handle of hidden) {
+        expect(people.find((p) => p.handle === handle), handle).toMatchObject({
+          status: 'excused', excused_reason: 'The document is restricted to its owner, Management System Managers and Programme Owners',
+        });
+      }
+      expect(people.filter((p) => p.status === 'pending').map((p) => p.handle)).toEqual(allowed);
+      expect(people.find((p) => p.handle === 'bagus')).toMatchObject({ status: 'confirmed' });
+      expect((await taskOf('hendra', hendraRow!.id))!.status).toBe('cancelled');
+      expect((await auditOf(db, 'ndt', docId)).filter((e) => e.action === 'document.updated').at(-1)).toMatchObject({
+        actor: 'rina', before: { classification: 'internal' }, after: { classification: 'restricted', acknowledgement_excused: hidden.length },
+      });
+      // Their lists no longer name it, and nothing of it opens for them: not the address issued before the change, not a
+      // new open, not a confirmation. The owner's and the managers' rows still grant the file.
+      expect((await mine(bagus)).some((m) => m.document.code === 'QP-91')).toBe(false);
+      expect((await mine(hendra)).some((m) => m.document.code === 'QP-91')).toBe(false);
+      expect((await mine(rina)).some((m) => m.document.code === 'QP-91')).toBe(true);
+      expect((await bagus.get(address)).status).toBe(403);
+      for (const [client, row] of [[bagus, bagusRow], [hendra, hendraRow]] as const) {
+        for (const step of ['open', 'confirm']) {
+          const refused = await client.post(`/api/v1/me/acknowledgements/${row!.id}/${step}`);
+          expect(refused.status, `${client.handle} ${step}`).toBe(403);
+          expect(refused.body.messageKey).toBe('acknowledgements.restricted');
+          expect(refused.body.messages.id).toContain('Management System Manager');
+        }
+      }
+      const grants = await inOrg(db, 'ndt', async (trx) => ({
+        bagus: await acknowledgementFileGrant(trx, bagus.userId, bagusRow!.id, objectId),
+        rina: await acknowledgementFileGrant(trx, rina.userId, rinaRow!.id, objectId),
+      }));
+      expect(grants.bagus).toBeNull();
+      expect(grants.rina).toMatchObject({ acknowledgementId: rinaRow!.id, documentCode: 'QP-91', versionLabel: '1.0' });
+      expect((await rina.post(`/api/v1/me/acknowledgements/${rinaRow!.id}/open`)).status).toBe(200);
+
+      // A new version of the restricted document asks only the owner and the managers.
+      await versionInReview(db, 'ndt', 'QP-91', '1.1', 'andi', undefined, objectId);
+      const approved = await rina.post(`${DOC('qms', docId)}/transitions`, { to: 'approved' });
+      expect(approved.status, approved.text).toBe(200);
+      expect(approved.body.message[0]).toBe(`QP-91 v1.1 approved. ${allowed.length} people are asked to confirm that they have read it.`);
+      const second = await openRequest();
+      expect(second).not.toBe(first);
+      expect((await peopleOfRequest(db, 'ndt', second)).map((p) => p.handle)).toEqual(allowed);
+      expect(await myRow(bagus, 'QP-91')).toBeUndefined();
+      expect(await myRow(hendra, 'QP-91')).toBeUndefined();
+
+      // The owner changes without documents.update (as a restore or a fix in the database would): the daily job excuses
+      // yusuf, who still holds his QMS role but no longer owns the restricted document, with the same reason.
+      const andi = await userId(db, 'andi');
+      await rowsOf(db, 'ndt', sql`update document set owner_user_id = ${andi} where id = ${docId} returning id`);
+      const job = ctx.moduleRef.get(AcknowledgementRemindersJob);
+      const run = await job.run(ORG_IDS.ndt, undefined, TODAY);
+      expect(run!.excused).toBeGreaterThanOrEqual(1);
+      const after = await peopleOfRequest(db, 'ndt', second);
+      expect(after.find((p) => p.handle === 'yusuf')).toMatchObject({
+        status: 'excused', excused_reason: 'The document is restricted to its owner, Management System Managers and Programme Owners',
+      });
+      expect(after.filter((p) => p.status === 'pending').map((p) => p.handle)).toEqual(allowed.filter((h) => h !== 'yusuf'));
     });
   });
 
@@ -551,6 +715,80 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
         expect(refused.body.messageKey).toBe('task_completes_on_screen');
         expect(refused.body.messages.en).toContain(source === 'access_review' ? 'Access review of this system' : 'Personal data checks');
       }
+    });
+  });
+
+  describe('a person whose role in the task\'s system ends (D.7 "Confirming")', () => {
+    it('opens the version through another system of the document where they still hold an asked role, and nowhere once none is left', async () => {
+      // A Managed Vault document linked to the QMS and the ISMS that asks Top Management: hendra (Top Management in
+      // every system, no file rights) is asked once, with his task in the document's primary system.
+      const [qm01] = await rowsOf<{ doc_type: string }>(db, 'ndt', sql`select doc_type from document where doc_code = 'QM-01' and deleted_at is null`);
+      const created = await rina.post('/api/v1/ms/qms/documents', {
+        docCode: 'QP-92', title: 'Integrated Communication Procedure', docType: qm01!.doc_type, ownerHandle: 'yusuf', classification: 'internal', orgWide: false,
+        linkedMs: ['qms', 'isms'], acknowledgement: { required: true, scope: 'roles', roles: ['top_management'], dueDays: 14 },
+      }, { 'idempotency-key': 'ack-role-ends-create-1' });
+      expect(created.status, created.text).toBe(201);
+      const docId = created.body.ref.id as string;
+      const pdf = Buffer.from('%PDF-1.4\n% MSCD integrated communication 1.0\n%%EOF\n');
+      const objectId = await uploadFile(sari, 'qms', 'document', docId, 'Integrated-Communication-1.0.pdf', pdf);
+      await versionInReview(db, 'ndt', 'QP-92', '1.0', 'andi', undefined, objectId);
+      expect((await rina.post(`${DOC('qms', docId)}/transitions`, { to: 'approved' })).status).toBe(200);
+      const [request] = await rowsOf<{ id: string }>(db, 'ndt', sql`select id from acknowledgement_request where document_id = ${docId} and status = 'open'`);
+      const hendraRow = await myRow(hendra, 'QP-92');
+      expect(hendraRow, 'hendra is asked to confirm QP-92').toBeDefined();
+      const taskMs = (await taskOf('hendra', hendraRow!.id))!.ms;
+      expect(taskMs).toBe('qms');
+      const plain = `/api/v1/storage/objects/${objectId}/content?ms=isms&inline=true`;
+      expect((await hendra.get(plain)).status).toBe(403);
+
+      const hendraId = await userId(db, 'hendra');
+      const endRole = (ms: string) => rowsOf<{ id: string }>(db, 'ndt', sql`update user_ms_role set deleted_at = now()
+        where user_id = ${hendraId} and role = 'top_management' and deleted_at is null
+          and management_system_id = (select id from management_system where slug = ${ms}) returning id`);
+      const ended: { id: string }[] = [];
+      try {
+        // His Top Management role in the QMS ends; he still holds it in the ISMS, so he stays asked (the daily job keeps
+        // him) and his task stays where it is.
+        ended.push(...(await endRole('qms')));
+        expect(ended).toHaveLength(1);
+        const job = ctx.moduleRef.get(AcknowledgementRemindersJob);
+        await job.run(ORG_IDS.ndt, undefined, TODAY);
+        expect((await peopleOfRequest(db, 'ndt', request!.id)).find((p) => p.handle === 'hendra')).toMatchObject({ status: 'pending' });
+        expect((await taskOf('hendra', hendraRow!.id))!).toMatchObject({ ms: 'qms', status: 'open' });
+
+        // The address names the ISMS, where the content route's guard (`ms.read`) lets him in, and streams the file.
+        const opened = await hendra.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${hendraRow!.id}/open`);
+        expect(opened.status, opened.text).toBe(200);
+        expect(opened.body.url).toMatch(new RegExp(`^/api/v1/storage/objects/${objectId}/content\\?ms=isms&inline=true&via=acknowledgement&t=[A-Za-z0-9_.-]+$`));
+        const bytes = await hendra.get(opened.body.url);
+        expect(bytes.status, bytes.text.slice(0, 200)).toBe(200);
+        expect(bytes.text).toBe(pdf.toString('utf8'));
+        expect((await auditOf(db, 'ndt', objectId)).at(-1)).toMatchObject({
+          action: 'file.downloaded', actor: 'hendra', after: { via: 'acknowledgement', acknowledgement: hendraRow!.id, records: ['document:QP-92'] },
+        });
+        // The same token in the QMS, where he holds no role any more, opens nothing.
+        expect((await hendra.get(opened.body.url.replace('?ms=isms&', '?ms=qms&'))).status).toBe(403);
+        const [isms] = await rowsOf<{ id: string }>(db, 'ndt', sql`select id from management_system where slug = 'isms'`);
+        const grant = await inOrg(db, 'ndt', (trx) => acknowledgementFileGrantOf(trx, hendraId, hendraRow!.id, objectId));
+        expect(grant).toMatchObject({ acknowledgementId: hendraRow!.id, msId: isms!.id, documentCode: 'QP-92', versionLabel: '1.0' });
+
+        // His role in the ISMS ends too: no system of the document is left, so there is no address, and the one he was
+        // given opens nothing.
+        ended.push(...(await endRole('isms')));
+        expect(await inOrg(db, 'ndt', (trx) => acknowledgementFileGrantOf(trx, hendraId, hendraRow!.id, objectId))).toBe('no_role');
+        expect(await inOrg(db, 'ndt', (trx) => acknowledgementFileGrant(trx, hendraId, hendraRow!.id, objectId))).toBeNull();
+        const refused = await hendra.post(`/api/v1/me/acknowledgements/${hendraRow!.id}/open`);
+        expect(refused.status, refused.text).toBe(403);
+        expect(refused.body.messageKey).toBe('acknowledgements.no_role');
+        expect(refused.body.messages.id).toContain('sistem manajemen');
+        expect((await hendra.get(opened.body.url)).status).toBe(403);
+      } finally {
+        for (const role of ended) await rowsOf(db, 'ndt', sql`update user_ms_role set deleted_at = null where id = ${role.id} returning id`);
+      }
+      // With his roles back he confirms the version he opened.
+      const confirmed = await hendra.post(`/api/v1/me/acknowledgements/${hendraRow!.id}/confirm`);
+      expect(confirmed.status, confirmed.text).toBe(200);
+      expect((await taskOf('hendra', hendraRow!.id))!.status).toBe('done');
     });
   });
 

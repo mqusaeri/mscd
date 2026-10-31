@@ -81,14 +81,15 @@ describe('visibility of host screens', () => {
     const admin = nav.find((g) => g.id === 'admin')!;
     expect(admin.items.map((i) => i.id)).toEqual(['getting-started', 'fw', 'storage', 'organization', 'license', 'systems', 'routing', 'users', 'approvals', 'access-reviews', 'identity-providers']);
     expect(admin.items[4]).toMatchObject({ host: true, label: 'Licence', order: 30 });
-    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'audit', 'admin', 'ops']);
+    expect(nav.map((g) => g.id)).toEqual(['top', 'impl', 'audit', 'tasks', 'admin', 'ops']);
     // A persona without the Administration group gets it when a host screen of the group is visible.
     const top = hostNav([{ id: 'top', label: null, items: [{ id: 'portfolio', label: 'P' }] }], ctxOf({ lang: 'id' }), 'top');
-    // Required documented information (M2-12) and the audit screens (M2-14) also open for Top Management.
-    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['audit', 'Audit'], ['admin', 'Administrasi']]);
-    // With no built-in entries, a Domain Owner gets Required documented information (M2-12), Registers (M2-13) and
-    // Findings and actions (M2-14).
-    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info', 'registers']], ['audit', ['findings']]]);
+    // Required documented information (M2-12), the audit screens (M2-14) and Policies to confirm (M3-05) also open for
+    // Top Management.
+    expect(top.map((g) => [g.id, g.label])).toEqual([['top', null], ['impl', 'Implementasi'], ['audit', 'Audit'], ['tasks', null], ['admin', 'Administrasi']]);
+    // With no built-in entries, a Domain Owner gets Required documented information (M2-12), Registers (M2-13),
+    // Findings and actions (M2-14) and Policies to confirm (M3-05) in the My Tasks group.
+    expect(hostNav([], ctxOf(), 'owner').map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([['impl', ['documented-info', 'registers']], ['audit', ['findings']], ['tasks', ['my-confirmations']]]);
     expect(GROUP_LABELS.ops).toEqual(['Operations', 'Operasi']);
   });
 

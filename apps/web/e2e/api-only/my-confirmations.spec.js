@@ -3,7 +3,8 @@ import { test, expect, ui, go, openApp, expectToast, expectReadableText } from '
 
 // Policies to confirm against the api (MILESTONE-3 M3-05, D.7 "Confirming", H.7). rina asks the Domain Owners of the
 // ISMS to confirm the Information Security Policy POL-01 (SharePoint, Link mode). bagus sees the banner, puts it off,
-// and opens the screen from its address; "Confirm" waits until he has opened the version, which he may read at the
+// and opens the screen from its sidebar entry, which counts the open confirmation (its address also opens it);
+// "Confirm" waits until he has opened the version, which he may read at the
 // provider without file rights in the ISMS, and ticked the statement. His confirmation moves to Done and the banner
 // goes. A person who is not asked has nothing to confirm. The screen is readable in both themes.
 const body = (page) => page.locator('main [data-screen="my-confirmations"]');
@@ -59,6 +60,9 @@ test.describe('Policies to confirm against the api @api-only', () => {
     await button(banner(page), 'Later').click();
     await expect(banner(page)).toHaveCount(0);
 
+    await expect(ui.nav(page, 'Policies to confirm')).toContainText('1');
+    await ui.nav(page, 'Policies to confirm').click();
+    await expect(ui.title(page)).toHaveText('Policies to confirm');
     await page.goto('/my-confirmations?ms=isms');
     await expect(ui.title(page)).toHaveText('Policies to confirm');
     await expect(body(page)).toBeVisible();
@@ -102,6 +106,8 @@ test.describe('Policies to confirm against the api @api-only', () => {
     await openApp(page);
     await expect(page.locator('main h1')).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
+    await expect(ui.nav(page, 'Policies to confirm')).toBeVisible();
+    await expect(ui.nav(page, 'Policies to confirm')).not.toContainText(/\d/);
     await page.goto('/my-confirmations?ms=isms');
     await expect(ui.title(page)).toHaveText('Policies to confirm');
     await expect(body(page)).toContainText('Nothing to confirm');

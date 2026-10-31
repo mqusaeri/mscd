@@ -1,7 +1,7 @@
 // Policies to confirm (MILESTONE-3 M3-05, D.7 "Confirming"): routes against the shared table, the model (open and done
 // lists, the checks before "Confirm"), the API adapter over a fake fetch (the list, open, confirm, ACK-OPEN-FIRST), the
-// sample adapter on the store shared with "Policy read confirmations", the store and the banner of the host layer, and
-// the views in both languages and themes.
+// sample adapter on the store shared with "Policy read confirmations", the store and the banner of the host layer, the
+// sidebar entry with its badge and the page action of My Tasks, and the views in both languages and themes.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
@@ -14,11 +14,12 @@ import { adapterFor, deferredAdapter } from '../../src/screens/my-confirmations/
 import { confirmBlock, doneOf, openOf } from '../../src/screens/my-confirmations/model';
 import type { Confirmation, ConfirmationsAdapter } from '../../src/screens/my-confirmations/model';
 import {
-  confirmationsState, invalidateConfirmations, keyOf, loadConfirmations, putOffBanner, resetConfirmations,
+  confirmationsState, invalidateConfirmations, keyOf, loadConfirmations, openConfirmationCount, putOffBanner, resetConfirmations,
 } from '../../src/screens/my-confirmations/store';
 import { ConfirmationBanner } from '../../src/screens/my-confirmations/Banner';
 import MyConfirmationsScreen, { DoneTable, OpenItem } from '../../src/screens/my-confirmations/Screen';
-import { layerItems } from '../../src/screens/my-confirmations/actions';
+import { extraPageActions, hasOpenConfirmations, layerItems } from '../../src/screens/my-confirmations/actions';
+import { hostExtraActions, hostNav } from '../../src/screens/host';
 import { TEXT } from '../../src/screens/my-confirmations/text';
 import { createSampleAdapter as createRegisterAdapter } from '../../src/screens/acknowledgements/sample';
 import { resetSampleAcknowledgements } from '../../src/screens/acknowledgements/sample-store';
@@ -215,8 +216,57 @@ describe('my confirmation views', () => {
     }
   });
 
-  it('is in the My Tasks group of the system for every business role (ms.read), opened from the banner', () => {
-    expect(screen).toMatchObject({ id: 'my-confirmations', path: '/my-confirmations', group: 'tasks', scope: 'ms', perm: 'ms.read', roles: ['manager', 'owner', 'auditor', 'top'], nav: false });
+  it('is in the My Tasks group of the sidebar for every business role (ms.read), after My Tasks', () => {
+    expect(screen).toMatchObject({ id: 'my-confirmations', path: '/my-confirmations', group: 'tasks', order: 20, scope: 'ms', perm: 'ms.read', roles: ['manager', 'owner', 'auditor', 'top'] });
+    expect(screen.nav).not.toBe(false);
     expect(screen.pageActions).toBeUndefined();
+  });
+});
+
+describe('the sidebar entry and the link from My Tasks (C.2, C.5)', () => {
+  const tasksGroup = [{ id: 'tasks' as const, label: 'My Tasks', items: [{ id: 'mytasks', label: 'My Tasks' }] }];
+
+  it('counts the open confirmations of the session person as the badge of the entry after My Tasks', async () => {
+    const ctx = ctxOf('en', { role: 'owner' });
+    expect(openConfirmationCount(ctx)).toBe(0);
+    expect(screen.count!(ctx)).toBe(0);
+    const before = hostNav(tasksGroup, ctx, 'owner').find((g) => g.id === 'tasks')!;
+    expect(before.items.map((i) => [i.id, i.n ?? 0])).toEqual([['mytasks', 0], ['my-confirmations', 0]]);
+    const register = createRegisterAdapter({ getD: () => D, org: () => 'ndt' });
+    await register.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await register.ask('isms', { documentId: 'STD-05', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await loadConfirmations(ctx);
+    expect(openConfirmationCount(ctx)).toBe(2);
+    const after = hostNav(tasksGroup, ctx, 'owner').find((g) => g.id === 'tasks')!;
+    expect(after.items.find((i) => i.id === 'my-confirmations')).toMatchObject({ label: 'Policies to confirm', host: true, n: 2 });
+    // Another person or another organisation counts nothing until their own list loads.
+    expect(openConfirmationCount(ctxOf('en', { person: { handle: 'bagus', name: 'Bagus Prasetyo', jobTitle: '-' } }))).toBe(0);
+    expect(openConfirmationCount(ctxOf('en', { org: { id: 'tst' } as never }))).toBe(0);
+    // Putting the banner off keeps the badge.
+    putOffBanner();
+    expect(openConfirmationCount(ctx)).toBe(2);
+    // API mode: the entry follows ms.read in the selected system.
+    const api = ctxOf('en', { mode: 'api', can: (_ms: string, perm: unknown) => perm === 'ms.read' });
+    expect(hostNav([], api, 'owner').find((g) => g.id === 'tasks')!.items.map((i) => i.id)).toEqual(['my-confirmations']);
+    const none = ctxOf('en', { mode: 'api', can: () => false });
+    expect(hostNav([], none, 'owner').some((g) => g.items.some((i) => i.id === 'my-confirmations'))).toBe(false);
+  });
+
+  it('adds "Policies to confirm" to My Tasks while confirmations are open, which opens the screen', async () => {
+    expect(extraPageActions).toHaveLength(1);
+    expect(extraPageActions[0]).toMatchObject({ screen: 'mytasks', id: 'mytasks.policiesToConfirm', label: TEXT.title });
+    const ctx = ctxOf('en', { screen: 'mytasks' });
+    expect(hasOpenConfirmations(ctx)).toBe(false);
+    expect(hostExtraActions('mytasks', ctx)).toEqual([]);
+    await createRegisterAdapter({ getD: () => D, org: () => 'ndt' }).ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await loadConfirmations(ctx);
+    expect(hasOpenConfirmations(ctx)).toBe(true);
+    const [action] = hostExtraActions('mytasks', ctx);
+    expect(action).toMatchObject({ label: 'Policies to confirm', primary: true });
+    action!.go();
+    expect(ctx.go).toHaveBeenCalledWith('my-confirmations');
+    expect(hostExtraActions('mytasks', ctxOf('id', { screen: 'mytasks' }))[0]!.label).toBe(TEXT.title[1]);
+    expect(hasOpenConfirmations(ctxOf('en', { msObj: null }))).toBe(false);
+    expect(hostExtraActions('docs', ctx).map((a) => a.label)).not.toContain('Policies to confirm');
   });
 });

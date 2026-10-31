@@ -6,7 +6,7 @@
   "scope": "ms",
   "perm": "ms.read",
   "roles": ["manager", "owner", "auditor", "top"],
-  "nav": false,
+  "nav": true,
   "pageActions": [],
   "sampleRole": "owner",
   "open": "query"

@@ -153,16 +153,32 @@ export const ObjectOpenResponse = named(
 );
 export type ObjectOpenResponse = z.infer<typeof ObjectOpenResponse>;
 
-export const ObjectRedirectQuery = named('ObjectRedirectQuery', z.strictObject({ t: z.string().regex(/^[A-Za-z0-9_.-]{16,512}$/) }), 'Query of storage object redirect: the HMAC token (5 minutes) from open', {
+/** A redirect token (`files/redirect-token.ts`): `<base64url payload>.<hex MAC>`. */
+const RedirectToken = z.string().regex(/^[A-Za-z0-9_.-]{16,512}$/);
+
+export const ObjectRedirectQuery = named('ObjectRedirectQuery', z.strictObject({ t: RedirectToken }), 'Query of storage object redirect: the HMAC token (5 minutes) from open', {
   valid: [{ t: 'eyJ1IjoiYSJ9.c2lnbmF0dXJl' }],
   invalid: [{}, { t: 'short' }],
 });
 export type ObjectRedirectQuery = z.infer<typeof ObjectRedirectQuery>;
 
-export const ObjectContentQuery = named('ObjectContentQuery', z.strictObject({ ms: MsId, inline: QueryBoolean.optional() }), 'Query of storage object content; inline only for PDF and raster images (F.13)', {
-  valid: [{ ms: 'isms' }, { ms: 'isms', inline: 'true' }],
-  invalid: [{ inline: 'true' }, { ms: 'isms', inline: 'yes' }],
-});
+export const ObjectContentQuery = named(
+  'ObjectContentQuery',
+  z
+    .strictObject({
+      ms: MsId,
+      inline: QueryBoolean.optional(),
+      /** Milestone 3 D.7: opened through a read confirmation; `t` is then the token `me.acknowledgements.open` issued. */
+      via: z.enum(['acknowledgement']).optional(),
+      t: RedirectToken.optional(),
+    })
+    .refine((q) => (q.via === undefined) === (q.t === undefined), { message: 'via and t are given together', path: ['t'] }),
+  'Query of storage object content; inline only for PDF and raster images (F.13). With via=acknowledgement and the token t of me.acknowledgements.open, a person asked to confirm the version opens it without storage.object.read (Milestone 3 D.7)',
+  {
+    valid: [{ ms: 'isms' }, { ms: 'isms', inline: 'true' }, { ms: 'isms', inline: 'true', via: 'acknowledgement', t: 'eyJ1IjoiYSIsImsiOiJiIn0.c2lnbmF0dXJl' }],
+    invalid: [{ inline: 'true' }, { ms: 'isms', inline: 'yes' }, { ms: 'isms', via: 'acknowledgement' }, { ms: 'isms', t: 'eyJ1IjoiYSJ9.c2lnbmF0dXJl' }, { ms: 'isms', via: 'other', t: 'eyJ1IjoiYSJ9.c2lnbmF0dXJl' }],
+  },
+);
 export type ObjectContentQuery = z.infer<typeof ObjectContentQuery>;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -304,10 +320,19 @@ export const storageObjectContentRoute = defineRoute({
   owner: 'WP-21',
   method: 'GET',
   path: '/api/v1/storage/objects/:id/content',
-  summary: 'File bytes of a Managed Vault or pass-through object through FileResponder (F.13)',
+  summary: 'File bytes of a Managed Vault or pass-through object through FileResponder (F.13); with via=acknowledgement the token of a read confirmation grants that one version (Milestone 3 D.7)',
   auth: 'session',
-  permission: 'storage.object.read',
-  scope: 'ms',
+  // Milestone 3 D.7 "Confirming": a person asked to confirm a version opens it also without file rights in the system
+  // (Top Management, a Domain Owner who does not own the document). The guard then checks only that the person may
+  // read the system; the service checks the token and the person's acknowledgement row (`acknowledgementFileGrant`).
+  permissionBy: {
+    source: 'query',
+    member: 'via',
+    cases: {
+      acknowledgement: { permission: 'ms.read', scope: 'ms' },
+      '*': { permission: 'storage.object.read', scope: 'ms' },
+    },
+  },
   msSource: 'query',
   params: IdParams,
   query: ObjectContentQuery,

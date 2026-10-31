@@ -13,7 +13,9 @@
 // Milestone 3 (D.2, D.7, M3-05): a document carries its read confirmation settings (`acknowledgement`: required, the
 // audience scope, the roles of scope `roles`, the days to confirm), set on create and changed on update; the approval
 // of a new version of a document that asks for read confirmation opens the confirmation request of that version in the
-// same transaction (`AcknowledgementService`, which closes the request of the earlier version).
+// same transaction (`AcknowledgementService`, which closes the request of the earlier version). A change of the
+// classification or the owner excuses the pending confirmations of people who may no longer see a `restricted`
+// document (`excuseHiddenByClassification`).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { CommandResult, DocumentAcknowledgement, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest, DocumentVersionItem } from '@mscd/shared';
@@ -27,7 +29,9 @@ import {
   AUDIT_WRITER, LICENCE_GATE, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type AuthzState, type LicenceGate,
   type MembershipService, type PermissionEvaluator, type Principal, type RecordResolver, type TenantInfo, type Trx,
 } from '../../common/tokens';
-import { AcknowledgementService, DEFAULT_SETTINGS, sameSettings, settingsOfRow, type AcknowledgementSettings } from '../acknowledgements/acknowledgement.service';
+import {
+  AcknowledgementService, DEFAULT_SETTINGS, excuseHiddenByClassification, sameSettings, settingsOfRow, type AcknowledgementSettings,
+} from '../acknowledgements/acknowledgement.service';
 import { ScopePolicyService } from '../authz/scope-policy';
 import { enqueueDerived } from '../implementation/readiness/readiness-queue';
 import { RuleEngine } from '../rules';
@@ -334,6 +338,12 @@ export class DocumentCommandsService {
         }
       }
       const updatedAt = await writeRow(trx, ENTITY, id, set, actor);
+      // Milestone 3 D.7 with the classification rule (F.7): once the document is `restricted` (or changes owner while
+      // it is), pending confirmations of people who may no longer see it are excused at once.
+      if ('classification' in set || 'owner_user_id' in set) {
+        const excused = await excuseHiddenByClassification(trx, id, actor);
+        if (excused > 0) after.acknowledgement_excused = excused;
+      }
       if (Object.keys(after).length > 0) {
         await this.audit.record(trx, {
           action: 'document.updated',

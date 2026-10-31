@@ -54,6 +54,7 @@ export const EXCUSED = {
   replaced: (version: string) => `Replaced by version ${version}`.slice(0, 200),
   membershipEnded: 'Membership of the organisation ended',
   roleEnded: 'No longer holds a role that is asked to confirm',
+  restricted: 'The document is restricted to its owner, Management System Managers and Programme Owners',
 } as const;
 
 /** Refusals of the routes: message key and both texts. */
@@ -103,10 +104,20 @@ export const REFUSALS = {
     en: 'This version has no file to open. Ask the Management System Manager.',
     id: 'Versi ini tidak memiliki berkas untuk dibuka. Tanyakan kepada Management System Manager.',
   },
+  restricted: {
+    key: 'acknowledgements.restricted',
+    en: 'This document is now restricted to its owner and to the Management System Managers and Programme Owners of its systems, so you are no longer asked to confirm it.',
+    id: 'Dokumen ini kini dibatasi untuk pemiliknya serta Management System Manager dan Programme Owner sistemnya, sehingga Anda tidak lagi diminta mengonfirmasinya.',
+  },
+  noRole: {
+    key: 'acknowledgements.no_role',
+    en: 'You no longer hold a role in a management system of this document, so you are no longer asked to confirm it.',
+    id: 'Anda tidak lagi memegang peran di sistem manajemen dokumen ini, sehingga Anda tidak lagi diminta mengonfirmasinya.',
+  },
   fileNotReadable: {
     key: 'acknowledgements.file_not_readable',
-    en: 'This document is kept in the Managed Vault and your role cannot open its files in MSCD. Ask the Management System Manager for a copy.',
-    id: 'Dokumen ini disimpan di Managed Vault dan peran Anda tidak dapat membuka berkasnya di MSCD. Minta salinannya kepada Management System Manager.',
+    en: 'The file of this version can no longer be opened in MSCD, for example because the document was removed. Ask the Management System Manager for a copy.',
+    id: 'Berkas versi ini tidak dapat dibuka lagi di MSCD, misalnya karena dokumennya telah dihapus. Minta salinannya kepada Management System Manager.',
   },
 } as const;
 

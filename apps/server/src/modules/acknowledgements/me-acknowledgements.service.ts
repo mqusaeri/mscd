@@ -5,18 +5,26 @@
 //
 // Opening (D.7): the address is short-lived and names only the version of the request.
 // - A file the api streams (Managed Vault, pass-through): the content route of the system in which the person may read
-//   it. A person without file rights there cannot read Managed Vault content through the existing routes, so the route
-//   refuses with `acknowledgements.file_not_readable` and records nothing. Follow-up 1 of the M3-05 handoff lifts this:
-//   a redirect token that names the person's row, which the file routes accept when `acknowledgementFileGrant`
-//   (acknowledgement-file-grant.ts) passes.
+//   it. A person without file rights there (Top Management, a Domain Owner who does not own the document) gets the
+//   content route with `via=acknowledgement` and a redirect token (`files/redirect-token.ts`) that names their row
+//   (`k`); the content route then checks `acknowledgementFileGrant` (acknowledgement-file-grant.ts) in place of the
+//   file permission, so the address opens this one version for this person only, for 5 minutes. The address names a
+//   system of the document where the person still holds an asked role (the task's, else the request's, else another
+//   one), since the content route's guard checks `ms.read` there; with none left, open answers 403
+//   `acknowledgements.no_role` and records no open.
 // - A file kept in the customer's repository: the api's redirect (token of `files/redirect-token.ts`) for a person
 //   who may read the file in MSCD, else the provider's address itself, where the person's own access applies.
 // The open is audited as `acknowledgement.opened` and `file.opened`; `opened_at` keeps the first time.
+//
+// Classification (F.7): a `restricted` document is only for its owner and the Management System Managers and Programme
+// Owners of a linked system (acknowledgement-visibility.ts). The audience never holds anyone else; a row left from
+// before the document became restricted or changed owner is out of the person's list, and opening or confirming it
+// answers 403 `acknowledgements.restricted` until the daily job excuses it.
 import { Inject, Injectable } from '@nestjs/common';
 import type { CommandResult, GatewayObjectRef, MyAcknowledgementItem, ObjectOpenResponse, OpenUrlResult } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
-import { BusinessRuleError, NotFoundError, ProblemError } from '../../common/problems';
+import { BusinessRuleError, ForbiddenError, NotFoundError, ProblemError } from '../../common/problems';
 import {
   AUDIT_WRITER, GATEWAY_CLIENT, PERMISSION_EVALUATOR, type AuditWriter, type GatewayClient, type PermissionEvaluator, type Principal, type Trx,
 } from '../../common/tokens';
@@ -24,11 +32,13 @@ import { ScopePolicyService } from '../authz/scope-policy';
 import { viaGateway } from '../files/files-support';
 import { assertContentNotDisposed, streamsContent } from '../files/object-access.service';
 import { RedirectTokens } from '../files/redirect-token';
+import { acknowledgementFileGrantOf } from './acknowledgement-file-grant';
 import { ruleMessageKey, ruleMessages } from '../rules';
 import { StorageGatewayContext, type RepositoryRow } from '../storage';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { REFUSALS } from './acknowledgement-text';
 import { closeTasks, conflict, refusal } from './acknowledgement.service';
+import { classificationAllows } from './acknowledgement-visibility';
 import { orgOf } from './acknowledgement-requests.service';
 
 /** How long the address of an open is offered (the content and redirect routes check again at use). */
@@ -66,6 +76,8 @@ interface OwnRow {
   storage_object_id: string | null;
   task_ms_id: string | null;
   task_ms_slug: string | null;
+  /** Whether the classification rule lets the person see the document (`classificationAllows`). */
+  visible: boolean;
 }
 
 interface ObjectRow {
@@ -115,6 +127,7 @@ export class MeAcknowledgementsService {
              where t.source_rule = 'acknowledgement' and t.entity_type = 'acknowledgement' and t.entity_id = a.id and t.deleted_at is null
              order by t.created_at desc limit 1) tm on true
          where a.user_id = ${principal.user.id}::uuid and a.deleted_at is null
+           and ${classificationAllows(sql`${principal.user.id}::uuid`, sql.ref('d.id'))}
            and ((a.status = 'pending' and r.status = 'open')
                 or (a.status <> 'pending' and a.updated_at > now() - make_interval(days => ${RECENT_DAYS})))
          order by (a.status = 'pending') desc, case when a.status = 'pending' then r.due_on end, a.updated_at desc, a.id
@@ -142,6 +155,7 @@ export class MeAcknowledgementsService {
     const org = orgOf(principal);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const row = await ownRow(trx, principal.user.id, id);
+      assertVisible(row);
       if (row.status === 'excused') throw conflict(REFUSALS.excused);
       if (row.status === 'pending' && row.request_status !== 'open') throw conflict(REFUSALS.requestClosed);
       if (!row.storage_object_id) throw refusal(REFUSALS.noFile);
@@ -158,11 +172,26 @@ export class MeAcknowledgementsService {
       const now = this.clock.now();
       const readable = await this.readableSystem(trx, principal, row, objectId);
       let url: string;
-      let via: 'content' | 'redirect' | 'provider';
-      if (streamsContent({ hash_source: object.hash_source }, repository)) {
-        if (!readable) throw refusal(REFUSALS.fileNotReadable);
+      let expiresAt = new Date(now.getTime() + OPEN_URL_TTL_MS);
+      let via: 'content' | 'acknowledgement_token' | 'redirect' | 'provider';
+      if (streamsContent({ hash_source: object.hash_source }, repository) && readable) {
         url = `/api/v1/storage/objects/${object.id}/content?ms=${encodeURIComponent(readable)}&inline=true`;
         via = 'content';
+      } else if (streamsContent({ hash_source: object.hash_source }, repository)) {
+        // No file rights in any system the document counts in: the read confirmation itself grants this version
+        // (D.7), through a token the content route checks with `acknowledgementFileGrant`, as it does here. The token
+        // names the grant's system, where the person still holds an asked role, so the route's guard (`ms.read`)
+        // passes there.
+        const grant = await acknowledgementFileGrantOf(trx, principal.user.id, row.id, objectId);
+        if (grant === 'no_role') throw forbidden(REFUSALS.noRole);
+        const system = typeof grant === 'string'
+          ? undefined
+          : await trx.selectFrom('management_system').select('slug').where('id', '=', grant.msId).where('deleted_at', 'is', null).executeTakeFirst();
+        if (typeof grant === 'string' || !system) throw refusal(REFUSALS.fileNotReadable);
+        const issued = this.tokens.issue({ u: principal.user.id, g: org.id, m: system.slug, o: object.id, k: row.id }, now);
+        url = `/api/v1/storage/objects/${object.id}/content?ms=${encodeURIComponent(system.slug)}&inline=true&via=acknowledgement&t=${issued.token}`;
+        expiresAt = issued.expiresAt;
+        via = 'acknowledgement_token';
       } else if (readable) {
         const issued = this.tokens.issue({ u: principal.user.id, g: org.id, m: readable, o: object.id }, now);
         url = `/api/v1/storage/objects/${object.id}/redirect?t=${issued.token}`;
@@ -196,7 +225,7 @@ export class MeAcknowledgementsService {
         entityCode: object.display_name,
         after: { via: 'acknowledgement', repository: repository.slug, records: [`document:${row.doc_code}`] },
       });
-      return { url, expiresAt: new Date(now.getTime() + OPEN_URL_TTL_MS).toISOString() };
+      return { url, expiresAt: expiresAt.toISOString() };
     });
   }
 
@@ -208,6 +237,7 @@ export class MeAcknowledgementsService {
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const row = await ownRow(trx, actor, id);
+      assertVisible(row);
       if (row.status === 'confirmed') throw conflict(REFUSALS.confirmed);
       if (row.status === 'excused') throw conflict(REFUSALS.excused);
       if (row.request_status !== 'open') throw conflict(REFUSALS.requestClosed);
@@ -276,7 +306,8 @@ async function ownRow(trx: Trx, userId: string, id: string): Promise<OwnRow> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundError();
   const { rows } = await sql<OwnRow>`
     select a.id, a.user_id, a.status, a.opened_at, r.id as request_id, r.status as request_status, r.management_system_id as request_ms_id,
-           d.id as document_id, d.doc_code, d.is_org_wide, v.version_label, v.storage_object_id, t.ms_id as task_ms_id, t.ms_slug as task_ms_slug
+           d.id as document_id, d.doc_code, d.is_org_wide, v.version_label, v.storage_object_id, t.ms_id as task_ms_id, t.ms_slug as task_ms_slug,
+           ${classificationAllows(sql`${userId}::uuid`, sql.ref('d.id'))} as visible
       from acknowledgement a
       join acknowledgement_request r on r.id = a.acknowledgement_request_id and r.deleted_at is null
       join document d on d.id = r.document_id
@@ -290,6 +321,19 @@ async function ownRow(trx: Trx, userId: string, id: string): Promise<OwnRow> {
   const row = rows[0];
   if (!row) throw new NotFoundError();
   return row;
+}
+
+/**
+ * 403 `acknowledgements.restricted` when the classification rule hides the row's document from the person (F.7): it
+ * became `restricted`, or changed owner, after the request opened.
+ */
+function assertVisible(row: OwnRow): void {
+  if (!row.visible) throw forbidden(REFUSALS.restricted);
+}
+
+/** 403 with a message key and both texts. */
+function forbidden(text: { key: string; en: string; id: string }): ForbiddenError {
+  return new ForbiddenError(text.en, { messageKey: text.key, messages: { en: text.en, id: text.id } });
 }
 
 /** The stored facts of an object that gateway calls compare with the provider (D.5 `GatewayObjectRef`). */

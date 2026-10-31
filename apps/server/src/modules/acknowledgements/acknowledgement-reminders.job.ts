@@ -1,7 +1,8 @@
 // `acknowledgement.reminders` job handler (Milestone 3 J.3, D.7 "Reminders"): daily per organisation at 08:10 local
 // through `scheduler.tick` (`ak:<org>:<local date>`), on the date of its run (`Clock.runDate`). For every open request:
-// - people whose membership ended, or who no longer hold a role that puts them in the request's audience, become
-//   `excused` with the reason, and their tasks are cancelled (the membership and role services stay unchanged);
+// - people whose membership ended, who no longer hold a role that puts them in the request's audience, or whom the
+//   classification rule no longer lets see the document (it became `restricted`, acknowledgement-visibility.ts),
+//   become `excused` with the reason, and their tasks are cancelled (the membership and role services stay unchanged);
 // - pending people are reminded 7 days after the start and on the due date, then every 7 days, at most three times in
 //   all (`reminder_count`, manual reminders included); a day the job did not run is caught up once, never twice;
 // - a request past its due date with people still pending reaches the Management System Managers of its system once,
@@ -121,15 +122,14 @@ export class AcknowledgementRemindersJob implements JobHandlerInstance<'acknowle
       .where('deleted_at', 'is', null)
       .execute();
     if (pending.length === 0) return 0;
-    const audience = new Set(
-      (await audienceOf(trx, {
-        documentId: request.document_id,
-        isOrgWide: request.is_org_wide,
-        scope: request.audience_scope,
-        roles: request.audience_roles,
-        primaryMsId: request.management_system_id,
-      })).map((m) => m.userId),
-    );
+    const query = {
+      documentId: request.document_id,
+      isOrgWide: request.is_org_wide,
+      scope: request.audience_scope,
+      roles: request.audience_roles,
+      primaryMsId: request.management_system_id,
+    };
+    const audience = new Set((await audienceOf(trx, query)).map((m) => m.userId));
     const gone = pending.map((p) => p.user_id).filter((id) => !audience.has(id));
     if (gone.length === 0) return 0;
     const members = new Set(
@@ -139,9 +139,14 @@ export class AcknowledgementRemindersJob implements JobHandlerInstance<'acknowle
            and u.status = 'active' and u.deleted_at is null and om.user_id = any(${gone}::uuid[])`.execute(trx)).rows.map((r) => r.user_id),
     );
     const left = gone.filter((id) => !members.has(id));
-    const roleless = gone.filter((id) => members.has(id));
+    const stayed = gone.filter((id) => members.has(id));
+    // Still asked by their role and out only by the classification rule: the document became restricted or changed owner.
+    const byRole = stayed.length > 0 ? new Set((await audienceOf(trx, { ...query, ignoreClassification: true })).map((m) => m.userId)) : new Set<string>();
+    const hidden = stayed.filter((id) => byRole.has(id));
+    const roleless = stayed.filter((id) => !byRole.has(id));
     return (await excusePending(trx, request.id, left, EXCUSED.membershipEnded, SYSTEM_USER_ID))
-      + (await excusePending(trx, request.id, roleless, EXCUSED.roleEnded, SYSTEM_USER_ID));
+      + (await excusePending(trx, request.id, roleless, EXCUSED.roleEnded, SYSTEM_USER_ID))
+      + (await excusePending(trx, request.id, hidden, EXCUSED.restricted, SYSTEM_USER_ID));
   }
 
   /** Reminds the pending people whose reminder date is in force (D.7). */

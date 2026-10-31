@@ -4,6 +4,13 @@
 // `content` streams the bytes through `FileResponder`. Every route checks `ScopePolicy.canReadObject`; external
 // auditors open pack copies only and never receive a provider URL; Top Management has no file access. An object whose
 // content an approved disposal removed answers 404 `content_disposed` on every route (Milestone 3 D.2).
+//
+// One exception (Milestone 3 D.7 "Confirming"): `content` with `via=acknowledgement` and the token that
+// `me.acknowledgements.open` issued for the person's acknowledgement row opens that one version for that person, also
+// without `storage.object.read` in the system. The token is checked as on `redirect`, and the row through
+// `acknowledgementFileGrant` in place of the permission and the owner scope of `canReadObject`. The grant keeps the
+// classification rule of `canReadObject` (a `restricted` document only for its owner and the Management System
+// Managers and Programme Owners of a linked system); every other route and check stays.
 import { Inject, Injectable } from '@nestjs/common';
 import type { GatewayRepository, GatewayTenant, ObjectOpenResponse, OpenUrlResult } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -11,6 +18,7 @@ import { sql } from 'kysely';
 import { FileResponder } from '../../common/file-response';
 import { BusinessRuleError, ForbiddenError, NotFoundError, ProblemError } from '../../common/problems';
 import { AUDIT_WRITER, GATEWAY_CLIENT, type AuditWriter, type GatewayClient, type Principal, type Trx } from '../../common/tokens';
+import { acknowledgementFileGrant } from '../acknowledgements/acknowledgement-file-grant';
 import { addAuditorReadRefs, type AuditorReadRef } from '../authz/auditor-read';
 import { ScopePolicyService, type ScopeContext } from '../authz/scope-policy';
 import type { RepositoryRow } from '../storage';
@@ -126,16 +134,15 @@ export class ObjectAccessService {
   async redirect(principal: Principal, id: string, token: string, reply: FastifyReply): Promise<void> {
     const org = this.common.org(principal);
     const claims = this.tokens.verify(token, this.common.clock.now());
-    if (!claims || claims.o !== id || claims.u !== principal.user.id || claims.g !== org.id) {
-      throw new ForbiddenError('The link has expired or was issued to someone else', { messageKey: 'files.redirect_token' });
-    }
+    // A token of a read confirmation (`k`, Milestone 3 D.7) opens the content route only.
+    if (!claims || claims.k !== undefined || claims.o !== id || claims.u !== principal.user.id || claims.g !== org.id) throw redirectTokenRefused();
     // The permission is checked again at use (D.3): a role revoked since `open` ends the access.
     if (!(await this.common.holds(principal, claims.m, 'storage.object.read'))) throw new ForbiddenError();
     const call = await this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const readable = await this.readable(trx, principal, claims.m, id);
       if (readable.ctx.kind === 'external_auditor') throw new NotFoundError();
       if (streamsContent(readable.object, readable.repository)) throw new NotFoundError('This file opens through the content route');
-      const call = await this.gatewayCall(trx, org.id, readable);
+      const call = await this.gatewayCall(trx, org.id, readable.repository);
       await this.audit.record(trx, {
         action: 'file.opened',
         msId: readable.ctx.ms.id,
@@ -157,6 +164,10 @@ export class ObjectAccessService {
   // ---------------------------------------------------------------------------------------------------------------
 
   async content(principal: Principal, id: string, ms: string, inline: boolean, request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> {
+    // The validated query, as the guard read it: `via=acknowledgement` chose the `ms.read` case of the route's
+    // `permissionBy`, so this request must pass the read confirmation's checks instead of the file permission.
+    const query = request.mscd?.input.query as { via?: string; t?: string } | undefined;
+    if (query?.via === 'acknowledgement') return this.contentByAcknowledgement(principal, id, ms, inline, query.t ?? '', reply);
     const org = this.common.org(principal);
     const call = await this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const readable = await this.readable(trx, principal, ms, id);
@@ -166,28 +177,44 @@ export class ObjectAccessService {
         throw new BusinessRuleError('BR-35', ruleMessages('BR-35', readable.repository.name), undefined, { messageKey: 'files.opens_in_repository' });
       }
       if (auditor) addAuditorReadRefs(request, readable.refs);
-      return { ...(await this.gatewayCall(trx, org.id, readable)), readable };
+      return { ...(await this.gatewayCall(trx, org.id, readable.repository)), readable };
     });
     const { object, repository, ctx } = call.readable;
-    const streamed = await viaGateway(repository, () =>
-      this.gateway.stream({ tenant: call.tenant, repository: call.descriptor, object: this.common.objectRef(object) }),
-    );
-    const size = streamed.size ?? (object.size_bytes === null ? null : Number(object.size_bytes));
-    return this.files.send(reply, {
-      body: streamed.stream,
-      // F.13: the type the gateway detected at upload; the gateway's detection of this stream otherwise.
-      storedType: object.mime_type ?? streamed.detectedType,
-      fileName: object.display_name ?? `file-${object.id}`,
-      size,
-      inline,
-      audit: {
-        action: 'file.downloaded',
-        msId: ctx.ms.id,
-        entityType: 'storage_object',
-        entityId: object.id,
-        entityCode: object.display_name,
-        after: { repository: repository.slug, inline, records: call.readable.refs.map((r) => `${r.entityType}:${r.code}`) },
-      },
+    return this.stream(reply, call, object, repository, inline, ctx.ms.id, { records: call.readable.refs.map((r) => `${r.entityType}:${r.code}`) });
+  }
+
+  /**
+   * `content` with `via=acknowledgement` (Milestone 3 D.7): the token must be one of `me.acknowledgements.open` for
+   * this caller, organisation, system and object, still valid, naming an acknowledgement row (`k`); the row must still
+   * grant the object to the caller (`acknowledgementFileGrant`: the caller's own row, not excused, of an open request
+   * or confirmed, whose version holds the object, of a document the classification rule lets the caller see) in the
+   * system the grant names, a system of the document where the caller still holds an asked role, which is the one the
+   * token and the query name. Refused with 403 `files.redirect_token` otherwise. Disposed content and BR-35 answer as
+   * on the other routes. The download is audited in the grant's system with `via: acknowledgement`.
+   */
+  private async contentByAcknowledgement(principal: Principal, id: string, ms: string, inline: boolean, token: string, reply: FastifyReply): Promise<FastifyReply> {
+    const org = this.common.org(principal);
+    const claims = this.tokens.verify(token, this.common.clock.now());
+    if (!claims?.k || claims.o !== id || claims.u !== principal.user.id || claims.g !== org.id || claims.m !== ms) throw redirectTokenRefused();
+    const acknowledgementId = claims.k;
+    const call = await this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
+      // Checked again at use: an excusal, a closed request or a new version since `open` ends the grant.
+      const grant = await acknowledgementFileGrant(trx, principal.user.id, acknowledgementId, id);
+      const system = grant
+        ? await trx.selectFrom('management_system').select(['id', 'slug']).where('id', '=', grant.msId).where('deleted_at', 'is', null).executeTakeFirst()
+        : undefined;
+      if (!grant || system?.slug !== ms) throw redirectTokenRefused();
+      await assertContentNotDisposed(trx, id);
+      const object = await this.common.object(trx, id);
+      const repository = await this.common.repositoryOf(trx, object);
+      if (!streamsContent(object, repository)) {
+        throw new BusinessRuleError('BR-35', ruleMessages('BR-35', repository.name), undefined, { messageKey: 'files.opens_in_repository' });
+      }
+      return { ...(await this.gatewayCall(trx, org.id, repository)), grant, object, repository };
+    });
+    const { object, repository, grant } = call;
+    return this.stream(reply, call, object, repository, inline, grant.msId, {
+      via: 'acknowledgement', acknowledgement: grant.acknowledgementId, records: [`document:${grant.documentCode}`],
     });
   }
 
@@ -225,7 +252,44 @@ export class ObjectAccessService {
     return rows;
   }
 
-  private async gatewayCall(trx: Trx, orgId: string, readable: ReadableObject): Promise<{ tenant: GatewayTenant; descriptor: GatewayRepository }> {
-    return { tenant: await this.common.storage.tenant(trx, orgId), descriptor: await this.common.storage.repository(trx, readable.repository) };
+  private async gatewayCall(trx: Trx, orgId: string, repository: RepositoryRow): Promise<{ tenant: GatewayTenant; descriptor: GatewayRepository }> {
+    return { tenant: await this.common.storage.tenant(trx, orgId), descriptor: await this.common.storage.repository(trx, repository) };
   }
+
+  /** Streams an object through `FileResponder` (F.13), audited `file.downloaded` in `msId` with `after` extended. */
+  private async stream(
+    reply: FastifyReply,
+    call: { tenant: GatewayTenant; descriptor: GatewayRepository },
+    object: StorageObjectRow,
+    repository: RepositoryRow,
+    inline: boolean,
+    msId: string,
+    after: Record<string, unknown>,
+  ): Promise<FastifyReply> {
+    const streamed = await viaGateway(repository, () =>
+      this.gateway.stream({ tenant: call.tenant, repository: call.descriptor, object: this.common.objectRef(object) }),
+    );
+    const size = streamed.size ?? (object.size_bytes === null ? null : Number(object.size_bytes));
+    return this.files.send(reply, {
+      body: streamed.stream,
+      // F.13: the type the gateway detected at upload; the gateway's detection of this stream otherwise.
+      storedType: object.mime_type ?? streamed.detectedType,
+      fileName: object.display_name ?? `file-${object.id}`,
+      size,
+      inline,
+      audit: {
+        action: 'file.downloaded',
+        msId,
+        entityType: 'storage_object',
+        entityId: object.id,
+        entityCode: object.display_name,
+        after: { repository: repository.slug, inline, ...after },
+      },
+    });
+  }
+}
+
+/** 403 `files.redirect_token`: the token expired, was forged, or was issued to someone else or for another purpose. */
+function redirectTokenRefused(): ForbiddenError {
+  return new ForbiddenError('The link has expired or was issued to someone else', { messageKey: 'files.redirect_token' });
 }

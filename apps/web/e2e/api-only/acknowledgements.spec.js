@@ -8,8 +8,10 @@ import {
 // bagus submits a new version, which rina approves, so everyone with a role in the QMS is asked to confirm it. bagus
 // sees the banner and the task, cannot confirm before he opens the version (ACK-OPEN-FIRST), opens it and confirms.
 // rina sees 1 confirmed in the document's detail and in the register, with the person list; hendra (Top Management)
-// sees the totals only (product decision 2); rina closes the request into the evidence item EQ-0136 (clause 7.3,
-// awareness), which then holds a new file. Every dialog is readable in both themes.
+// sees the totals only (product decision 2). hendra has no file rights in the QMS: he reaches "Policies to confirm" from
+// the sidebar, opens the version through his read confirmation (an address for him and that version only) and
+// confirms it. rina closes the request into the evidence item EQ-0136 (clause 7.3, awareness), which then holds a new
+// file. Every dialog is readable in both themes.
 const panel = (page) => ui.drawer(page).locator('[data-docs-edit]');
 const panelButton = (page, name) => panel(page).locator('button', { hasText: new RegExp(`^${name}$`) });
 const dialog = (page) => ui.modal(page).last();
@@ -147,6 +149,9 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await inBothThemes(page, () => expectReadableText(page, 4.5));
     await go(page, 'My Tasks');
     await expect(page.locator('main')).toContainText(`Read and confirm QM-01 Quality Manual, version ${version}, in Policies to confirm`);
+    // My Tasks links to the screen that completes the task, and the sidebar entry counts the open confirmation.
+    await expect(ui.pageAction(page, 'Policies to confirm')).toBeVisible();
+    await expect(ui.nav(page, 'Policies to confirm')).toContainText('1');
     await button(banner(page), 'Open Policies to confirm').click();
     await expect(ui.title(page)).toHaveText('Policies to confirm');
     await expect(banner(page)).toHaveCount(0);
@@ -163,6 +168,8 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     const openAnswer = await opened;
     expect(openAnswer.status()).toBe(200);
     expect((await openAnswer.json()).url).toContain('/content?ms=qms');
+    // bagus owns QM-01, so he reads it through the file routes, without a read confirmation token.
+    expect((await openAnswer.json()).url).not.toContain('via=acknowledgement');
     await (await popup).close();
     await expect(item).toContainText(/Opened on \d{2} [A-Z][a-z]{2} 2026/);
     await expect(item).toContainText('Tick the statement first.');
@@ -209,6 +216,39 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await expect(button(ui.drawer(page), 'Remind')).toHaveCount(0);
     await expect(button(ui.drawer(page), 'Export CSV')).toHaveCount(0);
     await expect(button(ui.drawer(page), 'Close and file as evidence')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(ui.drawer(page)).toHaveCount(0);
+
+    // hendra has no file rights in the QMS: the file routes refuse him the Managed Vault file, and "Open document"
+    // gives him an address that opens this version for him through his read confirmation. He then confirms it.
+    const hendraOwn = listOf(await apiGet(page, baseURL, '/api/v1/me/acknowledgements')).find((m) => m.requestId === request.id);
+    expect(hendraOwn).toMatchObject({ status: 'pending', openedAt: null });
+    await expect(ui.nav(page, 'Policies to confirm')).toContainText('1');
+    await ui.nav(page, 'Policies to confirm').click();
+    await expect(ui.title(page)).toHaveText('Policies to confirm');
+    const hendraItem = confirmations(page).locator('[data-confirmation="QM-01"]');
+    await expect(hendraItem).toContainText('Not opened yet');
+    await expect(button(hendraItem, 'Confirm')).toBeDisabled();
+    const hendraOpened = page.waitForResponse((r) => r.url().endsWith(`/api/v1/me/acknowledgements/${hendraOwn.id}/open`));
+    const hendraPopup = page.waitForEvent('popup');
+    await button(hendraItem, 'Open document').click();
+    const hendraAnswer = await hendraOpened;
+    expect(hendraAnswer.status()).toBe(200);
+    const hendraUrl = (await hendraAnswer.json()).url;
+    expect(hendraUrl).toMatch(/\/content\?ms=qms&inline=true&via=acknowledgement&t=/);
+    await (await hendraPopup).close();
+    const file = await page.request.get(`${baseURL}${hendraUrl}`);
+    expect(file.status()).toBe(200);
+    expect((await file.body()).toString('utf8')).toContain('MSCD E2E quality manual');
+    expect((await page.request.get(`${baseURL}${hendraUrl.split('&via=')[0]}`)).status()).toBe(403);
+    await expect(hendraItem).toContainText(/Opened on \d{2} [A-Z][a-z]{2} 2026/);
+    await hendraItem.getByLabel('I have read and understood this document').check();
+    await button(hendraItem, 'Confirm').click();
+    await expectToast(page, `You confirmed QM-01 version ${version}`);
+    await expect(confirmations(page)).toContainText('Nothing to confirm');
+    await expect(ui.nav(page, 'Policies to confirm')).not.toContainText(/\d/);
+    const afterHendra = await apiGet(page, baseURL, `/api/v1/ms/qms/acknowledgement-requests/${request.id}`);
+    expect(afterHendra.totals).toMatchObject({ confirmed: 2, audience });
 
     // rina closes the request into the evidence of clause 7.3, which then holds a new file.
     await signIn(page, baseURL, 'rina');

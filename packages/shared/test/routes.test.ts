@@ -365,7 +365,7 @@ describe('authorisation metadata', () => {
 
   it('names a permission per member value on permissionBy routes', () => {
     const byRoutes = routes.filter((r) => r.permissionBy);
-    expect(byRoutes.map((r) => r.id).sort()).toEqual(['audit-events.create', 'exports.create', 'imports.create', 'registers.create', 'registers.update']);
+    expect(byRoutes.map((r) => r.id).sort()).toEqual(['audit-events.create', 'exports.create', 'imports.create', 'registers.create', 'registers.update', 'storage.objects.content']);
     for (const r of byRoutes) {
       const by = r.permissionBy as NonNullable<RouteDef['permissionBy']>;
       expect(r.permission ?? r.anyOf ?? r.allOf ?? r.machine ?? r.scope, `${r.id} keeps its checks in the cases`).toBeUndefined();

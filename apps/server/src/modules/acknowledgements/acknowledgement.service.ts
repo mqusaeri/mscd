@@ -9,7 +9,9 @@
 // - fixes the audience when the request opens (D.7 "Setting"): `system_roles` is every active member with a business
 //   role in a system the document is linked to (every system for an organisation-wide document), `roles` only the
 //   holders of the chosen roles there, `organisation` every active member with a business role in any system. Guests,
-//   external auditors and members without a business role are never in it;
+//   external auditors and members without a business role are never in it, and for a `restricted` document only its
+//   owner and the Management System Managers and Programme Owners of a linked system are (the classification rule of
+//   F.7, acknowledgement-visibility.ts);
 // - writes one `acknowledgement` row, one stored task (source `acknowledgement`, entity the person's row, C.3) and one
 //   `acknowledgement_requested` notification per person, then `acknowledgement_request.created`.
 //
@@ -24,6 +26,7 @@ import { addDays } from '../../common/dates';
 import { ConflictError, NotFoundError, ProblemError } from '../../common/problems';
 import { AUDIT_WRITER, NOTIFICATION_WRITER, type AuditWriter, type NotificationWriter, type Trx } from '../../common/tokens';
 import { EXCUSED, REFUSALS, requestedNotice, taskTitle, type DocumentFacts } from './acknowledgement-text';
+import { classificationAllows } from './acknowledgement-visibility';
 
 /** The read confirmation settings of a document (D.7, `DocumentAcknowledgement`). */
 export interface AcknowledgementSettings {
@@ -76,6 +79,11 @@ export interface AudienceQuery {
   roles: readonly AcknowledgementRole[] | null;
   /** The request's system: the task of a person who holds a role there is listed there. */
   primaryMsId: string;
+  /**
+   * True to leave the classification rule out (`classificationAllows`): only the daily job uses it, to tell a person
+   * the rule hides the document from apart from one who no longer holds an asked role.
+   */
+  ignoreClassification?: boolean;
 }
 
 export interface OpenRequestInput {
@@ -299,11 +307,13 @@ export async function primarySystemOf(trx: Trx, documentId: string): Promise<str
 /**
  * The people of an audience (D.7 "Setting"), each with the system their task is listed in: the request's system when
  * they hold a role there, else the first such system by slug. Active members with an active business role (approved,
- * not expired) other than the external auditor; accounts of kind `person` only (no guests, no system user).
+ * not expired) other than the external auditor; accounts of kind `person` only (no guests, no system user); for a
+ * `restricted` document only the people the classification rule lets see it (`classificationAllows`).
  */
 export async function audienceOf(trx: Trx, query: AudienceQuery): Promise<AudienceMember[]> {
   const everySystem = query.scope === 'organisation' || query.isOrgWide;
   const roles = query.scope === 'roles' && query.roles && query.roles.length > 0 ? [...query.roles] : null;
+  const classification = query.ignoreClassification ? sql<boolean>`true` : classificationAllows(sql.ref('r.user_id'), sql`${query.documentId}::uuid`);
   const { rows } = await sql<{ user_id: string; ms_id: string }>`
     with target as (
       select m.id, m.slug from management_system m
@@ -321,6 +331,7 @@ export async function audienceOf(trx: Trx, query: AudienceQuery): Promise<Audien
      where r.deleted_at is null and r.approval_status = 'active' and (r.valid_until is null or r.valid_until > now())
        and r.role = any(${[...AUDIENCE_ROLES]}::text[])
        and (${roles}::text[] is null or r.role = any(${roles}::text[]))
+       and ${classification}
      group by r.user_id
      order by r.user_id`.execute(trx);
   return rows.map((r) => ({ userId: r.user_id, msId: r.ms_id }));
@@ -342,6 +353,26 @@ export async function excusePending(trx: Trx, requestId: string, userIds: readon
   const excused = await update.returning('id').execute();
   await closeTasks(trx, excused.map((e) => e.id), 'cancelled', actorId);
   return excused.length;
+}
+
+/**
+ * Excuses the pending people of the document's open requests whom the classification rule no longer lets see it
+ * (`classificationAllows`), after it became `restricted` or changed owner (`documents.update`), and cancels their
+ * tasks. Returns how many became excused.
+ */
+export async function excuseHiddenByClassification(trx: Trx, documentId: string, actorId: string): Promise<number> {
+  const { rows } = await sql<{ request_id: string; user_id: string }>`
+    select a.acknowledgement_request_id as request_id, a.user_id
+      from acknowledgement a
+      join acknowledgement_request r on r.id = a.acknowledgement_request_id and r.status = 'open' and r.deleted_at is null
+     where r.document_id = ${documentId}::uuid and a.status = 'pending' and a.deleted_at is null
+       and not ${classificationAllows(sql.ref('a.user_id'), sql`${documentId}::uuid`)}
+     order by a.acknowledgement_request_id, a.user_id`.execute(trx);
+  const byRequest = new Map<string, string[]>();
+  for (const row of rows) byRequest.set(row.request_id, [...(byRequest.get(row.request_id) ?? []), row.user_id]);
+  let excused = 0;
+  for (const [requestId, userIds] of byRequest) excused += await excusePending(trx, requestId, userIds, EXCUSED.restricted, actorId);
+  return excused;
 }
 
 /** Closes the open stored tasks of acknowledgement rows (`done` when confirmed, `cancelled` otherwise). */

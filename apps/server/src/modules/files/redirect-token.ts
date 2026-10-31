@@ -1,6 +1,10 @@
 // Redirect tokens of `GET /storage/objects/{id}/redirect?t=` (build plan D.3): an HMAC with a key derived from
 // `platform.key` (SecretBox purpose `redirect`, D-09) over the user, organisation, system, object and expiry, valid
 // for 5 minutes. The token is `<base64url payload>.<hex MAC>`; it names no provider URL.
+//
+// Milestone 3 D.7: a token that also names the person's acknowledgement row (`k`) is issued by
+// `me.acknowledgements.open` for a version the api streams, and opens that one version through
+// `GET /storage/objects/{id}/content?via=acknowledgement&t=` for a person without file rights in the system.
 import { Injectable } from '@nestjs/common';
 import { SecretBox } from '../keys/secret-box';
 
@@ -18,6 +22,11 @@ export interface RedirectClaims {
   o: string;
   /** Expiry, epoch milliseconds. */
   e: number;
+  /**
+   * The person's acknowledgement row (Milestone 3 D.7), on tokens of `me.acknowledgements.open` only: the content route
+   * then checks `acknowledgementFileGrant` in place of `storage.object.read` and the scope policy.
+   */
+  k?: string;
 }
 
 @Injectable()
@@ -44,6 +53,7 @@ export class RedirectTokens {
     }
     const c = claims as Partial<RedirectClaims>;
     if (typeof c.u !== 'string' || typeof c.g !== 'string' || typeof c.m !== 'string' || typeof c.o !== 'string' || typeof c.e !== 'number') return null;
+    if (c.k !== undefined && typeof c.k !== 'string') return null;
     if (c.e <= now.getTime()) return null;
     return c as RedirectClaims;
   }

@@ -6,7 +6,7 @@ import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext } from '../types';
 import { adapterFor } from './adapter';
 import type { Confirmation } from './model';
-import { settled } from './model';
+import { openOf, settled } from './model';
 
 export interface ConfirmationsState {
   /** `<person>:<organisation>` of the list; null before the first load. */
@@ -62,6 +62,14 @@ export function putOffBanner(): void {
 /** The key of the session person and organisation. */
 export function keyOf(ctx: Pick<HostContext, 'me' | 'person' | 'org'>): string {
   return `${ctx.me?.user.handle ?? ctx.person.handle}:${ctx.org?.id ?? ''}`;
+}
+
+/**
+ * The number of open confirmations of the session person and organisation, for the sidebar badge (`count` of the
+ * screen definition, which is synchronous): 0 while the list is not loaded or belongs to another person.
+ */
+export function openConfirmationCount(ctx: Pick<HostContext, 'me' | 'person' | 'org'>): number {
+  return state.key === keyOf(ctx) && state.items ? openOf(state.items).length : 0;
 }
 
 /** Loads the list of the session through the build's adapter. */
