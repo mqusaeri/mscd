@@ -23,9 +23,14 @@
 // One build runs at a time in the installation (D.4), whatever the number of worker processes: the build holds the
 // session advisory lock of `build-lock.ts`. A job that finds it held changes nothing and sends itself again
 // `BUILD_BUSY_RETRY_SECONDS` later (outcome `busy`).
+//
+// The working folder is in the worker's temporary folder (`TMPDIR`): the scratch volume of Compose (`worker-tmp`) and
+// the `emptyDir` of the Helm worker, which keep their content across a restart of the worker. A build that died leaves
+// its folder there, so each build first removes the folders of earlier builds that nobody touched for
+// `STALE_BUILD_HOURS`.
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -56,6 +61,7 @@ import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
 import { BUILD_BUSY_RETRY_SECONDS, withBuildLock } from './build-lock';
 import { checkFreeSpace, exportFolder, exportTooLarge, OrgExportBuilder, storedFileBytes, type BuildResult, type StoredPart } from './builder';
+import { STALE_BUILD_HOURS } from './expiry';
 import { notifyAll, readyNotice } from './notices';
 import { exportCode } from './org-export.service';
 import { activeTenantAdmins, exportPeople, nameOf } from './people';
@@ -98,6 +104,38 @@ interface StoredObjectRef {
 
 /** A failure that another attempt cannot fix: the export fails without a retry. */
 class FinalExportError extends Error {}
+
+/** Prefix of the working folders of builds in the worker's temporary folder. */
+export const WORK_DIR_PREFIX = 'mscd-org-export-';
+
+/**
+ * Removes the working folders of earlier builds that nobody touched for `STALE_BUILD_HOURS` (a build adds a file to
+ * its folder for every table and part). Runs while the build holds the installation's lock; best effort.
+ */
+export async function removeStaleWorkDirs(root: string, logger: Logger, nowMs = Date.now()): Promise<string[]> {
+  const removed: string[] = [];
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return removed;
+  }
+  const cutoff = nowMs - STALE_BUILD_HOURS * 3_600_000;
+  for (const name of names) {
+    if (!name.startsWith(WORK_DIR_PREFIX)) continue;
+    const dir = path.join(root, name);
+    try {
+      const info = await stat(dir);
+      if (!info.isDirectory() || info.mtimeMs > cutoff) continue;
+      await rm(dir, { recursive: true, force: true });
+      removed.push(dir);
+      logger.warn({ dir }, 'org-export.build removed the working folder of an earlier build that stopped');
+    } catch (error) {
+      logger.warn({ dir }, `org-export.build could not remove an old working folder: ${errorText(error)}`);
+    }
+  }
+  return removed;
+}
 
 function errorText(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -166,7 +204,8 @@ export class OrgExportBuildJob implements JobHandlerInstance<'org-export.build'>
       const fileBytes = await this.scope.withTenant(context, (trx) => storedFileBytes(trx, org.id));
       if (fileBytes > limit) throw new FinalExportError(exportTooLarge(fileBytes, limit).message);
       const partBytes = options.partBytes ?? this.config.profile.lifecycle.export_part_bytes;
-      workDir = await mkdtemp(path.join(os.tmpdir(), `mscd-org-export-${exportId.slice(0, 8)}-`));
+      await removeStaleWorkDirs(os.tmpdir(), this.logger);
+      workDir = await mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}${exportId.slice(0, 8)}-`));
       await checkFreeSpace(workDir, await this.builder.neededSpace(org, partBytes));
       const now = this.clock.now();
       const parts: StoredPart[] = [];

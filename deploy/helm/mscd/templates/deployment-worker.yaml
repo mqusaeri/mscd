@@ -1,5 +1,6 @@
 {{- /* worker: background jobs; health and metrics on 9464. Mounts
-       only the worker Secret and its client certificate. */}}
+       only the worker Secret and its client certificate, and a scratch
+       folder on the node's disk (TMPDIR) for the organisation export. */}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,6 +44,9 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
             {{- include "mscd.serverEnv" (list . .Values.worker.extraEnv) | nindent 12 }}
+            # The organisation export builds one part at a time in the temporary folder (worker.scratch).
+            - name: TMPDIR
+              value: /var/lib/mscd/tmp
           ports:
             - name: metrics
               containerPort: {{ include "mscd.metricsPort" . }}
@@ -52,5 +56,10 @@ spec:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:
             {{- include "mscd.serverVolumeMounts" . | nindent 12 }}
+            - name: scratch
+              mountPath: /var/lib/mscd/tmp
       volumes:
         {{- include "mscd.serverVolumes" (list . "worker" "client") | nindent 8 }}
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ required "worker.scratch.sizeLimit is required (for example 5Gi)" .Values.worker.scratch.sizeLimit | quote }}

@@ -896,31 +896,29 @@ A Tenant Admin can download everything the organisation keeps in MSCD at any tim
 
 An export can be downloaded for 7 days. A new request is refused while another export waits for approval or is being built, and for an organisation whose stored files are larger than the export limit (100 GiB by default, `lifecycle.export_max_bytes`).
 
-The worker builds one part at a time in its temporary folder (`TMPDIR`, otherwise `/tmp`), uploads it to the Managed Vault and deletes it before it starts the next one. The folder needs free space for one part, 2 GiB by default (`lifecycle.export_part_bytes`), plus room for the largest table, or less for a small organisation. The worker checks this before it starts, and the export fails with a message that names the space it needs. As a guide, 1 GiB of files in three parts took about 40 seconds and 385 MiB of temporary space on a test server. One export is built at a time in the installation; another one waits and is tried again every two minutes until the first has finished.
+The worker builds one part at a time in its scratch folder, uploads it to the Managed Vault and deletes it before it starts the next one. The folder needs free space for one part, 2 GiB by default (`lifecycle.export_part_bytes`), plus room for the largest table: at most twice the part size and 16 MiB, and much less for a small organisation. The worker checks this before it starts, and the export fails with a message that names the space it needs. As a guide, 1 GiB of files in three parts took about 40 seconds and 385 MiB of scratch space on a test server. One export is built at a time in the installation; another one waits and is tried again every two minutes until the first has finished.
 
-In the Compose stack, `/tmp` of every MSCD container is a memory disk of 64 MiB, which holds the export of a small organisation only. For a larger organisation, use the command line (section 19.2), which builds in the folder you give it, or give the worker a folder on the server's disk:
+In the Compose stack, the scratch folder is the Docker volume `worker-tmp`, mounted in the worker at `/var/lib/mscd/tmp` (its `TMPDIR`). The volume has no fixed size: it uses the free space of the disk that holds Docker's data, so that disk needs at least 5 GiB free for an export with the default part size. Check it with:
 
-1. Create the folder on a disk with enough free space and let the MSCD user own it:
+```bash
+df -h "$(sudo docker info -f '{{.DockerRootDir}}')"
+```
+
+To give the worker more room, free space on that disk, or put the scratch folder on another disk:
+
+1. Create a folder there and let the MSCD user own it:
 
    ```bash
    sudo mkdir -p /srv/mscd-worker-tmp
    sudo chown 10001:0 /srv/mscd-worker-tmp && sudo chmod 0700 /srv/mscd-worker-tmp
    ```
 
-2. Create `/opt/mscd/docker-compose.override.yml` with this content:
+2. Add `MSCD_WORKER_TMP=/srv/mscd-worker-tmp` to `/opt/mscd/.env`. `install.sh` and `upgrade.sh` keep the settings of `.env`.
+3. Apply it with `cd /opt/mscd && sudo docker compose up -d worker`, and check the space with `df -h /srv/mscd-worker-tmp`.
 
-   ```yaml
-   services:
-     worker:
-       environment:
-         TMPDIR: /var/lib/mscd/tmp
-       volumes:
-         - /srv/mscd-worker-tmp:/var/lib/mscd/tmp
-   ```
+The worker deletes each part after its upload and the rest of its working files when the export ends, also when it fails. A build that stopped part way, for example because the worker was killed, leaves its files in the folder: up to one part and one table, about 4 GiB with the default part size. They stay there until the next export starts. That export first removes the files of every build that stopped more than a day ago, then checks the free space. The folder holds no data that needs a backup. With a smaller part size (`lifecycle.export_part_bytes`), an export needs less scratch space and has more parts.
 
-3. Apply it with `cd /opt/mscd && sudo docker compose up -d worker`.
-
-`install.sh` starts the stack from `docker-compose.yml` alone, so run step 3 again after every upgrade. Check the free space with `df -h /srv/mscd-worker-tmp`.
+On Kubernetes, the scratch folder of the worker is an `emptyDir` on the node's disk with a size limit, `worker.scratch.sizeLimit` (5Gi by default) in the chart's values. Raise it with the part size: keep it at twice `lifecycle.export_part_bytes` plus 16 MiB or more, because the kubelet stops the worker pod when the folder grows past the limit. Apply it with `helm upgrade` and your values file.
 
 ### 19.2 On the command line
 
@@ -947,9 +945,11 @@ sudo docker compose run --rm -v /srv/mscd-export:/export \
   cli export verify --dir /export --anchor-key /run/anchor/audit-anchor.pub
 ```
 
-The command reads the manifest (the downloaded `*-manifest.json`, or the copy in the last part), compares the size and SHA-256 of every part and every file with it, recomputes the hash of every audit trail entry from its canonical text, and checks every signed anchor. It trusts only the anchor keys built into your MSCD release and the public keys you name with `--anchor-key`. Repeat the option for a key your installation used before, for example after its anchor key was replaced, and keep every public anchor key for as long as you keep exports of its time. The command never uses a key from the export itself: the manifest and the parts are not signed, so anyone who changes the audit trail could also change them, but nobody without the private anchor key can sign a new anchor. An anchor signed with a key that is not trusted, a key file whose key id does not match its key, or an anchor that does not match its audit trail entry is a problem. The command ends with `OK`, or with `FAILED` and each problem, and then exits with status 1. When `FAILED` names a key that is not trusted, check that you gave `--anchor-key` with the right file.
+The command reads the manifest (the downloaded `*-manifest.json`, or the copy in the last part), compares the size and SHA-256 of every part and every file with it, recomputes the hash of every audit trail entry from its canonical text, and checks every signed anchor. It trusts only the anchor keys built into your MSCD release and the public keys you name with `--anchor-key`. Repeat the option for a key your installation used before, for example after its anchor key was replaced, and keep every public anchor key for as long as you keep exports of its time. The command never uses a key from the export itself: the manifest and the parts are not signed, so anyone who changes the audit trail could also change them, but nobody without the private anchor key can sign a new anchor. An anchor signed with a key that is not trusted, a key file whose key id does not match its key, or an anchor that does not match its audit trail entry is a problem. When every check passes, the command prints `OK` and exits with status 0; otherwise it prints `FAILED` with each problem and exits with status 1. When `FAILED` names a key that is not trusted, check that you gave `--anchor-key` with the right file.
 
 An anchor proves its audit trail entry and every entry before it. The worker writes one anchor a night, so no signature covers the entries made since the newest anchor; the command says up to which entry (its `seq`) the anchors prove the trail and how many entries come after it. Someone who rewrites the audit trail can also remove the newest anchors from the export. The command then still ends with `OK`, but it names an older anchor as the newest one, or says that no anchor proves the trail. So compare the newest anchor of the export with the anchors kept outside MSCD (section 14): when your log platform or your downloaded anchor files hold a later anchor of the same chain, or another hash for the same entry, the audit trail of the export was changed.
+
+A redacted entry (its personal values were removed when a person's data was erased) keeps its stored hash, and a later attestation entry lists it with the hash of its new content. Only that attestation entry explains the redacted content, so an anchor proves that content only when the anchor also covers the attestation entry. The command counts the redacted entries whose attestation no anchor covers apart, names their `seq`, and ends the part of the trail it calls proven before the first of them. A redaction made after the newest anchor looks like this, and so does an export in which someone rewrote an older entry and added an attestation entry of their own. Build the export again after the next nightly anchor and check the new one: its anchors then cover a genuine redaction.
 
 To see by hand which key the export names, compare the key id of `audit/audit-anchor.pub` in the export with the key id of your `secrets/audit-anchor.pub` (the first 16 characters of each line):
 

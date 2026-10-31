@@ -5,7 +5,10 @@
 // rewritten too), and it fails when an anchor is signed by a key this build does not trust, even under that key's real
 // id. On-premise, each installation signs with its own key (`keys generate` at install): the builder names that key
 // in the export, and verify trusts it only when the operator names its public key file with `--anchor-key`. The report
-// says up to which row the anchors prove the trail, also when the newest anchors were removed.
+// says up to which row the anchors prove the trail, also when the newest anchors were removed. A redacted row keeps its
+// stored hash, so only its attestation entry explains its content: the anchors prove that content only when a valid
+// anchor covers the attestation (D.5.4), so a rewritten anchored row with a forged attestation after the newest anchor
+// is reported without anchor proof.
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -73,14 +76,21 @@ interface AuditFiles {
   keys: string;
 }
 
-/** Writes an export folder (parts and the separate manifest) with these audit rows and audit files. */
-async function writeExport(dir: string, actions: string[], files: (hashes: string[]) => AuditFiles): Promise<void> {
-  const rows = auditRows(actions);
+/** The audit trail of an export: its JSON lines and the row hash of each row. */
+interface Trail {
+  lines: string;
+  hashes: string[];
+}
+
+/** Writes an export folder (parts and the separate manifest) with these audit rows (actions, or a trail) and audit files. */
+async function writeExport(dir: string, trail: string[] | Trail, files: (hashes: string[]) => AuditFiles): Promise<void> {
+  const rows = Array.isArray(trail) ? auditRows(trail) : trail;
+  const rowCount = rows.hashes.length;
   const audit = files(rows.hashes);
   const anchorCount = audit.anchors.split('\n').filter((l) => l.trim() !== '').length;
   const writer = new ArchiveWriter({ dir, baseName: BASE, partBytes: 1024 * 1024, mtime: new Date(OCCURRED), onPart: async () => undefined });
   const entries: ManifestEntry[] = [
-    manifestEntry(await writer.addBuffer('audit/audit_trail.jsonl', Buffer.from(rows.lines)), 'audit', { rows: actions.length }),
+    manifestEntry(await writer.addBuffer('audit/audit_trail.jsonl', Buffer.from(rows.lines)), 'audit', { rows: rowCount }),
     manifestEntry(await writer.addBuffer('audit/anchors.jsonl', Buffer.from(audit.anchors)), 'anchors', { rows: anchorCount }),
     manifestEntry(await writer.addBuffer('audit/audit-anchor.pub', Buffer.from(audit.pub)), 'key'),
     manifestEntry(await writer.addBuffer('audit/anchor-keys.json', Buffer.from(audit.keys)), 'key'),
@@ -90,7 +100,7 @@ async function writeExport(dir: string, actions: string[], files: (hashes: strin
     format: 'mscd-organization-export', formatVersion: 1, copy, exportId: '33333333-3333-4333-8333-333333333333', organization: { id: 'x', slug: 'tst', name: 'Test' },
     createdAt: OCCURRED, requestedVia: 'cli', requestedBy: null, approvedBy: null, isFinal: false, mscd: { version: 'test', revision: 'test' }, tenantMigrations: [],
     tenantMigrationsSource: 'build', frameworkPacks: [], parts, entries, filesWithoutContent: [],
-    audit: { chain: CHAIN, rows: actions.length, anchors: anchorCount, anchorKeyIds: keyIds }, excluded: [],
+    audit: { chain: CHAIN, rows: rowCount, anchors: anchorCount, anchorKeyIds: keyIds }, excluded: [],
     counts: { tables: 0, rows: 0, files: 0, filesWithoutContent: 0, externalFiles: 0, fileBytes: 0, entries: entries.length, parts: 1 },
   });
   await writer.finish('manifest.json', (last) => manifestBytes(manifest('last-part', [{ part: last, name: writer.partName(last), sizeBytes: null, sha256: null }])));
@@ -338,5 +348,186 @@ describe('the report says up to which row the anchors prove the audit trail (D.4
     const lines = verifyLines(report);
     expect(lines.out[2]).toContain('No anchor: no signature proves any of the 2 audit row(s)');
     expect(lines.out[2]).toContain('anchors kept outside MSCD');
+  });
+});
+
+/** The hashed columns of an audit row, in the order of `platform.audit_canonical_text`. */
+const HASHED = [
+  'seq', 'id', 'occurred_at', 'organization_id', 'management_system_id', 'actor_user_id', 'actor_kind', 'action', 'entity_type', 'entity_id', 'entity_code',
+  'before_data', 'after_data', 'edition', 'request_id', 'source_ip', 'user_agent',
+] as const;
+type AuditRow = Record<string, unknown>;
+
+const hashOf = (prev: string, canonical: string) => createHash('sha256').update(Buffer.from(prev, 'hex')).update(canonical, 'utf8').digest('hex');
+const canonicalOf = (row: AuditRow) => JSON.stringify(HASHED.map((key) => row[key] ?? null));
+
+/** A chained audit row of `seq` after the row whose hash is `prev`. */
+function chainRow(seq: number, prev: string, fields: AuditRow = {}): AuditRow {
+  const row: AuditRow = {
+    seq, id: `11111111-1111-4111-8111-${String(seq).padStart(12, '0')}`, occurred_at: OCCURRED, organization_id: null, management_system_id: null,
+    actor_user_id: null, actor_kind: 'user', action: 'risk.updated', entity_type: 'risk', entity_id: null, entity_code: 'R-001', before_data: null,
+    after_data: { status: 'treated', owner: 'rina' }, edition: null, request_id: null, source_ip: '203.0.113.7', user_agent: 'Browser/1', ...fields,
+  };
+  const canonical = canonicalOf(row);
+  return { ...row, prev_hash: prev, row_hash: hashOf(prev, canonical), redacted_at: null, redaction_id: null, canonical_text: canonical };
+}
+
+/** `row` with these values changed and marked redacted: it keeps its stored hashes, and its canonical text holds the new values. */
+function redacted(row: AuditRow, fields: AuditRow, redactionId: string): { row: AuditRow; listed: { seq: number; rowHash: string; redactedHash: string } } {
+  const changed: AuditRow = { ...row, source_ip: null, user_agent: null, ...fields };
+  const canonical = canonicalOf(changed);
+  return {
+    row: { ...changed, canonical_text: canonical, redacted_at: OCCURRED, redaction_id: redactionId },
+    listed: { seq: Number(row.seq), rowHash: String(row.row_hash), redactedHash: hashOf(String(row.prev_hash), canonical) },
+  };
+}
+
+/** The attestation entry of a redaction, as `platform.redact_audit_rows` writes it. */
+function attestation(seq: number, prev: string, redactionId: string, rows: { seq: number; rowHash: string; redactedHash: string }[]): AuditRow {
+  return chainRow(seq, prev, {
+    actor_kind: 'system', action: 'privacy.audit_redacted', entity_type: 'audit_trail', entity_code: 'redaction', after_data: { redactionId, count: rows.length, rows },
+    source_ip: null, user_agent: null,
+  });
+}
+
+const trailOf = (rows: AuditRow[]): Trail => ({ lines: rows.map((r) => `${JSON.stringify(r)}\n`).join(''), hashes: rows.map((r) => String(r.row_hash)) });
+
+describe('a redacted row is proven only through an attestation that an anchor covers (D.5.4)', () => {
+  let work: string;
+  let trusted: KeyObject;
+  let trustedPem: string;
+  let trustedId: string;
+
+  /** The audit files with one anchor of `seq` signed by the trusted key. */
+  const anchoredAt = (seq: number) => (hashes: string[]): AuditFiles => {
+    const anchor = signAnchor({ chain: CHAIN, seq, rowHash: hashes[seq - 1]!, anchoredAt: OCCURRED, installationId: INSTALLATION }, trusted, createPublicKey(trusted));
+    return { anchors: `${JSON.stringify(anchor)}\n`, pub: trustedPem, keys: JSON.stringify([{ keyId: trustedId, publicKeyPem: trustedPem }]) };
+  };
+
+  beforeAll(async () => {
+    work = await mkdtemp(path.join(os.tmpdir(), 'mscd-m3-02-redaction-'));
+    trusted = createPrivateKey(await readFile(ANCHOR_KEY_FILE));
+    trustedPem = pemOf(createPublicKey(trusted));
+    trustedId = anchorKeyId(trustedPem);
+  });
+  afterAll(async () => {
+    if (work) await rm(work, { recursive: true, force: true });
+  });
+
+  it('proves a redacted row whose attestation lies at or below the newest anchor', async () => {
+    const dir = await mkdtemp(path.join(work, 'above-'));
+    const r1 = chainRow(1, '');
+    const redactionId = '44444444-4444-4444-8444-000000000001';
+    const red = redacted(r1, { after_data: { status: 'treated', owner: 'P-0001' } }, redactionId);
+    const r2 = attestation(2, String(r1.row_hash), redactionId, [red.listed]);
+    const r3 = chainRow(3, String(r2.row_hash), { action: 'risk.closed' });
+    // The anchor signs seq 3, above the attestation of seq 2.
+    await writeExport(dir, trailOf([red.row, r2, r3]), anchoredAt(3));
+    const report = await exportVerify(dir);
+    expect(report.problems).toEqual([]);
+    expect(report).toMatchObject({
+      ok: true, auditRows: 3, redactedRows: 1, redactedUnanchored: 0, redactedUnanchoredSeqs: [], newestAnchoredSeq: 3, lastAnchoredSeq: 3, rowsAfterLastAnchor: 0,
+    });
+    const lines = verifyLines(report);
+    expect(lines.out[0]).toContain('3 audit rows (1 redacted)');
+    expect(lines.out[2]).toContain('up to seq 3, the newest one');
+    expect(lines.out).toHaveLength(3);
+  });
+
+  it('gives no anchor proof to a rewritten anchored row whose forged attestation follows the newest anchor', async () => {
+    // The genuine export: rows 1 and 2, anchored at seq 2.
+    const r1 = chainRow(1, '');
+    const r2 = chainRow(2, String(r1.row_hash), { action: 'risk.closed' });
+    const genuine = await mkdtemp(path.join(work, 'genuine-'));
+    await writeExport(genuine, trailOf([r1, r2]), anchoredAt(2));
+    expect(await exportVerify(genuine)).toMatchObject({ ok: true, redactedRows: 0, lastAnchoredSeq: 2, rowsAfterLastAnchor: 0 });
+
+    // The forgery: row 1 rewritten (another action and content), its stored hash kept, marked redacted, and an
+    // attestation appended as row 3 after the anchor. Every hash matches, and the anchor of seq 2 still verifies.
+    const forged = await mkdtemp(path.join(work, 'forged-redaction-'));
+    const redactionId = '44444444-4444-4444-8444-000000000002';
+    const fake = redacted(r1, { action: 'risk.accepted', after_data: { status: 'accepted', approvedBy: 'top.management' } }, redactionId);
+    const r3 = attestation(3, String(r2.row_hash), redactionId, [fake.listed]);
+    await writeExport(forged, trailOf([fake.row, r2, r3]), anchoredAt(2));
+    const report = await exportVerify(forged);
+    expect(report.problems).toEqual([]);
+    expect(report).toMatchObject({
+      auditRows: 3, anchors: 1, anchorKeysTrusted: true, redactedRows: 0, redactedUnanchored: 1, redactedUnanchoredSeqs: [1], newestAnchoredSeq: 2,
+      lastAnchoredSeq: null, rowsAfterLastAnchor: 3,
+    });
+    // The output never says the anchor proves row 1: no row is proven, and the redacted row is named.
+    const lines = verifyLines(report);
+    expect(lines.out[0]).toContain('3 audit rows (1 redacted, 1 of them without an anchor over their attestation)');
+    expect(lines.out[2]).toContain('No anchor proves the audit trail: the newest valid anchor signs seq 2, but the content of the redacted row 1');
+    expect(lines.out[2]).not.toMatch(/prove (every audit row|the audit rows) up to/);
+    expect(lines.out[3]).toContain('Redacted rows without an anchor: 1 row(s) (seq 1)');
+  });
+
+  it('ends the coverage before the first rewritten row when older rows are untouched', async () => {
+    const r1 = chainRow(1, '');
+    const r2 = chainRow(2, String(r1.row_hash), { action: 'risk.reviewed' });
+    const r3 = chainRow(3, String(r2.row_hash), { action: 'risk.closed' });
+    const dir = await mkdtemp(path.join(work, 'forged-middle-'));
+    const redactionId = '44444444-4444-4444-8444-000000000003';
+    const fake = redacted(r2, { after_data: { status: 'accepted' } }, redactionId);
+    const r4 = attestation(4, String(r3.row_hash), redactionId, [fake.listed]);
+    await writeExport(dir, trailOf([r1, fake.row, r3, r4]), anchoredAt(3));
+    const report = await exportVerify(dir);
+    expect(report.problems).toEqual([]);
+    expect(report).toMatchObject({ redactedRows: 0, redactedUnanchored: 1, redactedUnanchoredSeqs: [2], newestAnchoredSeq: 3, lastAnchoredSeq: 1, rowsAfterLastAnchor: 3 });
+    const lines = verifyLines(report);
+    expect(lines.out[2]).toContain('The anchors prove the audit rows up to seq 1: the newest valid anchor signs seq 3, but the content of the redacted row 2');
+  });
+
+  it('counts a redaction made after the newest anchor apart without lowering the coverage below it', async () => {
+    const r1 = chainRow(1, '');
+    const r2 = chainRow(2, String(r1.row_hash), { action: 'risk.reviewed' });
+    const r3 = chainRow(3, String(r2.row_hash), { action: 'risk.closed' });
+    const dir = await mkdtemp(path.join(work, 'after-anchor-'));
+    const redactionId = '44444444-4444-4444-8444-000000000004';
+    const red = redacted(r3, { entity_code: 'P-0001' }, redactionId);
+    const r4 = attestation(4, String(r3.row_hash), redactionId, [red.listed]);
+    await writeExport(dir, trailOf([r1, r2, red.row, r4]), anchoredAt(2));
+    const report = await exportVerify(dir);
+    expect(report.problems).toEqual([]);
+    expect(report).toMatchObject({ ok: true, redactedRows: 0, redactedUnanchored: 1, redactedUnanchoredSeqs: [3], newestAnchoredSeq: 2, lastAnchoredSeq: 2, rowsAfterLastAnchor: 2 });
+    expect(verifyLines(report).out[2]).toContain('up to seq 2; no signature covers the 2 newer row(s)');
+  });
+
+  it('follows an attestation entry that was itself redacted to the attestation that accepts it', async () => {
+    const r1 = chainRow(1, '');
+    const first = '44444444-4444-4444-8444-000000000005';
+    const red1 = redacted(r1, { entity_code: 'P-0001' }, first);
+    const att2 = attestation(2, String(r1.row_hash), first, [red1.listed]);
+    const r3 = chainRow(3, String(att2.row_hash), { action: 'risk.closed' });
+    // A later redaction changes the attestation entry of seq 2 too; its own attestation is seq 4.
+    const second = '44444444-4444-4444-8444-000000000006';
+    const red2 = redacted(att2, { entity_code: 'P-0002' }, second);
+    const att4 = attestation(4, String(r3.row_hash), second, [red2.listed]);
+    const rows = [red1.row, red2.row, r3, att4];
+
+    const covered = await mkdtemp(path.join(work, 'nested-covered-'));
+    await writeExport(covered, trailOf(rows), anchoredAt(4));
+    const ok = await exportVerify(covered);
+    expect(ok.problems).toEqual([]);
+    expect(ok).toMatchObject({ redactedRows: 2, redactedUnanchored: 0, lastAnchoredSeq: 4 });
+
+    // Anchored at seq 3 only: the entry of seq 2 is explained by seq 4, so neither redacted row is proven.
+    const open = await mkdtemp(path.join(work, 'nested-open-'));
+    await writeExport(open, trailOf(rows), anchoredAt(3));
+    const report = await exportVerify(open);
+    expect(report.problems).toEqual([]);
+    expect(report).toMatchObject({ redactedRows: 0, redactedUnanchored: 2, redactedUnanchoredSeqs: [1, 2], newestAnchoredSeq: 3, lastAnchoredSeq: null, rowsAfterLastAnchor: 4 });
+  });
+
+  it('still fails a redacted row that no attestation lists', async () => {
+    const r1 = chainRow(1, '');
+    const r2 = chainRow(2, String(r1.row_hash), { action: 'risk.closed' });
+    const dir = await mkdtemp(path.join(work, 'unlisted-'));
+    const fake = redacted(r1, { action: 'risk.accepted' }, '44444444-4444-4444-8444-000000000007');
+    await writeExport(dir, trailOf([fake.row, r2]), anchoredAt(2));
+    const report = await exportVerify(dir);
+    expect(report.ok).toBe(false);
+    expect(report.problems).toEqual(['Audit chain broken at seq 1: a redacted row has no attestation that lists its stored and current hash']);
   });
 });

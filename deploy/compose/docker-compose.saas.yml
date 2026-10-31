@@ -120,8 +120,14 @@ services:
 
   worker:
     <<: *server-image
+    # The scratch folder of docker-compose.yml, always the named volume
+    # worker-tmp here: /var/lib/mscd/tmp (TMPDIR) on the server's disk, where the
+    # organisation export builds one part (2 GiB by default) and one table at a time.
     environment:
       <<: *saas-env
+      TMPDIR: /var/lib/mscd/tmp
+    volumes:
+      - worker-tmp:/var/lib/mscd/tmp
     logging: *logging
     deploy:
       resources:

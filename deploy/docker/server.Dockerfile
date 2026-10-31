@@ -201,6 +201,11 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
            /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
            /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg \
  && mkdir -p /app
+# Scratch folder of the worker (TMPDIR in Compose and Helm): the organisation export builds one part at a time here.
+# The run user 10001 owns it, so a new Docker named volume mounted on it (worker-tmp) starts with that owner.
+RUN mkdir -p /var/lib/mscd/tmp \
+ && chown 10001:0 /var/lib/mscd/tmp \
+ && chmod 0700 /var/lib/mscd/tmp
 WORKDIR /app
 COPY --from=prod-deps /src/ /app/
 # Licences and notices of the third-party software in the image (tools/scripts/third-party-notices.mjs).
@@ -260,7 +265,8 @@ COPY --from=build-release /src/apps/server/profiles/onprem.yaml /src/apps/server
 COPY --from=build-release /packs/ packs/
 # Everything in /app is owned by root and read-only for the run user 10001
 # (group 0; the build stages set the modes, COPY keeps them). Compose and Helm
-# add a read-only root filesystem and a /tmp. The checks below fail the build if
+# add a read-only root filesystem, a /tmp and, for the worker, a scratch folder
+# at /var/lib/mscd/tmp (runtime-base creates it for user 10001). The checks below fail the build if
 # anything of R-13 slipped in.
 RUN set -eu; \
     for f in apps/server/profiles/demo.yaml apps/server/profiles/test.yaml apps/server/src \

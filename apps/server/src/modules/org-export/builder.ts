@@ -113,7 +113,8 @@ export async function checkFreeSpace(dir: string, needed: number): Promise<void>
   if (free < needed) {
     throw new Error(
       `The folder ${dir} has ${free} bytes free and the export needs ${needed} (one part and the largest table). ` +
-        'Give the worker a larger temporary folder (TMPDIR, section 19.1 of the on-premise guide) or lower lifecycle.export_part_bytes',
+        'Give the worker a larger scratch folder (TMPDIR: the worker-tmp volume or MSCD_WORKER_TMP in Compose, worker.scratch.sizeLimit in Helm; ' +
+        'section 19.1 of the on-premise guide) or lower lifecycle.export_part_bytes',
     );
   }
 }

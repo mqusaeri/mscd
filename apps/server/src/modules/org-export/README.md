@@ -29,6 +29,10 @@ The full export of an organisation (Milestone 3 D.4, D3-03). Owner: M3-02.
   hash from its canonical text (attested redactions included), and the signed anchors with the anchor keys compiled into
   the build and the public keys the operator names with `--anchor-key` (never a key of the export, which is not
   signed); an anchor without a valid signature by a trusted key is a problem. The report gives the newest anchored row
-  and the rows after it, which no signature covers.
+  and the rows after it, which no signature covers. A redacted row keeps its stored hash, so only its attestation entry
+  explains its content: the row counts as proven (`redactedRows`) only when a valid anchor covers that entry (D.5.4).
+  The others are counted apart (`redactedUnanchored`, with their seqs), and the proven coverage (`lastAnchoredSeq`)
+  ends before the first of them that lies below the newest anchor, so a rewritten anchored row with a forged
+  attestation after the newest anchor is never reported as proven.
 - `build-lock.ts`: one build at a time in the installation (a session advisory lock on a pinned connection), taken by
   the job (a busy job sends itself again two minutes later) and by `mscd-server export organization` (refuses).

@@ -262,6 +262,16 @@ worker:
   resources:
     requests: { cpu: 200m, memory: 384Mi }
     limits: { cpu: "2", memory: 1Gi }
+  # Scratch folder of the worker: an emptyDir on the node's disk at
+  # /var/lib/mscd/tmp, the worker's TMPDIR. The organisation export builds one
+  # part (lifecycle.export_part_bytes, 2 GiB by default) and one table at a time
+  # there, and needs at most twice the part size plus 16 MiB.
+  scratch:
+    # -- Largest size of the scratch folder. The worker checks the free space
+    # of the node's disk before an export, and the kubelet evicts the pod when
+    # the folder grows past this limit, so keep it at twice
+    # lifecycle.export_part_bytes plus 16 MiB or more.
+    sizeLimit: 5Gi
   autoscaling:
     enabled: false
     minReplicas: 1

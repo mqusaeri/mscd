@@ -9,7 +9,8 @@
 // 4. The audit chain (`audit/audit_trail.jsonl`): every row links to the previous one, its canonical text describes the
 //    row's own values, and SHA-256 of the previous hash bytes and the UTF-8 canonical text equals its `row_hash`; a
 //    redacted row is accepted when a later attestation entry (`tenant.audit_redacted`, `user.audit_redacted`,
-//    `privacy.audit_redacted`) lists it with its stored hash and the hash of the row as it is now (D.5.4).
+//    `privacy.audit_redacted`) lists it with its stored hash and the hash of the row as it is now (D.5.4). The
+//    attestation entry is an ordinary chained row; when it was itself redacted later, its own attestation explains it.
 // 5. The anchors, with the anchor keys the caller trusts, never with a key the export brings: the manifest, the parts
 //    and the audit files are not signed, so whoever changes the audit trail can also change them. The command trusts
 //    the anchor keys compiled into this build (`compiledAnchorKeys`, D-16) and the public keys the operator names with
@@ -23,6 +24,12 @@
 //    gives the seq of the newest row a valid anchor proves and the number of rows after it, which no signature covers:
 //    rows written since the last nightly anchor, or rows of a trail whose newest anchors were removed. Only the anchors
 //    kept outside MSCD (worker log, vault objects, downloaded files) show whether newer anchors existed.
+//    A redacted row keeps its stored hash, so the anchor proves where it sits in the chain but not its content: only the
+//    attestation entry explains that, and D.5.4 wants that entry covered by an anchor. A redacted row whose attestation
+//    lies after the newest valid anchor is counted apart (`redactedUnanchored`), and the coverage ends before the first
+//    such row, so the report never says the anchors prove a row whose content only an unsigned attestation explains
+//    (someone who rewrites an anchored row, keeps its hash, marks it redacted and appends an attestation after the
+//    newest anchor gets every hash to match, and the report then says no anchor proves that row).
 import { createHash, createPublicKey, type Hash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -51,7 +58,12 @@ export interface VerifyReport {
   entries: number;
   files: number;
   auditRows: number;
+  /** Redacted rows whose content a valid anchor proves: their attestation entry lies at or below the newest valid anchor. */
   redactedRows: number;
+  /** Redacted rows listed by an attestation entry that no valid anchor covers: no signature proves their content. */
+  redactedUnanchored: number;
+  /** The seqs of those rows, in order. */
+  redactedUnanchoredSeqs: number[];
   anchors: number;
   /** True when every anchor has a valid signature by a trusted key; false when one has not (a problem); null without anchors. */
   anchorKeysTrusted: boolean | null;
@@ -59,9 +71,14 @@ export interface VerifyReport {
   anchorKeyIds: string[];
   /** Key ids of anchors signed by a key the caller does not trust. */
   untrustedKeyIds: string[];
-  /** Seq of the newest audit row a valid anchor proves (with every row before it); null when no anchor proves a row. */
+  /** Seq of the newest audit row a valid trusted anchor signs; null without such an anchor. */
+  newestAnchoredSeq: number | null;
+  /**
+   * Seq of the newest audit row the anchors prove with every row before it: `newestAnchoredSeq`, or the row before the
+   * first redacted row whose attestation no valid anchor covers when that row lies below it; null when no row is proven.
+   */
   lastAnchoredSeq: number | null;
-  /** Audit rows after `lastAnchoredSeq` (every row when it is null): no signature covers them. */
+  /** Audit rows after `lastAnchoredSeq` (every row when it is null): the anchors do not prove them. */
   rowsAfterLastAnchor: number;
 }
 
@@ -100,16 +117,31 @@ function keyIdOf(pem: string): string | null {
   }
 }
 
+/** One row listed by an attestation entry: the entry's seq and redaction id, and the row's seq and hashes. */
+interface Attestation {
+  attestationSeq: number;
+  redactionId: string;
+  seq: number;
+  rowHash: string;
+  redactedHash: string;
+}
+
 /** Hashes and line-parses the audit trail while its entry (or pieces) streams by. */
 class AuditChecker {
   rows = 0;
-  redacted = 0;
+  /**
+   * The redacted rows an attestation accepts, each with the seq of the row whose signature would prove its content:
+   * the attestation entry that lists it, or, when that entry was itself redacted later, the entry that accepts it.
+   */
+  readonly accepted: { seq: number; proofSeq: number }[] = [];
   private previousHash = '';
   private previousSeq = 0;
   private readonly decoder = new StringDecoder('utf8');
   private pending = '';
   private readonly redactedRows: { seq: number; redactionId: string; rowHash: string; currentHash: string }[] = [];
-  private readonly attestations: { attestationSeq: number; redactionId: string; seq: number; rowHash: string; redactedHash: string }[] = [];
+  private readonly attestations: Attestation[] = [];
+  /** Attestation entries whose content does not hash to their stored hash and is not marked redacted: they prove nothing. */
+  private readonly brokenAttestations = new Set<number>();
   readonly hashes = new Map<number, string>();
 
   constructor(private readonly problems: string[]) {}
@@ -147,12 +179,14 @@ class AuditChecker {
     const describes = this.describes(row, canonical);
     if (describes) this.broken(seq, describes);
     const computed = createHash('sha256').update(Buffer.from(prevHash, 'hex')).update(canonical, 'utf8').digest('hex');
+    const isAttestation = ATTESTATION_ACTIONS.has(String(row.action));
     if (typeof row.redaction_id === 'string' && row.redaction_id !== '') {
       this.redactedRows.push({ seq, redactionId: row.redaction_id, rowHash, currentHash: computed });
     } else if (computed !== rowHash) {
       this.broken(seq, 'row_hash does not match the hash of the canonical text');
+      if (isAttestation) this.brokenAttestations.add(seq);
     }
-    if (ATTESTATION_ACTIONS.has(String(row.action))) {
+    if (isAttestation) {
       const after = (row.after_data ?? {}) as { redactionId?: unknown; rows?: unknown };
       if (Array.isArray(after.rows)) {
         for (const e of after.rows as Record<string, unknown>[]) {
@@ -200,13 +234,32 @@ class AuditChecker {
     const rest = this.pending + this.decoder.end();
     this.pending = '';
     if (rest.trim() !== '') this.row(rest);
-    for (const r of this.redactedRows) {
-      const attested = this.attestations.some(
-        (a) => a.seq === r.seq && a.attestationSeq > r.seq && a.redactionId === r.redactionId && a.rowHash === r.rowHash && a.redactedHash === r.currentHash,
-      );
-      if (attested) this.redacted += 1;
-      else this.broken(r.seq, 'a redacted row has no attestation that lists its stored and current hash');
+    // Newest first, so a redacted attestation entry is settled before the rows it lists.
+    const proofOf = new Map<number, number>();
+    const redactedSeqs = new Set(this.redactedRows.map((r) => r.seq));
+    const listing = new Map<number, Attestation[]>();
+    for (const a of this.attestations) {
+      const list = listing.get(a.seq);
+      if (list) list.push(a);
+      else listing.set(a.seq, [a]);
     }
+    for (const r of [...this.redactedRows].sort((a, b) => b.seq - a.seq)) {
+      let proofSeq: number | null = null;
+      for (const a of listing.get(r.seq) ?? []) {
+        if (a.attestationSeq <= r.seq || a.redactionId !== r.redactionId || a.rowHash !== r.rowHash || a.redactedHash !== r.currentHash) continue;
+        if (this.brokenAttestations.has(a.attestationSeq)) continue;
+        // A redacted attestation entry proves its list only through the attestation that accepts it.
+        const through = redactedSeqs.has(a.attestationSeq) ? proofOf.get(a.attestationSeq) : a.attestationSeq;
+        if (through !== undefined && (proofSeq === null || through < proofSeq)) proofSeq = through;
+      }
+      if (proofSeq === null) {
+        this.broken(r.seq, 'a redacted row has no attestation that lists its stored and current hash');
+        continue;
+      }
+      proofOf.set(r.seq, proofSeq);
+      this.accepted.push({ seq: r.seq, proofSeq });
+    }
+    this.accepted.sort((a, b) => a.seq - b.seq);
   }
 }
 
@@ -243,8 +296,9 @@ export async function verifyExportFolder(dir: string, options: VerifyOptions = {
   const problems: string[] = [];
   const parts = await partFiles(dir);
   const report: VerifyReport = {
-    ok: false, problems, manifestSource: 'download', parts: parts.size, entries: 0, files: 0, auditRows: 0, redactedRows: 0, anchors: 0, anchorKeysTrusted: null, anchorKeyIds: [],
-    untrustedKeyIds: [], lastAnchoredSeq: null, rowsAfterLastAnchor: 0,
+    ok: false, problems, manifestSource: 'download', parts: parts.size, entries: 0, files: 0, auditRows: 0, redactedRows: 0, redactedUnanchored: 0,
+    redactedUnanchoredSeqs: [], anchors: 0, anchorKeysTrusted: null, anchorKeyIds: [], untrustedKeyIds: [], newestAnchoredSeq: null, lastAnchoredSeq: null,
+    rowsAfterLastAnchor: 0,
   };
   if (parts.size === 0) {
     problems.push(`No part (*-part-<n>.tar.gz) in ${dir}`);
@@ -357,7 +411,6 @@ export async function verifyExportFolder(dir: string, options: VerifyOptions = {
   // 4. The audit chain.
   audit.finish();
   report.auditRows = audit.rows;
-  report.redactedRows = audit.redacted;
   if (manifest.audit && audit.rows !== manifest.audit.rows) problems.push(`The audit trail has ${audit.rows} rows, the manifest names ${manifest.audit.rows}`);
 
   // 5. The anchors, with the trusted keys only (a key the export brings proves nothing: the export is not signed).
@@ -423,10 +476,20 @@ export async function verifyExportFolder(dir: string, options: VerifyOptions = {
     const stored = audit.hashes.get(anchor.seq);
     if (stored !== anchor.rowHash) problems.push(`The anchor of seq ${seq} names another row hash than the audit trail holds`);
     else if (!manifest.audit || anchor.chain === manifest.audit.chain) {
-      report.lastAnchoredSeq = Math.max(report.lastAnchoredSeq ?? 0, anchor.seq);
+      report.newestAnchoredSeq = Math.max(report.newestAnchoredSeq ?? 0, anchor.seq);
     }
   }
-  report.rowsAfterLastAnchor = Math.max(0, audit.rows - (report.lastAnchoredSeq ?? 0));
+
+  // 6. Coverage. A redacted row's content is proven only when a valid anchor covers its attestation entry (D.5.4).
+  const coveredThrough = report.newestAnchoredSeq ?? 0;
+  const unanchored = audit.accepted.filter((r) => r.proofSeq > coveredThrough).map((r) => r.seq);
+  report.redactedRows = audit.accepted.length - unanchored.length;
+  report.redactedUnanchored = unanchored.length;
+  report.redactedUnanchoredSeqs = unanchored;
+  let proven = coveredThrough;
+  if (unanchored.length > 0 && unanchored[0]! <= proven) proven = unanchored[0]! - 1;
+  report.lastAnchoredSeq = proven > 0 ? proven : null;
+  report.rowsAfterLastAnchor = Math.max(0, audit.rows - proven);
   if (manifest.audit && report.anchors !== manifest.audit.anchors) problems.push(`audit/anchors.jsonl has ${report.anchors} anchors, the manifest names ${manifest.audit.anchors}`);
   report.anchorKeysTrusted = report.anchors === 0 ? null : unverified === 0;
   report.anchorKeyIds = [...checkedKeys];

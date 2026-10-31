@@ -250,20 +250,44 @@ export function verifyLines(report: ExportVerifyResult): { out: string[]; err: s
       : report.anchorKeysTrusted
         ? `anchors checked with the anchor key ${report.anchorKeyIds.map(keyLabel).join(', ')}`
         : 'an anchor has NO valid signature by a trusted anchor key';
+  const redacted =
+    report.redactedUnanchored === 0
+      ? `${report.redactedRows} redacted`
+      : `${report.redactedRows + report.redactedUnanchored} redacted, ${report.redactedUnanchored} of them without an anchor over their attestation`;
   const head =
     `export verify: ${report.parts} part(s), ${report.entries} entries, ${report.files} file(s), ${report.auditRows} audit rows ` +
-    `(${report.redactedRows} redacted), ${report.anchors} anchor(s), ${trust}, manifest from the ${report.manifestSource === 'download' ? 'download' : 'last part'}`;
+    `(${redacted}), ${report.anchors} anchor(s), ${trust}, manifest from the ${report.manifestSource === 'download' ? 'download' : 'last part'}`;
+  // The anchors prove less than the newest anchor signs when a redacted row below it is explained only by a newer attestation.
+  const cut = report.newestAnchoredSeq !== null && (report.lastAnchoredSeq ?? 0) < report.newestAnchoredSeq;
   const coverage =
     report.auditRows === 0
       ? 'The audit trail is empty.'
-      : report.lastAnchoredSeq === null
-        ? `No anchor: no signature proves any of the ${report.auditRows} audit row(s); the hashes only show that the rows match each other.`
-        : report.rowsAfterLastAnchor === 0
-          ? `The anchors prove every audit row up to seq ${report.lastAnchoredSeq}, the newest one.`
-          : `The anchors prove the audit rows up to seq ${report.lastAnchoredSeq}; no signature covers the ${report.rowsAfterLastAnchor} newer row(s).`;
+      : cut
+        ? report.lastAnchoredSeq === null
+          ? `No anchor proves the audit trail: the newest valid anchor signs seq ${report.newestAnchoredSeq}, but the content of the redacted row ` +
+            `${report.redactedUnanchoredSeqs[0]} is explained only by an attestation entry written after that anchor.`
+          : `The anchors prove the audit rows up to seq ${report.lastAnchoredSeq}: the newest valid anchor signs seq ${report.newestAnchoredSeq}, but the ` +
+            `content of the redacted row ${report.redactedUnanchoredSeqs[0]} is explained only by an attestation entry written after that anchor.`
+        : report.lastAnchoredSeq === null
+          ? `No anchor: no signature proves any of the ${report.auditRows} audit row(s); the hashes only show that the rows match each other.`
+          : report.rowsAfterLastAnchor === 0
+            ? `The anchors prove every audit row up to seq ${report.lastAnchoredSeq}, the newest one.`
+            : `The anchors prove the audit rows up to seq ${report.lastAnchoredSeq}; no signature covers the ${report.rowsAfterLastAnchor} newer row(s).`;
   const compare = 'Compare the newest anchor with the anchors kept outside MSCD (section 14 of the on-premise guide).';
+  const shown = report.redactedUnanchoredSeqs.slice(0, 10).join(', ') + (report.redactedUnanchoredSeqs.length > 10 ? ', ...' : '');
+  const unanchored =
+    report.redactedUnanchored === 0
+      ? []
+      : [
+          `Redacted rows without an anchor: ${report.redactedUnanchored} row(s) (seq ${shown}) are explained only by an attestation entry that no ` +
+            'valid anchor covers, so no signature proves their content. A redaction made after the newest anchor of this export looks the ' +
+            'same: export again after the next nightly anchor, whose signature then covers the attestation entry.',
+        ];
   if (report.ok) {
-    return { out: [head, 'OK: every part, entry and audit hash matches the manifest, and every anchor is signed by a trusted key.', `${coverage} ${compare}`], err: [] };
+    return {
+      out: [head, 'OK: every part, entry and audit hash matches the manifest, and every anchor is signed by a trusted key.', `${coverage} ${compare}`, ...unanchored],
+      err: [],
+    };
   }
   const err = [`FAILED: ${report.problems.length} problem(s)`, ...report.problems.map((p) => `  ${p}`)];
   if (report.untrustedKeyIds.length > 0) {

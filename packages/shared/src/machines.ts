@@ -490,10 +490,19 @@ const organizationExport: Machine = {
     }),
     ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'requested', 'expired', null, { note: '7 days without a decision' }),
     ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'queued', 'building', null, { note: 'org-export.build starts' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'failed', 'building', null, {
+      note: 'The one retry of org-export.build starts the failed attempt again, unless another export of the organisation is queued or building',
+    }),
     ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'building', 'ready', null, {
       sets: ['parts', 'manifest_object_id', 'manifest_sha256', 'expires_at', 'completed_at'], note: 'org-export.build stored every part and the manifest',
     }),
-    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'building', 'failed', null, { sets: ['error'], note: 'org-export.build failed' }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'building', 'failed', null, {
+      sets: ['error'], note: 'org-export.build failed, or cleanup.expired found it building for 24 hours while no build ran',
+    }),
+    ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'queued', 'failed', null, {
+      sets: ['error'],
+      note: 'org-export.build found the organisation neither active nor offboarding, or cleanup.expired found it queued for 24 hours while no build ran',
+    }),
     ...rows<OrganizationExportState>(ORGANIZATION_EXPORT, 'ready', 'expired', null, { note: 'cleanup.expired deletes the content of an expired export (D.4)' }),
   ],
   rejections: [],

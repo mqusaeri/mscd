@@ -271,6 +271,15 @@ services:
     restart: unless-stopped
     environment:
       <<: *app-env
+      # Scratch folder on the server's disk: the organisation export builds one
+      # part (2 GiB by default) and one table at a time here, far more than the
+      # 64 MB memory /tmp holds (INSTALL-ONPREM.md section 19.1).
+      TMPDIR: /var/lib/mscd/tmp
+    # The named volume worker-tmp, or a host folder owned by 10001 named in
+    # MSCD_WORKER_TMP (for a disk with more room). The image creates the folder
+    # for user 10001, so a new volume starts with that owner.
+    volumes:
+      - ${MSCD_WORKER_TMP:-worker-tmp}:/var/lib/mscd/tmp
     secrets:
       - db-app.url
       - db-pack.url
@@ -400,6 +409,9 @@ volumes:
   pgdata:
   s3data:
   valkey-data:
+  # Scratch folder of the worker (TMPDIR): working files of the organisation
+  # export, deleted after each build. Holds no data that needs a backup.
+  worker-tmp:
 
 # Secret files written by install.sh. Each file is mode 0400 and owned by the
 # user of the service that reads it (10001 for MSCD, 70 for PostgreSQL, 1000
