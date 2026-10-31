@@ -1,0 +1,13 @@
+{
+  "id": "org-export",
+  "label": ["Organisation export", "Ekspor organisasi"],
+  "group": "admin",
+  "order": 48,
+  "scope": "org",
+  "perm": "org.export.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Export all data", "Ekspor semua data"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

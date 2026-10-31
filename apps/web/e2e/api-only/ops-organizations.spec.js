@@ -3,13 +3,15 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, ui, expectToast, expectOverlayReadable } from '../helpers.js';
 import { DEMO_PASSWORD, demoCode, freshTotpStep } from '../../e2e-api/fixtures.js';
 
-// The organisations of the operator console against the api (MILESTONE-2 M2-S12). The API stack runs one organisation
-// (single tenancy), so the first test checks with the real api that every organisation route the console reads
-// answers 409 `single_tenancy` and that the console says so. The SaaS answers of the other tests come from
-// `page.route`, as in sign-in-discovery.spec.js: a small service in the shapes of the contract that checks every
-// request with the schemas of @mscd/shared, follows the status machine of J.8, and checks `If-Match` with the server's
-// own `entitlementEtag` and `ifMatchOf` (apps/server/dist), so the ETag the screen builds is the one the server sends.
-// The operator's platform rights of a multi tenancy service are added to `GET /me`.
+// The organisations of the operator console against the api (MILESTONE-2 M2-S12, MILESTONE-3 M3-09). The API stack runs
+// one organisation (single tenancy), so the first test checks with the real api that every organisation route the
+// console reads, the export and deletion routes of Milestone 3 included, answers 409 `single_tenancy` and that the
+// console says so. The SaaS answers of the other tests come from `page.route`, as in sign-in-discovery.spec.js: a small
+// service in the shapes of the contract that checks every request with the schemas of @mscd/shared, follows the status
+// machine of Milestone 3 J.8 (an archived organisation reopens only while its deletion is scheduled), keeps the exports
+// and the deletion of each organisation, and checks `If-Match` with the server's own `entitlementEtag` and `ifMatchOf`
+// (apps/server/dist), so the ETag the screen builds is the one the server sends. The operator's platform rights of a
+// multi tenancy service are added to `GET /me`.
 
 /** The entitlement row helpers of the server build, which the API stack builds before the run. */
 const ROW_HELPERS = fileURLToPath(new URL('../../../server/dist/modules/license/entitlement-row.js', import.meta.url));
@@ -72,20 +74,50 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
     features: ['integrated_mode', 'edition_transition', 'link_health_monitor', 'auditor_guest_access'], rateUserPerMinute: null, rateOrgPerMinute: null, graceDays: 30,
     validFrom: '2026-10-01', validUntil: '2027-09-30', version: 1, updatedAt: new Date(at('03:00:00')), ...values,
   });
+  const STEPS = ['check', 'access', 'accounts', 'vault', 'database', 'audit', 'organization', 'checks', 'certificate', 'emails'];
   const orgs = {
     alpha: {
       id: '00000000-0000-4000-8000-0000000a1fa1', slug: 'alpha', name: 'PT Alpha Konsultan', status: 'active', region: 'id', createdAt: at('01:00:00'),
       memberCount: 41, systemCount: 2, entitlement: record({ version: 3, updatedAt: new Date(at('03:00:00')) }),
       domains: [{ domain: 'alpha.co.id', status: 'verified', method: 'dns', requestedAt: at('01:00:00'), verifiedAt: at('02:00:00'), lastCheckedAt: at('02:00:00'), pendingUntil: null, txtName: '_mscd-verify.alpha.co.id', found: true }],
-      events: [], lastSignInAt: at('04:00:00'),
+      events: [], lastSignInAt: at('04:00:00'), offboardingEndsAt: null, deletion: null,
+      exports: [{ id: '5a6b7c8d-9e0f-4a1b-8c2d-0000000a1001', status: 'ready', requestedVia: 'tenant_admin', requestedAt: at('01:00:00'), completedAt: at('01:40:00'), expiresAt: '2026-11-04T01:40:00.000Z', isFinal: false, partCount: 2, sizeBytes: 734003200, downloadCount: 1 }],
     },
     beta: {
       id: '00000000-0000-4000-8000-0000000be7a1', slug: 'beta', name: 'PT Beta Logistik', status: 'suspended', region: 'id', createdAt: at('01:30:00'),
       memberCount: 3, systemCount: 0, entitlement: null, domains: [],
       events: [{ id: '7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a', from: 'active', to: 'suspended', reason: 'Invoice overdue by 60 days', actor: { handle: 'ops', displayName: 'Platform Operator' }, at: at('05:00:00') }],
-      lastSignInAt: null,
+      lastSignInAt: null, offboardingEndsAt: null, deletion: null, exports: [],
+    },
+    delta: {
+      id: '00000000-0000-4000-8000-0000000de1a1', slug: 'delta', name: 'PT Delta Retail', status: 'archived', region: 'id', createdAt: '2025-06-01T01:00:00.000Z',
+      memberCount: 12, systemCount: 1, entitlement: null, domains: [], lastSignInAt: null, offboardingEndsAt: null,
+      events: [{ id: '7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0b', from: 'offboarding', to: 'archived', reason: 'The read-only period ended on 2026-10-20', actor: null, at: '2026-10-20T03:00:00.000Z' }],
+      deletion: {
+        id: '1e2f3a4b-5c6d-4e7f-8a9b-0000000de1a1', status: 'scheduled', scheduledFor: '2026-11-19T03:00:00.000Z', scheduledBy: null, reason: 'The read-only period ended on 2026-10-20',
+        archivedAt: '2026-10-20T03:00:00.000Z', earliestAllowed: '2026-10-27T03:00:00.000Z', finalExportId: null, startedAt: null, completedAt: null, failedStep: null, error: null,
+        steps: [], vaultObjectsDeleted: null, certificateId: null,
+      },
+      exports: [],
+    },
+    omega: {
+      id: '00000000-0000-4000-8000-00000000e9a1', slug: 'omega', name: 'PT Omega Tekstil', status: 'deleted', region: 'id', createdAt: '2025-01-01T01:00:00.000Z',
+      memberCount: 0, systemCount: 0, entitlement: null, domains: [], lastSignInAt: null, offboardingEndsAt: null, events: [],
+      deletion: {
+        id: '1e2f3a4b-5c6d-4e7f-8a9b-00000000e9a1', status: 'completed', scheduledFor: '2026-09-14T03:00:00.000Z', scheduledBy: null, reason: 'The read-only period ended on 2026-08-15',
+        archivedAt: '2026-08-15T03:00:00.000Z', earliestAllowed: '2026-08-22T03:00:00.000Z', finalExportId: '5a6b7c8d-9e0f-4a1b-8c2d-00000000e9a1', startedAt: '2026-09-14T03:00:00.000Z',
+        completedAt: '2026-09-14T03:12:00.000Z', failedStep: null, error: null, vaultObjectsDeleted: 731, certificateId: '2f3a4b5c-6d7e-4f8a-9b0c-00000000e9a1',
+        steps: [...STEPS.map((step) => ({ step, status: 'done', at: '2026-09-14T03:05:00.000Z', detail: `${step} done` })), { step: 'check: data key', status: 'done', at: null, detail: 'No wrapped data key of the organisation remains' }],
+      },
+      exports: [],
     },
   };
+  /** The read-only end, the deletion that is not cancelled and the newest export (Milestone 3 D.2). */
+  const lifecycle = (o) => ({
+    offboardingEndsAt: o.status === 'offboarding' ? o.offboardingEndsAt : null,
+    deletion: o.deletion && o.deletion.status !== 'cancelled' ? { status: o.deletion.status, scheduledFor: o.deletion.scheduledFor } : null,
+    lastExport: o.exports[0] ? { status: o.exports[0].status, readyAt: o.exports[0].completedAt } : null,
+  });
   const view = ({ entitlement: e, slug, memberCount, systemCount }) => ({
     organization: slug, plan: e.plan, source: e.source, maxUsers: e.maxUsers, maxManagementSystems: e.maxManagementSystems, frameworks: [...e.frameworks],
     storageAdapters: [...e.storageAdapters], features: [...e.features], rateUserPerMinute: e.rateUserPerMinute, rateOrgPerMinute: e.rateOrgPerMinute,
@@ -96,7 +128,7 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
     id: o.id, slug: o.slug, name: o.name, status: o.status, licence: o.entitlement ? { state: 'valid', validUntil: o.entitlement.validUntil ?? '9999-12-31' } : null,
     memberCount: o.memberCount, systemCount: o.systemCount, plan: o.entitlement?.plan ?? null, validUntil: o.entitlement?.validUntil ?? null,
     verifiedDomains: o.domains.filter((d) => d.status === 'verified').map((d) => d.domain), createdAt: o.createdAt,
-    offboardingEndsAt: null, deletion: null, lastExport: null,
+    ...lifecycle(o),
   });
   const domainView = ({ found: _found, ...d }) => shared.OrgDomain.parse(d);
   const send = (route, status, body, headers = {}) => route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) });
@@ -127,7 +159,7 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
       orgs[create.slug] = {
         id: '00000000-0000-4000-8000-0000000c0de1', slug: create.slug, name: create.name, status: 'active', region: 'id', createdAt: at('06:00:00'), memberCount: 0, systemCount: 0,
         entitlement: create.preset ? record({ plan: create.preset, maxUsers: 10, maxManagementSystems: 1, validFrom: day, validUntil: '2026-11-26', graceDays: 7 }) : null,
-        domains: [], events: [], lastSignInAt: null,
+        domains: [], events: [], lastSignInAt: null, offboardingEndsAt: null, deletion: null, exports: [],
       };
       return send(route, 201, shared.OpsOrganizationCreateResult.parse({
         ok: true, changed: [],
@@ -143,13 +175,14 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
         id: o.id, slug: o.slug, name: o.name, status: o.status, region: o.region, createdAt: o.createdAt, memberCount: o.memberCount, systemCount: o.systemCount,
         entitlement: o.entitlement ? { plan: o.entitlement.plan, source: o.entitlement.source, maxUsers: o.entitlement.maxUsers, maxManagementSystems: o.entitlement.maxManagementSystems, validUntil: o.entitlement.validUntil } : null,
         domains: o.domains.map((d) => ({ domain: d.domain, status: d.status })), lastSignInAt: o.lastSignInAt,
-        offboardingEndsAt: null, deletion: null, lastExport: null,
+        ...lifecycle(o),
       }));
     }
     if (rest[0] === 'status') {
       const change = shared.OrganizationStatusChange.parse(body);
       const row = shared.MACHINES['organization.status'].transitions.find((t) => t.from === o.status && t.to === change.status && t.via === 'ops.organizations.status');
-      if (!row) {
+      // Milestone 3 J.8: archived -> offboarding only while the deletion is scheduled.
+      if (!row || (o.status === 'archived' && o.deletion?.status !== 'scheduled')) {
         return route.fulfill(problem(409, 'transition-not-allowed', 'Transition not allowed', {
           messageKey: 'invalid_status_transition',
           messages: { en: `Organisation ${o.slug} is ${o.status} and cannot move to ${change.status}.`, id: `Organisasi ${o.slug} berstatus ${o.status} dan tidak dapat dipindahkan ke ${change.status}.` },
@@ -163,12 +196,50 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
       }
       const from = o.status;
       o.status = change.status;
+      if (change.status === 'offboarding') {
+        o.offboardingEndsAt = new Date(Date.parse(at('12:00:00')) + (from === 'archived' ? 7 : 30) * 864e5).toISOString();
+        if (from === 'archived') o.deletion = { ...o.deletion, status: 'cancelled' };
+        o.exports.unshift({ id: `5a6b7c8d-9e0f-4a1b-8c2d-0000000f${String(o.exports.length).padStart(4, '0')}`, status: 'queued', requestedVia: 'offboarding', requestedAt: at('12:00:00'), completedAt: null, expiresAt: null, isFinal: true, partCount: null, sizeBytes: null, downloadCount: 0 });
+      } else o.offboardingEndsAt = null;
       o.events.unshift({ id: `0000000${o.events.length}-1b2c-4d3e-8f4a-5b6c7d8e9f0a`, from, to: change.status, reason: change.reason, actor: { handle: 'ops', displayName: 'Platform Operator' }, at: at(`0${7 + o.events.length}:00:00`) });
       const ended = change.status === 'suspended' || change.status === 'archived' ? 7 : 0;
       return send(route, 200, shared.OrganizationStatusChangeResult.parse({
         ok: true, changed: [], message: [`Organisation ${o.slug} moved from ${from} to ${change.status}.`, `Organisasi ${o.slug} dipindahkan dari ${from} ke ${change.status}.`],
         data: { slug: o.slug, from, to: change.status, sessionsRevoked: ended, tenantAdmins: 2, tenantAdminsEmailed: 1 },
       }));
+    }
+    if (rest[0] === 'exports' && method === 'GET') return send(route, 200, o.exports.map((e) => shared.OpsOrganizationExportItem.parse(e)));
+    if (rest[0] === 'exports' && method === 'POST') {
+      const { reason } = shared.OpsReasonBody.parse(body);
+      if (o.exports.some((e) => ['requested', 'queued', 'building'].includes(e.status))) {
+        return route.fulfill(problem(409, 'conflict', 'Conflict', {
+          messageKey: 'export_in_progress',
+          messages: { en: 'Another export of this organisation is waiting for approval or being built. Wait until it is ready, rejected or failed.', id: 'Ekspor lain dari organisasi ini sedang menunggu persetujuan atau sedang dibuat.' },
+        }));
+      }
+      const id = `5a6b7c8d-9e0f-4a1b-8c2d-0000000e${String(o.exports.length).padStart(4, '0')}`;
+      o.exports.unshift({ id, status: 'queued', requestedVia: 'operator', requestedAt: at('13:00:00'), completedAt: null, expiresAt: null, isFinal: false, partCount: null, sizeBytes: null, downloadCount: 0, reason });
+      return send(route, 202, shared.OpsOrganizationExportQueued.parse({ ok: true, changed: [], message: [`The export of ${o.slug} was queued; its Tenant Admins are told and download it when it is ready`, `Ekspor ${o.slug} diantrekan`], data: { id, status: 'queued' } }));
+    }
+    if (rest[0] === 'deletion' && rest.length === 1 && method === 'GET') {
+      if (!o.deletion) return route.fulfill(problem(404, 'not-found', 'Not found'));
+      return send(route, 200, shared.OrganizationDeletionView.parse(o.deletion));
+    }
+    if (rest[0] === 'deletion' && rest.length === 1 && method === 'POST') {
+      const schedule = shared.OrganizationDeletionSchedule.parse(body);
+      if (schedule.confirmSlug !== o.slug) return route.fulfill(problem(422, 'business-rule', 'Business rule', { messageKey: 'confirmation_mismatch', messages: { en: 'The slug does not match.', id: 'Slug tidak cocok.' } }));
+      if (Date.parse(schedule.scheduledFor) < Date.parse(o.deletion.earliestAllowed)) {
+        return route.fulfill(problem(409, 'conflict', 'Conflict', { messageKey: 'deletion_too_soon', messages: { en: `The deletion of ${o.slug} cannot be earlier than ${o.deletion.earliestAllowed}`, id: `Penghapusan ${o.slug} tidak boleh lebih awal dari ${o.deletion.earliestAllowed}` } }));
+      }
+      o.deletion = { ...o.deletion, status: 'scheduled', scheduledFor: new Date(schedule.scheduledFor).toISOString(), scheduledBy: { handle: 'ops', displayName: 'Platform Operator' }, reason: schedule.reason };
+      return send(route, 200, shared.OrganizationDeletionResult.parse({ ok: true, changed: [], message: [`The deletion of ${o.slug} is scheduled for ${schedule.scheduledFor.slice(0, 10)}.`, `Penghapusan ${o.slug} dijadwalkan pada ${schedule.scheduledFor.slice(0, 10)}.`], data: { id: o.deletion.id, status: 'scheduled', scheduledFor: o.deletion.scheduledFor } }));
+    }
+    if (rest[0] === 'deletion' && (rest[1] === 'cancel' || rest[1] === 'retry')) {
+      shared.OpsReasonBody.parse(body);
+      const wanted = rest[1] === 'cancel' ? 'scheduled' : 'failed';
+      if (o.deletion?.status !== wanted) return route.fulfill(problem(409, 'conflict', 'Conflict', { messageKey: 'deletion_in_progress' }));
+      o.deletion = { ...o.deletion, status: rest[1] === 'cancel' ? 'cancelled' : 'running' };
+      return send(route, 200, shared.OrganizationDeletionResult.parse({ ok: true, changed: [], data: { id: o.deletion.id, status: o.deletion.status, scheduledFor: o.deletion.scheduledFor } }));
     }
     if (rest[0] === 'events') {
       const query = shared.OrganizationEventsQuery.parse(Object.fromEntries(url.searchParams));
@@ -230,7 +301,10 @@ test.describe('Operator console organisations against the api @api-only', () => 
 
   test('single tenancy: the organisation routes answer single_tenancy, and the console says that one organisation runs here', async ({ page }) => {
     await signInAsOperator(page);
-    for (const path of ['/api/v1/ops/organizations', '/api/v1/ops/organizations/ndt', '/api/v1/ops/organizations/ndt/events', '/api/v1/ops/organizations/ndt/domains', '/api/v1/ops/organizations/ndt/entitlements', '/api/v1/ops/plans']) {
+    for (const path of [
+      '/api/v1/ops/organizations', '/api/v1/ops/organizations/ndt', '/api/v1/ops/organizations/ndt/events', '/api/v1/ops/organizations/ndt/domains', '/api/v1/ops/organizations/ndt/entitlements', '/api/v1/ops/plans',
+      '/api/v1/ops/organizations/ndt/exports', '/api/v1/ops/organizations/ndt/deletion', '/api/v1/ops/organizations/ndt/deletion/certificate',
+    ]) {
       const response = await page.request.get(path);
       expect(response.status(), path).toBe(409);
       expect((await response.json()).messageKey, path).toBe('single_tenancy');
@@ -375,7 +449,7 @@ test.describe('Operator console organisations against the api @api-only', () => 
       await row(page, 'alpha').getByRole('button', { name: 'Manage' }).click();
       const drawer = ui.drawer(page);
       const dialog = ui.modal(page);
-      for (const label of ['Overview', 'Status', 'Domains', 'Entitlements', 'History']) {
+      for (const label of ['Overview', 'Status', 'Export', 'Deletion', 'Domains', 'Entitlements', 'History']) {
         await drawerTab(page, label).click();
         await expect(drawer.locator('[role="tabpanel"]')).not.toContainText('Loading');
         await expectOverlayReadable(page);
@@ -390,8 +464,105 @@ test.describe('Operator console organisations against the api @api-only', () => 
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await drawer.locator('[data-domain="alpha.co.id"]').getByRole('button', { name: 'Remove' }).click();
       await expectOverlayReadable(page);
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await drawerTab(page, 'Export').click();
+      await drawer.getByRole('button', { name: 'Start export' }).click();
+      await expectOverlayReadable(page);
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+      await row(page, 'delta').getByRole('button', { name: 'Manage' }).click();
+      await drawerTab(page, 'Deletion').click();
+      await expect(drawer.locator('[data-deletion="scheduled"]')).toBeVisible();
+      await expectOverlayReadable(page);
+      await drawer.getByRole('button', { name: 'Change date' }).click();
+      await expectOverlayReadable(page);
+      await page.keyboard.press('Escape');
+      await drawer.getByRole('button', { name: 'Cancel deletion' }).click();
+      await expectOverlayReadable(page);
     });
   }
+
+  test('a multi tenancy service: the export and deletion of an organisation, Reopen for export and the certificate', async ({ page }) => {
+    const service = await saasService(page);
+    await signInAsOperator(page);
+    await tab(page, 'Organisations').click();
+    // The dates of instants are days in the browser's time zone (the operator without a membership has no organisation calendar).
+    await expect(row(page, 'delta').locator('[data-deletion-on]')).toHaveAttribute('data-deletion-on', '2026-11-19');
+    await expect(row(page, 'omega')).toContainText('Deleted');
+    await expect(row(page, 'omega').locator('[data-deletion-on]')).toContainText('Completed');
+    // Export: the operator sees status and sizes, starts an export with a reason, and never downloads one.
+    await row(page, 'alpha').getByRole('button', { name: 'Manage' }).click();
+    const drawer = ui.drawer(page);
+    const dialog = ui.modal(page);
+    await drawerTab(page, 'Export').click();
+    await expect(drawer.locator('[data-export-status="ready"]')).toBeVisible();
+    await expect(drawer).toContainText('700 MB');
+    await expect(drawer.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await drawer.getByRole('button', { name: 'Start export' }).click();
+    await dialog.locator('textarea').fill('Asked by the Tenant Admin in ticket 5120');
+    await dialog.getByRole('button', { name: 'Start export' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expectToast(page, 'The export of alpha was queued; its Tenant Admins are told and download it when it is ready');
+    await expect(drawer.locator('[data-export-status="queued"]')).toBeVisible();
+    await expect(drawer.getByRole('button', { name: 'Start export' })).toBeDisabled();
+    const exportPost = service.calls.find((c) => c.method === 'POST' && c.path.endsWith('/alpha/exports'));
+    expect(exportPost.body).toEqual({ reason: 'Asked by the Tenant Admin in ticket 5120' });
+    expect(exportPost.headers['idempotency-key']).toBeTruthy();
+    await page.keyboard.press('Escape');
+    // Deletion of an archived organisation: change the date, with the body the contract takes.
+    await row(page, 'delta').getByRole('button', { name: 'Manage' }).click();
+    await drawerTab(page, 'Deletion').click();
+    await expect(drawer.locator('[data-deletion="scheduled"]')).toContainText('MSCD, when the organisation was archived');
+    await drawer.getByRole('button', { name: 'Change date' }).click();
+    // A day 40 days ahead of the real today, so the form's own check (not before today) passes on any run date.
+    const later = new Date(Date.now() + 40 * 864e5);
+    const laterDay = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`;
+    await dialog.locator('input[type="date"]').fill(laterDay);
+    await dialog.locator('textarea').fill('The customer asked in writing for a later deletion');
+    await dialog.locator('input[type="text"]').fill('delta');
+    await dialog.getByRole('button', { name: 'Change date' }).click();
+    await expect(dialog).toHaveCount(0);
+    const schedule = service.calls.find((c) => c.method === 'POST' && c.path.endsWith('/delta/deletion'));
+    // The chosen day at the local time of day of the current date (the browser and this process share the time zone).
+    const base = new Date('2026-11-19T03:00:00.000Z');
+    const scheduledFor = new Date(later.getFullYear(), later.getMonth(), later.getDate(), base.getHours(), base.getMinutes(), base.getSeconds()).toISOString();
+    expect(schedule.body).toEqual({ scheduledFor, reason: 'The customer asked in writing for a later deletion', confirmSlug: 'delta' });
+    await expectToast(page, `The deletion of delta is scheduled for ${scheduledFor.slice(0, 10)}.`);
+    await expect(drawer.locator('[data-deletion-date]')).toHaveAttribute('data-deletion-date', laterDay);
+    await expect(drawer).toContainText('Platform Operator');
+    // Reopen for export while the deletion is scheduled (J.8): the deletion is cancelled, 7 read-only days.
+    await drawerTab(page, 'Status').click();
+    await drawer.getByRole('button', { name: 'Reopen for export' }).click();
+    await expect(dialog).toContainText('The scheduled deletion is cancelled.');
+    await dialog.locator('textarea').fill('The customer forgot the final export');
+    await dialog.locator('input').fill('delta');
+    await dialog.getByRole('button', { name: 'Reopen for export' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(drawer.locator('[data-status-meaning="offboarding"]')).toBeVisible();
+    expect(service.calls.filter((c) => c.path.endsWith('/delta/status')).map((c) => c.body)).toEqual([{ status: 'offboarding', reason: 'The customer forgot the final export', confirmSlug: 'delta' }]);
+    await expect(row(page, 'delta').locator('[data-read-only-until]')).toHaveAttribute('data-read-only-until', '2026-11-04');
+    await expect(row(page, 'delta').locator('[data-deletion-on]')).toHaveCount(0);
+    await drawerTab(page, 'Export').click();
+    await expect(drawer.locator('[data-export-status="queued"]')).toContainText('Final export');
+    await drawerTab(page, 'Deletion').click();
+    await expect(drawer.locator('[data-deletion="cancelled"]')).toBeVisible();
+    await expect(drawer.getByRole('button', { name: 'Change date' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    // A completed deletion: the steps and checks, and the signed certificate.
+    await row(page, 'omega').getByRole('button', { name: 'Manage' }).click();
+    await drawerTab(page, 'Deletion').click();
+    await expect(drawer.locator('[data-deletion="completed"]')).toContainText('The organisation is deleted.');
+    await expect(drawer.locator('[data-step="check: data key"]')).toHaveText('Check: the data key is gone');
+    // Chromium sends a download started by a link past `page.route`, so the console's link is checked here; the api's
+    // certificate route (signed file, server's file name) is covered by test/int/org-deletion. The api of this stack
+    // runs a single organisation and refuses it (409), so the console claims only that the download started.
+    const [download] = await Promise.all([page.waitForEvent('download'), drawer.getByRole('button', { name: 'Download certificate' }).click()]);
+    expect(new URL(download.url()).pathname).toBe('/api/v1/ops/organizations/omega/deletion/certificate');
+    await expectToast(page, 'Certificate download started');
+    await drawerTab(page, 'Status').click();
+    await expect(drawer).toContainText('Deleted is final. No move is possible.');
+    for (const c of service.calls.filter((x) => x.method !== 'GET')) expect(c.headers['x-csrf-token'], `${c.method} ${c.path}`).toBeTruthy();
+  });
 
   test('an operator who may only read sees the organisation without any action', async ({ page }) => {
     await saasService(page, { rights: ['ops.read', 'license.manage', 'pack.install'] });

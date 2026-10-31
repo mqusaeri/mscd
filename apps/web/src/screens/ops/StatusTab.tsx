@@ -1,18 +1,21 @@
-// Status tab of the organisation drawer (MILESTONE-2 M2-S12): the current status with one plain sentence on what the
-// members can do, and the moves of J.8 ("Suspend", "Reactivate", "Start offboarding", "Archive"). Each move lists its
-// effects before the operator confirms it and needs a reason; "Start offboarding" and "Archive" also need the slug
-// typed again. The answer's ended sessions and emailed Tenant Admins are shown; refusals (409
-// `invalid_status_transition`, 422 `confirmation_mismatch`) show the server's message. In offboarding the tab says
-// when the read-only period of D-S5 ends, because the operator archives the organisation by hand.
+// Status tab of the organisation drawer (MILESTONE-2 M2-S12, MILESTONE-3 M3-09): the current status with one plain
+// sentence on what the members can do, and the moves of Milestone 3 J.8 ("Suspend", "Reactivate", "Start offboarding",
+// "Archive" and, for an archived organisation whose deletion is scheduled, "Reopen for export"). Each move lists its
+// effects before the operator confirms it and needs a reason; "Start offboarding", "Archive" and "Reopen for export"
+// also need the slug typed again. The answer's ended sessions and emailed Tenant Admins are shown; refusals (409
+// `invalid_status_transition`, 422 `confirmation_mismatch`) show the server's message. In offboarding the tab says when
+// the read-only period ends (`offboardingEndsAt`, D.2), after which MSCD archives the organisation by itself; an
+// archived organisation shows its deletion date. Nobody moves an organisation to deleted: `deleted` is final.
 import { useCallback, useEffect, useState } from 'react';
 import { useMutation } from '../api';
 import type { HostContext, TextPair } from '../types';
 import { Alert, Button, Card, Field, Modal, TextInput, Textarea, UI_TEXT } from '../ui';
 import { LoadState, asApi, useLoad } from './Health';
 import type { OpsAdapter } from './model';
+import { DELETION_STATUS_TEXT, instantDay } from './lifecycle-model';
 import {
-  EMPTY_STATUS_FORM, EVENT_PAGE_SIZE, MOVE_LABEL, MOVE_TONE, READ_ONLY_DAYS, STATUS_LABEL, STATUS_MEANING, STATUS_MOVES, addDays, dayText,
-  localIso, moveEffects, needsSlug, offboardingStart, refusalText, statusBody, statusErrors, todayOf,
+  EFFECT_VALUES, EMPTY_STATUS_FORM, EVENT_PAGE_SIZE, MOVE_TONE, READ_ONLY_DAYS, STATUS_LABEL, STATUS_MEANING, addDays, dayText, localIso, moveEffects,
+  moveLabel, movesOf, needsSlug, offboardingStart, refusalText, statusBody, statusErrors, todayOf,
 } from './org-model';
 import type { EventPage, OrgDetail, OrgStatus, StatusChange, StatusChanged, StatusForm } from './org-model';
 import { StatusBadge } from './org-parts';
@@ -60,13 +63,13 @@ export function StatusDialog({ ctx, adapter, detail, to, onClose, onMoved }: {
   return (
     <Modal
       open
-      title={ctx.fill(ORG_TEXT.moveTitle, { action: ctx.li(MOVE_LABEL[to]), org: detail.name })}
+      title={ctx.fill(ORG_TEXT.moveTitle, { action: ctx.li(moveLabel(detail.status, to)), org: detail.name })}
       sub={ctx.fill(ORG_TEXT.moveSub, { from: ctx.li(STATUS_LABEL[detail.status]), to: ctx.li(STATUS_LABEL[to]) })}
       onClose={onClose}
       footer={(
         <>
           <Button onClick={onClose}>{ctx.li(UI_TEXT.cancel)}</Button>
-          <Button variant={MOVE_TONE[to] === 'default' ? 'primary' : MOVE_TONE[to]} busy={mutation.busy} onClick={submit}>{ctx.li(MOVE_LABEL[to])}</Button>
+          <Button variant={MOVE_TONE[to] === 'default' ? 'primary' : MOVE_TONE[to]} busy={mutation.busy} onClick={submit}>{ctx.li(moveLabel(detail.status, to))}</Button>
         </>
       )}
     >
@@ -74,7 +77,7 @@ export function StatusDialog({ ctx, adapter, detail, to, onClose, onMoved }: {
         <div>
           <div className="mx-label">{ctx.li(ORG_TEXT.effectsTitle)}</div>
           <ul style={{ margin: '6px 0 0', paddingLeft: 20, color: 'var(--tx)' }}>
-            {moveEffects(detail.status, to).map((e) => <li key={e[0]} style={{ marginTop: 4 }}>{ctx.fill(e, { days: READ_ONLY_DAYS })}</li>)}
+            {moveEffects(detail.status, to).map((e) => <li key={e[0]} style={{ marginTop: 4 }}>{ctx.fill(e, EFFECT_VALUES)}</li>)}
           </ul>
         </div>
         <Field label={ORG_TEXT.reason} hint={ORG_TEXT.reasonHint} error={shown.reason ?? fields.reason ?? null} required>
@@ -106,18 +109,32 @@ export function MovedAlert({ ctx, name, moved }: { ctx: HostContext; name: strin
 
 const NO_EVENTS: EventPage = { items: [], page: 1, pageSize: EVENT_PAGE_SIZE, total: 0 };
 
-/** The read-only period of an organisation in offboarding: its start (from the history), its end and whether it passed. */
+/**
+ * The read-only period of an organisation in offboarding: its start (from the history), its end (`offboardingEndsAt`,
+ * or the start plus the read-only days when the answer has none) and whether it passed.
+ */
 export function OffboardingNote({ ctx, detail, events }: { ctx: HostContext; detail: OrgDetail; events: EventPage | null }) {
+  if (detail.status !== 'offboarding') return null;
   const start = events ? offboardingStart(detail.status, events.items) : null;
-  if (!start) return null;
-  const startDay = localIso(new Date(start));
-  const end = addDays(startDay, READ_ONLY_DAYS);
+  const startDay = start ? localIso(new Date(start)) : null;
+  const end = detail.offboardingEndsAt ? instantDay(detail.offboardingEndsAt) : startDay ? addDays(startDay, READ_ONLY_DAYS) : null;
+  if (!end) return null;
   const over = todayOf(ctx) >= end;
+  const text = !startDay ? ORG_TEXT.offboardingUntil : over ? ORG_TEXT.offboardingOver : ORG_TEXT.offboardingSince;
   return (
     <Alert tone={over ? 'warn' : 'info'}>
-      {ctx.fill(over ? ORG_TEXT.offboardingOver : ORG_TEXT.offboardingSince, { date: dayText(ctx, startDay), days: READ_ONLY_DAYS, end: dayText(ctx, end) })}
+      <span data-offboarding-end={end}>{ctx.fill(text, { date: startDay ? dayText(ctx, startDay) : '', end: dayText(ctx, end) })}</span>
     </Alert>
   );
+}
+
+/** The deletion of an archived organisation: its date while scheduled, else its state, with a pointer to the Deletion tab. */
+export function ArchivedNote({ ctx, detail }: { ctx: HostContext; detail: OrgDetail }) {
+  if (detail.status !== 'archived') return null;
+  const d = detail.deletion;
+  if (d?.status === 'scheduled') return <Alert tone="warn">{ctx.fill(ORG_TEXT.archivedDeletion, { date: dayText(ctx, instantDay(d.scheduledFor)) })}</Alert>;
+  if (d) return <Alert tone={d.status === 'failed' ? 'bad' : 'info'}>{ctx.fill(ORG_TEXT.archivedDeletionState, { status: ctx.li(DELETION_STATUS_TEXT[d.status]) })}</Alert>;
+  return <Alert tone="info">{ctx.li(ORG_TEXT.archivedNoDeletion)}</Alert>;
 }
 
 export function StatusTab({ ctx, adapter, detail, tick, onChanged }: {
@@ -137,7 +154,7 @@ export function StatusTab({ ctx, adapter, detail, tick, onChanged }: {
   );
   const { result, reload } = useLoad<EventPage>(load);
   const canManage = ctx.platformCan('ops.tenants.manage');
-  const moves = STATUS_MOVES[detail.status];
+  const moves = movesOf(detail);
   const done = (change: StatusChanged) => {
     setMoving(null);
     setMoved(change);
@@ -145,12 +162,12 @@ export function StatusTab({ ctx, adapter, detail, tick, onChanged }: {
     onChanged();
   };
   let actions;
-  if (!moves.length) actions = <span className="mx-muted">{ctx.li(ORG_TEXT.finalStatus)}</span>;
+  if (!moves.length) actions = <span className="mx-muted" data-no-move={detail.status}>{ctx.li(detail.status === 'archived' ? ORG_TEXT.archivedNoMove : ORG_TEXT.finalStatus)}</span>;
   else if (!canManage) actions = <span className="mx-muted">{ctx.li(ORG_TEXT.readOnlyRights)}</span>;
   else {
     actions = (
       <div className="mx-btn-group">
-        {moves.map((to) => <Button key={to} variant={MOVE_TONE[to]} onClick={() => setMoving(to)}>{ctx.li(MOVE_LABEL[to])}</Button>)}
+        {moves.map((to) => <Button key={to} variant={MOVE_TONE[to]} onClick={() => setMoving(to)}>{ctx.li(moveLabel(detail.status, to))}</Button>)}
       </div>
     );
   }
@@ -163,6 +180,7 @@ export function StatusTab({ ctx, adapter, detail, tick, onChanged }: {
           <div data-status-meaning={detail.status}>{ctx.li(STATUS_MEANING[detail.status])}</div>
           {offboarding && result && !result.ok ? <LoadState ctx={ctx} result={result} failed={ORG_TEXT.historyFailed} retry={reload} /> : null}
           {offboarding && result && result.ok ? <OffboardingNote ctx={ctx} detail={detail} events={result.data} /> : null}
+          <ArchivedNote ctx={ctx} detail={detail} />
         </div>
       </Card>
       <Card title={ORG_TEXT.changeStatus} sub={moves.length ? ORG_TEXT.changeStatusSub : undefined}>{actions}</Card>

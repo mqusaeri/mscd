@@ -1,4 +1,4 @@
-// Operator console, organisation lifecycle (MILESTONE-2 M2-S12): the status machine and enum values against
+// Operator console, organisation lifecycle (MILESTONE-2 M2-S12, MILESTONE-3 M3-09): the status machine and enum values against
 // @mscd/shared, the route permissions, the pure rules (status form and body, effects, days left, the entitlement ETag,
 // form and body, domain checks and refusal texts), the API adapter over a fake fetch (detail, status with confirmSlug
 // and the 409 and 422 messages, paged history, domains with add, verify, 503 and remove, entitlements with If-Match,
@@ -15,7 +15,7 @@ import { createApiAdapter, fromDetail, fromDomain, fromEntitlement, fromEvent, f
 import { createSampleAdapter, normaliseDomain, resetSampleOps } from '../../src/screens/ops/sample';
 import {
   DOMAIN_STATUSES, EMPTY_STATUS_FORM, FEATURE_NAMES, ORG_STATUSES, STATUS_MOVES, STORAGE_ADAPTER_NAMES, addDays, checkOutcome, daysBetween, daysLeftOf,
-  domainInputError, entitlementBody, entitlementErrors, entitlementEtag, entitlementForm, isOpenEnded, mapLimited, moveEffects, needsSlug,
+  domainInputError, entitlementBody, entitlementErrors, entitlementEtag, entitlementForm, isOpenEnded, mapLimited, moveEffects, moveLabel, movesOf, needsSlug,
   offboardingStart, planPicked, presetUntil, refusalText, statusBody, statusErrors, todayOf, toggled,
 } from '../../src/screens/ops/org-model';
 import type { DomainCheck, Entitlement, PlanPreset } from '../../src/screens/ops/org-model';
@@ -89,10 +89,18 @@ describe('Organisation lifecycle contract', () => {
     expect([...ORG_STATUSES]).toEqual([...ORGANIZATION_STATUSES]);
     const rows = MACHINES['organization.status'].transitions.filter((r) => r.via === 'ops.organizations.status');
     const moves = Object.fromEntries(ORG_STATUSES.map((s) => [s, rows.filter((r) => r.from === s).map((r) => r.to).sort()]));
-    // Milestone 3 J.8 (M3-01) adds archived -> offboarding while a deletion is scheduled; the screen offers it with the
-    // deletion tab of M3-09, so until then the screen's moves are the machine's without exactly that row.
-    const screenMoves = Object.fromEntries(ORG_STATUSES.map((s) => [s, [...STATUS_MOVES[s], ...(s === 'archived' ? ['offboarding'] : [])].sort()]));
-    expect(moves).toEqual(screenMoves);
+    // Milestone 3 J.8: the screen offers exactly the operator's moves, archived -> offboarding included; nobody moves to deleted.
+    expect(moves).toEqual(Object.fromEntries(ORG_STATUSES.map((s) => [s, [...STATUS_MOVES[s]].sort()])));
+    expect(STATUS_MOVES.deleted).toEqual([]);
+    expect(Object.values(STATUS_MOVES).flat()).not.toContain('deleted');
+    // Reopen for export only while the deletion is scheduled (the note of the machine row).
+    expect(rows.find((r) => r.from === 'archived')?.note).toContain('Only while the deletion is scheduled');
+    expect(movesOf({ status: 'archived', deletion: { status: 'scheduled', scheduledFor: '2026-10-20T03:00:00Z' } })).toEqual(['offboarding']);
+    expect(movesOf({ status: 'archived', deletion: { status: 'failed', scheduledFor: '2026-10-20T03:00:00Z' } })).toEqual([]);
+    expect(movesOf({ status: 'archived', deletion: null })).toEqual([]);
+    expect(movesOf({ status: 'offboarding', deletion: null })).toEqual(['active', 'archived']);
+    expect(moveLabel('archived', 'offboarding')).toBe(ORG_TEXT.moveReopen);
+    expect(moveLabel('active', 'offboarding')).toBe(ORG_TEXT.moveOffboard);
     for (const r of rows) expect(needsSlug(r.to as (typeof ORG_STATUSES)[number]), `${r.from} to ${r.to}`).toBe(Boolean(r.requires?.includes('confirmSlug')));
     for (const r of rows) expect(r.permission).toBe('ops.tenants.manage');
   });
@@ -130,8 +138,10 @@ describe('Organisation lifecycle rules', () => {
   it('lists the effects of each move with the email to the Tenant Admins, and the plan after a renewal', () => {
     expect(moveEffects('active', 'suspended')).toContain(ORG_TEXT.effectSuspended2);
     expect(moveEffects('active', 'offboarding')).toContain(ORG_TEXT.effectOffboarding4);
-    expect(moveEffects('offboarding', 'archived')).toContain(ORG_TEXT.effectArchived3);
-    expect(moveEffects('offboarding', 'active')).toContain(ORG_TEXT.effectRenewPlan);
+    expect(moveEffects('offboarding', 'archived')).toEqual(expect.arrayContaining([ORG_TEXT.effectArchivedExports, ORG_TEXT.effectArchivedDeletion]));
+    expect(moveEffects('active', 'offboarding')).toContain(ORG_TEXT.effectOffboardingExport);
+    expect(moveEffects('archived', 'offboarding')).toEqual([ORG_TEXT.effectReopen1, ORG_TEXT.effectReopen2, ORG_TEXT.effectReopen3, ORG_TEXT.effectReopen4, ORG_TEXT.effectEmail]);
+    expect(moveEffects('offboarding', 'active')).toEqual(expect.arrayContaining([ORG_TEXT.effectRenewPlan, ORG_TEXT.effectActiveFinalExport]));
     expect(moveEffects('suspended', 'active')).not.toContain(ORG_TEXT.effectRenewPlan);
     for (const to of ['active', 'suspended', 'offboarding', 'archived'] as const) expect(moveEffects('active', to).at(-1)).toBe(ORG_TEXT.effectEmail);
     expect(offboardingStart('offboarding', [fromEvent(EVENT)])).toBe('2026-09-19T03:00:00Z');
@@ -368,7 +378,7 @@ describe('Organisation lifecycle parts', () => {
         );
         const texts = [
           ORG_TEXT.statusOffboarding, ORG_TEXT.sourceManual, ORG_TEXT.domainVerified, ORG_TEXT.domainPending, ORG_TEXT.commandLine, ORG_TEXT.meaningOffboarding,
-          ORG_TEXT.moveReactivate, ORG_TEXT.moveArchive, ORG_TEXT.effectsTitle, ORG_TEXT.effectArchived3, ORG_TEXT.reasonHint, ORG_TEXT.methodDns,
+          ORG_TEXT.moveReactivate, ORG_TEXT.moveArchive, ORG_TEXT.effectsTitle, ORG_TEXT.effectArchivedExports, ORG_TEXT.reasonHint, ORG_TEXT.methodDns,
           ORG_TEXT.methodManual, ORG_TEXT.verifyNow, ORG_TEXT.remove, ORG_TEXT.domainHint, ORG_TEXT.customLimits, ORG_TEXT.noEndDate, ORG_TEXT.frameworksHint,
           ORG_TEXT.featureGuest, ORG_TEXT.everyStandard, ORG_TEXT.defaultRate,
         ];
@@ -378,7 +388,8 @@ describe('Organisation lifecycle parts', () => {
         expect(html).toContain(esc(t(ORG_TEXT.movedEmailsShort, lang)));
         expect(html).toContain(esc(ctx.fill(ORG_TEXT.usersOf, { used: 41, limit: 50 })));
         expect(html).toContain(esc(ctx.fill(ORG_TEXT.presetUntil, { date: ctx.D!.fmt('2026-10-28', lang) })));
-        expect(html).toContain(esc(ctx.fill(ORG_TEXT.offboardingSince, { date: ctx.D!.fmt('2026-09-19', lang), days: 30, end: ctx.D!.fmt('2026-10-19', lang) })));
+        expect(html).toContain(esc(ctx.fill(ORG_TEXT.offboardingSince, { date: ctx.D!.fmt('2026-09-19', lang), end: ctx.D!.fmt('2026-10-19', lang) })));
+        expect(html).toContain(esc(ctx.fill(ORG_TEXT.effectArchivedDeletion, { grace: 30 })));
         // "Verify now" only for a DNS domain.
         expect(html.split(esc(t(ORG_TEXT.verifyNow, lang))).length - 1).toBe(1);
         expect(html).not.toMatch(/[—·]/);
@@ -399,7 +410,15 @@ describe('Organisation lifecycle parts', () => {
     expect(managed).toContain(esc(t(ORG_TEXT.moveOffboard)));
     expect(managed).not.toContain(esc(t(ORG_TEXT.moveArchive)));
     const archived = render(<StatusTab ctx={manager} adapter={adapter} detail={{ ...detail, status: 'archived' }} tick={0} onChanged={() => undefined} />, manager);
-    expect(archived).toContain(esc(t(ORG_TEXT.finalStatus)));
+    expect(archived).toContain(esc(t(ORG_TEXT.archivedNoMove)));
+    expect(archived).toContain(esc(t(ORG_TEXT.archivedNoDeletion)));
+    const scheduled = { ...detail, status: 'archived' as const, deletion: { status: 'scheduled' as const, scheduledFor: '2026-10-20T03:00:00Z' } };
+    const reopen = render(<StatusTab ctx={manager} adapter={adapter} detail={scheduled} tick={0} onChanged={() => undefined} />, manager);
+    expect(reopen).toContain(esc(t(ORG_TEXT.moveReopen)));
+    expect(reopen).toContain(esc(manager.fill(ORG_TEXT.archivedDeletion, { date: manager.D!.fmt('2026-10-20', 'en') })));
+    const deleted = render(<StatusTab ctx={manager} adapter={adapter} detail={{ ...detail, status: 'deleted' }} tick={0} onChanged={() => undefined} />, manager);
+    expect(deleted).toContain(esc(t(ORG_TEXT.finalStatus)));
+    expect(deleted).not.toContain(esc(t(ORG_TEXT.moveReopen)));
     expect(render(<DomainsTab ctx={ctx} adapter={adapter} detail={detail} onChanged={() => undefined} />, ctx)).not.toContain(esc(t(ORG_TEXT.addDomain)));
     expect(render(<DomainsTab ctx={manager} adapter={adapter} detail={detail} onChanged={() => undefined} />, manager)).toContain(esc(t(ORG_TEXT.addDomain)));
     expect(render(<DomainsTab ctx={manager} adapter={adapter} detail={{ ...detail, status: 'archived' }} onChanged={() => undefined} />, manager)).toContain(esc(t(ORG_TEXT.archivedDomains)));
@@ -407,13 +426,13 @@ describe('Organisation lifecycle parts', () => {
     expect(table).not.toContain(esc(t(ORG_TEXT.verifyNow)));
   });
 
-  it('the drawer has the five tabs of the brief, and the list its filter and Manage', () => {
-    expect(ORG_TABS.map((x) => x.label[0])).toEqual(['Overview', 'Status', 'Domains', 'Entitlements', 'History']);
+  it('the drawer has the seven tabs of the briefs, and the list its filter and Manage', () => {
+    expect(ORG_TABS.map((x) => x.label[0])).toEqual(['Overview', 'Status', 'Export', 'Deletion', 'Domains', 'Entitlements', 'History']);
     const ctx = ctxOf({ mode: 'api', org: MULTI });
     const html = render(<OrganizationsTab ctx={ctx} adapter={createSampleAdapter(() => sampleD())} creating={false} setCreating={() => undefined} />, ctx);
     expect(html).toContain(esc(t(ORG_TEXT.statusFilter)));
     expect(html).toContain(esc(t(ORG_TEXT.allStatuses)));
-    for (const s of [ORG_TEXT.statusActive, ORG_TEXT.statusSuspended, ORG_TEXT.statusOffboarding, ORG_TEXT.statusArchived]) expect(html).toContain(esc(t(s)));
+    for (const s of [ORG_TEXT.statusActive, ORG_TEXT.statusSuspended, ORG_TEXT.statusOffboarding, ORG_TEXT.statusArchived, ORG_TEXT.statusDeleted]) expect(html).toContain(esc(t(s)));
     const create = render(<CreateDialog ctx={ctx} adapter={createSampleAdapter(() => sampleD())} open onClose={() => undefined} onCreated={() => undefined} />, ctx);
     expect(create).toContain(esc(t(ORG_TEXT.plan)));
     expect(create).toContain(esc(t(ORG_TEXT.noPlanYet)));
@@ -422,12 +441,17 @@ describe('Organisation lifecycle parts', () => {
 });
 
 describe('Organisation lifecycle sample adapter', () => {
-  it('holds an organisation in every status but archived, with plans, domains and history for every tab', async () => {
+  it('holds an organisation in every status, with plans, domains and history for every tab', async () => {
     const adapter = createSampleAdapter(() => sampleD());
     const list = await adapter.organizations({ page: 1, pageSize: 25 });
     expect(list.ok && list.data.items.map((o) => [o.slug, o.status])).toEqual([
       ['ndt', 'active'], ['bsd', 'active'], ['rmn', 'active'], ['mitra_logistik', 'suspended'], ['sinar_farma', 'offboarding'],
+      ['cahaya_retail', 'archived'], ['delta_konstruksi', 'archived'], ['karya_tekstil', 'deleted'],
     ]);
+    expect(list.ok && list.data.items.find((o) => o.slug === 'sinar_farma')).toMatchObject({ offboardingEndsAt: '2026-10-19T03:00:00Z', deletion: null, lastExport: { status: 'ready' } });
+    expect(list.ok && list.data.items.find((o) => o.slug === 'cahaya_retail')?.deletion).toEqual({ status: 'scheduled', scheduledFor: '2026-10-20T03:00:00Z' });
+    expect(list.ok && list.data.items.find((o) => o.slug === 'delta_konstruksi')?.deletion?.status).toBe('failed');
+    expect(list.ok && list.data.items.find((o) => o.slug === 'karya_tekstil')?.deletion?.status).toBe('completed');
     expect(list.ok && list.data.items[0]).toMatchObject({ plan: 'enterprise', maxUsers: 100, verifiedDomains: ['nusantaradigital.co.id'], validUntil: '2027-03-31' });
     expect(list.ok && list.data.items[1].licence).toEqual({ state: 'grace', validUntil: '2026-09-15' });
     const suspended = await adapter.organizations({ page: 1, pageSize: 25, status: 'suspended' });
@@ -453,9 +477,30 @@ describe('Organisation lifecycle sample adapter', () => {
     expect(offboarding.ok && offboarding.data.sessionsRevoked).toBe(0);
     const history = await adapter.events('ndt', 1, 20);
     expect(history.ok && history.data.items.slice(0, 2).map((e) => `${e.from}>${e.to}`)).toEqual(['suspended>offboarding', 'active>suspended']);
+    const offboarded = await adapter.organization('ndt');
+    expect(offboarded.ok && offboarded.data.offboardingEndsAt).toBeTruthy();
+    const finalExports = await adapter.exports('ndt');
+    expect(finalExports.ok && finalExports.data.filter((e) => e.isFinal).map((e) => e.requestedVia)).toEqual(['offboarding']);
     expect((await adapter.changeStatus('ndt', { status: 'archived', reason: 'Read-only period over', confirmSlug: 'ndt' })).ok).toBe(true);
+    const archivedDetail = await adapter.organization('ndt');
+    expect(archivedDetail.ok && archivedDetail.data).toMatchObject({ status: 'archived', offboardingEndsAt: null, deletion: { status: 'scheduled' } });
     const final = await adapter.changeStatus('ndt', { status: 'active', reason: 'Renewed' });
     expect(!final.ok && final.error.message[0]).toContain('archived is final');
+    expect(!final.ok && final.error.message[0]).toContain('only while its deletion is scheduled');
+    // Reopen for export while the deletion is scheduled: the deletion is cancelled and the read-only period is 7 days.
+    const reopened = await adapter.changeStatus('ndt', { status: 'offboarding', reason: 'Customer forgot the export', confirmSlug: 'ndt' });
+    expect(reopened.ok).toBe(true);
+    const back = await adapter.organization('ndt');
+    expect(back.ok && back.data.deletion).toBeNull();
+    expect(back.ok && daysBetween(sampleD().TODAY_S, back.data.offboardingEndsAt!.slice(0, 10))).toBe(7);
+    const deletion = await adapter.deletion('ndt');
+    expect(deletion.ok && deletion.data?.status).toBe('cancelled');
+    // Archived again, then cancelled: no reopen without a scheduled deletion.
+    expect((await adapter.changeStatus('ndt', { status: 'archived', reason: 'Export taken', confirmSlug: 'ndt' })).ok).toBe(true);
+    expect((await adapter.cancelDeletion('ndt', 'Customer asked to wait')).ok).toBe(true);
+    const noReopen = await adapter.changeStatus('ndt', { status: 'offboarding', reason: 'Again', confirmSlug: 'ndt' });
+    expect(!noReopen.ok && noReopen.error.messageKey).toBe('invalid_status_transition');
+    expect((await adapter.changeStatus('karya_tekstil', { status: 'offboarding', reason: 'No', confirmSlug: 'karya_tekstil' })).ok).toBe(false);
     const archivedAdd = await adapter.addDomain('ndt', 'new.co.id');
     expect(!archivedAdd.ok && refusalText(archivedAdd.error)).toBe(ORG_TEXT.refusedArchived);
   });

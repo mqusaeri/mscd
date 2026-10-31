@@ -1,7 +1,8 @@
 // Operator console, Organisations (MILESTONE-2 M2-16, M2-S12): the customer organisations of a multi tenancy service
 // with their status, plan, users against the limit, the last day of the plan with the days left, the licence state and
-// the verified domains, filtered by status and searched by slug or name; "Manage" opens the organisation drawer
-// (OrgDrawer.tsx: overview, status, domains, entitlements, history). "Create organisation" (slug with the permanence
+// the verified domains, the end of the read-only period and the deletion date (Milestone 3 D.2, M3-09), filtered by
+// status and searched by slug or name; "Manage" opens the organisation drawer (OrgDrawer.tsx: overview, status,
+// export, deletion, domains, entitlements, history). "Create organisation" (slug with the permanence
 // warning, name, time zone, sites, first administrator and the plan preset of `ops.plans.list`), whose one-time link
 // shows only when the answer carries one (never on SaaS, where mail.required is true); and "Install licence" per
 // organisation (`PUT /admin/license` with `{org, licence}`).
@@ -15,7 +16,9 @@ import { timeZones } from '../organization/model';
 import { LoadState, asApi, useLoad } from './Health';
 import { EMPTY_CREATE, LICENCE_TEXT, ORG_PAGE_SIZE, createBody, createErrors, isSingleTenancy, multiTenancy } from './model';
 import type { CreateForm, Created, OpsAdapter, OrgCreate, OrgItem, OrgPage } from './model';
-import { ORG_STATUSES, STATUS_LABEL } from './org-model';
+import { DELETION_STATUS_TEXT, DELETION_STATUS_TONE, instantDay } from './lifecycle-model';
+import { LIFE_TEXT } from './lifecycle-text';
+import { ORG_STATUSES, STATUS_LABEL, dayText } from './org-model';
 import type { OrgStatus, PlanPreset } from './org-model';
 import { OrgDrawer } from './OrgDrawer';
 import { DomainName, StatusBadge, UsersOf, ValidUntil } from './org-parts';
@@ -276,6 +279,23 @@ export function OrganizationsTab({ ctx, adapter, creating, setCreating }: { ctx:
       render: (o) => (o.licence
         ? <Badge tone={o.licence.state === 'valid' ? 'ok' : o.licence.state === 'grace' ? 'warn' : 'bad'}>{ctx.li(LICENCE_TEXT[o.licence.state])}</Badge>
         : <Badge tone="mute">{ctx.li(TEXT.noLicence)}</Badge>),
+    },
+    {
+      key: 'readOnly',
+      label: LIFE_TEXT.colReadOnlyUntil,
+      render: (o) => (o.offboardingEndsAt ? <span style={{ whiteSpace: 'nowrap' }} data-read-only-until={instantDay(o.offboardingEndsAt)}>{dayText(ctx, instantDay(o.offboardingEndsAt))}</span> : <span className="mx-muted">-</span>),
+    },
+    {
+      key: 'deletion',
+      label: LIFE_TEXT.colDeletionOn,
+      render: (o) => (o.deletion
+        ? (
+          <span data-deletion-on={instantDay(o.deletion.scheduledFor)}>
+            <div style={{ whiteSpace: 'nowrap' }}>{dayText(ctx, instantDay(o.deletion.scheduledFor))}</div>
+            {o.deletion.status !== 'scheduled' ? <div style={{ marginTop: 4 }}><Badge tone={DELETION_STATUS_TONE[o.deletion.status]}>{ctx.li(DELETION_STATUS_TEXT[o.deletion.status])}</Badge></div> : null}
+          </span>
+        )
+        : <span className="mx-muted">-</span>),
     },
     {
       key: 'domains',

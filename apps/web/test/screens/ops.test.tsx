@@ -1,4 +1,4 @@
-// Operator console (MILESTONE-2 M2-16, M2-S12): routes against the shared table and the job allow-list, the API adapter
+// Operator console (MILESTONE-2 M2-16, M2-S12, MILESTONE-3 M3-09): routes against the shared table and the job allow-list, the API adapter
 // over a fake fetch (health, queues, Run job, diagnostics archive, organisations with the status filter, the user limit
 // of each row and the single tenancy answer, Create with its idempotency key, plan preset and one-time link, Install
 // licence with {org, licence}, packs and the multipart import), the following of a pack installation, the multi
@@ -345,8 +345,8 @@ describe('Operator console sample adapter', () => {
   it('creates an organisation once, installs its licence and imports a pack', async () => {
     const adapter = createSampleAdapter(() => sampleD());
     const before = await adapter.organizations({ page: 1, pageSize: 25 });
-    // The organisations of the snapshot, then the two of the sample service only (M2-S12).
-    expect(before.ok && before.data.items.map((o) => o.slug)).toEqual([...sampleD().orgs.map((o) => o.id), 'mitra_logistik', 'sinar_farma']);
+    // The organisations of the snapshot, then the five of the sample service only (M2-S12, M3-09: one in each lifecycle state).
+    expect(before.ok && before.data.items.map((o) => o.slug)).toEqual([...sampleD().orgs.map((o) => o.id), 'mitra_logistik', 'sinar_farma', 'cahaya_retail', 'delta_konstruksi', 'karya_tekstil']);
     const body = createBody({ ...EMPTY_CREATE, slug: 'klinik_sehat', name: 'Klinik Sehat', email: 'admin@kliniksehat.id', displayName: 'Sari Dewi' });
     expect((await adapter.createOrganization(body, 'k')).ok).toBe(true);
     const again = await adapter.createOrganization(body, 'k2');

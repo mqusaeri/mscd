@@ -61,8 +61,8 @@ test.describe('Operator console @sample-only', () => {
     await expect(dialog(page)).toContainText('The invitation was emailed to it.admin@nusantara.example.');
     await dialog(page).locator('button', { hasText: 'Close' }).click();
     await expect(page.locator('main table')).toContainText('klinik_sehat');
-    // The five organisations of the sample service (M2-S12) and the new one.
-    await expect(page.locator('main table tbody tr')).toHaveCount(6);
+    // The eight organisations of the sample service (M2-S12, M3-09) and the new one.
+    await expect(page.locator('main table tbody tr')).toHaveCount(9);
   });
 
   test('Install licence installs the licence of one organisation', async ({ page }) => {

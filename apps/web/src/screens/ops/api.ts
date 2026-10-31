@@ -8,21 +8,27 @@
 // the status change, the account's ETag as `If-Match`. The list item carries no user limit, so the list reads the detail of each organisation of the page (at
 // most `DETAIL_READS` at a time) for it (M2-S12 handoff deviation 1). The client answers the body only, so the
 // `If-Match` value of an entitlement change is built from the body (`entitlementEtag`, deviation 2).
+//
+// The end of a contract (M3-09): the read-only end, the deletion and the last export of each organisation (D.2), the
+// exports of an organisation and "Start export" (`ops.exports.*`, never a download), and the verified deletion
+// (`ops.deletion.*`); an organisation without a deletion answers 404, which the adapter gives as null. The certificate
+// is saved through the api's own link, so the session cookie goes with it.
 import type {
   CommandResult, Entitlement as WireEntitlement, OpsAccountActionResult, OpsAccountDetail, OpsAccountItem, OpsOperatorAddResult, OpsOperatorItem,
   OpsOperatorRemoveResult, EntitlementSetResult, JobRunResponse, OpsHealth, OpsOrganizationCreateResult, OpsOrganizationDetail,
-  OpsOrganizationItem, OrgDomain, OrgDomainAdded, OrgDomainCheck, OrganizationStatusChangeResult, OrganizationStatusEventItem, PackSummary,
-  PlanPreset as WirePreset, QueueStats,
+  OpsOrganizationExportItem, OpsOrganizationExportQueued, OpsOrganizationItem, OrgDomain, OrgDomainAdded, OrgDomainCheck, OrganizationDeletionResult,
+  OrganizationDeletionView, OrganizationStatusChangeResult, OrganizationStatusEventItem, PackSummary, PlanPreset as WirePreset, QueueStats,
 } from '@mscd/shared';
 import { toApiError } from '../../data/api/ApiClient';
 import type { ApiClient, ApiResult } from '../../data/api/ApiClient';
 import { NO_CLIENT, call } from '../api';
 import type { Page } from '../api';
 import type { AccountDetail, AccountItem, ActionDone, OperatorItem } from './account-model';
+import type { DeletionDone, DeletionView, OpsExport } from './lifecycle-model';
 import type { Health, OpsAdapter, OrgItem, PackItem, Result } from './model';
 import { entitlementEtag, mapLimited } from './org-model';
 import type { Domain, DomainCheck, Entitlement, OrgDetail, PlanPreset, StatusEvent } from './org-model';
-import { ROUTES } from './routes';
+import { ROUTES, pathOf } from './routes';
 
 /** Detail reads of the organisation list in flight at once. */
 export const DETAIL_READS = 4;
@@ -39,11 +45,20 @@ export function fromHealth(h: OpsHealth): Health {
   };
 }
 
+/** The read-only end, the deletion and the last export of an organisation (Milestone 3 D.2); null means none. */
+function lifecycleOf(o: Pick<OpsOrganizationItem, 'offboardingEndsAt' | 'deletion' | 'lastExport'>): Pick<OrgDetail, 'offboardingEndsAt' | 'deletion' | 'lastExport'> {
+  return {
+    offboardingEndsAt: o.offboardingEndsAt ?? null,
+    deletion: o.deletion ? { status: o.deletion.status, scheduledFor: o.deletion.scheduledFor } : null,
+    lastExport: o.lastExport ? { status: o.lastExport.status, readyAt: o.lastExport.readyAt } : null,
+  };
+}
+
 export function fromOrg(o: OpsOrganizationItem, maxUsers: number | null = null): OrgItem {
   return {
     slug: o.slug, name: o.name, status: o.status, licence: o.licence ? { state: o.licence.state, validUntil: o.licence.validUntil } : null,
     memberCount: o.memberCount, systemCount: o.systemCount, plan: o.plan, validUntil: o.validUntil, verifiedDomains: [...o.verifiedDomains],
-    maxUsers, createdAt: o.createdAt,
+    maxUsers, createdAt: o.createdAt, ...lifecycleOf(o),
   };
 }
 
@@ -53,8 +68,32 @@ export function fromDetail(d: OpsOrganizationDetail): OrgDetail {
     entitlement: d.entitlement ? { ...d.entitlement } : null,
     domains: d.domains.map((x) => ({ domain: x.domain, status: x.status })),
     lastSignInAt: d.lastSignInAt,
+    ...lifecycleOf(d),
   };
 }
+
+export function fromOpsExport(e: OpsOrganizationExportItem): OpsExport {
+  return {
+    id: e.id, status: e.status, requestedVia: e.requestedVia, requestedAt: e.requestedAt, completedAt: e.completedAt, expiresAt: e.expiresAt,
+    isFinal: e.isFinal, partCount: e.partCount, sizeBytes: e.sizeBytes, downloadCount: e.downloadCount,
+  };
+}
+
+export function fromDeletion(d: OrganizationDeletionView): DeletionView {
+  return {
+    id: d.id, status: d.status, scheduledFor: d.scheduledFor, scheduledBy: d.scheduledBy ? { handle: d.scheduledBy.handle, displayName: d.scheduledBy.displayName } : null,
+    reason: d.reason, archivedAt: d.archivedAt, earliestAllowed: d.earliestAllowed, finalExportId: d.finalExportId, startedAt: d.startedAt,
+    completedAt: d.completedAt, failedStep: d.failedStep, error: d.error, steps: d.steps.map((s) => ({ step: s.step, status: s.status, at: s.at, detail: s.detail })),
+    vaultObjectsDeleted: d.vaultObjectsDeleted, certificateId: d.certificateId,
+  };
+}
+
+function fromDeletionResult(r: OrganizationDeletionResult): DeletionDone {
+  return { id: r.data.id, status: r.data.status, scheduledFor: r.data.scheduledFor, message: pair(r.message) };
+}
+
+/** The api's link of the deletion certificate of an organisation. */
+export const certificateHref = (slug: string): string => pathOf(ROUTES.deletionCertificate, { org: slug });
 
 export function fromEvent(e: OrganizationStatusEventItem): StatusEvent {
   return { id: e.id, from: e.from, to: e.to, reason: e.reason, actor: e.actor ? { handle: e.actor.handle, displayName: e.actor.displayName } : null, at: e.at };
@@ -313,6 +352,37 @@ export function createApiAdapter(client: ApiClient | null, fetchImpl: typeof fet
       const res = await call<OpsOperatorRemoveResult>(client, ROUTES.operatorRemove, { params: { id }, body: { reason } });
       if (!res.ok) return fail(res);
       return { ok: true, data: { sessionsRevoked: res.data.data.sessionsRevoked, operatorsLeft: res.data.data.operatorsLeft, message: pair(res.data.message) } };
+    },
+    async exports(slug) {
+      const res = await call<OpsOrganizationExportItem[]>(client, ROUTES.exportsList, { params: { org: slug } });
+      return res.ok ? { ok: true, data: res.data.map(fromOpsExport) } : fail(res);
+    },
+    async startExport(slug, reason, idempotencyKey) {
+      const res = await call<OpsOrganizationExportQueued>(client, ROUTES.exportsCreate, { params: { org: slug }, body: { reason }, idempotencyKey });
+      return res.ok ? { ok: true, data: { id: res.data.data.id, message: pair(res.data.message) } } : fail(res);
+    },
+    async deletion(slug) {
+      const res = await call<OrganizationDeletionView>(client, ROUTES.deletionGet, { params: { org: slug } });
+      if (res.ok) return { ok: true, data: fromDeletion(res.data) };
+      // An organisation that never had a deletion answers 404 (an unknown slug would fail the detail read first).
+      if (res.error.status === 404) return { ok: true, data: null };
+      return fail(res);
+    },
+    async scheduleDeletion(slug, body) {
+      const res = await call<OrganizationDeletionResult>(client, ROUTES.deletionSchedule, { params: { org: slug }, body });
+      return res.ok ? { ok: true, data: fromDeletionResult(res.data) } : fail(res);
+    },
+    async cancelDeletion(slug, reason) {
+      const res = await call<OrganizationDeletionResult>(client, ROUTES.deletionCancel, { params: { org: slug }, body: { reason } });
+      return res.ok ? { ok: true, data: fromDeletionResult(res.data) } : fail(res);
+    },
+    async retryDeletion(slug, reason) {
+      const res = await call<OrganizationDeletionResult>(client, ROUTES.deletionRetry, { params: { org: slug }, body: { reason } });
+      return res.ok ? { ok: true, data: fromDeletionResult(res.data) } : fail(res);
+    },
+    async certificate(slug) {
+      // No name of its own: the browser takes the server's (`deletion-certificate-<slug>-<date>.json`, Content-Disposition).
+      return { ok: true, data: { href: certificateHref(slug), fileName: '' } };
     },
   };
 }

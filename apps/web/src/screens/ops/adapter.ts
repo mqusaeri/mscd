@@ -49,6 +49,13 @@ export function deferredAdapter(load: () => Promise<OpsAdapter>): OpsAdapter {
     operators: () => settled(get().then((a) => a.operators())),
     addOperator: (body, key) => settled(get().then((a) => a.addOperator(body, key))),
     removeOperator: (id, reason) => settled(get().then((a) => a.removeOperator(id, reason))),
+    exports: (slug) => settled(get().then((a) => a.exports(slug))),
+    startExport: (slug, reason, key) => settled(get().then((a) => a.startExport(slug, reason, key))),
+    deletion: (slug) => settled(get().then((a) => a.deletion(slug))),
+    scheduleDeletion: (slug, body) => settled(get().then((a) => a.scheduleDeletion(slug, body))),
+    cancelDeletion: (slug, reason) => settled(get().then((a) => a.cancelDeletion(slug, reason))),
+    retryDeletion: (slug, reason) => settled(get().then((a) => a.retryDeletion(slug, reason))),
+    certificate: (slug) => settled(get().then((a) => a.certificate(slug))),
   };
 }
 

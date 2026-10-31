@@ -1,5 +1,6 @@
-// Routes of the operator console (MILESTONE-2 M2-16, M2-S12, M2-19): `[method, path]` constants for `call()` of screens/api.ts
-// and the shared route ids, which test/screens/ops.test.tsx compares with the route table of @mscd/shared.
+// Routes of the operator console (MILESTONE-2 M2-16, M2-S12, M2-19, MILESTONE-3 M3-09): `[method, path]` constants for
+// `call()` of screens/api.ts and the shared route ids, which test/screens/ops.test.tsx compares with the route table of
+// @mscd/shared.
 import type { RouteRef } from '../api';
 
 export const ROUTES = {
@@ -32,6 +33,13 @@ export const ROUTES = {
   licensePut: ['PUT', '/api/v1/admin/license'],
   packsList: ['GET', '/api/v1/admin/packs'],
   packsImport: ['POST', '/api/v1/admin/packs/import'],
+  exportsList: ['GET', '/api/v1/ops/organizations/:org/exports'],
+  exportsCreate: ['POST', '/api/v1/ops/organizations/:org/exports'],
+  deletionGet: ['GET', '/api/v1/ops/organizations/:org/deletion'],
+  deletionSchedule: ['POST', '/api/v1/ops/organizations/:org/deletion'],
+  deletionCancel: ['POST', '/api/v1/ops/organizations/:org/deletion/cancel'],
+  deletionRetry: ['POST', '/api/v1/ops/organizations/:org/deletion/retry'],
+  deletionCertificate: ['GET', '/api/v1/ops/organizations/:org/deletion/certificate'],
 } as const satisfies Record<string, RouteRef>;
 
 export const ROUTE_IDS: Record<keyof typeof ROUTES, string> = {
@@ -64,4 +72,16 @@ export const ROUTE_IDS: Record<keyof typeof ROUTES, string> = {
   licensePut: 'admin.license.put',
   packsList: 'admin.packs.list',
   packsImport: 'admin.packs.import',
+  exportsList: 'ops.exports.list',
+  exportsCreate: 'ops.exports.create',
+  deletionGet: 'ops.deletion.get',
+  deletionSchedule: 'ops.deletion.schedule',
+  deletionCancel: 'ops.deletion.cancel',
+  deletionRetry: 'ops.deletion.retry',
+  deletionCertificate: 'ops.deletion.certificate',
 };
+
+/** A path of a route with its `:name` segments filled in. */
+export function pathOf(route: RouteRef, params: Record<string, string>): string {
+  return route[1].replace(/:([a-zA-Z]+)/g, (_m, name: string) => encodeURIComponent(params[name] ?? ''));
+}

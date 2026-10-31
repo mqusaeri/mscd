@@ -412,7 +412,7 @@ describe('screen host in sample mode', () => {
     expect(v.hostLayer).toBeTruthy();
     expect([v.isPortfolio, v.isDrill, v.isFw, v.showList]).toEqual([false, false, false, false]);
     const admin = v.nav.find((g: AnyRecord) => g.label === 'Administration');
-    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Getting started', 'Framework library', 'Storage repositories', 'Organisation', 'Licence', 'Management systems', 'Routing rules', 'People and roles', 'Pending approvals', 'Access reviews', 'Company sign-in']);
+    expect(admin.items.map((i: AnyRecord) => i.label)).toEqual(['Getting started', 'Framework library', 'Storage repositories', 'Organisation', 'Licence', 'Management systems', 'Routing rules', 'People and roles', 'Pending approvals', 'Access reviews', 'Company sign-in', 'Organisation export']);
     expect(admin.items[4].fw).toBe(600);
     v.pageActions[0].go();
     expect(app.state.screen).toBe('license');

@@ -23,7 +23,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
 | M3-04 Requests from one person | 3 | Running | Started 2026-10-31 after M3-03 |
 | M3-07 Periodic access review | 3 | Done | Screens `access-reviews` (Tenant Admins) and `access-review` (each system's managers); daily `access-review.open` every 3 months with reminders; keep, change or revoke with the existing services; nobody decides on their own access; the report CSV is filed as evidence for A.5.18 |
-| M3-09 Export and deletion screens | 3 | Running | Started 2026-10-31 after M3-02 and M3-03 |
+| M3-09 Export and deletion screens | 3 | Done | Screen "Organisation export" (request, approve or reject, parts and manifest with SHA-256, read-only banner); operator console columns "Read-only until" and "Deletion on", drawer tabs Export and Deletion (schedule, change date, cancel, retry, steps and checks, certificate), status moves of J.8 |
 | M3-10 Demo personas | 4 | Waiting | |
 | M3-11 Data lifecycle run and documents | 4 | Waiting | |
 | M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |

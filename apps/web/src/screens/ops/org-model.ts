@@ -1,11 +1,13 @@
-// The organisation lifecycle of the operator console (MILESTONE-2 M2-S12): the detail, status, domain, entitlement and
-// history models both adapters answer, and the pure rules of the drawer: the status machine of J.8 with the slug
-// confirmation and the effects listed before a move, days left of a plan, the entitlement form with its plan picker and
-// its body, the ETag of an entitlement, the texts of a domain check and of the refusals.
+// The organisation lifecycle of the operator console (MILESTONE-2 M2-S12, MILESTONE-3 M3-09): the detail, status,
+// domain, entitlement and history models both adapters answer, and the pure rules of the drawer: the status machine of
+// Milestone 3 J.8 with the slug confirmation and the effects listed before a move (the read-only period, the final
+// export, the scheduled deletion and "Reopen for export"), days left of a plan, the entitlement form with its plan
+// picker and its body, the ETag of an entitlement, the texts of a domain check and of the refusals.
 import { untranslated } from '../../data/api/ApiClient';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext, TextPair } from '../types';
 import type { Tone } from '../ui';
+import type { DeletionStatus, ExportStatus } from './lifecycle-model';
 import { ORG_TEXT } from './org-text';
 
 /** `deleted`: Milestone 3 J.7, set by the purge only (M3-03); no move of the operator leads to it or out of it. */
@@ -26,8 +28,16 @@ export type FeatureName = (typeof FEATURE_NAMES)[number];
 /** Framework codes of the packs (ISO/IEC 27001, ISO 9001, ISO 22301, ISO 37001); a row may hold others, which it keeps. */
 export const KNOWN_FRAMEWORKS: readonly string[] = ['ISO27001', 'ISO9001', 'ISO22301', 'ISO37001'];
 
-/** The read-only period of an organisation in offboarding before it is archived (decision D-S5). */
+/**
+ * The default read-only period of an organisation in offboarding before it is archived (decision D-S5). The server reads
+ * `lifecycle.offboarding_days` from its profile, so the texts that state it say "by default"; the dates the console shows
+ * come from the server (`offboardingEndsAt`).
+ */
 export const READ_ONLY_DAYS = 30;
+/** The default days from archiving to the deletion (H.1, `lifecycle.deletion_grace_days`); the texts say "by default". */
+export const DELETION_GRACE_DAYS = 30;
+/** The read-only period after "Reopen for export" (Milestone 3 D.2). */
+export const REOPEN_DAYS = 7;
 /** `valid_until` of an entitlement without an end date in the licence views (M2-S10). */
 export const NO_END = '9999-12-31';
 /** Rows per page of the status history. */
@@ -45,6 +55,12 @@ export interface OrgDetail {
   entitlement: { plan: string | null; source: EntitlementSource; maxUsers: number; maxManagementSystems: number; validUntil: string | null } | null;
   domains: { domain: string; status: DomainStatus }[];
   lastSignInAt: string | null;
+  /** Milestone 3 D.2: while offboarding, the end of the read-only period; else null. */
+  offboardingEndsAt: string | null;
+  /** The deletion that is not cancelled (status and date), else null. */
+  deletion: { status: DeletionStatus; scheduledFor: string } | null;
+  /** The newest organisation export, else null. */
+  lastExport: { status: ExportStatus; readyAt: string | null } | null;
 }
 
 /** The body of `ops.organizations.status`. */
@@ -158,17 +174,23 @@ export interface EntitlementSaved {
 // ---------------------------------------------------------------------------------------------------------------
 
 /**
- * The moves of the machine `organization.status` (J.8) that this screen offers; the unit test compares them with
- * @mscd/shared. Milestone 3 J.8 adds `archived -> offboarding` while a deletion is scheduled, which M3-09 brings to the
- * screen with the deletion tab.
+ * The moves of the machine `organization.status` (Milestone 3 J.8) that an operator makes through
+ * `ops.organizations.status`; the unit test compares them with @mscd/shared. `archived -> offboarding` ("Reopen for
+ * export") is offered only while the deletion is scheduled (`movesOf`). Nobody moves an organisation to `deleted`: only
+ * the purge on its date does, and `deleted` is final.
  */
 export const STATUS_MOVES: Readonly<Record<OrgStatus, readonly OrgStatus[]>> = {
   active: ['suspended', 'offboarding'],
   suspended: ['active', 'offboarding'],
   offboarding: ['active', 'archived'],
-  archived: [],
+  archived: ['offboarding'],
   deleted: [],
 };
+
+/** The moves the Status tab offers for an organisation: an archived one reopens only while its deletion is scheduled. */
+export function movesOf(detail: Pick<OrgDetail, 'status' | 'deletion'>): OrgStatus[] {
+  return STATUS_MOVES[detail.status].filter((to) => detail.status !== 'archived' || to !== 'offboarding' || detail.deletion?.status === 'scheduled');
+}
 
 /** `offboarding` and `archived` need the slug typed again (`confirmSlug`). */
 export const needsSlug = (to: OrgStatus): boolean => to === 'offboarding' || to === 'archived';
@@ -188,6 +210,11 @@ export const MOVE_LABEL: Readonly<Record<OrgStatus, TextPair>> = {
   active: ORG_TEXT.moveReactivate, suspended: ORG_TEXT.moveSuspend, offboarding: ORG_TEXT.moveOffboard, archived: ORG_TEXT.moveArchive,
   deleted: ORG_TEXT.moveDelete,
 };
+
+/** The action of a move: "Reopen for export" for an archived organisation, else the label of the target status. */
+export function moveLabel(from: OrgStatus, to: OrgStatus): TextPair {
+  return from === 'archived' && to === 'offboarding' ? ORG_TEXT.moveReopen : MOVE_LABEL[to];
+}
 export const MOVE_TONE: Readonly<Record<OrgStatus, 'primary' | 'danger' | 'default'>> = {
   active: 'primary', suspended: 'danger', offboarding: 'default', archived: 'danger', deleted: 'danger',
 };
@@ -195,15 +222,20 @@ export const MOVE_TONE: Readonly<Record<OrgStatus, 'primary' | 'danger' | 'defau
 const EFFECTS: Readonly<Record<OrgStatus, readonly TextPair[]>> = {
   suspended: [ORG_TEXT.effectSuspended1, ORG_TEXT.effectSuspended2, ORG_TEXT.effectSuspended3, ORG_TEXT.effectSuspended4],
   active: [ORG_TEXT.effectActive1, ORG_TEXT.effectActive2],
-  offboarding: [ORG_TEXT.effectOffboarding1, ORG_TEXT.effectOffboarding2, ORG_TEXT.effectOffboarding3, ORG_TEXT.effectOffboarding4],
-  archived: [ORG_TEXT.effectArchived1, ORG_TEXT.effectArchived2, ORG_TEXT.effectArchived3, ORG_TEXT.effectArchived4],
+  offboarding: [ORG_TEXT.effectOffboarding1, ORG_TEXT.effectOffboarding2, ORG_TEXT.effectOffboarding3, ORG_TEXT.effectOffboardingExport, ORG_TEXT.effectOffboarding4],
+  archived: [ORG_TEXT.effectArchived1, ORG_TEXT.effectArchived2, ORG_TEXT.effectArchivedExports, ORG_TEXT.effectArchivedDeletion],
   deleted: [ORG_TEXT.effectDeleted1],
 };
+/** "Reopen for export" (Milestone 3 D.2): the deletion is cancelled and the organisation is read-only for 7 days. */
+const REOPEN_EFFECTS: readonly TextPair[] = [ORG_TEXT.effectReopen1, ORG_TEXT.effectReopen2, ORG_TEXT.effectReopen3, ORG_TEXT.effectReopen4];
 
-/** What a move does, listed before the operator confirms it (texts may hold `{days}`). */
+/** The values of the placeholders of the effects: `{days}`, `{grace}` and `{reopen}`. */
+export const EFFECT_VALUES = { days: READ_ONLY_DAYS, grace: DELETION_GRACE_DAYS, reopen: REOPEN_DAYS } as const;
+
+/** What a move does, listed before the operator confirms it (texts may hold the placeholders of `EFFECT_VALUES`). */
 export function moveEffects(from: OrgStatus, to: OrgStatus): TextPair[] {
-  const out = [...EFFECTS[to]];
-  if (to === 'active' && from === 'offboarding') out.push(ORG_TEXT.effectRenewPlan);
+  const out = from === 'archived' && to === 'offboarding' ? [...REOPEN_EFFECTS] : [...EFFECTS[to]];
+  if (to === 'active' && from === 'offboarding') out.push(ORG_TEXT.effectActiveFinalExport, ORG_TEXT.effectRenewPlan);
   out.push(ORG_TEXT.effectEmail);
   return out;
 }

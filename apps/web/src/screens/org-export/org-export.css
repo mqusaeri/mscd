@@ -1,0 +1,10 @@
+/* Organisation export and its banner (M3-09): tokens of src/styles.css only, text of 12px or more, AA contrast in both
+   themes. A SHA-256 wraps anywhere so it never widens the page. The banner of the read-only period sits at the bottom
+   left of the page column (its left edge is set from the column, so the sidebar stays free), away from the invitation
+   and confirmation banners at the bottom right, under the drawers and dialogs (z-index 35) and above the page. */
+.mx-oe-sha{display:inline-block;max-width:22em;font-size:12px;line-height:1.5;color:var(--tx);overflow-wrap:anywhere;word-break:break-all}
+.mx-oe-command{display:inline-block;padding:2px 6px;border-radius:6px;background:var(--sur2);color:var(--tx);font-size:13px;overflow-wrap:anywhere;user-select:all}
+.mx-oe-banner{position:fixed;left:24px;bottom:24px;z-index:35;box-sizing:border-box;width:420px;max-width:calc(100vw - 48px);display:flex;flex-direction:column;gap:8px;padding:14px 16px;background:var(--sur);color:var(--tx);border:1px solid var(--bd);border-left:4px solid var(--warn);border-radius:var(--r);box-shadow:var(--sh);font-family:var(--ff);font-size:var(--fs);line-height:1.45}
+.mx-oe-banner-title{margin:0;font-size:15px;font-weight:600;color:var(--tx)}
+.mx-oe-banner-text{color:var(--tx2)}
+@media (prefers-reduced-motion:no-preference){.mx-oe-banner{animation:drawerIn .22s ease}}

@@ -1,12 +1,15 @@
 // The model of the operator console (MILESTONE-2 M2-16, M2-S12) and the interface both adapters implement (api.ts in
 // API builds, sample.ts in the sample build). M2-S12 adds the organisation lifecycle: status, plan, domains and
 // entitlements (org-model.ts). M2-19 adds the accounts and the platform operators (account-model.ts); the factor reset
-// by email (`ops.users.reset-mfa`) stays on the server for `saas-ops.sh` and is no longer in the console.
+// by email (`ops.users.reset-mfa`) stays on the server for `saas-ops.sh` and is no longer in the console. M3-09 adds
+// the end of a contract: the read-only end, the deletion and the last export of each organisation, its exports and its
+// verified deletion (lifecycle-model.ts).
 import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext, TextPair } from '../types';
 import type {
   AccountDetail, AccountPage, AccountQuery, ActionDone, OperatorAdded, OperatorItem, OperatorRemoved,
 } from './account-model';
+import type { DeletionDone, DeletionSchedule, DeletionView, Download, ExportQueued, OpsExport } from './lifecycle-model';
 import type {
   Domain, DomainAdded, DomainCheck, EntitlementInput, EntitlementRead, EntitlementSaved, EventPage, OrgDetail, OrgStatus, PlanPreset,
   StatusChange, StatusChanged,
@@ -47,6 +50,12 @@ export interface OrgItem {
   /** The user limit of the entitlement; null without one or when it could not be read. */
   maxUsers: number | null;
   createdAt: string;
+  /** Milestone 3 D.2: while offboarding, the end of the read-only period; else null. */
+  offboardingEndsAt: string | null;
+  /** The deletion that is not cancelled, else null. */
+  deletion: OrgDetail['deletion'];
+  /** The newest organisation export, else null. */
+  lastExport: OrgDetail['lastExport'];
 }
 
 export interface OrgQuery {
@@ -149,6 +158,20 @@ export interface OpsAdapter {
   addOperator(body: { email: string; name: string; reason: string }, idempotencyKey: string): Promise<Result<OperatorAdded>>;
   /** `ops.operators.remove`. */
   removeOperator(id: string, reason: string): Promise<Result<OperatorRemoved>>;
+  /** `ops.exports.list`: status, dates and sizes of the organisation's exports, newest first. */
+  exports(slug: string): Promise<Result<OpsExport[]>>;
+  /** `ops.exports.create` with the reason and an idempotency key. */
+  startExport(slug: string, reason: string, idempotencyKey: string): Promise<Result<ExportQueued>>;
+  /** `ops.deletion.get`; an organisation without a deletion answers null. */
+  deletion(slug: string): Promise<Result<DeletionView | null>>;
+  /** `ops.deletion.schedule`. */
+  scheduleDeletion(slug: string, body: DeletionSchedule): Promise<Result<DeletionDone>>;
+  /** `ops.deletion.cancel`. */
+  cancelDeletion(slug: string, reason: string): Promise<Result<DeletionDone>>;
+  /** `ops.deletion.retry`. */
+  retryDeletion(slug: string, reason: string): Promise<Result<DeletionDone>>;
+  /** `ops.deletion.certificate`: the signed certificate as a file to save. */
+  certificate(slug: string): Promise<Result<Download>>;
 }
 
 /**

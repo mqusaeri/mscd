@@ -1,16 +1,25 @@
 // Sample adapter of the operator console: a healthy installation, the queues of a quiet afternoon, the organisations of
-// the sample service (the three of the snapshot and two more, sample-orgs.ts) with their status, plan, domains and
-// history, the D-S4 plan presets, the packs of the sample (ISO 9001 and ISO 37001 in their newer editions), and the
-// accounts and platform operators of the sample service (sample-accounts.ts, M2-19). Created
-// organisations, status changes, domains, entitlements, licences and packs stay for the browser session; an imported
-// bundle shows as "Installing" on the next read and as installed on the one after, as the worker would do it. The
-// state belongs to the installation (the operator sees every organisation), so it is not kept per organisation.
+// the sample service (the three of the snapshot and five more, sample-orgs.ts) with their status, plan, domains,
+// history, exports and deletion, the D-S4 plan presets, the packs of the sample (ISO 9001 and ISO 37001 in their newer
+// editions), and the accounts and platform operators of the sample service (sample-accounts.ts, M2-19). Created
+// organisations, status changes, domains, entitlements, licences, packs, exports and deletions stay for the browser
+// session; an imported bundle shows as "Installing" on the next read and as installed on the one after, as the worker
+// would do it, and an export is built the same way (sample-lifecycle.ts). The moves follow Milestone 3 J.8: offboarding
+// sets the end of the read-only period and queues the final export, archiving schedules the deletion, and an archived
+// organisation reopens for export only while its deletion is scheduled. The state belongs to the installation (the
+// operator sees every organisation), so it is not kept per organisation.
 import type { ControllerData } from '../../data/types';
+import { textFile } from '../auditor-access/shared';
+import { EXPORTABLE } from './lifecycle-model';
+import type { DeletionView, OpsExport } from './lifecycle-model';
 import type { Health, LicenceState, OpsAdapter, OrgItem, PackItem, Result } from './model';
-import { NO_END, STATUS_MOVES, daysBetween, entitlementEtag, localIso, needsSlug, presetUntil } from './org-model';
-import type { Domain, Entitlement, EntitlementInput, OrgDetail } from './org-model';
+import { DELETION_GRACE_DAYS, NO_END, READ_ONLY_DAYS, REOPEN_DAYS, STATUS_MOVES, daysBetween, entitlementEtag, localIso, needsSlug, presetUntil } from './org-model';
+import type { Domain, Entitlement, EntitlementInput, OrgDetail, OrgStatus } from './org-model';
 import { resetSampleAccounts, sampleAccounts } from './sample-accounts';
-import { EXTRA_ORGS, FREE_MAIL, SAMPLE_PRESETS, cloneOrg, snapshotOrg } from './sample-orgs';
+import {
+  addDaysIso, advanceExports, certificateText, finishPurge, inFlight, lifecycleOf, newExport, pendingSteps, queueFinalExport,
+} from './sample-lifecycle';
+import { FREE_MAIL, SAMPLE_PRESETS, resetSampleService, sampleId, sampleNow, sampleServiceOrgs } from './sample-orgs';
 import type { SampleEntitlement, SampleOrg } from './sample-orgs';
 
 const NO_SERVER: [string, string] = ['The sample build has no server to read diagnostics from.', 'Versi contoh tidak memiliki server untuk membaca diagnostik.'];
@@ -24,7 +33,6 @@ const refuse = <T,>(status: number, message: readonly [string, string], extra: E
 const titled = <T,>(status: number, title: string, extra: Extra = {}): Result<T> => refuse<T>(status, [title, title], extra);
 
 interface State {
-  orgs: SampleOrg[] | null;
   packs: PackItem[];
   /** Imported packs still installing: the number of reads left until they are installed. */
   installing: Map<string, number>;
@@ -35,6 +43,7 @@ let state: State | null = null;
 export function resetSampleOps(): void {
   state = null;
   resetSampleAccounts();
+  resetSampleService();
 }
 
 function initialPacks(): PackItem[] {
@@ -48,19 +57,12 @@ function initialPacks(): PackItem[] {
 }
 
 function current(): State {
-  state ??= { orgs: null, packs: initialPacks(), installing: new Map() };
+  state ??= { packs: initialPacks(), installing: new Map() };
   return state;
 }
 
-/** The organisations of the sample service: those of the snapshot, then the two of the sample service only. */
-function orgsOf(D: ControllerData | null): SampleOrg[] {
-  const s = current();
-  s.orgs ??= [
-    ...(D?.orgs ?? []).map((o, i) => snapshotOrg(o.id, o.name, o.ms.length, i)),
-    ...EXTRA_ORGS.filter((x) => !(D?.orgs ?? []).some((o) => o.id === x.slug)).map(cloneOrg),
-  ];
-  return s.orgs;
-}
+/** The organisations of the sample service (the store the operator console and Organisation export share). */
+const orgsOf = (D: ControllerData | null): SampleOrg[] => sampleServiceOrgs(D);
 
 /** The licence state of an entitlement on a day: valid until its last day, then grace, then read-only. */
 function licenceOf(e: SampleEntitlement | null, today: string): { state: LicenceState; validUntil: string } | null {
@@ -75,7 +77,7 @@ function itemOf(o: SampleOrg, today: string): OrgItem {
     slug: o.slug, name: o.name, status: o.status, licence: licenceOf(o.entitlement, today), memberCount: o.memberCount, systemCount: o.systemCount,
     plan: o.entitlement?.plan ?? null, validUntil: o.entitlement?.validUntil ?? null,
     verifiedDomains: o.domains.filter((d) => d.status === 'verified').map((d) => d.domain).sort(), maxUsers: o.entitlement?.maxUsers ?? null,
-    createdAt: o.createdAt,
+    createdAt: o.createdAt, ...lifecycleOf(o),
   };
 }
 
@@ -86,7 +88,42 @@ function detailOf(o: SampleOrg): OrgDetail {
     entitlement: e ? { plan: e.plan, source: e.source, maxUsers: e.maxUsers, maxManagementSystems: e.maxManagementSystems, validUntil: e.validUntil } : null,
     domains: o.domains.map((d) => ({ domain: d.domain, status: d.status })).sort((a, b) => a.domain.localeCompare(b.domain)),
     lastSignInAt: o.lastSignInAt,
+    ...lifecycleOf(o),
   };
+}
+
+const opsExportOf = (e: SampleOrg['exports'][number]): OpsExport => ({
+  id: e.id, status: e.status, requestedVia: e.requestedVia, requestedAt: e.requestedAt, completedAt: e.completedAt, expiresAt: e.expiresAt, isFinal: e.isFinal,
+  partCount: e.partCount, sizeBytes: e.sizeBytes, downloadCount: e.downloadCount,
+});
+
+const deletionView = (d: DeletionView): DeletionView => ({ ...d, scheduledBy: d.scheduledBy ? { ...d.scheduledBy } : null, steps: d.steps.map((x) => ({ ...x })) });
+
+/** The effects of a move of Milestone 3 J.8 on the sample organisation (D.2, D.5.1). */
+function applyMove(o: SampleOrg, from: OrgStatus, to: OrgStatus, at: string): void {
+  if (to === 'offboarding') {
+    const reopened = from === 'archived';
+    o.offboardingEndsAt = addDaysIso(at, reopened ? REOPEN_DAYS : READ_ONLY_DAYS);
+    if (reopened && o.deletion?.status === 'scheduled') o.deletion = { ...o.deletion, status: 'cancelled', reason: `Reopened for an export: ${o.events[0]?.reason ?? ''}`.trim() };
+    queueFinalExport(o, at, sampleId());
+    return;
+  }
+  o.offboardingEndsAt = null;
+  if (to === 'archived') {
+    // The expiry removes the content of the final export once the organisation is archived (D.4).
+    for (const e of o.exports) if (e.status === 'ready') e.status = 'expired';
+    if (o.deletion?.status !== 'scheduled') {
+      const final = o.exports.find((e) => e.isFinal);
+      o.deletion = {
+        id: sampleId(), status: 'scheduled', scheduledFor: addDaysIso(at, DELETION_GRACE_DAYS), scheduledBy: null, reason: o.events[0]?.reason ?? null,
+        archivedAt: at, earliestAllowed: addDaysIso(at, 7), finalExportId: final?.id ?? null, startedAt: null, completedAt: null, failedStep: null, error: null,
+        steps: [], vaultObjectsDeleted: null, certificateId: null,
+      };
+    }
+  } else if (from === 'offboarding') {
+    // Back to active: a final export stays downloadable for the usual 7 days (D.4).
+    for (const e of o.exports) if (e.isFinal && e.status === 'ready' && !e.expiresAt) e.expiresAt = addDaysIso(at, 7);
+  }
 }
 
 function viewOf(e: SampleEntitlement, o: SampleOrg): Entitlement {
@@ -125,13 +162,7 @@ function newToken(): string {
 
 /** Now on the sample's day: the sample's today at the current local time, so new records sit beside the sample's. */
 let sampleDay: string | null = null;
-const nowIso = () => {
-  const now = new Date();
-  if (!sampleDay) return now.toISOString();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const local = new Date(`${sampleDay}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
-  return Number.isNaN(local.getTime()) ? now.toISOString() : new Date(local.getTime() + now.getMilliseconds()).toISOString();
-};
+const nowIso = () => sampleNow(sampleDay);
 
 /** The row values of a preset starting on `validFrom` (the server's `presetValues`). */
 function presetValues(name: string, validFrom: string): Omit<SampleEntitlement, 'version' | 'updatedAt'> {
@@ -235,7 +266,7 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
       const entitlement: SampleEntitlement | null = preset ? { ...presetValues(preset.name, from), version: 1, updatedAt: nowIso() } : null;
       allOrgs().push({
         slug: body.slug, name: body.name, status: 'active', region: 'id', createdAt: nowIso(), memberCount: 0, systemCount: 0, tenantAdmins: 0,
-        entitlement, domains: [], events: [], lastSignInAt: null,
+        entitlement, domains: [], events: [], lastSignInAt: null, offboardingEndsAt: null, deletion: null, exports: [],
       });
       const plan: [string, string] = entitlement
         ? [`The ${entitlement.plan} plan applies from ${entitlement.validFrom} to ${entitlement.validUntil}. `, `Paket ${entitlement.plan} berlaku sejak ${entitlement.validFrom} sampai ${entitlement.validUntil}. `]
@@ -260,18 +291,23 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
       if (!o) return unknown(slug);
       const from = o.status;
       const to = body.status;
-      if (!STATUS_MOVES[from].includes(to)) {
-        const allowed = STATUS_MOVES[from];
-        const en = from === to ? `Organisation ${slug} is already ${to}.` : `Organisation ${slug} is ${from} and cannot move to ${to}. ${allowed.length ? `From ${from} it can move to ${allowed.join(' or ')}.` : `${from} is final.`}`;
-        const id = from === to ? `Organisasi ${slug} sudah berstatus ${to}.` : `Organisasi ${slug} berstatus ${from} dan tidak dapat dipindahkan ke ${to}. ${allowed.length ? `Dari ${from} organisasi dapat dipindahkan ke ${allowed.join(' atau ')}.` : `${from} adalah status akhir.`}`;
+      // Milestone 3 J.8: an archived organisation moves back to offboarding only while its deletion is scheduled.
+      const reopenRefused = from === 'archived' && to === 'offboarding' && o.deletion?.status !== 'scheduled';
+      if (!STATUS_MOVES[from].includes(to) || reopenRefused) {
+        const allowed = STATUS_MOVES[from].filter((x) => from !== 'archived' || o.deletion?.status === 'scheduled' || x !== 'offboarding');
+        const reopen: [string, string] = from === 'archived' ? [' It can move back to offboarding only while its deletion is scheduled.', ' Organisasi dapat kembali ke offboarding hanya selama penghapusannya dijadwalkan.'] : ['', ''];
+        const en = from === to ? `Organisation ${slug} is already ${to}.` : `Organisation ${slug} is ${from} and cannot move to ${to}. ${allowed.length && from !== 'archived' ? `From ${from} it can move to ${allowed.join(' or ')}.` : `${from} is final.`}${reopen[0]}`;
+        const id = from === to ? `Organisasi ${slug} sudah berstatus ${to}.` : `Organisasi ${slug} berstatus ${from} dan tidak dapat dipindahkan ke ${to}. ${allowed.length && from !== 'archived' ? `Dari ${from} organisasi dapat dipindahkan ke ${allowed.join(' atau ')}.` : `${from} adalah status akhir.`}${reopen[1]}`;
         return refuse(409, [en, id], { slug: 'transition-not-allowed', messageKey: 'invalid_status_transition' });
       }
       if (body.reason.trim().length < 3) return titled(400, 'Invalid request', { slug: 'validation', errors: [{ path: 'body.reason', message: 'Too small: expected string to have >=3 characters' }] });
       if (needsSlug(to) && body.confirmSlug !== slug) {
         return refuse(422, [`Moving organisation ${slug} to ${to} needs confirmSlug equal to the slug ${slug}.`, `Memindahkan organisasi ${slug} ke ${to} memerlukan confirmSlug yang sama dengan slug ${slug}.`], { slug: 'business-rule', messageKey: 'confirmation_mismatch' });
       }
+      const at = nowIso();
       o.status = to;
-      o.events.unshift({ id: `ev-${slug}-${o.events.length + 1}-${Date.now().toString(36)}`, from, to, reason: body.reason.trim(), actor: { handle: 'ops.owner', displayName: 'Platform owner' }, at: nowIso() });
+      o.events.unshift({ id: `ev-${slug}-${o.events.length + 1}-${Date.now().toString(36)}`, from, to, reason: body.reason.trim(), actor: { handle: 'ops.owner', displayName: 'Platform owner' }, at });
+      applyMove(o, from, to, at);
       const sessionsRevoked = to === 'suspended' || to === 'archived' ? Math.ceil(o.memberCount / 3) : 0;
       const admins = o.tenantAdmins;
       return {
@@ -447,6 +483,142 @@ export function createSampleAdapter(getD: () => ControllerData | null): OpsAdapt
     },
     async organizationNames() {
       return { ok: true, data: orgsOf(getD()).map((o) => ({ slug: o.slug, name: o.name })) };
+    },
+    async exports(slug) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      advanceExports(o, nowIso());
+      return { ok: true, data: o.exports.map(opsExportOf) };
+    },
+    async startExport(slug, reason) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      if (reason.trim().length < 3) return titled(400, 'Invalid request', { slug: 'validation', errors: [{ path: 'body.reason', message: 'Too small: expected string to have >=3 characters' }] });
+      if (!EXPORTABLE.includes(o.status)) {
+        return refuse(409, [
+          `Organisation ${slug} is ${o.status}. An export can be made while it is active or offboarding.`,
+          `Organisasi ${slug} berstatus ${o.status}. Ekspor dapat dibuat selama organisasi aktif atau dalam masa offboarding.`,
+        ], { slug: 'conflict', messageKey: 'export_not_available' });
+      }
+      const at = nowIso();
+      if (inFlight(o, at)) {
+        return refuse(409, [
+          'Another export of this organisation is waiting for approval or being built. Wait until it is ready, rejected or failed.',
+          'Ekspor lain dari organisasi ini sedang menunggu persetujuan atau sedang dibuat. Tunggu sampai ekspor itu siap, ditolak atau gagal.',
+        ], { slug: 'conflict', messageKey: 'export_in_progress' });
+      }
+      const id = sampleId();
+      o.exports.unshift(newExport({ id, status: 'queued', requestedVia: 'operator', requestedAt: at }));
+      return {
+        ok: true,
+        data: {
+          id,
+          message: [
+            `The export of ${slug} was queued; its Tenant Admins are told and download it when it is ready`,
+            `Ekspor ${slug} diantrekan; Tenant Admin-nya diberi tahu dan mengunduhnya setelah siap`,
+          ],
+        },
+      };
+    },
+    async deletion(slug) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      // A retried purge finishes on the next read, as the worker would.
+      if (o.deletion?.status === 'running') finishPurge(o, nowIso(), sampleId());
+      return { ok: true, data: o.deletion ? deletionView(o.deletion) : null };
+    },
+    async scheduleDeletion(slug, body) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      if (o.status !== 'archived') {
+        return refuse(409, [
+          `Organisation ${slug} is ${o.status}: only an archived organisation has a deletion date`,
+          `Organisasi ${slug} berstatus ${o.status}: hanya organisasi yang diarsipkan yang memiliki tanggal penghapusan`,
+        ], { slug: 'conflict', messageKey: 'deletion_not_archived' });
+      }
+      if (body.confirmSlug !== slug) {
+        return refuse(422, [`Moving organisation ${slug} to archived needs confirmSlug equal to the slug ${slug}.`, `Memindahkan organisasi ${slug} ke archived memerlukan confirmSlug yang sama dengan slug ${slug}.`], { slug: 'business-rule', messageKey: 'confirmation_mismatch' });
+      }
+      const at = nowIso();
+      const archivedAt = o.events.find((e) => e.to === 'archived')?.at ?? o.deletion?.archivedAt ?? at;
+      const earliest = addDaysIso(archivedAt, 7);
+      if (Date.parse(body.scheduledFor) < Date.parse(earliest)) {
+        return refuse(409, [
+          `The deletion of ${slug} cannot be earlier than ${earliest} (archived on ${archivedAt.slice(0, 10)} plus 7 days)`,
+          `Penghapusan ${slug} tidak boleh lebih awal dari ${earliest} (diarsipkan pada ${archivedAt.slice(0, 10)} ditambah 7 hari)`,
+        ], { slug: 'conflict', messageKey: 'deletion_too_soon' });
+      }
+      if (Date.parse(body.scheduledFor) < Date.parse(at)) {
+        return refuse(409, [
+          `The deletion date ${body.scheduledFor} of ${slug} is in the past; choose now or later`,
+          `Tanggal penghapusan ${body.scheduledFor} untuk ${slug} sudah lewat; pilih sekarang atau sesudahnya`,
+        ], { slug: 'conflict', messageKey: 'deletion_too_soon' });
+      }
+      const open = o.deletion && o.deletion.status !== 'cancelled' ? o.deletion : null;
+      if (open && open.status !== 'scheduled') {
+        return refuse(409, [
+          `The deletion of ${slug} is ${open.status}; its date can no longer change${open.status === 'failed' ? ' (retry it instead)' : ''}`,
+          `Penghapusan ${slug} berstatus ${open.status}; tanggalnya tidak dapat diubah lagi${open.status === 'failed' ? ' (coba lagi sebagai gantinya)' : ''}`,
+        ], { slug: 'conflict', messageKey: 'deletion_in_progress' });
+      }
+      const by = { handle: 'ops.owner', displayName: 'Platform owner' };
+      o.deletion = open
+        ? { ...open, scheduledFor: body.scheduledFor, scheduledBy: by, reason: body.reason }
+        : {
+          id: sampleId(), status: 'scheduled', scheduledFor: body.scheduledFor, scheduledBy: by, reason: body.reason, archivedAt, earliestAllowed: earliest,
+          finalExportId: o.exports.find((e) => e.isFinal)?.id ?? null, startedAt: null, completedAt: null, failedStep: null, error: null, steps: [],
+          vaultObjectsDeleted: null, certificateId: null,
+        };
+      const day = body.scheduledFor.slice(0, 10);
+      return {
+        ok: true,
+        data: { id: o.deletion.id, status: 'scheduled', scheduledFor: body.scheduledFor, message: [`The deletion of ${slug} is scheduled for ${day}.`, `Penghapusan ${slug} dijadwalkan pada ${day}.`] },
+      };
+    },
+    async cancelDeletion(slug, reason) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const open = o.deletion && o.deletion.status !== 'cancelled' ? o.deletion : null;
+      if (!open || open.status !== 'scheduled') {
+        return titled(409, `Organisation ${slug} has no scheduled deletion to cancel${open ? ` (it is ${open.status})` : ''}`, { slug: 'conflict', messageKey: 'deletion_in_progress' });
+      }
+      o.deletion = { ...open, status: 'cancelled', reason: `Cancelled: ${reason.trim()}` };
+      return {
+        ok: true,
+        data: {
+          id: open.id, status: 'cancelled', scheduledFor: open.scheduledFor,
+          message: [
+            `The deletion of ${slug} is cancelled. The organisation stays archived until a deletion is scheduled again.`,
+            `Penghapusan ${slug} dibatalkan. Organisasi tetap diarsipkan sampai penghapusan dijadwalkan lagi.`,
+          ],
+        },
+      };
+    },
+    async retryDeletion(slug, reason) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const open = o.deletion && o.deletion.status !== 'cancelled' ? o.deletion : null;
+      if (!open || open.status !== 'failed') {
+        return titled(409, `The deletion of ${slug} has not failed${open ? ` (it is ${open.status})` : ''}; only a failed purge is retried`, { slug: 'conflict', messageKey: 'deletion_in_progress' });
+      }
+      const step = open.failedStep ?? 'check';
+      o.deletion = { ...open, status: 'running', error: null, reason: open.reason, steps: (open.steps.length ? open.steps : pendingSteps()).map((s) => (s.status === 'failed' ? { ...s, status: 'running' as const } : s)) };
+      void reason;
+      return {
+        ok: true,
+        data: {
+          id: open.id, status: 'running', scheduledFor: open.scheduledFor,
+          message: [`The purge of ${slug} runs again from the step ${step}.`, `Penghapusan ${slug} dijalankan lagi dari langkah ${step}.`],
+        },
+      };
+    },
+    async certificate(slug) {
+      const o = find(slug);
+      if (!o) return unknown(slug);
+      const d = o.deletion;
+      if (!d) return titled(404, `Organisation ${slug} has no deletion`, { slug: 'not-found' });
+      if (d.status !== 'completed') return titled(409, `The deletion of ${slug} is ${d.status}; the certificate exists once it has completed`, { slug: 'conflict' });
+      return { ok: true, data: textFile(certificateText(o, d), `deletion-certificate-${slug}-${(d.completedAt ?? '').slice(0, 10)}.json`, 'application/json') };
     },
     // The accounts and platform operators of the sample service (M2-19).
     ...sampleAccounts(getD, nowIso),

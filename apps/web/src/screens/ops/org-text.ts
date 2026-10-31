@@ -1,6 +1,7 @@
-// Texts of the organisation lifecycle parts of the operator console (MILESTONE-2 M2-S12) in English and Indonesian
-// (D2-01): the list columns and filters, the organisation drawer with its Overview, Status, Domains, Entitlements and
-// History tabs, and the plan of "Create organisation".
+// Texts of the organisation lifecycle parts of the operator console (MILESTONE-2 M2-S12, MILESTONE-3 M3-09) in English
+// and Indonesian (D2-01): the list columns and filters, the organisation drawer with its Overview, Status, Domains,
+// Entitlements and History tabs, and the plan of "Create organisation". The Export and Deletion tabs are in
+// lifecycle-text.ts.
 export const ORG_TEXT = {
   // List
   statusFilter: ['Status', 'Status'],
@@ -38,8 +39,8 @@ export const ORG_TEXT = {
     'Anggota dapat masuk, membaca dan mengekspor, tetapi tidak ada yang dapat mengubah apa pun. Ini masa hanya baca di akhir kontrak.',
   ],
   meaningArchived: [
-    'Members can no longer open this organisation. Archived is final, so it cannot become active again.',
-    'Anggota tidak dapat membuka organisasi ini lagi. Diarsipkan adalah status akhir, jadi organisasi tidak dapat aktif kembali.',
+    'Members can no longer open this organisation. MSCD deletes it for good on its deletion date; until then you can move the date or reopen it for export.',
+    'Anggota tidak dapat membuka organisasi ini lagi. MSCD menghapusnya secara permanen pada tanggal penghapusannya; sampai saat itu Anda dapat memindahkan tanggalnya atau membukanya kembali untuk ekspor.',
   ],
   meaningDeleted: [
     'The organisation was deleted for good on its deletion date. Its data is gone and nobody can open it.',
@@ -78,12 +79,17 @@ export const ORG_TEXT = {
   currentStatus: ['Current status', 'Status saat ini'],
   changeStatus: ['Change the status', 'Ubah status'],
   changeStatusSub: ['Each change needs a reason. The Tenant Admins of the organisation get an email with the new status and your reason, so write it for the customer to read.', 'Setiap perubahan memerlukan alasan. Tenant Admin organisasi menerima email berisi status baru dan alasan Anda, jadi tulislah untuk dibaca pelanggan.'],
-  finalStatus: ['Archived is final. No move is possible.', 'Diarsipkan adalah status akhir. Tidak ada perpindahan yang mungkin.'],
+  finalStatus: ['Deleted is final. No move is possible.', 'Dihapus adalah status akhir. Tidak ada perpindahan yang mungkin.'],
+  archivedNoMove: [
+    'An archived organisation moves back to offboarding only while its deletion is scheduled. Schedule the deletion in the Deletion tab first.',
+    'Organisasi yang diarsipkan hanya dapat kembali ke pengakhiran selama penghapusannya dijadwalkan. Jadwalkan dulu penghapusannya di tab Penghapusan.',
+  ],
   moveSuspend: ['Suspend', 'Tangguhkan'],
   moveReactivate: ['Reactivate', 'Aktifkan kembali'],
   moveOffboard: ['Start offboarding', 'Mulai pengakhiran'],
   moveArchive: ['Archive', 'Arsipkan'],
   moveDelete: ['Delete for good', 'Hapus permanen'],
+  moveReopen: ['Reopen for export', 'Buka kembali untuk ekspor'],
   moveTitle: ['{action}: {org}', '{action}: {org}'],
   moveSub: ['From {from} to {to}', 'Dari {from} ke {to}'],
   effectsTitle: ['What happens', 'Yang terjadi'],
@@ -94,14 +100,20 @@ export const ORG_TEXT = {
   effectActive1: ['Members can sign in and work again as their roles allow.', 'Anggota dapat masuk dan bekerja kembali sesuai peran mereka.'],
   effectActive2: ['Daily jobs, reminders and digests run again.', 'Pekerjaan harian, pengingat dan ringkasan berjalan kembali.'],
   effectRenewPlan: ['If the contract was renewed, set the new plan in Entitlements.', 'Jika kontrak diperpanjang, tetapkan paket baru di Hak pakai.'],
+  effectActiveFinalExport: ['The final export stays downloadable for 7 more days by default.', 'Ekspor akhir tetap dapat diunduh selama 7 hari lagi secara bawaan.'],
   effectOffboarding1: ['Members can sign in, read and export. Nobody can change anything.', 'Anggota dapat masuk, membaca dan mengekspor. Tidak ada yang dapat mengubah apa pun.'],
   effectOffboarding2: ['Sessions are kept.', 'Sesi tetap berjalan.'],
-  effectOffboarding3: ['Daily jobs and emails stop, except the emails of finished exports.', 'Pekerjaan harian dan email berhenti, kecuali email ekspor yang selesai.'],
-  effectOffboarding4: ['The read-only period is {days} days. Archive the organisation after it ends.', 'Masa hanya baca adalah {days} hari. Arsipkan organisasi setelah masa itu berakhir.'],
+  effectOffboarding3: ['Daily jobs and emails stop, except the emails of exports and of the end of the contract.', 'Pekerjaan harian dan email berhenti, kecuali email ekspor dan email akhir kontrak.'],
+  effectOffboardingExport: ['A final export of all data is queued. The Tenant Admins download it without a second approval.', 'Ekspor akhir semua data diantrekan. Tenant Admin mengunduhnya tanpa persetujuan kedua.'],
+  effectOffboarding4: ['The read-only period is {days} days by default. When it ends, MSCD archives the organisation by itself; you can also archive it earlier.', 'Masa hanya baca secara bawaan adalah {days} hari. Saat masa itu berakhir, MSCD mengarsipkan organisasi dengan sendirinya; Anda juga dapat mengarsipkannya lebih awal.'],
   effectArchived1: ['The organisation no longer appears for its members.', 'Organisasi tidak lagi muncul bagi anggotanya.'],
   effectArchived2: ['Every session in this organisation ends at once.', 'Setiap sesi di organisasi ini berakhir saat itu juga.'],
-  effectArchived3: ['This is final: an archived organisation cannot become active again.', 'Ini final: organisasi yang diarsipkan tidak dapat aktif kembali.'],
-  effectArchived4: ['The data stays until it is deleted as the contract says.', 'Data tetap ada sampai dihapus sesuai kontrak.'],
+  effectArchivedExports: ['Its exports can no longer be downloaded. Check first that the customer has the final export.', 'Ekspornya tidak dapat diunduh lagi. Pastikan dulu pelanggan sudah memiliki ekspor akhir.'],
+  effectArchivedDeletion: ['MSCD deletes the organisation for good {grace} days later by default. Until then you can move the date in the Deletion tab or reopen the organisation for export.', 'MSCD menghapus organisasi secara permanen {grace} hari kemudian secara bawaan. Sampai saat itu Anda dapat memindahkan tanggalnya di tab Penghapusan atau membuka kembali organisasi untuk ekspor.'],
+  effectReopen1: ['The scheduled deletion is cancelled.', 'Penghapusan yang dijadwalkan dibatalkan.'],
+  effectReopen2: ['The organisation is read-only again for {reopen} days: its members can sign in, read and export.', 'Organisasi kembali hanya baca selama {reopen} hari: anggotanya dapat masuk, membaca dan mengekspor.'],
+  effectReopen3: ['A new final export is queued for the Tenant Admins.', 'Ekspor akhir baru diantrekan untuk Tenant Admin.'],
+  effectReopen4: ['When the {reopen} days end, MSCD archives the organisation again and schedules a new deletion.', 'Saat {reopen} hari itu berakhir, MSCD mengarsipkan organisasi lagi dan menjadwalkan penghapusan baru.'],
   effectDeleted1: ['Only the deletion run on its date deletes an organisation. Nobody moves it to deleted by hand.', 'Hanya proses penghapusan pada tanggalnya yang menghapus organisasi. Tidak ada yang memindahkannya ke dihapus secara manual.'],
   effectEmail: ['The Tenant Admins get an email with the new status and your reason.', 'Tenant Admin menerima email berisi status baru dan alasan Anda.'],
   reason: ['Reason', 'Alasan'],
@@ -114,8 +126,12 @@ export const ORG_TEXT = {
   movedSessions: ['Sessions ended: {n}.', 'Sesi yang diakhiri: {n}.'],
   movedEmails: ['Tenant Admins emailed: {sent} of {total}.', 'Tenant Admin yang dikirimi email: {sent} dari {total}.'],
   movedEmailsShort: ['Some emails did not go out. Tell the Tenant Admins yourself.', 'Sebagian email tidak terkirim. Beri tahu Tenant Admin sendiri.'],
-  offboardingSince: ['Offboarding since {date}. The read-only period of {days} days ends on {end}.', 'Pengakhiran sejak {date}. Masa hanya baca {days} hari berakhir pada {end}.'],
-  offboardingOver: ['Offboarding since {date}. The read-only period of {days} days ended on {end}: archive the organisation now.', 'Pengakhiran sejak {date}. Masa hanya baca {days} hari berakhir pada {end}: arsipkan organisasi sekarang.'],
+  offboardingSince: ['Offboarding since {date}. The read-only period ends on {end}; then MSCD archives the organisation by itself.', 'Pengakhiran sejak {date}. Masa hanya baca berakhir pada {end}; lalu MSCD mengarsipkan organisasi dengan sendirinya.'],
+  offboardingUntil: ['The read-only period ends on {end}; then MSCD archives the organisation by itself.', 'Masa hanya baca berakhir pada {end}; lalu MSCD mengarsipkan organisasi dengan sendirinya.'],
+  offboardingOver: ['Offboarding since {date}. The read-only period ended on {end}: MSCD archives the organisation within the hour.', 'Pengakhiran sejak {date}. Masa hanya baca berakhir pada {end}: MSCD mengarsipkan organisasi dalam satu jam.'],
+  archivedDeletion: ['MSCD deletes the organisation for good on {date}. See the Deletion tab.', 'MSCD menghapus organisasi secara permanen pada {date}. Lihat tab Penghapusan.'],
+  archivedDeletionState: ['Deletion: {status}. See the Deletion tab.', 'Penghapusan: {status}. Lihat tab Penghapusan.'],
+  archivedNoDeletion: ['No deletion is scheduled. See the Deletion tab.', 'Tidak ada penghapusan yang dijadwalkan. Lihat tab Penghapusan.'],
   // Domains
   domains: ['Email domains', 'Domain email'],
   domainsSub: ['A verified domain lets people of the organisation find it at sign-in by their work email, and lets company sign-in create their accounts. The customer proves the domain with a DNS TXT record.', 'Domain terverifikasi membuat orang di organisasi menemukannya saat masuk dengan email kerja mereka, dan membuat masuk perusahaan dapat membuat akun mereka. Pelanggan membuktikan domain dengan catatan TXT DNS.'],
@@ -237,7 +253,7 @@ export const ORG_TEXT = {
   colChange: ['Change', 'Perubahan'],
   colReason: ['Reason', 'Alasan'],
   colBy: ['By', 'Oleh'],
-  commandLine: ['Operator command', 'Perintah operator'],
+  commandLine: ['MSCD or an operator command', 'MSCD atau perintah operator'],
   // Create organisation
   plan: ['Plan', 'Paket'],
   planHint: ['The limits the organisation starts with. You can change them later in Entitlements.', 'Batas awal organisasi. Anda dapat mengubahnya nanti di Hak pakai.'],
