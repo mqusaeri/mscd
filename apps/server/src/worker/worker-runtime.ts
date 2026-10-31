@@ -110,6 +110,9 @@ export class WorkerRuntime implements OnModuleInit {
     const registered: JobName[] = [];
     for (const schedule of CRON_SCHEDULES) {
       if (!handled.has(schedule.name)) continue;
+      // Milestone 3 D.5.1 (M3-03): the organisation lifecycle belongs to multi tenancy. Its handler exists in single
+      // tenancy too (the operator console may run it, and a run does nothing), but the hourly schedule is left out there.
+      if (schedule.name === 'org.lifecycle' && this.config.profile.tenancy.mode !== 'multi') continue;
       await this.queue.schedule(schedule.name, schedule.cron, { orgId: null, payload: {} }, 'UTC');
       registered.push(schedule.name);
     }

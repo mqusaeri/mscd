@@ -28,8 +28,8 @@ export function kindEnabled(profile: Profile, kind: IdentityProviderKind | 'loca
 
 /**
  * True when a provider can be used for sign-in now: enabled, of a kind the profile offers, and of an organisation
- * that is not archived.
+ * that is not archived (or deleted, Milestone 3 D.5).
  */
 export function providerUsable(profile: Profile, row: Pick<ProviderRow, 'enabled' | 'kind' | 'org_status'>, kind?: IdentityProviderKind): boolean {
-  return row.enabled && (kind === undefined || row.kind === kind) && kindEnabled(profile, row.kind) && row.org_status !== 'archived';
+  return row.enabled && (kind === undefined || row.kind === kind) && kindEnabled(profile, row.kind) && row.org_status !== 'archived' && row.org_status !== 'deleted';
 }

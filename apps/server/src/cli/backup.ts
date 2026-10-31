@@ -247,7 +247,9 @@ export async function backupVerify(config: MscdConfig, options: BackupVerifyOpti
     // 5. Organisations.
     for (const org of organisations) {
       if (!org.schema_present) {
-        if (org.status === 'archived') {
+        // Milestone 3 D.5: a deleted organisation has no schema by design (the purge dropped it), like an archived one
+        // whose schema an operator removed.
+        if (org.status === 'archived' || org.status === 'deleted') {
           summary.database.skipped += 1;
           continue;
         }

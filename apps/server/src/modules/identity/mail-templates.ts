@@ -6,7 +6,13 @@
 // for the members and the operator's reason. It names no person (the repository and its tests are public, and the
 // email goes to several people): only the organisation, the status and the reason. Milestone 2 J.3 (M2-S11):
 // `domain_record_missing`, the email of `domain.verify` to the platform operators when the monthly check no longer
-// finds the DNS TXT record of a verified email domain (the domain stays verified).
+// finds the DNS TXT record of a verified email domain (the domain stays verified). Milestone 3 D.5 (M3-03): the end of
+// a contract. The status email names the end of the read-only period (offboarding) or the deletion date (archived);
+// `organization_lifecycle` reminds the Tenant Admins 7 days and 1 day before the read-only period ends and before the
+// deletion; `organization_deletion_certificate` carries the signed deletion certificate (attached) to the Tenant Admins
+// captured when the deletion was scheduled and to the platform operators; `organization_deletion_failed` alerts the
+// platform operators when a purge stops. Deletion emails go to people who can no longer sign in, so they are not
+// in-app notifications (J.4). None of them names a person.
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
 // `http.public_url`. Security messages end with the same advice, so a user who did not act knows what to do.
 import { fmtDay } from '../../common/dates';
@@ -43,14 +49,39 @@ export type AccountTemplate =
    * The platform operator changed the status of the organisation (`ops.organizations.status`, `tenant set-status`,
    * Milestone 2 J.4, J.8, M2-S09): to each Tenant Admin, with what the new status means and the operator's reason.
    */
-  | { name: 'organization_status_changed'; link: string; organisation: string; status: OrganisationStatusName; reason: string }
+  | {
+      name: 'organization_status_changed';
+      link: string;
+      organisation: string;
+      status: OrganisationStatusName;
+      reason: string;
+      /** Milestone 3 D.5.1: offboarding, the last day of the read-only period (a local date `YYYY-MM-DD`). */
+      readOnlyUntil?: string | null;
+      /** Milestone 3 D.5.1: archived, the day MSCD deletes the organisation (a local date `YYYY-MM-DD`). */
+      deletionOn?: string | null;
+    }
+  /**
+   * Milestone 3 D.5.1 (`org.lifecycle`): to each Tenant Admin, `days` (7 or 1) days before the read-only period ends
+   * (`read_only_ends`) or before the deletion (`deletion`), with the local date `on`.
+   */
+  | { name: 'organization_lifecycle'; link: string; organisation: string; stage: 'read_only_ends' | 'deletion'; on: string; days: number }
+  /**
+   * Milestone 3 D.5.5: the signed deletion certificate, attached as `fileName`, to the Tenant Admins captured when the
+   * deletion was scheduled and to every platform operator. `completedOn` and `backupsEndBy` are dates `YYYY-MM-DD`.
+   */
+  | { name: 'organization_deletion_certificate'; organisation: string; slug: string; certificateId: string; completedOn: string; backupsEndBy: string; fileName: string }
+  /** Milestone 3 D.5.3: a purge stopped at `step`; to every platform operator. */
+  | { name: 'organization_deletion_failed'; link: string; organisation: string; slug: string; step: string }
   /**
    * The monthly check of `domain.verify` (Milestone 2 J.3, M2-S11) did not find the TXT record `txtName` of a verified
    * email domain: to every platform operator. The domain stays verified. `verifiedAt` is an ISO instant or null.
    */
   | { name: 'domain_record_missing'; link: string; organisation: string; slug: string; domain: string; txtName: string; verifiedAt: string | null };
 
-/** The four statuses of an organisation (J.8 `organization.status`). */
+/**
+ * The statuses of an organisation that a status email names (J.8 `organization.status`). `deleted` is never one: the
+ * purge sends the deletion certificate instead (Milestone 3 D.5.5).
+ */
 export type OrganisationStatusName = 'active' | 'suspended' | 'offboarding' | 'archived';
 
 /**
@@ -277,24 +308,115 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
     }
     case 'organization_status_changed': {
       const texts = organisationStatusTexts(template.status, template.organisation, language);
+      const dates: string[] = [];
+      if (template.status === 'offboarding' && template.readOnlyUntil) {
+        dates.push(
+          en
+            ? `The read-only period ends on ${fmtDay(template.readOnlyUntil, language)}. Download the export of the organisation before then: a Tenant Admin finds it under Export all data.`
+            : `Masa hanya-baca berakhir pada ${fmtDay(template.readOnlyUntil, language)}. Unduh ekspor organisasi sebelum tanggal itu: Tenant Admin menemukannya di Ekspor semua data.`,
+        );
+      }
+      if (template.status === 'archived' && template.deletionOn) {
+        dates.push(
+          en
+            ? `MSCD deletes the data of ${template.organisation} for good on ${fmtDay(template.deletionOn, language)}. If you still need an export, ask your MSCD service provider before that day. You will get a reminder 7 days and 1 day before, and a signed deletion certificate afterwards.`
+            : `MSCD menghapus data ${template.organisation} secara permanen pada ${fmtDay(template.deletionOn, language)}. Jika Anda masih memerlukan ekspor, hubungi penyedia layanan MSCD Anda sebelum tanggal itu. Anda akan menerima pengingat 7 hari dan 1 hari sebelumnya, dan sertifikat penghapusan yang ditandatangani sesudahnya.`,
+        );
+      }
       return {
         title: texts.title,
         paragraphs: en
           ? [
               `Your MSCD service provider changed the status of ${template.organisation} to ${texts.label}.`,
               texts.meaning,
+              ...dates,
               `Reason given: ${template.reason}`,
               'If you have questions, contact your MSCD service provider.',
             ]
           : [
               `Penyedia layanan MSCD Anda mengubah status ${template.organisation} menjadi ${texts.label}.`,
               texts.meaning,
+              ...dates,
               `Alasan yang diberikan: ${template.reason}`,
               'Jika ada pertanyaan, hubungi penyedia layanan MSCD Anda.',
             ],
         link: { href: template.link, label: OPEN_APP[language] },
       };
     }
+    case 'organization_lifecycle': {
+      const day = fmtDay(template.on, language);
+      const days = en ? `${template.days} ${template.days === 1 ? 'day' : 'days'}` : `${template.days} hari`;
+      if (template.stage === 'read_only_ends') {
+        return {
+          title: en
+            ? `${template.organisation}: the read-only period ends in ${days}`
+            : `${template.organisation}: masa hanya-baca berakhir dalam ${days}`,
+          paragraphs: en
+            ? [
+                `${template.organisation} is read-only on MSCD because its contract ended. The read-only period ends on ${day}.`,
+                'After that day the organisation closes: nobody can sign in to it any more, and MSCD deletes its data after a further grace period.',
+                'If you have not downloaded the export of the organisation yet, a Tenant Admin does it now under Export all data.',
+              ]
+            : [
+                `${template.organisation} hanya dapat dibaca di MSCD karena kontraknya telah berakhir. Masa hanya-baca berakhir pada ${day}.`,
+                'Setelah tanggal itu organisasi ditutup: tidak ada lagi yang dapat masuk ke organisasi ini, dan MSCD menghapus datanya setelah masa tenggang berikutnya.',
+                'Jika Anda belum mengunduh ekspor organisasi, Tenant Admin dapat melakukannya sekarang di Ekspor semua data.',
+              ],
+          link: { href: template.link, label: OPEN_APP[language] },
+        };
+      }
+      return {
+        title: en
+          ? `${template.organisation}: MSCD deletes the data in ${days}`
+          : `${template.organisation}: MSCD menghapus data dalam ${days}`,
+        paragraphs: en
+          ? [
+              `${template.organisation} is closed on MSCD. Its data is deleted for good on ${day}.`,
+              'If you still need an export, ask your MSCD service provider before that day: they can reopen the organisation as read-only for 7 days.',
+              'After the deletion you get a signed deletion certificate by email.',
+            ]
+          : [
+              `${template.organisation} telah ditutup di MSCD. Datanya dihapus secara permanen pada ${day}.`,
+              'Jika Anda masih memerlukan ekspor, hubungi penyedia layanan MSCD Anda sebelum tanggal itu: mereka dapat membuka kembali organisasi dalam mode hanya-baca selama 7 hari.',
+              'Setelah penghapusan Anda menerima sertifikat penghapusan yang ditandatangani melalui email.',
+            ],
+      };
+    }
+    case 'organization_deletion_certificate':
+      return {
+        title: en
+          ? `${template.organisation} was deleted from MSCD: deletion certificate`
+          : `${template.organisation} telah dihapus dari MSCD: sertifikat penghapusan`,
+        paragraphs: en
+          ? [
+              `MSCD deleted the data of ${template.organisation} (organisation ${template.slug}) on ${fmtDay(template.completedOn, language)}: its database records, its stored documents and evidence files, its data key and the accounts that belonged to it only.`,
+              `The attached file ${template.fileName} is the signed deletion certificate ${template.certificateId}. It lists every step, every check and what remains, and it can be checked with "mscd-server tenant verify-certificate".`,
+              `The encrypted backups of the service still hold older copies until they age out, at the latest by ${fmtDay(template.backupsEndBy, language)}, as the certificate explains.`,
+              'Keep this email and the certificate as proof of the deletion.',
+            ]
+          : [
+              `MSCD menghapus data ${template.organisation} (organisasi ${template.slug}) pada ${fmtDay(template.completedOn, language)}: catatan basis datanya, dokumen dan berkas bukti yang disimpan, kunci datanya, dan akun yang hanya dimiliki organisasi ini.`,
+              `Berkas terlampir ${template.fileName} adalah sertifikat penghapusan ${template.certificateId} yang ditandatangani. Sertifikat ini mencantumkan setiap langkah, setiap pemeriksaan, dan apa yang tersisa, dan dapat diperiksa dengan "mscd-server tenant verify-certificate".`,
+              `Cadangan terenkripsi layanan masih menyimpan salinan lama sampai kedaluwarsa, paling lambat ${fmtDay(template.backupsEndBy, language)}, seperti dijelaskan sertifikat.`,
+              'Simpan email dan sertifikat ini sebagai bukti penghapusan.',
+            ],
+      };
+    case 'organization_deletion_failed':
+      return {
+        title: en
+          ? `${template.organisation}: the deletion stopped at step ${template.step}`
+          : `${template.organisation}: penghapusan berhenti pada langkah ${template.step}`,
+        paragraphs: en
+          ? [
+              `The verified deletion of ${template.organisation} (organisation ${template.slug}) stopped at the step ${template.step}. The steps before it are done; nothing after it ran.`,
+              'Find the cause in the deletion tab of the operator console (the report names the step and the error) or in the worker log, fix it, then choose Retry there. "mscd-server tenant deletion show" prints the same report.',
+            ]
+          : [
+              `Penghapusan terverifikasi ${template.organisation} (organisasi ${template.slug}) berhenti pada langkah ${template.step}. Langkah sebelumnya sudah selesai; langkah sesudahnya belum dijalankan.`,
+              'Cari penyebabnya di tab penghapusan konsol operator (laporan menyebutkan langkah dan kesalahannya) atau di log worker, perbaiki, lalu pilih Coba lagi di sana. "mscd-server tenant deletion show" mencetak laporan yang sama.',
+            ],
+        link: { href: template.link, label: en ? 'Open the operator console' : 'Buka konsol operator' },
+      };
     case 'domain_record_missing': {
       const since = template.verifiedAt ? fmtDay(template.verifiedAt.slice(0, 10), language) : null;
       return {

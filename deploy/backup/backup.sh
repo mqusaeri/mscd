@@ -26,7 +26,10 @@
 #   Two guards stop a run before it changes the off-site copy: a database without organisations
 #   while the newest off-site dump holds some (a new server waiting for its restore; --allow-empty
 #   lifts it), and a vault sync while the vault holds fewer objects than the copy by more than a
-#   tenth of the copy, or none (--allow-vault-deletes lifts it).
+#   tenth of the copy, or none (--allow-vault-deletes lifts it). Both stops of the vault guard (the
+#   count check and rclone --max-delete) also allow the objects that verified deletions completed in
+#   the last 72 hours removed (organization_deletion.vault_objects_deleted, Milestone 3 D.5.6), so
+#   the night after a purge the backup runs and stops only for losses no purge explains.
 # --pre-deploy (saas-deploy.sh, as the deploy account, while it holds the install folder): sends the
 #   dump FILE to the restic repository (tag pre-deploy). Exit code 0: the off-site copy is done;
 #   any other code stops the deploy before anything changes (3: the off-site backup is not set up).
@@ -169,6 +172,16 @@ heartbeat() {
     fi
 }
 
+# purge_allowance: the vault objects that verified deletions completed in the last 72 hours removed
+# (Milestone 3 D.5.6), read from the database the backup dumps; 0 when there are none or the table
+# does not exist yet (a database before Milestone 3).
+purge_allowance() {
+    local n
+    n=$(bk_db_psql "select coalesce(sum(vault_objects_deleted), 0) from platform.organization_deletion where status = 'completed' and completed_at > now() - interval '72 hours'" 2>/dev/null | head -n 1 || true)
+    [[ $n =~ ^[0-9]+$ ]] || n=0
+    printf '%s' "$n"
+}
+
 # empty_database_guard: refuses a run on a database without organisations while the newest
 # off-site dump holds some, so a new server waiting for its restore never adds empty dumps.
 empty_database_guard() {
@@ -193,7 +206,7 @@ run_cleanup() {
 }
 
 run_main() {
-    local started=$SECONDS line ok=true step_start prune=() vault_args=()
+    local started=$SECONDS line ok=true step_start prune=() vault_args=() allowance=0
     [[ $EUID -eq 0 ]] || die "backup.sh run reads the secret files of every service: run it as root (the timer does)"
     bk_init "$OPT_INSTALL_DIR"
     start_run_log
@@ -229,6 +242,12 @@ run_main() {
     if [[ $ALLOW_DELETES == true ]]; then
         vault_args=(-e MSCD_BACKUP_MAX_DELETE=-1)
         warn "--allow-vault-deletes: the sync may delete any number of objects in the copy"
+    else
+        allowance=$(purge_allowance)
+        vault_args=(-e "MSCD_BACKUP_PURGE_ALLOWANCE=$allowance")
+        if ((allowance > 0)); then
+            info "Verified deletions of the last 72 hours removed $allowance vault object(s); the vault guard allows them on top of its limits"
+        fi
     fi
     BK_RUN_ARGS=("${vault_args[@]}")
     if line=$(bk_run vault </dev/null); then

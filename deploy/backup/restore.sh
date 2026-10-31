@@ -3,7 +3,8 @@
 # docs/saas/backup-restore.md, "Full restore onto a new server", is the runbook around it.
 #
 #   sudo bash /opt/mscd/deploy/backup/restore.sh [--install-dir DIR] [--snapshot ID]
-#        [--host-files-snapshot ID] [--vault-at TIME] [--keep-secrets] [--no-timer] [--yes]
+#        [--host-files-snapshot ID] [--vault-at TIME] [--keep-secrets] [--no-timer]
+#        [--reapply-deletions FOLDER] [--yes]
 #
 # Before it runs, the server is bootstrapped (bootstrap-prod.yml, M2-S03) and deploy-prod.yml has
 # deployed a release at least as new as the backup, with the same PLATFORM_KEY, STORAGE_KEY and
@@ -28,6 +29,12 @@
 #   7. Start: migrate brings the database to the running release; storage-gateway, api, worker,
 #      web and caddy start; then ops-init runs once (it makes the database role mscd_monitor of
 #      the monitoring again, M2-S08) and the monitoring services start.
+#      --reapply-deletions FOLDER (Milestone 3 D.5.6): a backup older than a verified deletion brings
+#      the deleted organisation back. For every deletion certificate (*.json) in FOLDER, the
+#      certificate email or the operator console gave you, "mscd-server tenant purge --reapply"
+#      checks its signature and that it names that organisation, moves the organisation back to
+#      archived and its deletion to running, and the worker deletes it again (a new certificate is
+#      issued). A certificate of an organisation the restored database does not hold is skipped.
 #   8. Checks: /readyz of api, worker and storage-gateway, /healthz through Caddy, "mscd-server
 #      backup verify" (tenant data keys, vault objects, sealed values, audit chains against their
 #      signed anchors) and the organisation count of the dump.
@@ -60,6 +67,7 @@ usage() {
 }
 
 OPT_INSTALL_DIR=${MSCD_INSTALL_DIR:-/opt/mscd} SNAPSHOT=latest HOST_SNAPSHOT=latest VAULT_AT='' KEEP_SECRETS=false INSTALL_TIMER=true
+REAPPLY_DIR=''
 RESTORE_DIR='' PHASE=checks STARTED=$SECONDS
 
 parse_args() {
@@ -86,6 +94,12 @@ parse_args() {
                 VAULT_AT=$2
                 shift
                 ;;
+            --reapply-deletions)
+                [[ $# -ge 2 && -n $2 ]] || die "--reapply-deletions needs the folder of the deletion certificates"
+                REAPPLY_DIR=$2
+                shift
+                ;;
+            --reapply-deletions=*) REAPPLY_DIR=${1#*=} ;;
             --keep-secrets) KEEP_SECRETS=true ;;
             --no-timer) INSTALL_TIMER=false ;;
             -y | --yes) ASSUME_YES=true ;;
@@ -185,6 +199,13 @@ checks() {
     fi
     pass "Release here: $running (migrate brings the restored database to it)"
     if [[ -n $VAULT_AT ]]; then info "The vault is restored as it was at $VAULT_AT"; fi
+    if [[ -n $REAPPLY_DIR ]]; then
+        [[ -d $REAPPLY_DIR ]] || die "--reapply-deletions: $REAPPLY_DIR is not a folder"
+        CERTIFICATES=()
+        mapfile -t CERTIFICATES < <(find "$REAPPLY_DIR" -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort)
+        ((${#CERTIFICATES[@]} > 0)) || die "--reapply-deletions: $REAPPLY_DIR holds no deletion certificate (*.json)"
+        pass "${#CERTIFICATES[@]} deletion certificate(s) to re-apply after the restore"
+    fi
     services=$(bk_compose config --services 2>/dev/null || true)
     for svc in postgres objectstore; do
         grep -qx "$svc" <<<"$services" ||
@@ -390,6 +411,59 @@ start_services() {
     fi
 }
 
+# certificate_value FILE MEMBER: the value of a string member (slug, id of the organisation) of a
+# certificate file. The file is canonical JSON on one line, and only the organisation object holds
+# these member names.
+certificate_value() {
+    sed -n "s/.*\"organization\":{[^}]*\"$2\":\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
+}
+
+# reapply_deletions: "tenant purge --reapply" for every certificate of --reapply-deletions (D.5.6).
+CERTIFICATES=()
+reapply_deletions() {
+    local file name slug id status work log rc reapplied=0 skipped=0
+    [[ -n $REAPPLY_DIR ]] || return 0
+    PHASE=reapply
+    step "7b. Re-applying verified deletions"
+    # The cli container reads the certificates from a folder of its own (they hold no secret).
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mscd-reapply.XXXXXX")
+    chmod 0755 "$work"
+    for file in "${CERTIFICATES[@]}"; do
+        name=$(basename -- "$file")
+        slug=$(certificate_value "$file" slug)
+        id=$(certificate_value "$file" id)
+        if [[ ! $slug =~ ^[a-z][a-z0-9_]{1,39}$ || ! $id =~ ^[0-9a-f-]{36}$ ]]; then
+            fail "$name is not a deletion certificate (no organisation slug and id)"
+            continue
+        fi
+        status=$(bk_db_value "select status from platform.organization where id = '$id'")
+        if [[ -z $status ]]; then
+            info "$name: the restored database holds no organisation $id; nothing to re-apply"
+            skipped=$((skipped + 1))
+            continue
+        fi
+        if [[ $status == deleted ]]; then
+            info "$name: organisation $id is deleted in the restored database already"
+            skipped=$((skipped + 1))
+            continue
+        fi
+        install -m 0644 -- "$file" "$work/$name"
+        log=$LOG_DIR/restore-reapply-$(bk_stamp)-$id.log
+        rc=0
+        bk_compose run --rm --no-deps -T -v "$work:/run/mscd-certificates:ro" cli tenant purge \
+            --reapply "/run/mscd-certificates/$name" --confirm "$slug" --timeout "$WAIT_SECONDS" >"$log" 2>&1 || rc=$?
+        if ((rc == 0)) && [[ $(bk_db_value "select status from platform.organization where id = '$id'") == deleted ]]; then
+            pass "Organisation $id ($status in the backup) is deleted again; a new certificate was issued"
+            reapplied=$((reapplied + 1))
+        else
+            fail "The deletion of organisation $id could not be re-applied (log: $log)"
+            bk_redact <"$log" | tail -n 5 | sed 's/^/          /'
+        fi
+    done
+    rm -rf -- "$work"
+    info "$reapplied deletion(s) re-applied, $skipped certificate(s) skipped"
+}
+
 check_restore() {
     local entry svc port domain https_port code verify=$RESTORE_DIR/verify.json newest
     PHASE=check
@@ -467,6 +541,7 @@ main() {
     restore_database
     restore_vault
     start_services
+    reapply_deletions
     check_restore
     finish
 }

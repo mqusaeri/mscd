@@ -17,10 +17,16 @@
 //   notification `membership_invited` instead of a link. Audited `ops.organization_created`.
 // The command line uses the same service: `tenant onboard` is `create`, `tenant list` and `tenant show` read through
 // `list` and `detail` (also in single tenancy, where only the routes refuse), with the actor `CLI_OPERATOR`.
+// Milestone 3 (D.2; M3-03): the list and the detail add the end of the read-only period (`offboardingEndsAt`), the
+// deletion that is not cancelled (`deletion`: status and date) and the newest export (`lastExport`: status and the time
+// it was ready); the status filter accepts `deleted`. A deleted organisation has no schema any more, so its systems and
+// licence read as none.
 // Writes to platform tables run in platform scope (M2-02 follow-up 9); the organisation's own schema is written by the
 // provisioner as its owner.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
+  OrganizationDeletionStatus,
+  OrganizationExportStatus,
   OpsOrganizationCreate,
   OpsOrganizationCreateResult,
   OpsOrganizationDetail,
@@ -46,7 +52,7 @@ import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
 import { checkMailReadiness, mailRequiredMessage } from './mail-readiness';
 import { TenantDataKeys } from './tenant-data-keys';
 
-interface OrganizationRow {
+interface OrganizationRow extends LifecycleColumns {
   id: string;
   slug: string;
   name: string;
@@ -57,6 +63,34 @@ interface OrganizationRow {
   plan: string | null;
   valid_until: string | null;
   verified_domains: string[] | null;
+}
+
+/** The lifecycle columns of the list and the detail (Milestone 3 D.2). */
+interface LifecycleColumns {
+  offboarding_ends_at: Date | null;
+  deletion_status: OrganizationDeletionStatus | null;
+  deletion_scheduled_for: Date | null;
+  export_status: OrganizationExportStatus | null;
+  export_ready_at: Date | null;
+}
+
+/** The lifecycle columns as SQL select items over the organisation alias `o`. */
+const LIFECYCLE_SELECT = sql`o.offboarding_ends_at,
+  (select d.status from platform.organization_deletion d where d.organization_id = o.id and d.status <> 'cancelled' limit 1) as deletion_status,
+  (select d.scheduled_for from platform.organization_deletion d where d.organization_id = o.id and d.status <> 'cancelled' limit 1) as deletion_scheduled_for,
+  (select x.status from platform.organization_export x where x.organization_id = o.id order by x.requested_at desc, x.id desc limit 1) as export_status,
+  (select x.completed_at from platform.organization_export x where x.organization_id = o.id order by x.requested_at desc, x.id desc limit 1) as export_ready_at`;
+
+/** The lifecycle members of an item or detail (Milestone 3 D.2): each is always sent, null when it has no value. */
+function lifecycleOf(row: LifecycleColumns): Pick<OpsOrganizationItem, 'offboardingEndsAt' | 'deletion' | 'lastExport'> {
+  return {
+    offboardingEndsAt: row.offboarding_ends_at ? new Date(row.offboarding_ends_at).toISOString() : null,
+    deletion:
+      row.deletion_status && row.deletion_scheduled_for
+        ? { status: row.deletion_status, scheduledFor: new Date(row.deletion_scheduled_for).toISOString() }
+        : null,
+    lastExport: row.export_status ? { status: row.export_status, readyAt: row.export_ready_at ? new Date(row.export_ready_at).toISOString() : null } : null,
+  };
 }
 
 /**
@@ -134,7 +168,7 @@ export class OpsOrganizationsService {
         const counted = await sql<{ n: string }>`select count(*) as n from platform.organization o where ${where}`.execute(trx);
         const listed = await sql<OrganizationRow>`
           select o.id, o.slug, o.name, o.schema_name, o.status, o.created_at,
-                 ${memberCount(sql.ref('o.id'))} as member_count,
+                 ${memberCount(sql.ref('o.id'))} as member_count, ${LIFECYCLE_SELECT},
                  e.plan, e.valid_until::text as valid_until,
                  (select array_agg(d.domain order by d.domain) from platform.verified_domain d
                    where d.organization_id = o.id and d.status = 'verified') as verified_domains
@@ -150,13 +184,17 @@ export class OpsOrganizationsService {
     const items: OpsOrganizationItem[] = [];
     for (const row of rows) {
       const tenant = { id: row.id, schema: row.schema_name };
-      const { systems, licence } = await this.scope.withTenant(systemContextOf(tenant), async (trx) => {
-        const evaluated = await this.licences.evaluate(trx, row.id, { reportRollback: false });
-        return {
-          systems: await countSystems(trx),
-          licence: evaluated?.document ? { state: evaluated.state, validUntil: evaluated.document.valid_until } : null,
-        };
-      });
+      // A deleted organisation has no schema: no systems and no licence (Milestone 3 D.5).
+      const { systems, licence } =
+        row.status === 'deleted'
+          ? { systems: 0, licence: null }
+          : await this.scope.withTenant(systemContextOf(tenant), async (trx) => {
+              const evaluated = await this.licences.evaluate(trx, row.id, { reportRollback: false });
+              return {
+                systems: await countSystems(trx),
+                licence: evaluated?.document ? { state: evaluated.state, validUntil: evaluated.document.valid_until } : null,
+              };
+            });
       items.push({
         id: row.id,
         slug: row.slug,
@@ -169,6 +207,7 @@ export class OpsOrganizationsService {
         validUntil: row.valid_until,
         verifiedDomains: row.verified_domains ?? [],
         createdAt: new Date(row.created_at).toISOString(),
+        ...lifecycleOf(row),
       });
     }
     return { items, page: query.page, pageSize: query.pageSize, total };
@@ -189,6 +228,7 @@ export class OpsOrganizationsService {
           .where('deleted_at', 'is', null)
           .executeTakeFirst();
         if (!org) return null;
+        const lifecycle = await sql<LifecycleColumns>`select ${LIFECYCLE_SELECT} from platform.organization o where o.id = ${org.id}`.execute(trx);
         const counts = await sql<{ members: string; last_sign_in: Date | null }>`
           select ${memberCount(sql.val(org.id))} as members,
                  (select max(s.created_at) from platform.session s
@@ -199,16 +239,20 @@ export class OpsOrganizationsService {
           .where('organization_id', '=', org.id)
           .orderBy('domain')
           .execute();
-        return { org, members: Number(counts.rows[0]?.members ?? 0), lastSignIn: counts.rows[0]?.last_sign_in ?? null, domains };
+        return { org, members: Number(counts.rows[0]?.members ?? 0), lastSignIn: counts.rows[0]?.last_sign_in ?? null, domains, lifecycle: lifecycle.rows[0]! };
       },
       { scope: 'operator' },
     );
     if (!found) throw unknownOrganisation(slug);
     const { org } = found;
-    const { systems, entitlement } = await this.scope.withTenant(systemContextOf({ id: org.id, schema: org.schema_name }), async (trx) => {
-      const evaluated = await this.licences.evaluate(trx, org.id, { reportRollback: false });
-      return { systems: await countSystems(trx), entitlement: evaluated?.entitlement ?? null };
-    });
+    // A deleted organisation has no schema: no systems and no entitlement (Milestone 3 D.5).
+    const { systems, entitlement } =
+      org.status === 'deleted'
+        ? { systems: 0, entitlement: null }
+        : await this.scope.withTenant(systemContextOf({ id: org.id, schema: org.schema_name }), async (trx) => {
+            const evaluated = await this.licences.evaluate(trx, org.id, { reportRollback: false });
+            return { systems: await countSystems(trx), entitlement: evaluated?.entitlement ?? null };
+          });
     return {
       id: org.id,
       slug: org.slug,
@@ -221,6 +265,7 @@ export class OpsOrganizationsService {
       entitlement: entitlementSummary(entitlement),
       domains: found.domains.map((d) => ({ domain: d.domain, status: d.status })),
       lastSignInAt: found.lastSignIn ? new Date(found.lastSignIn).toISOString() : null,
+      ...lifecycleOf(found.lifecycle),
     };
   }
 

@@ -72,7 +72,7 @@ export class MeAssemblerService implements MeAssembler {
   }
 
   /**
-   * Milestone 2 D.2 `pendingMemberships`: the user's invited memberships of organisations that are not archived, oldest
+   * Milestone 2 D.2 `pendingMemberships`: the user's invited memberships of organisations that are not archived (or deleted), oldest
    * invitation first, with the name of the person who invited (null for an operator command) and the time of the
    * latest invitation (its `user.invited` entry, else the membership's `created_at`). Read through the policy's user
    * clause, like `orgs`; organisations and accounts carry no row-level security.
@@ -88,7 +88,7 @@ export class MeAssemblerService implements MeAssembler {
         .where('m.status', '=', 'invited')
         .where('m.deleted_at', 'is', null)
         .where('o.deleted_at', 'is', null)
-        .where('o.status', '<>', 'archived')
+        .where('o.status', 'not in', ['archived', 'deleted'])
         .execute(),
     );
     if (rows.length === 0) return [];
@@ -135,7 +135,7 @@ export class MeAssemblerService implements MeAssembler {
     const tenants: TenantInfo[] = [];
     for (const m of memberships) {
       const tenant = m.organization_id === principal.org?.id ? principal.org : await this.infra.tenants.resolveById(m.organization_id);
-      if (tenant && tenant.status !== 'archived') tenants.push(tenant);
+      if (tenant && tenant.status !== 'archived' && tenant.status !== 'deleted') tenants.push(tenant);
     }
     tenants.sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
     const out: Organisation[] = [];

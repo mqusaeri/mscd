@@ -394,6 +394,9 @@ describe('organisation lifecycle of the platform operator (Milestone 2 J.8, M2-S
           { domain: 'epsilon.id', status: 'pending' },
         ],
         lastSignInAt: expect.any(String),
+        offboardingEndsAt: null,
+        deletion: null,
+        lastExport: null,
       });
       expect(Date.now() - Date.parse(detail.body.lastSignInAt!)).toBeLessThan(120_000);
 

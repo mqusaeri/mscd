@@ -46,7 +46,11 @@ export type SessionRevokeReason =
   | 'membership_removed'
   | 'roles_changed'
   | 'grant_revoked'
-  | 'idp_disabled';
+  | 'idp_disabled'
+  /** Milestone 3 D.5.2 step 2: the purge of the organisation ends every session in it (M3-03). */
+  | 'organisation_deleted'
+  /** Milestone 3 D.6.5: the person was erased in the organisation (M3-04). */
+  | 'account_erased';
 
 export interface NewSession {
   userId: string;

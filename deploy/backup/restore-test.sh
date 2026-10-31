@@ -26,7 +26,14 @@
 #      Caddy, and a normal backup of the restored server.
 #   6. The weekly restore test (--ci below) with the read-only key into a second scratch stack,
 #      as a user that is not root, in the docker group (as on a GitHub runner).
-#   7. Removes everything it made: containers, networks, volumes, images and folders.
+#   7. Verified deletion (Milestone 3 D.5.6): with an overlay of its own that sets the lifecycle
+#      periods to 0 days and MSCD_SAAS_TEST=1 on the api, the worker and the cli, it sends a
+#      pre-deploy copy off-site, purges one of the two organisations (offboarding, archived,
+#      "tenant deletion run") and checks its certificate, backs up (the vault guard lets the drop
+#      that the purge explains pass), restores the copy from before the purge with
+#      "restore.sh --reapply-deletions", and checks that the organisation is deleted again and the
+#      other one intact.
+#   8. Removes everything it made: containers, networks, volumes, images and folders.
 #
 # --ci-version: prints version=, snapshot=, time= and orgs= of the newest database dump.
 # --ci: the weekly restore test of restore-test.yml. It restores the newest database dump and a
@@ -53,6 +60,8 @@
 #                                 refuses a folder with a .git folder above it
 #   MSCD_RESTORE_TEST_UID         owner of the off-site values, as the deploy account (default 61007)
 #   MSCD_RESTORE_TEST_KEEP        true: keep everything for a look; remove it with --down
+#   MSCD_EDGE_SUBNET6             IPv6 range of the edge network (default: a free /64 of the project's
+#                                 own, so a stopped stack on the same host does not block the run)
 #   MSCD_SAAS_TEST_SCAN, MSCD_BUILD_CA   passed to saas-stack.sh (image build)
 set -euo pipefail
 
@@ -135,6 +144,28 @@ free_octets() {
         printf '%s\n' "$x"
         n=$((n + 1))
         ((n < want)) || return 0
+    done
+    return 1
+}
+
+# free_subnet6: an IPv6 /64 of this project's own that no Docker network uses. Docker refuses two
+# networks with the same IPv6 range, also with IPv6 off, and the edge network of every SaaS stack
+# asks for the default range of docker-compose.saas.yml unless MSCD_EDGE_SUBNET6 names one; a
+# stopped stack on the same host (a preview stack) keeps its network and that range. The range
+# comes from a hash of the project name, in the form Docker prints (lower case, no group that
+# starts with 0), so the comparison with the ranges in use is exact.
+free_subnet6() {
+    local used salt candidate
+    used=$(docker network ls -q | xargs -r docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' |
+        tr ' ' '\n' | grep ':' || true)
+    for salt in $(seq 0 63); do
+        candidate=$(printf 'mscd-restore-test:%s:%s' "$PROJECT" "$salt" | sha256sum |
+            sed -E 's|^(..)(....)(....)(....).*|fd\1:\2:\3:\4::/64|')
+        [[ $candidate =~ :0 ]] && continue
+        if ! grep -qxF -- "$candidate" <<<"$used"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
     done
     return 1
 }
@@ -473,17 +504,26 @@ local_settings() {
     export MSCD_SAAS_TEST_PROJECT=$PROJECT MSCD_SAAS_TEST_DIR=$STATE
     export MSCD_BACKUP_IMAGE_NAME=$PROJECT-backup
     unset MSCD_BACKUP_MAX_DELETE
+    # The IPv6 range of the edge network (free_subnet6), for saas-stack.sh and every Compose call of
+    # this run; a range given in MSCD_EDGE_SUBNET6 wins.
+    if [[ -z ${MSCD_EDGE_SUBNET6:-} ]]; then
+        MSCD_EDGE_SUBNET6=$(free_subnet6) || die "No free IPv6 range for the edge network of $PROJECT: set MSCD_EDGE_SUBNET6 to a free /64"
+    fi
+    export MSCD_EDGE_SUBNET6
 }
 
 stack() {
     bash "$REPO_DIR/deploy/scripts/test/saas-stack.sh" "$@"
 }
 
-# compose ARGS...: docker compose of the test stack with the backup overlay.
+# compose ARGS...: docker compose of the test stack with the backup overlay (and the lifecycle
+# overlay of check_purge once it exists).
 compose() {
+    local extra=()
+    if [[ -f $STATE/compose.lifecycle.yml ]]; then extra=(-f "$STATE/compose.lifecycle.yml"); fi
     docker compose --project-name "$PROJECT" --project-directory "$REPO_DIR/deploy/compose" \
         -f "$REPO_DIR/deploy/compose/docker-compose.yml" -f "$REPO_DIR/deploy/compose/docker-compose.saas.yml" \
-        -f "$REPO_DIR/deploy/compose/docker-compose.backup.yml" -f "$STATE/compose.test.yml" \
+        -f "$REPO_DIR/deploy/compose/docker-compose.backup.yml" -f "$STATE/compose.test.yml" "${extra[@]}" \
         --env-file "$STATE/.env" "$@"
 }
 
@@ -492,6 +532,7 @@ compose() {
 backup_env() {
     export COMPOSE_PROJECT_NAME=$PROJECT MSCD_SAAS_TEST=1
     export MSCD_BACKUP_COMPOSE_FILES=docker-compose.yml:docker-compose.saas.yml:docker-compose.backup.yml:$STATE/compose.test.yml
+    if [[ -f $STATE/compose.lifecycle.yml ]]; then MSCD_BACKUP_COMPOSE_FILES=$MSCD_BACKUP_COMPOSE_FILES:$STATE/compose.lifecycle.yml; fi
     unset MSCD_BACKUP_COMPOSE_DIR MSCD_BACKUP_ENV_FILE
 }
 
@@ -1018,6 +1059,137 @@ check_ci() {
     rm -rf -- "$work" "$src"
 }
 
+# lifecycle_overlay: the Compose overlay of check_purge. The lifecycle periods of Milestone 3 at 0
+# days, which a server accepts only with MSCD_SAAS_TEST=1 (D.3): the deletion is due at once.
+lifecycle_overlay() {
+    cat >"$STATE/compose.lifecycle.yml" <<'EOF'
+# Test only (deploy/backup/restore-test.sh, check_purge): the lifecycle periods of Milestone 3 set to
+# 0 days, which the server accepts only with MSCD_SAAS_TEST=1 (D.3). Never on a server.
+x-lifecycle: &lifecycle
+  MSCD_SAAS_TEST: "1"
+  MSCD__LIFECYCLE__OFFBOARDING_DAYS: "0"
+  MSCD__LIFECYCLE__DELETION_GRACE_DAYS: "0"
+  MSCD__LIFECYCLE__DELETION_MIN_GRACE_DAYS: "0"
+services:
+  api:
+    environment: *lifecycle
+  worker:
+    environment: *lifecycle
+  cli:
+    environment: *lifecycle
+EOF
+    chmod 0644 "$STATE/compose.lifecycle.yml"
+}
+
+# cli_out NAME ARGS...: a command of the cli service with the certificate folder mounted; the output
+# goes to $LOGS/NAME.log.
+cli_out() {
+    local name=$1
+    shift
+    compose run --rm --no-deps -T -v "$STATE/certificates:/run/certificates" cli "$@" >"$LOGS/$name.log" 2>&1
+}
+
+check_purge() {
+    local alpha beta dump pre_id rc line
+    step "Verified deletion: purge, backup and a restore from before the purge (Milestone 3 D.5.6)"
+    lifecycle_overlay
+    if ! compose up -d --no-deps --wait --wait-timeout 300 --force-recreate api worker >"$LOGS/lifecycle-up.log" 2>&1; then
+        show_log lifecycle-up
+        die "The api and the worker did not start with the lifecycle overlay"
+    fi
+    ok "The api, the worker and the cli run with the lifecycle periods at 0 days (MSCD_SAAS_TEST=1, test overlay)"
+    alpha=$(db "select id from platform.organization where slug = 'rtalpha'")
+    beta=$(db "select id from platform.organization where slug = 'rtbeta'")
+    [[ -n $alpha && -n $beta ]] || die "The two organisations of the test are missing"
+
+    # The copy from before the purge: a pre-deploy dump sent off-site, as saas-deploy.sh does. (The
+    # retention keeps the newest database dump of a day, so the copy is a pre-deploy one.)
+    install -d -m 0700 "$STATE/backup/pre-deploy"
+    dump=$STATE/backup/pre-deploy/$(bk_stamp)-before-purge.dump
+    compose exec -T postgres pg_dump -U postgres --format=custom --dbname=mscd >"$dump"
+    chmod 0600 "$dump"
+    chown "$RUN_UID:$RUN_UID" "$dump"
+    if run_backup pre-purge --pre-deploy "$dump" && log_has pre-purge "Pre-deploy dump sent off-site: snapshot"; then
+        pre_id=$(grep -o 'Pre-deploy dump sent off-site: snapshot [0-9a-f]*' "$LOGS/pre-purge.log" | awk '{print $NF}' | head -n 1)
+        ok "The copy from before the purge is off-site (pre-deploy snapshot $pre_id)"
+    else
+        show_log pre-purge 20
+        die "The copy from before the purge could not be sent off-site"
+    fi
+
+    # The end of the contract of rtalpha and its purge.
+    install -d -m 0777 "$STATE/certificates"
+    if cli_out offboarding tenant set-status --org rtalpha --status offboarding --reason 'Restore test: contract ended' --confirm rtalpha &&
+        cli_out archive tenant set-status --org rtalpha --status archived --reason 'Restore test: read-only period over' --confirm rtalpha &&
+        log_has archive 'moved from offboarding to archived'; then
+        ok "rtalpha moved to offboarding (final export queued) and to archived (deletion due at once)"
+    else
+        show_log offboarding 10
+        show_log archive 10
+        die "rtalpha could not be moved to archived"
+    fi
+    if cli_out purge tenant deletion run --org rtalpha --timeout 300 && log_has purge 'organisation rtalpha is deleted'; then
+        ok "tenant deletion run: the worker purged rtalpha"
+    else
+        show_log purge 20
+        compose logs --no-color --no-log-prefix worker 2>/dev/null | grep -E 'org.purge' | bk_redact | tail -n 20 >"$LOGS/worker-purge.log" || true
+        die "The purge of rtalpha failed (logs: $LOGS/purge.log, $LOGS/worker-purge.log)"
+    fi
+    if [[ $(db "select status from platform.organization where id = '$alpha'") == deleted &&
+        $(db "select to_regnamespace('org_rtalpha') is null") == t &&
+        $(db "select count(*) from platform.tenant_key where organization_id = '$alpha'") == 0 ]]; then
+        ok "rtalpha is deleted: no schema, no data key"
+    else
+        fail "rtalpha is not deleted as expected"
+    fi
+    if cli_out certificate tenant deletion show --org rtalpha --certificate /run/certificates/rtalpha.json &&
+        cli_out verify tenant verify-certificate /run/certificates/rtalpha.json && log_has verify 'verifies with the trusted anchor key'; then
+        ok "The deletion certificate verifies with the anchor key of the release"
+    else
+        show_log certificate 10
+        show_log verify 10
+        fail "The deletion certificate could not be written or does not verify"
+    fi
+
+    # The nightly backup after the purge: the vault guard lets the drop the purge explains pass.
+    rc=0
+    run_backup backup-purged run || rc=$?
+    if ((rc == 0)) && log_has backup-purged "The off-site backup is done" && log_has backup-purged "Verified deletions of the last 72 hours removed"; then
+        ok "The backup after the purge ran: the vault guard allowed the objects the purge removed"
+    else
+        show_log backup-purged 20
+        fail "The backup after the purge did not run (exit code $rc)"
+    fi
+
+    # A restore from the copy before the purge brings rtalpha back; the certificate deletes it again.
+    rc=0
+    backup_env
+    bash "$SCRIPT_DIR/restore.sh" --install-dir "$STATE" --yes --no-timer --keep-secrets --snapshot "$pre_id" \
+        --reapply-deletions "$STATE/certificates" >"$LOGS/restore-reapply.log" 2>&1 || rc=$?
+    if ((rc == 0)) && log_has restore-reapply "The restore is done" && log_has restore-reapply "is deleted again"; then
+        ok "restore.sh --reapply-deletions restored the copy from before the purge and deleted rtalpha again"
+    else
+        show_log restore-reapply 40
+        die "restore.sh --reapply-deletions failed with exit code $rc (log: $LOGS/restore-reapply.log)"
+    fi
+    if [[ $(db "select status from platform.organization where id = '$alpha'") == deleted &&
+        $(db "select to_regnamespace('org_rtalpha') is null") == t &&
+        $(db "select status from platform.organization where id = '$beta'") == active &&
+        $(db "select to_regnamespace('org_rtbeta') is not null") == t ]]; then
+        ok "After the restore rtalpha is deleted again and rtbeta is intact"
+    else
+        fail "After the restore the organisations are not as expected"
+    fi
+    if compose run --rm --no-deps -T cli backup verify --sample 5 >"$LOGS/verify-reapplied.json" 2>"$LOGS/verify-reapplied.err" &&
+        [[ $(org_ids "$LOGS/verify-reapplied.json") == "$beta" ]]; then
+        line=$(bk_verify_summary "$LOGS/verify-reapplied.json")
+        ok "backup verify passes on the restored server with rtbeta only: $line"
+    else
+        bk_verify_failures "$LOGS/verify-reapplied.json"
+        fail "backup verify failed after the re-applied deletion"
+    fi
+}
+
 local_down_quiet() {
     local id
     if [[ -n $OFFSITE ]]; then docker rm -f -v "$OFFSITE" >/dev/null 2>&1 || true; fi
@@ -1096,6 +1268,7 @@ local_main() {
     lose_server
     check_restore
     check_ci
+    check_purge
 
     if ((FAILURES > 0)); then
         printf '\n%s%d check(s) failed%s, %d passed.\n' "$C_RED" "$FAILURES" "$C_RESET" "$CHECKS"

@@ -158,6 +158,7 @@ export type RoleGrantParams = z.infer<typeof RoleGrantParams>;
 const EXAMPLE_ORG_SETTINGS = {
   slug: 'ndt', name: 'PT Nusantara Digital Teknologi', timeZone: 'Asia/Jakarta', siteCount: 2, localLogin: 'allowed',
   installationId: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', tenancyMode: 'single', activeAdminCount: 2, etag: 'W/"1790380800000"',
+  offboardingEndsAt: null, deletionScheduledFor: null,
 } as const;
 
 export const OrganizationSettings = named(
@@ -174,9 +175,9 @@ export const OrganizationSettings = named(
     /** Weak ETag of the organisation row (`updated_at`), also sent as the `ETag` header; `PATCH` takes it as `If-Match`. */
     etag: z.string().regex(/^W\/"\d+"$/),
     /** Milestone 3 D.2: while offboarding, when the read-only period ends; else null. */
-    offboardingEndsAt: Instant.nullable().optional(),
+    offboardingEndsAt: Instant.nullable(),
     /** Milestone 3 D.2: while offboarding the planned deletion date, while archived the scheduled date, else null. */
-    deletionScheduledFor: Instant.nullable().optional(),
+    deletionScheduledFor: Instant.nullable(),
   }),
   'GET /admin/organization: the organisation settings the Tenant Admin can see and their ETag; the slug is permanent (Milestone 2 D.1); the read-only end and the deletion date (Milestone 3 D.2)',
   {
@@ -184,7 +185,10 @@ export const OrganizationSettings = named(
       EXAMPLE_ORG_SETTINGS, { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', activeAdminCount: 1 },
       { ...EXAMPLE_ORG_SETTINGS, tenancyMode: 'multi', offboardingEndsAt: '2026-11-30T03:00:00Z', deletionScheduledFor: '2026-12-30T03:00:00Z' },
     ],
-    invalid: [{ ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }, { ...EXAMPLE_ORG_SETTINGS, etag: undefined }],
+    invalid: [
+      { ...EXAMPLE_ORG_SETTINGS, localLogin: 'never' }, { ...EXAMPLE_ORG_SETTINGS, siteCount: -1 }, { ...EXAMPLE_ORG_SETTINGS, etag: undefined },
+      { ...EXAMPLE_ORG_SETTINGS, deletionScheduledFor: undefined },
+    ],
   },
 );
 export type OrganizationSettings = z.infer<typeof OrganizationSettings>;

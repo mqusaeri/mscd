@@ -85,13 +85,16 @@ export const OpsOrganizationListQuery = named(
 );
 export type OpsOrganizationListQuery = z.infer<typeof OpsOrganizationListQuery>;
 
-/** Milestone 3 D.2: the end of the read-only period, the deletion and the last export of an organisation. */
+/** Milestone 3 D.2: the end of the read-only period, the deletion and the last export of an organisation; null means none. */
 const lifecycleShape = {
-  /** While `offboarding`: when the read-only period ends (D.5.1). */
-  offboardingEndsAt: Instant.nullable().optional(),
-  deletion: z.object({ status: OrganizationDeletionStatus, scheduledFor: Instant }).nullable().optional(),
-  lastExport: z.object({ status: OrganizationExportStatus, readyAt: Instant.nullable() }).nullable().optional(),
+  /** While `offboarding`: when the read-only period ends (D.5.1); else null. */
+  offboardingEndsAt: Instant.nullable(),
+  /** The deletion that is not cancelled, else null. */
+  deletion: z.object({ status: OrganizationDeletionStatus, scheduledFor: Instant }).nullable(),
+  /** The newest organisation export, else null. */
+  lastExport: z.object({ status: OrganizationExportStatus, readyAt: Instant.nullable() }).nullable(),
 };
+const EXAMPLE_NO_LIFECYCLE = { offboardingEndsAt: null, deletion: null, lastExport: null } as const;
 const EXAMPLE_LIFECYCLE = {
   offboardingEndsAt: null, deletion: { status: 'scheduled', scheduledFor: '2026-12-30T00:00:00Z' }, lastExport: { status: 'ready', readyAt: '2026-11-01T03:10:00Z' },
 } as const;
@@ -99,7 +102,7 @@ const EXAMPLE_LIFECYCLE = {
 const EXAMPLE_OPS_ORG = {
   id: '00000000-0000-4000-8000-00000000a001', slug: 'ndt', name: 'PT Nusantara Digital Teknologi', status: 'active',
   licence: { state: 'valid', validUntil: '2027-03-31' }, memberCount: 86, systemCount: 4, plan: 'standard', validUntil: '2027-03-31',
-  verifiedDomains: ['nusantaradigital.co.id'], createdAt: '2026-02-01T03:00:00Z',
+  verifiedDomains: ['nusantaradigital.co.id'], createdAt: '2026-02-01T03:00:00Z', ...EXAMPLE_NO_LIFECYCLE,
 } as const;
 
 export const OpsOrganizationItem = named(
@@ -124,7 +127,10 @@ export const OpsOrganizationItem = named(
       EXAMPLE_OPS_ORG, { ...EXAMPLE_OPS_ORG, status: 'suspended', licence: null, plan: null, validUntil: null, verifiedDomains: [] },
       { ...EXAMPLE_OPS_ORG, status: 'archived', ...EXAMPLE_LIFECYCLE },
     ],
-    invalid: [{ ...EXAMPLE_OPS_ORG, status: 'paused' }, { ...EXAMPLE_OPS_ORG, memberCount: -1 }, { ...EXAMPLE_OPS_ORG, deletion: { status: 'pending', scheduledFor: '2026-12-30T00:00:00Z' } }],
+    invalid: [
+      { ...EXAMPLE_OPS_ORG, status: 'paused' }, { ...EXAMPLE_OPS_ORG, memberCount: -1 }, { ...EXAMPLE_OPS_ORG, deletion: { status: 'pending', scheduledFor: '2026-12-30T00:00:00Z' } },
+      { ...EXAMPLE_OPS_ORG, deletion: undefined },
+    ],
   },
 );
 export type OpsOrganizationItem = z.infer<typeof OpsOrganizationItem>;
@@ -188,7 +194,7 @@ const EXAMPLE_OPS_DETAIL = {
   id: '00000000-0000-4000-8000-00000000a001', slug: 'ndt', name: 'PT Nusantara Digital Teknologi', status: 'active', region: 'id',
   createdAt: '2026-02-01T03:00:00Z', memberCount: 86, systemCount: 4,
   entitlement: { plan: 'standard', source: 'preset', maxUsers: 50, maxManagementSystems: 3, validUntil: '2027-03-31' },
-  domains: [{ domain: 'nusantaradigital.co.id', status: 'verified' }], lastSignInAt: '2026-10-27T01:12:00Z',
+  domains: [{ domain: 'nusantaradigital.co.id', status: 'verified' }], lastSignInAt: '2026-10-27T01:12:00Z', ...EXAMPLE_NO_LIFECYCLE,
 } as const;
 
 export const OpsOrganizationDetail = named(
@@ -215,7 +221,7 @@ export const OpsOrganizationDetail = named(
       EXAMPLE_OPS_DETAIL, { ...EXAMPLE_OPS_DETAIL, status: 'offboarding', region: null, entitlement: null, domains: [], lastSignInAt: null },
       { ...EXAMPLE_OPS_DETAIL, status: 'offboarding', ...EXAMPLE_LIFECYCLE, offboardingEndsAt: '2026-11-30T03:00:00Z', deletion: null },
     ],
-    invalid: [{ ...EXAMPLE_OPS_DETAIL, status: 'paused' }, { ...EXAMPLE_OPS_DETAIL, domains: [{ domain: 'x.id', status: 'ok' }] }],
+    invalid: [{ ...EXAMPLE_OPS_DETAIL, status: 'paused' }, { ...EXAMPLE_OPS_DETAIL, domains: [{ domain: 'x.id', status: 'ok' }] }, { ...EXAMPLE_OPS_DETAIL, lastExport: undefined }],
   },
 );
 export type OpsOrganizationDetail = z.infer<typeof OpsOrganizationDetail>;

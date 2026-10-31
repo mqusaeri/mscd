@@ -3,7 +3,8 @@
 // (`audit_trail.metadata.read`), because before and after values are business data. The metadata view of the
 // whole organisation also lists the organisation's rows of `platform.audit_log` (sign-ins, users, licences).
 // Rows of another organisation are never visible: tenant rows live in the organisation's schema and both tables
-// carry RLS on `app.org_id`.
+// carry RLS on `app.org_id`. Milestone 3 (D.2, D.5.4, M3-03): every entry says whether an attested redaction removed
+// its personal values (`redacted`, `redactedAt`), and the CSV export carries both as columns.
 import { Readable } from 'node:stream';
 import { Injectable } from '@nestjs/common';
 import type { AuditEntry, AuditEntryMeta, AuditTrailQuery } from '@mscd/shared';
@@ -41,6 +42,7 @@ interface EntryRow {
   handle: string | null;
   display_name: string | null;
   ms_slug: string | null;
+  redacted_at: Date | null;
 }
 
 export interface TrailFilter {
@@ -58,7 +60,7 @@ export interface TrailFilter {
 /** Columns of the CSV export, in order. */
 export const AUDIT_CSV_COLUMNS = [
   'seq', 'occurred_at', 'actor', 'actor_name', 'actor_kind', 'action', 'entity_type', 'entity_id', 'entity_code', 'ms',
-  'before', 'after', 'edition', 'request_id', 'source_ip', 'user_agent',
+  'before', 'after', 'edition', 'request_id', 'source_ip', 'user_agent', 'redacted', 'redacted_at',
 ] as const;
 
 const EXPORT_BATCH = 1000;
@@ -102,13 +104,21 @@ export class AuditTrailService {
     });
   }
 
-  /** Every entry of one system, oldest first, as formula-safe CSV (F.15), read in batches. */
+  /**
+   * Every entry of one system, oldest first, as formula-safe CSV (F.15), read in batches. The stream is lazy: nothing
+   * is queried until the first read, so the `file.downloaded` entry that `FileResponder.send` writes before it sends
+   * the bytes (F.13) is always in the file.
+   */
   exportCsv(principal: Principal, ms: string): Readable {
     const org = this.orgOf(principal);
-    const csv = createSafeCsvStream(AUDIT_CSV_COLUMNS);
-    const source = Readable.from(this.exportRows(tenantContextOf(principal), org, ms));
-    source.on('error', (error) => csv.destroy(error));
-    return source.pipe(csv);
+    const rows = this.exportRows(tenantContextOf(principal), org, ms);
+    async function* csvChunks(): AsyncGenerator<Buffer | string> {
+      const csv = createSafeCsvStream(AUDIT_CSV_COLUMNS);
+      const source = Readable.from(rows);
+      source.on('error', (error) => csv.destroy(error));
+      yield* source.pipe(csv);
+    }
+    return Readable.from(csvChunks(), { objectMode: false });
   }
 
   /** CSV rows of a system's entries, read in batches of `EXPORT_BATCH` by `seq`, each batch in its own transaction. */
@@ -130,7 +140,7 @@ export class AuditTrailService {
         yield [
           Number(row.seq), row.occurred_at, row.handle, row.display_name, row.actor_kind, row.action, row.entity_type, row.entity_id,
           row.entity_code, row.ms_slug, row.before_data ?? null, row.after_data ?? null, row.edition, row.request_id, row.source_ip,
-          row.user_agent,
+          row.user_agent, row.redacted_at !== null, row.redacted_at,
         ];
       }
       if (batch.length < EXPORT_BATCH) return;
@@ -175,7 +185,7 @@ export class AuditTrailService {
       const a = sql.raw(alias);
       return sql`${sql.lit(chain)} as chain, ${a}.seq, ${a}.occurred_at, ${a}.actor_user_id, ${a}.actor_kind, ${a}.action,
         ${a}.entity_type, ${a}.entity_id, ${a}.entity_code, ${a}.management_system_id, ${a}.before_data, ${a}.after_data,
-        ${a}.edition, ${a}.request_id, host(${a}.source_ip) as source_ip, ${a}.user_agent`;
+        ${a}.edition, ${a}.request_id, host(${a}.source_ip) as source_ip, ${a}.user_agent, ${a}.redacted_at`;
     };
     const tenant = sql`select ${columns('t', 'tenant')} from audit_trail t where ${conditions('t')}`;
     if (!filter.includePlatform) return tenant;
@@ -196,6 +206,8 @@ export class AuditTrailService {
       requestId: row.request_id,
       sourceIp: row.source_ip,
       userAgent: row.user_agent,
+      redacted: row.redacted_at !== null,
+      redactedAt: row.redacted_at ? new Date(row.redacted_at).toISOString() : null,
     };
   }
 

@@ -360,7 +360,7 @@ export class OpsAccountsService {
     if (target.status === 'disabled') {
       throw conflict('account_disabled', 'This account is disabled. Enable it before you send the invitation again.', 'Akun ini dinonaktifkan. Aktifkan terlebih dahulu sebelum mengirim ulang undangan.');
     }
-    if (org.status === 'archived') {
+    if (org.status === 'archived' || org.status === 'deleted') {
       throw conflict('organization_archived', 'The organisation is archived, so nobody can join it.', 'Organisasi telah diarsipkan, jadi tidak ada yang dapat bergabung.');
     }
     return { id: org.id, name: org.name };

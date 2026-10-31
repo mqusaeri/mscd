@@ -33,7 +33,7 @@ export class MembershipDirectory {
           .where('m.status', '=', 'active')
           .where('m.deleted_at', 'is', null)
           .where('o.deleted_at', 'is', null)
-          .where('o.status', '<>', 'archived')
+          .where('o.status', 'not in', ['archived', 'deleted'])
           .limit(1)
           .executeTakeFirst();
         if (row) found.add(id);

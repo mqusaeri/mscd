@@ -1,5 +1,5 @@
 // `GET /auth/providers` (build plan D.2 `AuthProviders`, D.3): the sign-in buttons of the login page. Only enabled
-// providers of a kind the profile offers (`identity.providers`) and of organisations that are not archived are
+// providers of a kind the profile offers (`identity.providers`) and of organisations that are not archived (or deleted, Milestone 3) are
 // listed. With `tenancy.mode = multi` the list holds the providers of one organisation, chosen by `?org=<slug>` or by
 // the domain of `?email=` (only domains with status `verified` in `platform.verified_domain`: a pending or failed DNS
 // claim names no organisation, Milestone 2 M2-S11); without either it is empty, so the page never shows the providers
@@ -51,7 +51,7 @@ export class AuthProvidersService {
           .where('p.deleted_at', 'is', null)
           .where('p.kind', 'in', kinds)
           .where('o.deleted_at', 'is', null)
-          .where('o.status', '<>', 'archived');
+          .where('o.status', 'not in', ['archived', 'deleted']);
         if (org) rows = rows.where('p.organization_id', '=', org.id);
         const found = await rows.orderBy('o.position').orderBy('p.display_name').orderBy('p.slug').execute();
         const providers: AuthProvider[] = found.map((r) => ({ slug: r.slug, kind: r.kind, label: r.display_name, icon: r.icon }));
@@ -69,7 +69,7 @@ export class AuthProvidersService {
         .select(['id', 'local_login'])
         .where('slug', '=', query.org)
         .where('deleted_at', 'is', null)
-        .where('status', '<>', 'archived')
+        .where('status', 'not in', ['archived', 'deleted'])
         .executeTakeFirst();
       return row ? { id: row.id, localLogin: row.local_login } : null;
     }
@@ -83,7 +83,7 @@ export class AuthProvidersService {
         .where('d.domain', '=', domain)
         .where('d.status', '=', 'verified')
         .where('o.deleted_at', 'is', null)
-        .where('o.status', '<>', 'archived')
+        .where('o.status', 'not in', ['archived', 'deleted'])
         .execute();
       // A verified domain belongs to one organisation (platform migration 0005); were it ever several, it names none.
       return rows.length === 1 ? { id: rows[0]!.id, localLogin: rows[0]!.local_login } : null;

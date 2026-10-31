@@ -179,6 +179,9 @@ describe('platform operator (Milestone 2 D.1, D.2)', () => {
           validUntil: '2026-10-28',
           verifiedDomains: [],
           createdAt: expect.any(String),
+          offboardingEndsAt: null,
+          deletion: null,
+          lastExport: null,
         },
       ]);
       const all = await op.get<Page<OpsOrganizationItem>>('/api/v1/ops/organizations?pageSize=200');

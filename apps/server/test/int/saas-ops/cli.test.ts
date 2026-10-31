@@ -54,7 +54,7 @@ describe('operator commands of the organisation lifecycle (Milestone 2 K.6, M2-S
   it('registers list, show, set-status and onboard under tenant, and diagnostics with --out', () => {
     const program = buildProgram();
     const tenant = program.commands.find((c) => c.name() === 'tenant') as Command;
-    expect(tenant.commands.map((c) => c.name())).toEqual(['create', 'verify-domain', 'list', 'show', 'set-status', 'onboard']);
+    expect(tenant.commands.map((c) => c.name())).toEqual(['create', 'verify-domain', 'list', 'show', 'set-status', 'onboard', 'deletion', 'purge', 'verify-certificate']);
     const flags = (name: string) => tenant.commands.find((c) => c.name() === name)!.options.map((o) => o.long);
     expect(flags('set-status')).toEqual(['--org', '--status', '--reason', '--confirm', '--json']);
     expect(flags('onboard')).toEqual(['--slug', '--name', '--time-zone', '--site-count', '--admin-email', '--admin-name', '--preset', '--json']);

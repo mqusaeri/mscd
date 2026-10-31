@@ -413,7 +413,7 @@ export class InvitationService {
           .where('user_id', '=', user.id)
           .forUpdate()
           .executeTakeFirst();
-        if (!org || org.status === 'archived' || !membership || membership.deleted_at !== null || membership.status === 'disabled') return invalid();
+        if (!org || org.status === 'archived' || org.status === 'deleted' || !membership || membership.deleted_at !== null || membership.status === 'disabled') return invalid();
         if (!localLoginAllowed(org.local_login, membership.admin_roles)) {
           const methods = await providerMethods(trx, [org.id]);
           return {

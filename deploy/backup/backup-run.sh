@@ -259,19 +259,24 @@ rclone_copy() {
 }
 
 cmd_vault() {
-    local before held max limit
+    local before held max limit allowance
     use_rclone
     held=$(count "vault:$VAULT_BUCKET")
     [[ -n $held ]] || die "The vault bucket $VAULT_BUCKET cannot be listed at ${RCLONE_CONFIG_VAULT_ENDPOINT}"
     before=$(count "offsite:$BUCKET/vault")
     before=${before:-0}
     # A source that lost objects (a wrong or empty volume, a new server waiting for its restore)
-    # must not empty the copy, however small the copy is. The app deletes vault objects only when
-    # an organisation is purged, so the counts decide first: when the vault holds fewer objects
-    # than the copy by more than a tenth of the copy (an empty vault always), nothing is touched.
+    # must not empty the copy, however small the copy is. The app deletes vault objects when
+    # exports expire, when records are disposed of and when an organisation is purged, so a normal
+    # night removes few; the counts decide first: when the vault holds fewer objects than the copy
+    # by more than a tenth of the copy (an empty vault always), nothing is touched.
     # rclone's --max-delete (a tenth of the copy, at least 100) stays as a second stop, for
     # deletions that new objects hide in the counts. MSCD_BACKUP_MAX_DELETE sets both limits
-    # (-1: no limit, from --allow-vault-deletes).
+    # (-1: no limit, from --allow-vault-deletes). MSCD_BACKUP_PURGE_ALLOWANCE (Milestone 3 D.5.6) is
+    # the number of objects that verified deletions of the last 72 hours removed: both limits allow
+    # them on top, so the night after a purge the sync runs and still stops for any other loss.
+    allowance=${MSCD_BACKUP_PURGE_ALLOWANCE:-0}
+    [[ $allowance =~ ^[0-9]+$ ]] || die "MSCD_BACKUP_PURGE_ALLOWANCE must be a whole number"
     max=${MSCD_BACKUP_MAX_DELETE:-}
     if [[ -n $max ]]; then
         [[ $max =~ ^-?[0-9]+$ ]] || die "MSCD_BACKUP_MAX_DELETE must be a number (-1: no limit)"
@@ -281,9 +286,16 @@ cmd_vault() {
         max=$limit
         if ((max < 100)); then max=100; fi
     fi
-    if ((limit >= 0 && before - held > limit)); then
-        die "The vault bucket holds $held objects and the off-site copy $before: the sync would delete more than $limit. Nothing was copied or deleted. Find out why the vault lost objects (or restore it first); when the deletions are right, run backup.sh run --allow-vault-deletes"
+    if ((limit >= 0)); then
+        limit=$((limit + allowance))
+        max=$((max + allowance))
     fi
+    if ((limit >= 0 && before - held > limit)); then
+        local allowed=''
+        if ((allowance > 0)); then allowed=" (with $allowance allowed for verified deletions of the last 72 hours)"; fi
+        die "The vault bucket holds $held objects and the off-site copy $before: the sync would delete more than $limit$allowed. Nothing was copied or deleted. Find out why the vault lost objects (or restore it first); when the deletions are right, run backup.sh run --allow-vault-deletes"
+    fi
+    if ((allowance > 0)); then say "Verified deletions of the last 72 hours removed $allowance object(s): both vault limits allow them"; fi
     say "Copying the vault bucket $VAULT_BUCKET ($held objects) to $BUCKET/vault ($before objects there; at most $max deletions)"
     rclone_copy sync "vault:$VAULT_BUCKET" "offsite:$BUCKET/vault" --max-delete "$max" ||
         die "rclone sync of the vault failed (more than $max deletions also stop it: run backup.sh run --allow-vault-deletes after checking why)"

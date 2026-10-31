@@ -96,6 +96,7 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
     id: o.id, slug: o.slug, name: o.name, status: o.status, licence: o.entitlement ? { state: 'valid', validUntil: o.entitlement.validUntil ?? '9999-12-31' } : null,
     memberCount: o.memberCount, systemCount: o.systemCount, plan: o.entitlement?.plan ?? null, validUntil: o.entitlement?.validUntil ?? null,
     verifiedDomains: o.domains.filter((d) => d.status === 'verified').map((d) => d.domain), createdAt: o.createdAt,
+    offboardingEndsAt: null, deletion: null, lastExport: null,
   });
   const domainView = ({ found: _found, ...d }) => shared.OrgDomain.parse(d);
   const send = (route, status, body, headers = {}) => route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) });
@@ -142,6 +143,7 @@ async function saasService(page, { rights = MULTI_RIGHTS } = {}) {
         id: o.id, slug: o.slug, name: o.name, status: o.status, region: o.region, createdAt: o.createdAt, memberCount: o.memberCount, systemCount: o.systemCount,
         entitlement: o.entitlement ? { plan: o.entitlement.plan, source: o.entitlement.source, maxUsers: o.entitlement.maxUsers, maxManagementSystems: o.entitlement.maxManagementSystems, validUntil: o.entitlement.validUntil } : null,
         domains: o.domains.map((d) => ({ domain: d.domain, status: d.status })), lastSignInAt: o.lastSignInAt,
+        offboardingEndsAt: null, deletion: null, lastExport: null,
       }));
     }
     if (rest[0] === 'status') {

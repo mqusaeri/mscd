@@ -78,6 +78,8 @@ describe('organisation settings (Milestone 2 D.1, D.2)', () => {
       tenancyMode: full.get<MscdConfig>(MscdConfig).profile.tenancy.mode,
       activeAdminCount: 2,
       etag: `W/"${row.updated_at.getTime()}"`,
+      offboardingEndsAt: null,
+      deletionScheduledFor: null,
     });
   });
 

@@ -266,6 +266,10 @@ interface OrganizationRow {
   schema_exists: boolean;
 }
 
+/**
+ * The organisations whose schema `migrate` brings up to date. A deleted organisation (Milestone 3 D.5) has no schema any
+ * more and is left out; one whose schema is missing for another reason stays in and fails, as before.
+ */
 async function listOrganizations(connectionString: string): Promise<OrganizationRow[]> {
   return withDedicated(connectionString, {}, async (migrator) => {
     const table = await sql<{ found: boolean }>`select to_regclass('platform.organization') is not null as found`.execute(migrator);
@@ -274,6 +278,7 @@ async function listOrganizations(connectionString: string): Promise<Organization
       select o.id, o.slug, o.schema_name, to_regnamespace(o.schema_name) is not null as schema_exists
       from platform.organization o
       where o.deleted_at is null
+        and not (o.status = 'deleted' and to_regnamespace(o.schema_name) is null)
       order by o.position, o.slug`.execute(migrator);
     return rows;
   });

@@ -1,6 +1,6 @@
 # Backups, restore test and full restore
 
-This guide explains how the MSCD SaaS server keeps copies of its data somewhere else, how a weekly test proves those copies can be restored, and how to rebuild the service on a new server from them. It belongs to work package M2-S07 of the [Milestone 2 plan](../platform/MILESTONE-2.md#m2-s07-backups-and-restore-test).
+This guide explains how the MSCD SaaS server keeps copies of its data somewhere else, how a weekly test proves those copies can be restored, and how to rebuild the service on a new server from them. It belongs to work package M2-S07 of the [Milestone 2 plan](../platform/MILESTONE-2.md#m2-s07-backups-and-restore-test). Milestone 3 (M3-03) adds what a verified deletion of an organisation means for the backups: [Deleted organisations and the backups](#deleted-organisations-and-the-backups).
 
 On the production and staging servers the backup runs by itself every night, and the restore test runs by itself every week on GitHub. Nobody types the commands below in normal operation; they are for setting up, checking and recovering.
 
@@ -75,7 +75,7 @@ A run does, in this order:
 1. **Checks**: the off-site values, the backup tools image (built when missing), both restic repositories (made the first time).
 2. **Guard for an empty database**: when the database holds no organisation but the newest off-site dump holds some, the run stops. This is a new server waiting for its restore, and an empty dump must not join the copies.
 3. **Database**: the dump, tagged with the release and the organisation count.
-4. **Vault**: the sync. When the vault holds fewer objects than the copy, by more than a tenth of the copy, the sync stops before it changes anything. An empty vault always stops it, whatever the size of the copy, so an empty or wrong vault never empties the copy. The app removes vault objects only when an organisation is purged, so a normal night removes none. As a second stop, rclone ends the sync after deleting a tenth of the copy (at least 100 objects).
+4. **Vault**: the sync. When the vault holds fewer objects than the copy, by more than a tenth of the copy, the sync stops before it changes anything. An empty vault always stops it, whatever the size of the copy, so an empty or wrong vault never empties the copy. The app removes vault objects when exports expire (organisation exports and export files), when records are disposed of after their retention review, and when an organisation is purged, so a normal night removes few. As a second stop, rclone ends the sync after deleting a tenth of the copy (at least 100 objects). Both stops also allow the objects that verified deletions completed in the last 72 hours removed (the run reads them from the database and says "Verified deletions of the last 72 hours removed N vault object(s)"), so the night after a purge the backup runs, and it still stops for any loss that no purge explains. Only purges get the allowance: after a day with many expired exports or a large disposal, check the counts in the log of the run, and when the deletions are right, run `backup.sh run --allow-vault-deletes` once.
 5. **Host files**: the archive, into the second repository with the second key pair.
 6. **Retention**: 14 daily, 8 weekly, 12 monthly. On Sundays the data no copy needs any more is also removed (`prune`).
 7. **Reporting**: the heartbeat ping and `/opt/mscd/metrics/backup.prom`, the single line `mscd_backup_last_success_timestamp_seconds <unix time>` that node-exporter reads.
@@ -189,6 +189,7 @@ Options of `restore.sh`:
 | `--host-files-snapshot <id>` | Take the secret files from another night (default: the newest) |
 | `--vault-at <time>` | Copy the vault back as it was at that time (for example `2026-10-01T02:00:00Z`), from the old versions the bucket keeps. Use it with an older `--snapshot`, when files were deleted since |
 | `--keep-secrets` | Keep the secret files of this server. For a restore on the same server, whose secrets are intact |
+| `--reapply-deletions <folder>` | Delete again every organisation that a deletion certificate in the folder names and the restored copy brings back (see [Deleted organisations and the backups](#deleted-organisations-and-the-backups)) |
 | `--no-timer` | Do not install the timer |
 | `--yes` | No question (for scripts) |
 
@@ -202,6 +203,41 @@ sudo bash /opt/mscd/deploy/backup/restore.sh --snapshot <id> --keep-secrets
 ```
 
 For damage done by the last deploy, the local pre-deploy dump is faster ([deploy.md](deploy.md#restoring-the-database)).
+
+## Deleted organisations and the backups
+
+When a customer's contract ends, MSCD deletes the organisation for good after the read-only period and a grace period (Milestone 3, M3-03): its database schema, its vault files, its data key and the accounts that belonged to it only. The operator receives a signed **deletion certificate** by email and can download it from the operator console (`mscd-server tenant deletion show --org <slug> --certificate <file>` writes it too). The deletion does not reach into the backups at once, and the certificate says so in plain words.
+
+**How long copies stay.** Three things keep copies after a deletion:
+
+- the restic repository keeps 14 daily, 8 weekly and 12 monthly copies of the database and the pre-deploy dumps, so the last monthly copy that holds the organisation leaves the retention about 12 months after the deletion, and its data goes at the next Sunday `prune`;
+- the off-site bucket keeps old versions of every file that `prune` or the vault sync removes until its lifecycle rule removes them: 400 days with the recommended rule of [Setting up](#setting-up);
+- the pre-deploy copies on the server go after three further deploys, and the weekly restore test removes its copy when the job ends.
+
+So with the recommended bucket settings the last copy is gone at the latest about 12 months, plus 7 days, plus 400 days after the deletion: about 26 months. The certificate states the end date as the deletion date plus the profile value `lifecycle.backup_copies_end_days` (780 by default: 366 + 7 + 400 days, rounded up), names the settings that date assumes, and says the date holds only while the bucket keeps them.
+
+**Keep the value in line with the bucket.** When the bucket uses object lock instead, or another lifecycle period, or no lifecycle rule at all, the end moves with it. The value is `lifecycle.backup_copies_end_days` of the SaaS profile (`apps/server/profiles/saas.yaml`, 780 in this release); when the bucket differs from the recommended settings, change it there and ship a release before the first deletion. The right number is 366 for the restic retention, plus 7 for the next prune, plus the days the bucket keeps old versions (the object lock period, or the lifecycle rule). Without a lifecycle rule old versions never leave the bucket: add one before the first deletion. Check the value whenever the bucket settings change.
+
+**The night after a purge.** The vault guard of the nightly backup allows the objects that purges completed in the last 72 hours removed, so the backup runs as usual (see [The nightly backup](#the-nightly-backup)). A purge older than 72 hours no longer counts; if a backup stopped in between, check why before you run `backup.sh run --allow-vault-deletes`.
+
+**A restore from a copy older than a deletion** brings the deleted organisation back, in whatever status it had then, perhaps without a deletion record. Before every restore:
+
+1. Collect the deletion certificates from the operators' mailbox (the email "was deleted from MSCD: deletion certificate" carries each one as a `.json` file) into one folder on the server, for example `/opt/mscd/backup/certificates/`. Take every certificate issued after the time of the copy you restore; more do no harm.
+2. Restore with the folder:
+
+   ```bash
+   sudo bash /opt/mscd/deploy/backup/restore.sh --reapply-deletions /opt/mscd/backup/certificates
+   ```
+
+   After the services start, for each certificate it runs `mscd-server tenant purge --reapply <certificate> --confirm <slug>`: the command checks the signature against the trusted anchor keys of the release and that the certificate names this organisation id, moves the organisation to archived and its deletion to running as the system, and the worker runs the purge again and issues a new certificate. A certificate of an organisation the restored copy does not hold, or holds as deleted already, is skipped. Then the usual checks run.
+3. After a restore without the folder, run the same command by hand for each certificate:
+
+   ```bash
+   cd /opt/mscd/deploy/compose && sudo docker compose run --rm -T -v /opt/mscd/backup/certificates:/run/certs:ro cli \
+     tenant purge --reapply /run/certs/<file>.json --confirm <slug>
+   ```
+
+`mscd-server tenant verify-certificate <file>` checks one certificate offline, for example before you hand it to a customer.
 
 ## Keys
 
@@ -232,7 +268,8 @@ The base image digest is updated the same way: take the digest of a `postgres:16
 | "does not open with BACKUP_RESTIC_PASSWORD (wrong password)" | The secret holds another password than the one the repository was made with. Put back the owner's offline copy |
 | "The repository ... cannot be read" or rclone errors | The endpoint, bucket or keys are wrong, or the bucket provider is down. Check with the provider; the next night tries again |
 | "The backup tools image could not be built" | See [Updating the backup tools](#updating-the-backup-tools). Behind a TLS-inspecting proxy, set `MSCD_BUILD_CA` |
-| "the sync would delete more than N" | The vault holds fewer objects than the copy, by more than a tenth of the copy (or none at all). Find out why before anything else (a wrong volume, a lost disk). When the deletions are right (for example after organisations were purged), run `sudo bash /opt/mscd/deploy/backup/backup.sh run --allow-vault-deletes` once |
+| "the sync would delete more than N" | The vault holds fewer objects than the copy, by more than a tenth of the copy (or none at all), beyond what purges of the last 72 hours removed. Find out why before anything else (a wrong volume, a lost disk). When the deletions are right (for example a purge more than 72 hours ago), run `sudo bash /opt/mscd/deploy/backup/backup.sh run --allow-vault-deletes` once |
+| `restore.sh` fails at "Re-applying verified deletions" | The log it names says why: a certificate that does not verify (changed, or signed with another anchor key), or a purge step that failed. `mscd-server tenant deletion show --org <slug>` shows the steps; retry it from the operator console |
 | "looks like a new server waiting for its restore" | The database is empty but the copies are not. Restore first. When the organisations were really removed, run `backup.sh run --allow-empty` once |
 | Alert BackupTooOld or BackupMissing | Read `journalctl -u mscd-backup.service --since yesterday`. On a new server, the timer may not be installed (`backup.sh install-timer`) |
 | A deploy waits "The off-site backup (started ...) holds /opt/mscd" | The nightly backup runs; the deploy goes on when it ends. When it waits 45 minutes, check the backup with `journalctl -u mscd-backup.service -f` |
@@ -264,4 +301,4 @@ npm run test:int -w @mscd/server -- test/int/backup          # backup verify aga
 flock /tmp/mscd-stack.lock bash deploy/backup/restore-test.sh --local
 ```
 
-`restore-test.sh --local` runs the whole cycle on the SaaS test stack of [stack.md](stack.md) (ports 18080 and 18443, hence the host lock): two organisations with signed audit anchors and probe files, a second SeaweedFS as the off-site bucket (reached only through the network `egress`), the nightly backup, the pre-deploy copy, both guards (the vault guard also with an empty vault and the default limits), the loss of the server, `restore.sh`, the checks after it, and the weekly restore test with the read-only key, run as a user that is not root and reaches Docker through the docker group, as on a GitHub runner. It removes everything it made, and keeps its logs in `/var/tmp/<project>-logs`. `--down` removes what a stopped run left.
+`restore-test.sh --local` runs the whole cycle on the SaaS test stack of [stack.md](stack.md) (ports 18080 and 18443, hence the host lock): two organisations with signed audit anchors and probe files, a second SeaweedFS as the off-site bucket (reached only through the network `egress`), the nightly backup, the pre-deploy copy, both guards (the vault guard also with an empty vault and the default limits), the loss of the server, `restore.sh`, the checks after it, and the weekly restore test with the read-only key, run as a user that is not root and reaches Docker through the docker group, as on a GitHub runner. Then the verified deletion: with an overlay of its own (`compose.lifecycle.yml` in its state folder) that sets the lifecycle periods to 0 days and `MSCD_SAAS_TEST=1` on the api, the worker and the cli, it sends a pre-deploy copy off-site, purges one organisation and checks its certificate, backs up (the vault guard lets the purge's drop pass), restores the copy from before the purge with `--reapply-deletions`, and checks that the organisation is deleted again and the other intact. It removes everything it made, and keeps its logs in `/var/tmp/<project>-logs`. `--down` removes what a stopped run left. The edge network of its stack takes an IPv6 range of its own that no Docker network on the host uses (`MSCD_EDGE_SUBNET6` sets another), because Docker refuses two networks with the same range even when IPv6 is off, and a stopped stack on the same host keeps its network.

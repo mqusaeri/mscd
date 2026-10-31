@@ -26,7 +26,8 @@ describe('mscd-server command line (D-01)', () => {
     const sub = (name: string) => names(program.commands.find((c) => c.name() === name)!);
     expect(sub('db')).toEqual(['bootstrap']);
     // Milestone 2 K.6 (M2-S09): the organisation lifecycle of the platform operator.
-    expect(sub('tenant')).toEqual(['create', 'verify-domain', 'list', 'show', 'set-status', 'onboard']);
+    // Milestone 3 D.5 (M3-03): the verified deletion of an organisation.
+    expect(sub('tenant')).toEqual(['create', 'verify-domain', 'list', 'show', 'set-status', 'onboard', 'deletion', 'purge', 'verify-certificate']);
     expect(sub('packs')).toEqual(['install']);
     expect(sub('keys')).toEqual(['generate', 'rewrap', 'rotate-gateway-token']);
     // Milestone 2 D.3: the operator commands of M2-06.

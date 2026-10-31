@@ -45,7 +45,7 @@ export async function decideLocalLogin(trx: Trx, userId: string): Promise<LocalL
     from platform.org_membership m
     join platform.organization o on o.id = m.organization_id
     where m.user_id = ${userId} and m.status = 'active' and m.deleted_at is null
-      and o.deleted_at is null and o.status <> 'archived'
+      and o.deleted_at is null and o.status not in ('archived', 'deleted')
     order by (o.status = 'active') desc, m.is_default desc, o.position, o.name`.execute(trx);
   const memberOrgIds = rows.map((r) => r.organization_id);
   const first = rows.find((r) => localLoginAllowed(r.local_login, r.admin_roles));

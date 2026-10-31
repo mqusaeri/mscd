@@ -68,7 +68,7 @@ export class MeService {
   async switchOrganisation(request: FastifyRequest, reply: FastifyReply, principal: Principal, slug: string): Promise<Me> {
     const current = this.currentSession(request);
     const target = await this.infra.tenants.resolveBySlug(slug);
-    if (!target || target.status === 'archived') throw new NotFoundError('Not a member of this organisation');
+    if (!target || target.status === 'archived' || target.status === 'deleted') throw new NotFoundError('Not a member of this organisation');
     const userId = principal.user.id;
     const context = { orgId: target.id, schema: target.schema, userId };
     const outcome = await this.infra.scope.withTenant(context, async (trx): Promise<{ issued: IssuedSession } | { methods: ReauthMethods } | null> => {
@@ -103,7 +103,7 @@ export class MeService {
     const csrfToken = this.sessions.csrfTokenOf(request);
     if (!csrfToken) throw new UnauthenticatedError();
     const target = await this.infra.tenants.resolveBySlug(slug);
-    if (!target || target.status === 'archived') throw new NotFoundError('No invitation of this organisation');
+    if (!target || target.status === 'archived' || target.status === 'deleted') throw new NotFoundError('No invitation of this organisation');
     if (principal.user.kind === 'guest') throw new NotFoundError('No invitation of this organisation');
     const userId = principal.user.id;
     const now = this.infra.now();
@@ -146,7 +146,7 @@ export class MeService {
    */
   async declineMembership(principal: Principal, slug: string): Promise<void> {
     const target = await this.infra.tenants.resolveBySlug(slug);
-    if (!target || target.status === 'archived' || principal.user.kind === 'guest') throw new NotFoundError('No invitation of this organisation');
+    if (!target || target.status === 'archived' || target.status === 'deleted' || principal.user.kind === 'guest') throw new NotFoundError('No invitation of this organisation');
     const userId = principal.user.id;
     const now = this.infra.now();
     const declined = await this.infra.scope.withTenant({ orgId: target.id, schema: target.schema, userId }, async (trx) => {

@@ -13,6 +13,10 @@
 // key share lock), so a transaction that holds the tenant audit chain lock and then inserts such a row (an auditor
 // access grant) never deadlocks with it. The daily jobs follow a time zone change through the run ledger of
 // `scheduler.tick`: each runs once per local date of the organisation (jobs/scheduler-tick.job.ts).
+// Milestone 3 (D.2; M3-03): the GET adds, while the organisation is offboarding, the end of the read-only period
+// (`offboardingEndsAt`) and the planned deletion date (`deletionScheduledFor`: the end plus
+// `lifecycle.deletion_grace_days`), and while it is archived the scheduled date; both are null otherwise (the banner of
+// M3-09 shows them).
 import { Inject, Injectable } from '@nestjs/common';
 import type { OrganizationSettings, OrgPolicyPatch } from '@mscd/shared';
 import { sql } from 'kysely';
@@ -52,11 +56,12 @@ export class OrganizationService {
     return this.scope.withTenant(tenantContextOf(principal), async (trx) => {
       const row = await trx
         .selectFrom('platform.organization')
-        .select(['slug', 'name', 'time_zone', 'site_count', 'local_login', 'updated_at'])
+        .select(['slug', 'name', 'time_zone', 'site_count', 'local_login', 'updated_at', 'status', 'offboarding_ends_at'])
         .where('id', '=', org.id)
         .where('deleted_at', 'is', null)
         .executeTakeFirst();
       if (!row) throw new NotFoundError('No current organisation');
+      const lifecycle = await this.lifecycleOf(trx, org.id, row.status, row.offboarding_ends_at);
       return {
         slug: row.slug,
         name: row.name,
@@ -67,8 +72,35 @@ export class OrganizationService {
         tenancyMode: this.config.profile.tenancy.mode,
         activeAdminCount: await countActiveTenantAdmins(trx, org.id),
         etag: etagOf(row.updated_at),
+        ...lifecycle,
       };
     });
+  }
+
+  /** The read-only end and the deletion date of D.2; null when the organisation has none. */
+  private async lifecycleOf(
+    trx: Trx,
+    orgId: string,
+    status: string,
+    offboardingEndsAt: Date | null,
+  ): Promise<Pick<OrganizationSettings, 'offboardingEndsAt' | 'deletionScheduledFor'>> {
+    if (status === 'offboarding' && offboardingEndsAt) {
+      const graceMs = this.config.profile.lifecycle.deletion_grace_days * 86_400_000;
+      return {
+        offboardingEndsAt: offboardingEndsAt.toISOString(),
+        deletionScheduledFor: new Date(offboardingEndsAt.getTime() + graceMs).toISOString(),
+      };
+    }
+    if (status === 'archived') {
+      const deletion = await trx
+        .selectFrom('platform.organization_deletion')
+        .select('scheduled_for')
+        .where('organization_id', '=', orgId)
+        .where('status', 'in', ['scheduled', 'running'])
+        .executeTakeFirst();
+      return { offboardingEndsAt: null, deletionScheduledFor: deletion ? deletion.scheduled_for.toISOString() : null };
+    }
+    return { offboardingEndsAt: null, deletionScheduledFor: null };
   }
 
   /**

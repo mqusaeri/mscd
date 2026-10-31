@@ -41,6 +41,7 @@ const DETAIL = OpsOrganizationDetail.parse({
   createdAt: '2026-01-15T03:00:00Z', memberCount: 86, systemCount: 4,
   entitlement: { plan: 'enterprise', source: 'manual', maxUsers: 100, maxManagementSystems: 5, validUntil: '2027-03-31' },
   domains: [{ domain: 'nusantaradigital.co.id', status: 'verified' }, { domain: 'ndt.co.id', status: 'pending' }], lastSignInAt: '2026-09-29T01:12:00Z',
+  offboardingEndsAt: null, deletion: null, lastExport: null,
 });
 const EVENT = OrganizationStatusEventItem.parse({
   id: '7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a', from: 'active', to: 'offboarding', reason: 'Contract ends on 30 September 2026',

@@ -93,10 +93,16 @@ describe('secure functions (C.4)', () => {
     expect(rows.map((r) => r.proname)).toEqual([
       'assert_member',
       'audit_canonical_text',
+      // Milestone 3 platform 0008 (M3-03, D.5.4): the redaction helpers of attested redaction.
+      'audit_redact_json',
+      'audit_redact_text',
       'chain_hash',
       'entity_link_has_primary',
       'forbid_change',
       'prep_task_before_audit',
+      // Milestone 3 platform 0008 (M3-03, D.5.4): the purge and the attested redaction (SECURITY DEFINER).
+      'purge_organization',
+      'redact_audit_rows',
       // Milestone 2 platform 0005: organisation status changes need the platform scope (J.8).
       'require_platform_scope',
       'secure_platform_schema',

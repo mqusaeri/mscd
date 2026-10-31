@@ -20,16 +20,16 @@ const metaShape = {
   requestId: z.string().nullable().optional(),
   sourceIp: z.string().nullable().optional(),
   userAgent: z.string().nullable().optional(),
-  /** Milestone 3 D.5.4: personal values of the entry were removed by an attested redaction (optional until M3-03 fills it). */
-  redacted: z.boolean().optional(),
-  redactedAt: Instant.nullable().optional(),
+  /** Milestone 3 D.5.4: personal values of the entry were removed by an attested redaction, and when (else null). */
+  redacted: z.boolean(),
+  redactedAt: Instant.nullable(),
 };
 
 const EXAMPLE_ENTRY = {
   seq: 1042, occurredAt: '2026-09-29T03:15:00Z', actor: { handle: 'rina', displayName: 'Rina Kusuma', kind: 'user' }, action: 'applicability.transition',
   entityType: 'applicability_entry', entityId: '0b7e8c2a-1d3f-4e5a-8b6c-7d8e9f0a1b2c', entityCode: 'A.8.13', ms: 'isms',
   before: { implementation_status: 'complete' }, after: { implementation_status: 'implemented' }, edition: 'ISO27001-2022 1.2.0', requestId: 'req-12345678',
-  sourceIp: '172.31.250.10', userAgent: 'Mozilla/5.0',
+  sourceIp: '172.31.250.10', userAgent: 'Mozilla/5.0', redacted: false, redactedAt: null,
 } as const;
 
 export const AuditEntry = named(
@@ -38,7 +38,10 @@ export const AuditEntry = named(
   'Full audit entry with changed fields (audit_trail.read, F.11)',
   {
     valid: [EXAMPLE_ENTRY, { ...EXAMPLE_ENTRY, sourceIp: null, userAgent: null, redacted: true, redactedAt: '2026-11-02T03:00:00Z' }],
-    invalid: [{ ...EXAMPLE_ENTRY, seq: 0 }, { ...EXAMPLE_ENTRY, actor: { handle: 'rina', displayName: 'Rina', kind: 'admin' } }, { ...EXAMPLE_ENTRY, redactedAt: 'yesterday' }],
+    invalid: [
+      { ...EXAMPLE_ENTRY, seq: 0 }, { ...EXAMPLE_ENTRY, actor: { handle: 'rina', displayName: 'Rina', kind: 'admin' } }, { ...EXAMPLE_ENTRY, redactedAt: 'yesterday' },
+      { ...EXAMPLE_ENTRY, redacted: undefined },
+    ],
   },
 );
 export type AuditEntry = z.infer<typeof AuditEntry>;
@@ -47,7 +50,13 @@ export const AuditEntryMeta = named(
   'AuditEntryMeta',
   z.strictObject(metaShape),
   'Audit entry without before, after and entityCode (Tenant Admin view, audit_trail.metadata.read)',
-  { valid: [{ seq: 1042, occurredAt: '2026-09-29T03:15:00Z', actor: { handle: 'rina', displayName: 'Rina Kusuma', kind: 'user' }, action: 'applicability.transition', entityType: 'applicability_entry', entityId: null }], invalid: [EXAMPLE_ENTRY] },
+  {
+    valid: [{
+      seq: 1042, occurredAt: '2026-09-29T03:15:00Z', actor: { handle: 'rina', displayName: 'Rina Kusuma', kind: 'user' }, action: 'applicability.transition',
+      entityType: 'applicability_entry', entityId: null, redacted: false, redactedAt: null,
+    }],
+    invalid: [EXAMPLE_ENTRY],
+  },
 );
 export type AuditEntryMeta = z.infer<typeof AuditEntryMeta>;
 
@@ -94,11 +103,17 @@ export const AuditChainVerifyResult = named(
   'AuditChainVerifyResult',
   z.object({
     chain: z.string(), checked: z.int().min(0), firstBrokenSeq: z.int().min(1).nullable().optional(), anchorOk: z.boolean(),
-    /** Milestone 3 D.5.4: rows checked against an attestation instead of their columns (optional until M3-03 fills it). */
-    redacted: z.int().min(0).optional(),
+    /** Milestone 3 D.5.4: rows checked against an attestation instead of their columns (0 when the chain holds none). */
+    redacted: z.int().min(0),
   }),
   'Result of the chain verification query and the anchor comparison of one chain (F.11); redacted counts the attested redactions (Milestone 3 D.5.4)',
-  { valid: [{ chain: 'platform.audit_log', checked: 120, firstBrokenSeq: null, anchorOk: true }, { chain: 'org_ndt.audit_trail', checked: 4012, firstBrokenSeq: null, anchorOk: true, redacted: 14 }], invalid: [{ chain: 'x', checked: -1, anchorOk: true }, { chain: 'x', checked: 1, anchorOk: true, redacted: -1 }] },
+  {
+    valid: [
+      { chain: 'platform.audit_log', checked: 120, firstBrokenSeq: null, anchorOk: true, redacted: 0 },
+      { chain: 'org_ndt.audit_trail', checked: 4012, firstBrokenSeq: null, anchorOk: true, redacted: 14 },
+    ],
+    invalid: [{ chain: 'x', checked: -1, anchorOk: true, redacted: 0 }, { chain: 'x', checked: 1, anchorOk: true, redacted: -1 }, { chain: 'x', checked: 1, anchorOk: true }],
+  },
 );
 export type AuditChainVerifyResult = z.infer<typeof AuditChainVerifyResult>;
 

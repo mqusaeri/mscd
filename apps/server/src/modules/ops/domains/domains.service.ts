@@ -189,7 +189,7 @@ export class DomainsService {
     await this.scope.withPlatform(
       async (trx) => {
         const org = await organisationOf(trx, slug, { lock: true });
-        if (org.status === 'archived') {
+        if (org.status === 'archived' || org.status === 'deleted') {
           throw new ConflictError(`The organisation ${slug} is archived; its domains cannot change`, { messageKey: 'organization_archived' });
         }
         await assertNotTakenElsewhere(trx, org.id, domain);
@@ -252,7 +252,7 @@ export class DomainsService {
       { scope: 'operator' },
     );
     if (!found.row) throw new NotFoundError(`The organisation ${slug} has no domain ${domain}`);
-    if (found.org.status === 'archived') {
+    if (found.org.status === 'archived' || found.org.status === 'deleted') {
       throw new ConflictError(`The organisation ${slug} is archived; its domains are not checked`, { messageKey: 'organization_archived' });
     }
     if (!found.row.txt_token_hash) {
@@ -378,7 +378,7 @@ export class DomainsService {
       },
       { scope: 'job' },
     );
-    if (!found || found.row.status !== 'pending' || !found.row.txt_token_hash || found.org.status === 'archived') return null;
+    if (!found || found.row.status !== 'pending' || !found.row.txt_token_hash || found.org.status === 'archived' || found.org.status === 'deleted') return null;
     const check = await this.dns.check(domain, found.row.txt_token_hash);
     return this.apply(found.org, found.row, check, { kind: 'job' });
   }
@@ -398,7 +398,7 @@ export class DomainsService {
             .select(['d.organization_id', 'd.domain', 'd.status', 'd.method', 'd.txt_token_hash', 'd.requested_at', 'd.verified_at', 'd.last_checked_at'])
             .select(['o.id as org_id', 'o.slug as org_slug', 'o.name as org_name', 'o.status as org_status'])
             .where('o.deleted_at', 'is', null)
-            .where('o.status', '<>', 'archived')
+            .where('o.status', 'not in', ['archived', 'deleted'])
             .where('d.method', '=', 'dns')
             .where('d.txt_token_hash', 'is not', null);
         const pending = await base().where('d.status', '=', 'pending').orderBy(sql`d.last_checked_at nulls first`).orderBy('d.requested_at').limit(SWEEP_LIMIT).execute();

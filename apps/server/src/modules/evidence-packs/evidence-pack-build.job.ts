@@ -213,7 +213,7 @@ export class EvidencePackBuildJob implements JobHandlerInstance<'evidence-pack.b
   async build(orgId: string | null, packId: string, requestId?: string): Promise<EvidencePackBuildResult> {
     if (!orgId) throw new Error('evidence-pack.build needs the organisation of the job envelope');
     const org = await this.tenants.resolveById(orgId);
-    if (!org || org.status === 'archived') return { packId, status: 'skipped', itemCount: 0, exceptionCount: 0, packFolder: null };
+    if (!org || org.status === 'archived' || org.status === 'deleted') return { packId, status: 'skipped', itemCount: 0, exceptionCount: 0, packFolder: null };
     const context = systemContextOf(org, requestId);
     const input = await this.scope.withTenant(context, (trx) => this.prepare(trx, org, packId));
     if (!input) return { packId, status: 'skipped', itemCount: 0, exceptionCount: 0, packFolder: null };

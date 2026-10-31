@@ -139,7 +139,7 @@ describe('audit trail (F.11, D.3)', () => {
   it('verifies both chains and compares the newest anchor (F.11)', async () => {
     const verifier = ctx.moduleRef.get(AuditChainVerifier);
     const [tenant, platform] = await verifier.verifyForOrganisation({ orgId: ndt.id, schema: ndt.schemaName });
-    expect(tenant).toEqual({ chain: 'org_ndt.audit_trail', checked: 3, firstBrokenSeq: null, anchorOk: true });
+    expect(tenant).toEqual({ chain: 'org_ndt.audit_trail', checked: 3, firstBrokenSeq: null, anchorOk: true, redacted: 0 });
     expect(platform).toMatchObject({ chain: 'platform.audit_log', firstBrokenSeq: null, anchorOk: true });
     expect(platform!.checked).toBeGreaterThanOrEqual(4);
 

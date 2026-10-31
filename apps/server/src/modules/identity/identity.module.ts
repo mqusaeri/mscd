@@ -1,5 +1,6 @@
 import { Global, Module, type OnModuleInit } from '@nestjs/common';
 import { SESSION_RESOLVER } from '../../common/tokens';
+import { AccountAnonymiser } from './account-anonymiser';
 import { AccountMailer } from './account-mailer';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -21,7 +22,8 @@ import { SignInResponder } from './sign-in-responder';
  * build on the exported services: `SessionService` (create, rotate and revoke sessions, the cookie, the CSRF token of
  * a request), `MfaService` (second-factor checks, factor reset), `SignInResponder` (the `LoginResponse` of a new
  * session), `AccountMailer` (account and security emails), `InvitationService` (users with invitations),
- * `PreferencesService` (`Me.preferences`) and `GuestOtpResolverRegistry` (the guest one-time code caller).
+ * `PreferencesService` (`Me.preferences`) and `GuestOtpResolverRegistry` (the guest one-time code caller). Milestone 3
+ * (D.5.2, M3-03): `AccountAnonymiser`, which the purge of an organisation and the erasure of a person (M3-04) use.
  */
 @Global()
 @Module({
@@ -40,6 +42,7 @@ import { SignInResponder } from './sign-in-responder';
     AuthService,
     InvitationService,
     PreferencesService,
+    AccountAnonymiser,
   ],
   exports: [
     SESSION_RESOLVER,
@@ -51,6 +54,7 @@ import { SignInResponder } from './sign-in-responder';
     AuthService,
     InvitationService,
     PreferencesService,
+    AccountAnonymiser,
   ],
 })
 export class IdentityModule implements OnModuleInit {
