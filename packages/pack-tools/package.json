@@ -26,12 +26,12 @@
   },
   "dependencies": {
     "@mscd/shared": "*",
-    "commander": "14.0.3",
+    "commander": "15.0.0",
     "csv-parse": "7.0.3",
     "tar": "7.5.22",
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "vitest": "4.1.12"
+    "vitest": "5.0.5"
   }
 }
