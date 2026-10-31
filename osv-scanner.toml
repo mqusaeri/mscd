@@ -1,0 +1,13 @@
+# Known vulnerabilities accepted for a short time, with the reason. The OSV scan of
+# .github/workflows/security-scan.yml reads this file next to package-lock.json.
+# Every entry expires; the scan fails again on that date unless the package is upgraded.
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-11-14T00:00:00Z
+reason = "minimatch below 11.0.1 (pattern amplification with optimizationLevel 2 or more). Production copies come only through exceljs (archiver, readdir-glob) and the OpenTelemetry GCP detector (gaxios, rimraf, glob); none receives a glob pattern from a request. Published 2026-10-30; the major upgrade is planned after M2-21 or in M3-M02 (orchestrator, 2026-10-31)."
+
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2026-11-14T00:00:00Z
+reason = "glob 9.0.0 to 14.0.1 (an aborted walk keeps running). The production copy, glob 10.5.0, comes only through the OpenTelemetry GCP detector (gaxios, rimraf) and walks no path a request chooses. Published 2026-10-30; the upgrade to 14.0.2 is planned after M2-21 or in M3-M02 (orchestrator, 2026-10-31)."
