@@ -114,7 +114,14 @@ export class ReadOnlyModeError extends ProblemError {
 /** 403 `organisation-inactive` (D.1 Organisation status). */
 export class OrganisationInactiveError extends ProblemError {
   constructor(detail = 'The organisation of this session is not active') {
-    super('organisation-inactive', { detail });
+    // The message pair is what the web app shows (M2-19 shows a problem's detail when it has no pair).
+    super('organisation-inactive', {
+      detail,
+      messages: {
+        en: 'The organisation is not active. Ask your administrator or your MSCD service provider.',
+        id: 'Organisasi tidak aktif. Hubungi administrator Anda atau penyedia layanan MSCD Anda.',
+      },
+    });
   }
 }
 
