@@ -163,7 +163,8 @@ describe('acknowledgement API adapter', () => {
     client.setCsrfToken('csrf-token-0123456789abcdef');
     const adapter = createApiAdapter(client, () => API_D, () => 'org-a');
     const settings = { required: true, scope: 'roles' as const, roles: ['domain_owner' as const], dueDays: 21 };
-    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toBeNull();
+    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(DEFAULT_SETTINGS);
+    expect(adapter.settingsOf('isms', 'POL-01', null)).toBeNull();
     expect(await adapter.saveSettings('isms', 'POL-01', settings, false)).toMatchObject({ ok: false, error: { status: 409, slug: 'confirmation-required' } });
     expect(f.calls.at(-1)).toMatchObject({ method: 'PATCH', body: { acknowledgement: settings }, headers: { 'if-match': 'W/"7"' } });
     expect(await adapter.saveSettings('isms', 'POL-01', settings, true)).toMatchObject({ ok: true, data: { changed: ['isms', 'qms'] } });
@@ -186,14 +187,14 @@ describe('acknowledgement API adapter', () => {
     expect(await adapter.saveSettings('isms', 'POL-01', settings, false)).toMatchObject({ ok: true });
     expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(settings);
     org = 'org-b';
-    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toBeNull();
+    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(DEFAULT_SETTINGS);
     org = null;
-    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toBeNull();
+    expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(DEFAULT_SETTINGS);
     org = 'org-a';
     expect(adapter.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(settings);
     // Without the host's organisation, the snapshot's `me.org` names it.
     const viaMe = createApiAdapter(client, () => ({ ...API_D, me: { org: { id: 'org-b', slug: 'b', name: 'B' } } }) as unknown as ControllerData);
-    expect(viaMe.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toBeNull();
+    expect(viaMe.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(DEFAULT_SETTINGS);
     const viaMeA = createApiAdapter(client, () => ({ ...API_D, me: { org: { id: 'org-a', slug: 'a', name: 'A' } } }) as unknown as ControllerData);
     expect(viaMeA.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(settings);
   });
@@ -347,18 +348,18 @@ describe('acknowledgement views', () => {
     }
   }
 
-  it('shows no current value when the stored settings of a document are unknown (API build before the snapshot carries them)', () => {
+  it('shows no current value when the stored settings of a document are unknown (API build without the document record)', () => {
     vi.stubEnv('VITE_DATA_SOURCE', 'api');
     try {
       for (const lang of ['en', 'id'] as Lang[]) {
         const ctx = ctxOf(lang, { mode: 'api', D: API_D } as Partial<HostContext>);
         const t = (p: readonly [string, string]) => html(p[lang === 'id' ? 1 : 0]);
         const api = createApiAdapter(null, () => API_D);
-        expect(api.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toBeNull();
-        // The section says the stored settings are not shown and promises no list of who is asked.
+        expect(api.settingsOf('isms', 'POL-01', { id: 'POL-01' })).toEqual(DEFAULT_SETTINGS);
+        // A document record without the `acknowledgement` member has the default settings (M3-04).
         const section = render(<DocSection ctx={ctx} kind="doc" ms="isms" recordKey="isms:doc:POL-01" record={{ id: 'POL-01' }} close={() => undefined} />, ctx);
-        expect(section).toContain(t(TEXT.sectionUnknown));
-        expect(section).not.toContain(t(TEXT.sectionOff));
+        expect(section).toContain(t(TEXT.sectionOff));
+        expect(section).not.toContain(t(TEXT.sectionUnknown));
         // The dialog: a notice, "ask for confirmation" as a yes or no choice with neither chosen, and no checkbox that
         // would show the default "off" as the current value.
         const dialog = render(<SettingsDialog ctx={ctx} adapter={api} ms="isms" code="POL-01" initial={null} onCancel={() => undefined} onSaved={() => undefined} />, ctx);

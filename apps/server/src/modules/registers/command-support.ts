@@ -8,6 +8,7 @@ import {
   type Transition, type Warning,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import type { Clock } from '../../common/clock';
 import { etagOf } from '../../common/etag';
 import type { JobQueue } from '../../common/jobs/job-queue';
@@ -145,11 +146,12 @@ export async function enqueueFreshness(
   await enqueueDerived(queue, trx, org, msId, requestedBy);
 }
 
-/** The user's handle and display name (texts that name a person). */
+/** The user's handle and display name (texts that name a person); the pseudonym of a person erased in this organisation (Milestone 3 D.6.5). */
 export async function personOf(trx: Trx, userId: string | null): Promise<{ handle: string; name: string } | null> {
   if (!userId) return null;
   const { rows } = await sql<{ handle: string; display_name: string }>`
-    select handle, display_name from platform.app_user where id = ${userId}`.execute(trx);
+    select ${shownHandle('u', 'e')} as handle, ${shownName('u', 'e')} as display_name from platform.app_user u ${erasedJoin('e', 'u.id')}
+     where u.id = ${userId}`.execute(trx);
   const row = rows[0];
   return row ? { handle: row.handle, name: row.display_name } : null;
 }

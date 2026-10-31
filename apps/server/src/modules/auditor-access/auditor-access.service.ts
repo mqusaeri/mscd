@@ -13,6 +13,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuditorAccessGrantView, AuditorAccessRequest, AuditorAccessResult, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
+import { handleOfUser } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { fmtDay, localDate } from '../../common/dates';
 import { ConflictError, NotFoundError } from '../../common/problems';
@@ -138,11 +139,9 @@ export class AuditorAccessService {
       await this.closeExpired(trx, org.id, now);
       const { rows } = await sql<GrantListRow>`
         select g.id, g.email, g.user_id, g.user_ms_role_id, g.created_at, g.expires_at, g.link_used_at, g.last_used_at,
-               g.revoked_at, gu.handle as guest_handle, cu.handle as created_by_handle, ru.handle as revoked_by_handle
+               g.revoked_at, ${handleOfUser('g.user_id')} as guest_handle, ${handleOfUser('g.created_by')} as created_by_handle,
+               ${handleOfUser('g.revoked_by')} as revoked_by_handle
         from auditor_access_grant g
-        left join platform.app_user gu on gu.id = g.user_id
-        left join platform.app_user cu on cu.id = g.created_by
-        left join platform.app_user ru on ru.id = g.revoked_by
         where g.management_system_id = ${system.id} and g.deleted_at is null
         order by g.created_at desc, g.id`.execute(trx);
       return rows.map((r) => ({

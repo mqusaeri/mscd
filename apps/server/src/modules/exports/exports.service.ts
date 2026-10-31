@@ -8,13 +8,22 @@
 //   Managed Vault through `FileResponder` (attachment), audited `export.downloaded`.
 // - `GET /ms/{ms}/applicability/export` and `GET /ms/{ms}/documents/export`: the SoA and the document register built
 //   synchronously for the session user and streamed at once (audited `export.downloaded`).
+//
+// Milestone 3 (D.2, D.6.3, M3-04): personal data exports (`export_file` kind `personal_data`, format `json`) are queued
+// by `exports.person.create` (an access request, by a Tenant Admin) and `exports.me.create` (the person) through
+// `queuePersonalData`, never through `POST /exports`. `GET /exports/{taskId}` and the download serve them to their
+// creator only: a person's own export to that person, an access request export to the Tenant Admin who queued it, with
+// `privacy_request.manage` checked again at the download.
 import { Inject, Injectable } from '@nestjs/common';
 import type { BackgroundTask, CommandResult, ExportRequest } from '@mscd/shared';
 import type { FastifyReply } from 'fastify';
 import { Clock } from '../../common/clock';
 import { FileResponder } from '../../common/file-response';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../common/problems';
-import { AUDIT_WRITER, GATEWAY_CLIENT, JOB_QUEUE, type AuditWriter, type GatewayClient, type JobQueue, type Principal, type Trx } from '../../common/tokens';
+import {
+  AUDIT_WRITER, GATEWAY_CLIENT, JOB_QUEUE, PERMISSION_EVALUATOR, type AuditWriter, type GatewayClient, type JobQueue, type PermissionEvaluator, type Principal,
+  type Trx,
+} from '../../common/tokens';
 import { StorageGatewayContext } from '../storage/gateway-context';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { assertFormat, CONTENT_TYPES, ExportContentService, type ExportSpec, type Lang } from './export-content.service';
@@ -24,17 +33,37 @@ export function exportDownloadUrl(taskId: string): string {
   return `/api/v1/exports/${taskId}/download`;
 }
 
-const TYPE_NAMES: Readonly<Record<ExportRequest['type'], readonly [string, string]>> = {
+const TYPE_NAMES: Readonly<Record<ExportRequest['type'] | 'personal_data', readonly [string, string]>> = {
   portfolio_board: ['Portfolio board', 'Papan portofolio'],
   readiness: ['Readiness report', 'Laporan kesiapan'],
   soa: ['Statement of Applicability', 'Pernyataan Keberlakuan'],
   document_register: ['Document register', 'Daftar dokumen'],
   audit_trail: ['Audit trail', 'Jejak audit'],
+  personal_data: ['Personal data', 'Data pribadi'],
 };
 
-export function exportTypeName(type: ExportRequest['type']): readonly [string, string] {
+export function exportTypeName(type: ExportRequest['type'] | 'personal_data'): readonly [string, string] {
   return TYPE_NAMES[type];
 }
+
+/** The stored spec of a personal data export (Milestone 3 D.6.3): whose data, and the access request it answers. */
+export interface PersonalDataSpec {
+  type: 'personal_data';
+  format: 'json';
+  subjectUserId: string;
+  privacyRequestId: string | null;
+}
+
+/** The spec a task's `params` hold: an export of `POST /exports`, or a personal data export. */
+export type StoredExportSpec = ExportSpec | PersonalDataSpec;
+
+/** True for a personal data export. */
+export function isPersonalData(spec: StoredExportSpec): spec is PersonalDataSpec {
+  return spec.type === 'personal_data';
+}
+
+/** Content type of a personal data export. */
+export const PERSONAL_DATA_CONTENT_TYPE = 'application/json';
 
 interface TaskRow {
   id: string;
@@ -45,9 +74,13 @@ interface TaskRow {
   params: unknown;
 }
 
-/** The `ExportSpec` stored in a task's `params`. */
-export function specOf(params: unknown): ExportSpec {
-  const p = (params ?? {}) as Partial<ExportSpec>;
+/** The spec stored in a task's `params`. */
+export function specOf(params: unknown): StoredExportSpec {
+  const raw = (typeof params === 'string' ? JSON.parse(params) : params ?? {}) as Record<string, unknown>;
+  if (raw.type === 'personal_data') {
+    return { type: 'personal_data', format: 'json', subjectUserId: String(raw.subjectUserId), privacyRequestId: typeof raw.privacyRequestId === 'string' ? raw.privacyRequestId : null };
+  }
+  const p = raw as Partial<ExportSpec>;
   return { type: p.type!, format: p.format!, ...(p.ms ? { ms: p.ms } : {}) };
 }
 
@@ -62,7 +95,44 @@ export class ExportsService {
     @Inject(GATEWAY_CLIENT) private readonly gateway: GatewayClient,
     @Inject(JOB_QUEUE) private readonly jobs: JobQueue,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
+    @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
   ) {}
+
+  /**
+   * Queues the personal data export of `subjectUserId` in the caller's transaction (Milestone 3 D.6.3): a background
+   * task of kind `export` whose `params` name the person and the access request, `export.build` (singleton
+   * `ex:<taskId>`, 2 retries), audited `export.created` without the person's name. Returns the task id.
+   */
+  async queuePersonalData(trx: Trx, principal: Principal, spec: { subjectUserId: string; privacyRequestId: string | null; code: string }): Promise<string> {
+    const org = principal.org;
+    if (!org) throw new NotFoundError('No organisation is selected');
+    const stored: PersonalDataSpec = { type: 'personal_data', format: 'json', subjectUserId: spec.subjectUserId, privacyRequestId: spec.privacyRequestId };
+    const user = principal.user.id;
+    const task = await trx
+      .insertInto('background_task')
+      .values({ kind: 'export', management_system_id: null, status: 'queued', params: JSON.stringify(stored), created_by: user, updated_by: user })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const jobId = await this.jobs.send('export.build', { orgId: org.id, requestedBy: user, payload: { taskId: task.id } }, { singletonKey: `ex:${task.id}`, retryLimit: 2 }, trx);
+    if (jobId) await trx.updateTable('background_task').set({ job_id: jobId.slice(0, 80) }).where('id', '=', task.id).execute();
+    await this.audit.record(trx, {
+      action: 'export.created',
+      entityType: 'background_task',
+      entityId: task.id,
+      entityCode: 'personal_data',
+      after: { type: 'personal_data', format: 'json', self: spec.subjectUserId === user, ...(spec.privacyRequestId ? { privacyRequest: spec.code } : {}) },
+    });
+    return task.id;
+  }
+
+  /**
+   * Whether the principal may still download a personal data export: the person themselves, or for an access request
+   * a holder of `privacy_request.manage` (D.2).
+   */
+  async personalDataAllowed(principal: Principal, spec: PersonalDataSpec): Promise<boolean> {
+    if (spec.subjectUserId === principal.user.id && spec.privacyRequestId === null) return true;
+    return (await this.evaluator.evaluate(principal, 'privacy_request.manage', { scope: 'org' })) === 'full';
+  }
 
   /** `POST /exports` (202). */
   async request(principal: Principal, body: ExportRequest): Promise<CommandResult> {
@@ -152,7 +222,8 @@ export class ExportsService {
       return { task, file, object, repository, tenant: await this.storage.tenant(trx, org.id) };
     });
     const spec = specOf(prepared.task.params);
-    if (!(await this.content.allowed(principal, spec))) throw new ForbiddenError('You no longer hold the permission this export needs');
+    const allowed = isPersonalData(spec) ? await this.personalDataAllowed(principal, spec) : await this.content.allowed(principal, spec);
+    if (!allowed) throw new ForbiddenError('You no longer hold the permission this export needs');
     const { object } = prepared;
     const streamed = await this.gateway.stream({
       tenant: prepared.tenant,
@@ -169,7 +240,7 @@ export class ExportsService {
     const fileName = prepared.file.file_name ?? `export.${prepared.file.format}`;
     return this.files.send(reply, {
       body: streamed.stream,
-      storedType: CONTENT_TYPES[prepared.file.format as keyof typeof CONTENT_TYPES],
+      storedType: prepared.file.format === 'json' ? PERSONAL_DATA_CONTENT_TYPE : CONTENT_TYPES[prepared.file.format as keyof typeof CONTENT_TYPES],
       fileName,
       size: streamed.size ?? (object.size_bytes === null ? null : Number(object.size_bytes)),
       audit: {

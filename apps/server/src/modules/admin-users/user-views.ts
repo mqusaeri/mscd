@@ -1,9 +1,13 @@
 // `UserView` rows (D.2, `GET /admin/users`): members of the organisation with their account and membership fields,
 // role grants in the organisation's systems, whether a second factor is enrolled and whether the user holds an
-// active membership elsewhere (then the global fields are read-only for the Tenant Admin, F.6).
+// active membership elsewhere (then the global fields are read-only for the Tenant Admin, F.6). Milestone 3 (D.6.5,
+// M3-04): a person erased in this organisation is named by the pseudonym (`erased_person`): its handle form
+// (`former-user-7f3a`) as handle and the pseudonym as display name, with no job title; the erasure removes the
+// membership, so such a row shows only when the person was invited again.
 import type { ApprovalStatus, BusinessRole, OrgRole, UserView } from '@mscd/shared';
 import { sql, type RawBuilder } from 'kysely';
 import type { Trx } from '../../common/tokens';
+import { erasedJoin, shownHandle } from '../privacy/pseudonym';
 import { handleBase } from '../identity/invitation.service';
 
 interface MemberRow {
@@ -46,12 +50,13 @@ function likePattern(text: string): string {
  */
 function membersQuery(orgId: string, filter: (cols: { handle: RawBuilder<string>; email: RawBuilder<string>; displayName: RawBuilder<string> }) => RawBuilder<unknown>): RawBuilder<MemberRow> {
   const invited = sql`m.status = 'invited'`;
-  const displayName = sql<string>`(case when ${invited} then u.email else u.display_name end)`;
+  const erased = sql`ep.pseudonym is not null`;
+  const displayName = sql<string>`(case when ${erased} then ep.pseudonym when ${invited} then u.email else u.display_name end)`;
   // Invited rows: the real handle is neither returned nor searched; `toUserViews` derives one from the email.
-  const handle = sql<string>`(case when ${invited} then null else u.handle end)`;
+  const handle = sql<string>`(case when ${erased} then ${shownHandle('u', 'ep')} when ${invited} then null else u.handle end)`;
   return sql<MemberRow>`
     select u.id, ${handle} as handle, u.email, ${displayName} as display_name,
-           case when ${invited} then null else u.job_title end as job_title,
+           case when ${invited} or ${erased} then null else u.job_title end as job_title,
            u.kind,
            case when ${invited} then 'invited' else u.status end as account_status,
            case when ${invited} then null else u.last_login_at end as last_login_at,
@@ -60,6 +65,7 @@ function membersQuery(orgId: string, filter: (cols: { handle: RawBuilder<string>
                    where f.user_id = u.id and f.confirmed_at is not null and f.deleted_at is null) as mfa_enrolled
     from platform.org_membership m
     join platform.app_user u on u.id = m.user_id
+    ${erasedJoin('ep', 'u.id')}
     where m.organization_id = ${orgId} and m.deleted_at is null and u.deleted_at is null and u.kind <> 'system'
       and ${filter({ handle: sql<string>`coalesce(${handle}, '')`, email: sql<string>`u.email`, displayName })}`;
 }

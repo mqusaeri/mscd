@@ -17,6 +17,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { CommandResult, DocumentedInfoItem, DocumentedInfoLink, DocumentedInfoState, FreshnessStatus } from '@mscd/shared';
 import { uiDocStatus } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
 import { NotFoundError, ProblemError } from '../../common/problems';
@@ -314,12 +315,13 @@ export class DocumentedInfoService {
   /** Live documents of the system: linked to it, or organisation-wide. */
   private async documentsOf(trx: Trx, system: MsRef): Promise<DocumentFacts[]> {
     const { rows } = await sql<DocumentFacts>`
-      select d.id, d.doc_code, d.title, d.status, d.next_review_at, d.owner_user_id, u.handle as owner_handle, d.pending_holder_user_id,
+      select d.id, d.doc_code, d.title, d.status, d.next_review_at, d.owner_user_id, ${shownHandle('u', 'ue')} as owner_handle, d.pending_holder_user_id,
              d.classification,
              (select array_agg(l2.management_system_id) from entity_ms_link l2
                where l2.entity_type = 'document' and l2.entity_id = d.id and l2.deleted_at is null) as ms_ids
         from document d
         left join platform.app_user u on u.id = d.owner_user_id
+        ${erasedJoin('ue', 'd.owner_user_id')}
        where d.deleted_at is null
          and (d.is_org_wide or exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = d.id
                                          and l.management_system_id = ${system.id} and l.deleted_at is null))

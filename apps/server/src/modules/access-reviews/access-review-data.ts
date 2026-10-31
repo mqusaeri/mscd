@@ -16,6 +16,7 @@ import type {
   AccessReviewStatus, AccessReviewSummary,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import { localDate } from '../../common/dates';
 import { NotFoundError } from '../../common/problems';
 import type { Trx } from '../../common/tokens';
@@ -152,10 +153,13 @@ export async function reviewRow(trx: Trx, id: string, options: { forUpdate?: boo
   const { rows } = await sql<ReviewRow>`
     select r.id, r.review_no, r.status, r.opened_on::text as opened_on, r.due_on::text as due_on, r.opened_by, r.completed_at, r.completed_by,
            r.cancel_reason, r.summary, r.report_object_id, r.updated_at,
-           ou.handle as opened_handle, ou.display_name as opened_name, cu.handle as completed_handle, cu.display_name as completed_name
+           ${shownHandle('ou', 'oe')} as opened_handle, ${shownName('ou', 'oe')} as opened_name, ${shownHandle('cu', 'ce')} as completed_handle,
+           ${shownName('cu', 'ce')} as completed_name
       from access_review r
       left join platform.app_user ou on ou.id = r.opened_by
+      ${erasedJoin('oe', 'r.opened_by')}
       left join platform.app_user cu on cu.id = r.completed_by
+      ${erasedJoin('ce', 'r.completed_by')}
      where r.id = ${id} and r.deleted_at is null
      ${lock}`.execute(trx);
   const row = rows[0];
@@ -168,10 +172,13 @@ export async function reviewRows(trx: Trx): Promise<ReviewRow[]> {
   const { rows } = await sql<ReviewRow>`
     select r.id, r.review_no, r.status, r.opened_on::text as opened_on, r.due_on::text as due_on, r.opened_by, r.completed_at, r.completed_by,
            r.cancel_reason, r.summary, r.report_object_id, r.updated_at,
-           ou.handle as opened_handle, ou.display_name as opened_name, cu.handle as completed_handle, cu.display_name as completed_name
+           ${shownHandle('ou', 'oe')} as opened_handle, ${shownName('ou', 'oe')} as opened_name, ${shownHandle('cu', 'ce')} as completed_handle,
+           ${shownName('cu', 'ce')} as completed_name
       from access_review r
       left join platform.app_user ou on ou.id = r.opened_by
+      ${erasedJoin('oe', 'r.opened_by')}
       left join platform.app_user cu on cu.id = r.completed_by
+      ${erasedJoin('ce', 'r.completed_by')}
      where r.deleted_at is null
      order by (r.status = 'open') desc, r.opened_on desc, r.created_at desc, r.id`.execute(trx);
   return rows;
@@ -180,12 +187,13 @@ export async function reviewRows(trx: Trx): Promise<ReviewRow[]> {
 const PART_SELECT = sql`
   select p.id, p.access_review_id, r.review_no, r.status as review_status, r.due_on::text as due_on, p.management_system_id,
          ms.slug as ms, ms.code as ms_code, p.status, p.signed_off_by, p.signed_off_at, p.evidence_id, e.evidence_code, p.evidence_filed_at,
-         su.handle as signed_handle, su.display_name as signed_name
+         ${shownHandle('su', 'se')} as signed_handle, ${shownName('su', 'se')} as signed_name
     from access_review_part p
     join access_review r on r.id = p.access_review_id
     left join management_system ms on ms.id = p.management_system_id
     left join evidence e on e.id = p.evidence_id
-    left join platform.app_user su on su.id = p.signed_off_by`;
+    left join platform.app_user su on su.id = p.signed_off_by
+    ${erasedJoin('se', 'p.signed_off_by')}`;
 
 /** The parts of reviews (the organisation part first, then the systems in their order). */
 export async function partRows(trx: Trx, filter: { reviewIds?: readonly string[]; msId?: string; partId?: string }, options: { forUpdate?: boolean } = {}): Promise<PartRow[]> {
@@ -209,21 +217,28 @@ const ITEM_SELECT = sql`
   select i.id, i.access_review_id, i.access_review_part_id, p.management_system_id as part_ms_id, ms.slug as ms, ms.code as ms_code,
          i.subject_user_id, i.item_kind, i.ref, i.role, i.granted_by, i.granted_at, i.valid_until::text as valid_until, i.last_sign_in_at,
          i.decision, i.decision_note, i.decided_by, i.decided_at, i.applied_at, i.applied_by, i.applied_action, i.not_applied_reason,
-         su.handle as subject_handle, su.email as subject_email, su.display_name as subject_name,
+         ${shownHandle('su', 'se')} as subject_handle, su.email as subject_email, ${shownName('su', 'se')} as subject_name,
          coalesce(m.status = 'invited', false) as subject_invited,
-         gu.handle as granted_handle, gu.display_name as granted_name, du.handle as decided_handle, du.display_name as decided_name,
-         au.handle as applied_handle, au.display_name as applied_name,
-         ru.handle as requested_handle, ru.display_name as requested_name, pu.handle as approved_handle, pu.display_name as approved_name
+         ${shownHandle('gu', 'ge')} as granted_handle, ${shownName('gu', 'ge')} as granted_name, ${shownHandle('du', 'de')} as decided_handle,
+         ${shownName('du', 'de')} as decided_name, ${shownHandle('au', 'ae')} as applied_handle, ${shownName('au', 'ae')} as applied_name,
+         ${shownHandle('ru', 're')} as requested_handle, ${shownName('ru', 're')} as requested_name, ${shownHandle('pu', 'pe')} as approved_handle,
+         ${shownName('pu', 'pe')} as approved_name
     from access_review_item i
     join access_review_part p on p.id = i.access_review_part_id
     left join management_system ms on ms.id = p.management_system_id
     join platform.app_user su on su.id = i.subject_user_id
+    ${erasedJoin('se', 'i.subject_user_id')}
     left join platform.org_membership m on m.user_id = i.subject_user_id and m.organization_id = i.organization_id and m.deleted_at is null
     left join platform.app_user gu on gu.id = i.granted_by
+    ${erasedJoin('ge', 'i.granted_by')}
     left join platform.app_user du on du.id = i.decided_by
+    ${erasedJoin('de', 'i.decided_by')}
     left join platform.app_user au on au.id = i.applied_by
+    ${erasedJoin('ae', 'i.applied_by')}
     left join platform.app_user ru on ru.id = (i.ref->>'requestedBy')::uuid
-    left join platform.app_user pu on pu.id = (i.ref->>'approvedBy')::uuid`;
+    ${erasedJoin('re', 'ru.id')}
+    left join platform.app_user pu on pu.id = (i.ref->>'approvedBy')::uuid
+    ${erasedJoin('pe', 'pu.id')}`;
 
 const ITEM_ORDER = sql`
   order by (p.management_system_id is null) desc, ms.position nulls first, ms.code,

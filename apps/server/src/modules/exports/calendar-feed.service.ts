@@ -23,6 +23,7 @@ import { FileResponder } from '../../common/file-response';
 import { NotFoundError } from '../../common/problems';
 import { AUDIT_WRITER, PERMISSION_EVALUATOR, type AuditWriter, type PermissionEvaluator, type Principal, type TenantInfo, type Trx } from '../../common/tokens';
 import { SecretBox } from '../keys/secret-box';
+import { erasedPeople } from '../privacy/pseudonym';
 import { ScreenReadService } from '../read-model-api/screen-read.service';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope, systemContextOf, tenantContextOf } from '../tenancy/tenant-scope';
@@ -170,7 +171,11 @@ export class CalendarFeedService {
     const page = await this.screens.documents(principal, system.slug, language, { page: 1, pageSize: 1_000_000 });
     const names = await this.scope.withTenant(systemContextOf(org), async (trx) => {
       const rows = await trx.selectFrom('platform.app_user').select(['handle', 'display_name']).where('handle', 'in', [...new Set(page.items.map((d) => d.owner).filter((h): h is string => !!h && h !== 'none')), '-']).execute();
-      return new Map(rows.map((r) => [r.handle, r.display_name]));
+      const shown = new Map(rows.map((r) => [r.handle, r.display_name]));
+      // A person erased in the organisation is the owner under the handle form of the pseudonym in the read model, and
+      // shows as the pseudonym (Milestone 3 D.6.5).
+      for (const person of await erasedPeople(trx)) shown.set(person.handle, person.displayName);
+      return shown;
     });
     const today = this.clock.todayIn(org.timeZone);
     const text = reviewCalendar({

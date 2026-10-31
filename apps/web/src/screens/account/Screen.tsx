@@ -2,7 +2,8 @@
 // (hidden for accounts that sign in only through a company provider), "Replace authenticator" (the `reenrol` mode of
 // the enrolment page in src/auth, which returns to the app), recovery codes left with "Get new recovery codes",
 // linked company sign-in identities with "Link", one "Revoke calendar feed" per readable system, and the preferences
-// language, theme and density, saved with `PUT /me/preferences` and applied at once.
+// language, theme and density, saved with `PUT /me/preferences` and applied at once. "My data" (M3-04, my-data.tsx)
+// downloads a copy of one's own data, corrects the name and job title, and asks the organisation about the data.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ApiResult } from '../../data/api/ApiClient';
 import { useMutation } from '../api';
@@ -12,10 +13,11 @@ import type { Column } from '../ui';
 import { adapterFor } from './adapter';
 import { CodesDialog, PasswordDialog } from './dialogs';
 import { appRoot, applyDisplay, currentDensity } from './display';
+import { MyDataCard } from './my-data';
 import {
   DENSITIES, DENSITY_TEXT, LANGUAGES, LANGUAGE_TEXT, THEMES, THEME_TEXT, linkable, methodText, preferencesOf, rememberSaved, savedFor,
 } from './model';
-import type { AccountAdapter, LinkedIdentity, Preferences, ProviderModel, Result, SecurityModel } from './model';
+import type { AccountAdapter, LinkedIdentity, Preferences, ProfileCorrection, ProviderModel, Result, SecurityModel } from './model';
 import { TEXT } from './text';
 
 /** Date of an instant in the interface language, through the controller's date helper when there is one. */
@@ -29,13 +31,16 @@ function dayOf(ctx: HostContext, instant: string | null): string {
  * Name, email and job title of the session user: API from `Me`; sample from the persona's person, with the email the
  * sample adapter gives (`AccountAdapter.personEmail`, kept in sample.ts so an API build holds no sample data).
  */
-export function profileOf(ctx: HostContext, personEmail: string | null = null): { name: string; email: string | null; jobTitle: string | null } {
-  if (ctx.me) return { name: ctx.me.user.displayName, email: ctx.me.user.email, jobTitle: ctx.me.user.jobTitle };
-  return { name: ctx.person.name, email: personEmail, jobTitle: ctx.person.jobTitle && ctx.person.jobTitle !== '-' ? ctx.person.jobTitle : null };
+export function profileOf(ctx: HostContext, personEmail: string | null = null, corrected: ProfileCorrection | null = null): { name: string; email: string | null; jobTitle: string | null } {
+  const base = ctx.me
+    ? { name: ctx.me.user.displayName, email: ctx.me.user.email, jobTitle: ctx.me.user.jobTitle }
+    : { name: ctx.person.name, email: personEmail, jobTitle: ctx.person.jobTitle && ctx.person.jobTitle !== '-' ? ctx.person.jobTitle : null };
+  // A correction saved on this page shows at once; `Me` is read again only at the next start.
+  return corrected ? { ...base, name: corrected.displayName, jobTitle: corrected.jobTitle } : base;
 }
 
-export function ProfileCard({ ctx, personEmail = null }: { ctx: HostContext; personEmail?: string | null }) {
-  const p = profileOf(ctx, personEmail);
+export function ProfileCard({ ctx, personEmail = null, corrected = null }: { ctx: HostContext; personEmail?: string | null; corrected?: ProfileCorrection | null }) {
+  const p = profileOf(ctx, personEmail, corrected);
   const method = methodText(ctx.me?.session.authMethod);
   return (
     <Card title={TEXT.profile} sub={TEXT.profileSub}>
@@ -248,6 +253,7 @@ export function AccountPage({ ctx }: { ctx: HostContext }) {
   const [personEmail, setPersonEmail] = useState<string | null>(null);
   const hasMe = Boolean(ctx.me);
   const personName = ctx.person.name;
+  const [corrected, setCorrected] = useState<ProfileCorrection | null>(null);
   useEffect(() => {
     if (hasMe) return undefined;
     let live = true;
@@ -273,10 +279,17 @@ export function AccountPage({ ctx }: { ctx: HostContext }) {
   }
   return (
     <>
-      <ProfileCard ctx={ctx} personEmail={personEmail} />
+      <ProfileCard ctx={ctx} personEmail={personEmail} corrected={corrected} />
       {securityBody}
       <CalendarCard ctx={ctx} adapter={adapter} />
       <PreferencesCard ctx={ctx} adapter={adapter} />
+      <MyDataCard
+        ctx={ctx}
+        adapter={adapter}
+        profile={profileOf(ctx, personEmail, corrected)}
+        handle={ctx.me?.user.handle ?? ctx.person.handle}
+        onCorrected={setCorrected}
+      />
     </>
   );
 }

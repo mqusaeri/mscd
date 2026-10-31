@@ -1,18 +1,26 @@
 // Sample adapter of the My account screen: the persona's email, a password, an authenticator set up in February and
 // eight recovery codes left, the organisation's Microsoft sign-in not linked yet. A changed password and new codes follow the server's
 // checks (12 characters, a 6-digit code) and stay for the browser session: after a change, the current password is the
-// new one; before it, any current password is taken.
-import type { AccountAdapter, Result, SecurityModel } from './model';
+// new one; before it, any current password is taken. My data (M3-04): the copy is a file made in the browser from the
+// profile shown, and the requests to the organisation stay in this browser session with the server's rule of one open
+// request per type.
+import type { AccountAdapter, MyRequest, Result, SecurityModel } from './model';
+import { myDataFileName } from './model';
 import { TEXT } from './text';
 
 let state: SecurityModel | null = null;
 /** The password set in this session; null until a change. */
 let password: string | null = null;
+/** The persona's requests of this session. */
+let mine: MyRequest[] = [];
+let numbers = 40;
 
 /** Forgets the changes of the session (unit tests). */
 export function resetSampleAccount(): void {
   state = null;
   password = null;
+  mine = [];
+  numbers = 40;
 }
 
 function security(): SecurityModel {
@@ -71,6 +79,37 @@ export function createSampleAdapter(): AccountAdapter {
     },
     async personEmail(name) {
       return sampleEmail(name);
+    },
+    async myRequests() {
+      return { ok: true, data: mine.map((r) => ({ ...r })) };
+    },
+    async askOrganisation(type) {
+      if (mine.some((r) => r.type === type && (r.status === 'received' || r.status === 'in_progress'))) {
+        return refuse(409, ['You already have an open request of this type. The organisation answers it first.', 'Anda sudah memiliki permintaan terbuka dengan jenis ini. Organisasi menjawabnya terlebih dahulu.'], { messageKey: 'privacy.open_request' });
+      }
+      numbers += 1;
+      const now = new Date();
+      const requestNo = `PR-${now.getUTCFullYear()}-${String(numbers).padStart(3, '0')}`;
+      mine = [{ id: `sample-request-${numbers}`, requestNo, type, status: 'received', receivedAt: now.toISOString(), dueAt: new Date(now.getTime() + 72 * 3_600_000).toISOString(), closedAt: null }, ...mine];
+      return { ok: true, data: { requestNo } };
+    },
+    async requestMyData(profile) {
+      const now = new Date();
+      const handle = profile.email ? profile.email.split('@')[0] : profile.name;
+      const text = JSON.stringify({
+        format: 'mscd-personal-data-v1',
+        generatedAt: now.toISOString(),
+        sample: true,
+        account: { displayName: profile.name, email: profile.email, jobTitle: profile.jobTitle },
+      }, null, 2);
+      return { ok: true, data: { file: { text, fileName: myDataFileName(handle, now.toISOString().slice(0, 10)) } } };
+    },
+    async myDataState() {
+      return { ok: true, data: { status: 'succeeded', downloadUrl: null } };
+    },
+    async correctProfile(correction) {
+      if (!correction.displayName.trim()) return refuse(400, TEXT.nameRequired, { errors: [{ path: 'body.displayName', message: TEXT.nameRequired[0] }] });
+      return { ok: true, data: null };
     },
   };
 }

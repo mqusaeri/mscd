@@ -15,6 +15,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { RecordRef } from '@mscd/shared';
 import { sql } from 'kysely';
+import { nameOfUser } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { addDays, fmtDay } from '../../common/dates';
 import { JobHandler, type JobHandlerInstance } from '../../common/jobs/job-handler';
@@ -299,7 +300,7 @@ export class TasksOverdueJob implements JobHandlerInstance<'tasks.overdue'> {
       select c.id, c.role_title, c.owner_user_id, c.valid_until::text as valid_until, c.pending_action, c.action_due_at::text as action_due_at,
              (select l.management_system_id from entity_ms_link l where l.entity_type = 'competence_record' and l.entity_id = c.id
                and l.deleted_at is null order by l.is_primary desc limit 1) as ms_id,
-             (select u.display_name from platform.app_user u where u.id = c.user_id) as person
+             ${nameOfUser('c.user_id')} as person
         from competence_record c
        where c.deleted_at is null and c.valid_until is not null and c.valid_until <= ${addDays(today, COMPETENCE_REMINDER_DAYS)}::date
        order by c.valid_until, c.id`.execute(trx);

@@ -1,4 +1,4 @@
-// Routes of the My account screen (MILESTONE-2 M2-16): `[method, path]` constants for `call()` of screens/api.ts and
+// Routes of the My account screen (MILESTONE-2 M2-16; My data, MILESTONE-3 M3-04): `[method, path]` constants for `call()` of screens/api.ts and
 // the shared route ids, which test/screens/account.test.tsx compares with the route table of @mscd/shared.
 import type { RouteRef } from '../api';
 
@@ -10,6 +10,11 @@ export const ROUTES = {
   providers: ['GET', '/api/v1/auth/providers'],
   identityLink: ['POST', '/api/v1/me/identities/:slug/link'],
   calendarRevoke: ['POST', '/api/v1/ms/:ms/calendar-feed/revoke'],
+  myRequests: ['GET', '/api/v1/me/privacy-requests'],
+  askOrganisation: ['POST', '/api/v1/me/privacy-requests'],
+  myDataExport: ['POST', '/api/v1/me/data-export'],
+  exportState: ['GET', '/api/v1/exports/:taskId'],
+  profile: ['PATCH', '/api/v1/me/profile'],
 } as const satisfies Record<string, RouteRef>;
 
 export const ROUTE_IDS: Record<keyof typeof ROUTES, string> = {
@@ -20,6 +25,11 @@ export const ROUTE_IDS: Record<keyof typeof ROUTES, string> = {
   providers: 'auth.providers',
   identityLink: 'me.identity.link',
   calendarRevoke: 'calendar-feed.revoke',
+  myRequests: 'me.privacy-requests.list',
+  askOrganisation: 'me.privacy-requests.create',
+  myDataExport: 'exports.me.create',
+  exportState: 'exports.get',
+  profile: 'me.profile',
 };
 
 /** The enrolment page in its `reenrol` mode (src/auth, M2-S11): replaces the authenticator and returns to the app. */

@@ -14,6 +14,7 @@ import type {
   AcknowledgementRole, AcknowledgementScope, CommandResult,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { localDate } from '../../common/dates';
 import { NotFoundError } from '../../common/problems';
@@ -384,13 +385,15 @@ export function orgOf(principal: Principal): TenantInfo {
   return principal.org;
 }
 
-/** The people of a request, by name. */
+/** The people of a request, by name (a person erased in this organisation by the pseudonym, Milestone 3 D.6.5). */
 export async function peopleOf(trx: Trx, requestId: string): Promise<PersonRow[]> {
   const { rows } = await sql<PersonRow>`
-    select a.id, a.user_id, u.handle, u.display_name, a.status, a.opened_at, a.confirmed_at, a.reminder_count, a.excused_reason
+    select a.id, a.user_id, ${shownHandle('u', 'e')} as handle, ${shownName('u', 'e')} as display_name, a.status, a.opened_at, a.confirmed_at,
+           a.reminder_count, a.excused_reason
       from acknowledgement a join platform.app_user u on u.id = a.user_id
+      ${erasedJoin('e', 'a.user_id')}
      where a.acknowledgement_request_id = ${requestId}::uuid and a.deleted_at is null
-     order by case a.status when 'pending' then 0 when 'confirmed' then 1 else 2 end, u.display_name, u.handle`.execute(trx);
+     order by case a.status when 'pending' then 0 when 'confirmed' then 1 else 2 end, ${shownName('u', 'e')}, ${shownHandle('u', 'e')}`.execute(trx);
   return rows;
 }
 

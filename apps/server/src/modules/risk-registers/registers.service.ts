@@ -29,6 +29,7 @@ import {
   type ShareableEntityType,
 } from '@mscd/shared';
 import { sql, type RawBuilder } from 'kysely';
+import { erasedJoin, handleOfUser, shownHandle, shownName } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { addDays } from '../../common/dates';
 import { assertIfMatch } from '../../common/etag';
@@ -214,7 +215,7 @@ function labelColumns(kind: RegisterKind): RawBuilder<unknown>[] {
     .filter((f) => f.type === 'person' || f.type === 'metric')
     .map((f) =>
       f.type === 'person'
-        ? sql`(select u.handle from platform.app_user u where u.id = ${sql.ref(`t.${f.column}`)}) as ${sql.ref(`${f.column}__label`)}`
+        ? sql`${handleOfUser(`t.${f.column}`)} as ${sql.ref(`${f.column}__label`)}`
         : sql`(select m.code from metric m where m.id = ${sql.ref(`t.${f.column}`)}) as ${sql.ref(`${f.column}__label`)}`,
     );
 }
@@ -255,10 +256,11 @@ export class RegistersService {
         : sql`t.management_system_id = ${system.id}`;
       const order = meta.positioned ? sql`t.position, t.code` : sql`t.created_at, t.id`;
       const { rows } = await sql<Row & { owner_handle: string | null; owner_name: string | null; links: { slug: string; primary: boolean }[] }>`
-        select t.*, o.handle as owner_handle, o.display_name as owner_name, ${links} as links
+        select t.*, ${shownHandle('o', 'oe')} as owner_handle, ${shownName('o', 'oe')} as owner_name, ${links} as links
                ${labels.length > 0 ? sql`, ${sql.join(labels)}` : sql``}
           from ${sql.table(table)} t
           left join platform.app_user o on o.id = t.owner_user_id
+          ${erasedJoin('oe', 't.owner_user_id')}
          where t.deleted_at is null and ${inSystem}
          order by ${order}`.execute(trx);
       // H.5: competence records of other people only for the full read scope (MS Manager, Programme Owner, Internal
@@ -797,7 +799,7 @@ export class RegistersService {
   /** Handle of a user id for audit entries (none for an unassigned column). */
   private async handleOf(trx: Trx, userId: string | null): Promise<string> {
     if (!userId) return 'none';
-    const { rows } = await sql<{ handle: string }>`select handle from platform.app_user where id = ${userId}`.execute(trx);
+    const { rows } = await sql<{ handle: string | null }>`select ${handleOfUser(sql`${userId}::uuid`)} as handle`.execute(trx);
     return rows[0]?.handle ?? 'none';
   }
 

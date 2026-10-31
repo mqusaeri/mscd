@@ -11,6 +11,13 @@
 //
 // A failure marks the task `failed` with the reason and is thrown again so the queue retries; a later attempt starts
 // from step 1. A task that already succeeded is left alone (idempotent).
+//
+// Milestone 3 (D.6.3, M3-04): a personal data export (`params.type` `personal_data`) is checked against its own rule
+// (the person themselves, or `privacy_request.manage` for an access request), built by `personalDataOf` in the
+// organisation's transaction as JSON, and recorded as `export_file` kind `personal_data` with the person
+// (`subject_user_id`) and the access request (`privacy_request_id`). It fails without a retry once the person is erased
+// in the organisation (D.6.5): before the build, and again in step 4 after the task row is locked, so an erasure that
+// runs meanwhile either sees the finished file (and withdraws it) or makes the build fail.
 import { Readable } from 'node:stream';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { PutResult } from '@mscd/shared';
@@ -21,8 +28,9 @@ import { GATEWAY_CLIENT, NOTIFICATION_WRITER, SYSTEM_USER_ID, type GatewayClient
 import { StorageGatewayContext } from '../storage/gateway-context';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
-import { ExportContentService, type ExportSpec, type Lang } from './export-content.service';
-import { exportDownloadUrl, exportTypeName, specOf } from './exports.service';
+import { ExportContentService, type ExportFile, type Lang } from './export-content.service';
+import { exportDownloadUrl, ExportsService, exportTypeName, isPersonalData, PERSONAL_DATA_CONTENT_TYPE, specOf, type StoredExportSpec } from './exports.service';
+import { ERASED_SUBJECT, erasedInOrganisation, personalDataFileName, personalDataOf } from './personal-data';
 
 /** Days an export file stays downloadable (E.2). */
 export const EXPORT_RETENTION_DAYS = 7;
@@ -45,7 +53,7 @@ function errorText(error: unknown): string {
 }
 
 interface Prepared {
-  spec: ExportSpec;
+  spec: StoredExportSpec;
   principal: Principal | null;
   language: Lang;
   msId: string | null;
@@ -61,6 +69,7 @@ export class ExportBuildJob implements JobHandlerInstance<'export.build'> {
     private readonly tenants: TenantResolver,
     private readonly clock: Clock,
     private readonly content: ExportContentService,
+    private readonly exports: ExportsService,
     private readonly storage: StorageGatewayContext,
     @Inject(GATEWAY_CLIENT) private readonly gateway: GatewayClient,
     @Inject(NOTIFICATION_WRITER) private readonly notifications: NotificationWriter,
@@ -81,10 +90,22 @@ export class ExportBuildJob implements JobHandlerInstance<'export.build'> {
     const prepared = await this.scope.withTenant(context, (trx) => this.prepare(trx, org, taskId));
     if (!prepared) return { taskId, status: 'skipped' };
     try {
-      if (!prepared.principal || !(await this.content.allowed(prepared.principal, prepared.spec))) {
+      const spec = prepared.spec;
+      const allowed = prepared.principal
+        ? isPersonalData(spec) ? await this.exports.personalDataAllowed(prepared.principal, spec) : await this.content.allowed(prepared.principal, spec)
+        : false;
+      if (!prepared.principal || !allowed) {
         throw new FinalExportError('The requester no longer holds the permission this export needs');
       }
-      const file = await this.content.build(prepared.principal, prepared.spec, prepared.language);
+      const file: ExportFile = isPersonalData(spec)
+        ? await this.scope.withTenant(context, async (trx) => {
+          if (await erasedInOrganisation(trx, spec.subjectUserId)) throw new FinalExportError(ERASED_SUBJECT);
+          const subject = await trx.selectFrom('platform.app_user').select('handle').where('id', '=', spec.subjectUserId).executeTakeFirst();
+          const data = await personalDataOf(trx, org, spec.subjectUserId, this.clock.now());
+          const body = Buffer.from(`${JSON.stringify(data, null, 2)}\n`, 'utf8');
+          return { body, fileName: personalDataFileName(subject?.handle ?? 'person', this.clock.todayIn(org.timeZone)), contentType: PERSONAL_DATA_CONTENT_TYPE, size: body.length };
+        })
+        : await this.content.build(prepared.principal, spec, prepared.language);
       await this.progress(org, taskId, 60, requestId);
       const stored = await this.store(org, taskId, file.fileName, Buffer.isBuffer(file.body) ? Readable.from([file.body]) : file.body, requestId);
       await this.scope.withTenant(context, (trx) => this.complete(trx, prepared, taskId, file.fileName, stored));
@@ -166,6 +187,12 @@ export class ExportBuildJob implements JobHandlerInstance<'export.build'> {
   private async complete(trx: Trx, prepared: Prepared, taskId: string, fileName: string, stored: { repositoryId: string; result: PutResult }): Promise<void> {
     const now = this.clock.now();
     const r = stored.result;
+    const personal = isPersonalData(prepared.spec) ? prepared.spec : null;
+    if (personal) {
+      // The erasure updates this task row too: whichever transaction locks it first goes first (see the top of the file).
+      await trx.selectFrom('background_task').select('id').where('id', '=', taskId).forUpdate().execute();
+      if (await erasedInOrganisation(trx, personal.subjectUserId)) throw new FinalExportError(ERASED_SUBJECT);
+    }
     const object = await trx
       .insertInto('storage_object')
       .values({
@@ -199,6 +226,8 @@ export class ExportBuildJob implements JobHandlerInstance<'export.build'> {
       .values({
         kind: prepared.spec.type,
         format: prepared.spec.format,
+        subject_user_id: personal?.subjectUserId ?? null,
+        privacy_request_id: personal?.privacyRequestId ?? null,
         management_system_id: prepared.msId,
         background_task_id: taskId,
         storage_object_id: object.id,

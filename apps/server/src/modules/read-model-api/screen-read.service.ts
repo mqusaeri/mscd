@@ -12,6 +12,7 @@ import {
   type Permission, type StageReadiness, type StageRecordsQuery, type SurveillanceEvent,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedPeople, handleOfUser } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { ForbiddenError, NotFoundError } from '../../common/problems';
 import { PERMISSION_EVALUATOR, type PermissionEvaluator, type Principal, type TenantInfo, type Trx } from '../../common/tokens';
@@ -213,7 +214,10 @@ export class ScreenReadService {
     });
   }
 
-  /** Active members of the organisation with display names and job titles. */
+  /**
+   * Active members of the organisation with display names and job titles, and the people erased in it under the handle
+   * form of their pseudonym (Milestone 3 D.6.5), which the loader puts in person columns.
+   */
   private async members(trx: Trx, orgId: string): Promise<Map<string, Person>> {
     const { rows } = await sql<{ handle: string; display_name: string; job_title: string | null }>`
       select u.handle, u.display_name, u.job_title
@@ -221,7 +225,9 @@ export class ScreenReadService {
       join platform.app_user u on u.id = m.user_id and u.deleted_at is null
       where m.organization_id = ${orgId}::uuid and m.deleted_at is null and m.status = 'active' and u.status = 'active'
       order by u.handle`.execute(trx);
-    return new Map(rows.map((r) => [r.handle, { name: r.display_name, jobTitle: r.job_title }]));
+    const people = new Map<string, Person>(rows.map((r) => [r.handle, { name: r.display_name, jobTitle: r.job_title }]));
+    for (const person of await erasedPeople(trx)) people.set(person.handle, { name: person.displayName, jobTitle: person.jobTitle });
+    return people;
   }
 
   /** Active business roles in the system by holder handle (pending aggregates). */
@@ -292,7 +298,7 @@ export class ScreenReadService {
     const { rows } = await sql<{
       id: string; updated_at: Date; title: string; owner: string | null; due_at: string; status: PrepDetail['status']; violates_br43: boolean;
     }>`
-      select p.id, p.updated_at, p.title, (select u.handle from platform.app_user u where u.id = p.owner_user_id) as owner,
+      select p.id, p.updated_at, p.title, ${handleOfUser('p.owner_user_id')} as owner,
              p.due_at, p.status, p.violates_br43
       from audit_prep_task p
       where p.audit_event_id = ${eventId}::uuid and p.deleted_at is null
@@ -306,7 +312,7 @@ export class ScreenReadService {
       status: FindingDetail['status']; status_note: string | null; source: string; audit_event_id: string | null; owner: string | null;
     }>`
       select f.id, f.updated_at, f.code, f.classification, f.clause_ref, f.title, f.status, f.status_note, f.source, f.audit_event_id,
-             (select u.handle from platform.app_user u where u.id = f.owner_user_id) as owner
+             ${handleOfUser('f.owner_user_id')} as owner
       from finding f
       where f.management_system_id = ${msId}::uuid and f.deleted_at is null
       order by f.position, f.code`.execute(trx);

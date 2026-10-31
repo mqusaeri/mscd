@@ -1,0 +1,13 @@
+{
+  "id": "privacy-requests",
+  "label": ["Personal data requests", "Permintaan data pribadi"],
+  "group": "admin",
+  "order": 44,
+  "scope": "org",
+  "perm": "privacy_request.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [["Record request", "Catat permintaan"]],
+  "sampleRole": "manager",
+  "open": "nav"
+}

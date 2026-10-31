@@ -1,5 +1,8 @@
 // Record tables of the routes of M3-04: requests from one person (docs/platform/MILESTONE-3.md D.1, F).
-// Owned by M3-04; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs.
+// Owned by M3-04; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs and kept by M3-04: the
+// checks of a system are the record table of the `{ms}` routes, a request is read by its id in the organisation, and
+// the lists name no record id (the register of the organisation, the checks of the path system, the caller's own
+// requests).
 import type { RecordTables } from '../record-tables';
 
 export const RECORD_TABLES: RecordTables = {

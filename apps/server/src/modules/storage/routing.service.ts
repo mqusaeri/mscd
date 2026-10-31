@@ -14,6 +14,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Classification, CommandResult, Messages, ObjectKind, RoutingRulePatch, RoutingRuleRequest, RoutingRuleView, StorageMode } from '@mscd/shared';
 import { sql, type Selectable } from 'kysely';
+import { handleOfUser } from '../privacy/pseudonym';
 import { MscdConfig } from '../../config/mscd-config';
 import { ConfirmationRequiredError, ConflictError, ForbiddenError, NotFoundError, ProblemError } from '../../common/problems';
 import { AUDIT_WRITER, type AuditWriter, type Principal, type Trx } from '../../common/tokens';
@@ -128,8 +129,6 @@ export class RoutingService {
         .selectFrom('storage_routing_rule as r')
         .innerJoin('storage_repository as repo', 'repo.id', 'r.storage_repository_id')
         .leftJoin('management_system as ms', 'ms.id', 'r.management_system_id')
-        .leftJoin('platform.app_user as req', 'req.id', 'r.requested_by')
-        .leftJoin('platform.app_user as app', 'app.id', 'r.approved_by')
         .select([
           'r.id',
           'ms.slug as ms',
@@ -140,8 +139,8 @@ export class RoutingService {
           'r.priority',
           'r.note',
           'r.approval_status',
-          'req.handle as requestedBy',
-          'app.handle as approvedBy',
+          handleOfUser('r.requested_by').as('requestedBy'),
+          handleOfUser('r.approved_by').as('approvedBy'),
           'r.created_at',
         ])
         .where('r.deleted_at', 'is', null)

@@ -1,0 +1,13 @@
+{
+  "id": "privacy-checks",
+  "label": ["Personal data checks", "Pemeriksaan data pribadi"],
+  "group": "tasks",
+  "order": 30,
+  "scope": "ms",
+  "perm": "privacy_request.assist",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

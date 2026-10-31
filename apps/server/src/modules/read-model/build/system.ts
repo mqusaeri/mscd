@@ -15,7 +15,7 @@ import { derivePhases } from '../derive/phases';
 import { RefCollector, recordRef } from '../derive/refs';
 import { deriveRequirement, entryKey, requirementId } from '../derive/requirements';
 import { NONE, type PeopleNames } from '../derive/text';
-import { documentOriginFields, type LoadedChainRecord, type SystemCore, type SystemData } from '../load/loader';
+import { documentAcknowledgementField, documentOriginFields, type LoadedChainRecord, type SystemCore, type SystemData } from '../load/loader';
 
 export interface BuildContext {
   today: string;
@@ -140,6 +140,7 @@ export function buildSystemSnapshot(system: SystemData, ctx: BuildContext): UiMs
     return {
       ...deriveDocument(d, { ms, msId: system.id, today: ctx.today, docTypeLabels: system.docTypes, systemCodes: ctx.systemCodes }),
       ...documentOriginFields(d),
+      ...documentAcknowledgementField(d),
       pendingHolder: d.pendingHolder,
       pendingDueAt: d.pendingDueAt,
     };

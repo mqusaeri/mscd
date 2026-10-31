@@ -1,11 +1,11 @@
 // API adapter of the My account screen through the host's client (R-17). The password change and the identity link
 // answer 401 for a wrong password or a missing recent proof; those requests do not tell the session listeners, so the
 // app stays signed in and the form shows the message.
-import type { AuthProviders, CommandResult, IdentityLinkStart, MeSecurity, RecoveryCodesResponse } from '@mscd/shared';
+import type { AuthProviders, BackgroundTask, CommandResult, IdentityLinkStart, MeSecurity, MyPrivacyRequestItem, RecoveryCodesResponse } from '@mscd/shared';
 import type { ApiClient, ApiResult } from '../../data/api/ApiClient';
-import { NO_CLIENT, call } from '../api';
+import { NO_CLIENT, call, newIdempotencyKey } from '../api';
 import type { RouteRef } from '../api';
-import type { AccountAdapter, ProviderModel, Result, SecurityModel } from './model';
+import type { AccountAdapter, MyDataState, MyRequest, ProviderModel, Result, SecurityModel } from './model';
 import { REENROL_PATH, ROUTES } from './routes';
 
 /** A request whose 401 belongs to the form (wrong password, proof needed), not to the session. */
@@ -71,6 +71,31 @@ export function createApiAdapter(client: ApiClient | null, navigate: Navigate = 
     },
     async personEmail() {
       return null;
+    },
+    async myRequests() {
+      const res = await call<MyPrivacyRequestItem[]>(client, ROUTES.myRequests);
+      return res.ok ? { ok: true, data: res.data.map((r): MyRequest => ({ ...r })) } : fail(res);
+    },
+    async askOrganisation(type, note) {
+      const res = await call<CommandResult>(client, ROUTES.askOrganisation, { body: { type, ...(note ? { note } : {}) }, idempotencyKey: newIdempotencyKey() });
+      if (!res.ok) return fail(res);
+      const data = (res.data.data ?? {}) as { requestNo?: string };
+      return { ok: true, data: { requestNo: data.requestNo ?? res.data.ref?.code ?? '' } };
+    },
+    async requestMyData() {
+      const res = await call<CommandResult>(client, ROUTES.myDataExport, { idempotencyKey: newIdempotencyKey() });
+      if (!res.ok) return fail(res);
+      return res.data.taskId ? { ok: true, data: { taskId: res.data.taskId } } : { ok: false, error: { status: 500, message: ['The export did not start.', 'Ekspor tidak dimulai.'] } };
+    },
+    async myDataState(taskId) {
+      const res = await call<BackgroundTask>(client, ROUTES.exportState, { params: { taskId } });
+      if (!res.ok) return fail(res);
+      const state: MyDataState = { status: res.data.status as MyDataState['status'], downloadUrl: res.data.downloadUrl ?? null };
+      return { ok: true, data: state };
+    },
+    async correctProfile(correction) {
+      const res = await call(client, ROUTES.profile, { body: { displayName: correction.displayName, jobTitle: correction.jobTitle } });
+      return res.ok ? { ok: true, data: null } : fail(res);
     },
   };
 }

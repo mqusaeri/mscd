@@ -1,6 +1,8 @@
 // The view model of the My account screen (MILESTONE-2 M2-16) and the interface both adapters implement (api.ts in
 // API builds, sample.ts in the sample build): the security overview of `GET /me/security`, the company sign-in
-// providers that can be linked, password change, new recovery codes, preferences, identity linking and calendar feeds.
+// providers that can be linked, password change, new recovery codes, preferences, identity linking and calendar feeds,
+// and My data (MILESTONE-3 M3-04, D.6.6): the copy of one's own data, the correction of name and job title, and the
+// requests to the organisation.
 import type { ApiError } from '../../data/api/ApiClient';
 import type { TextPair } from '../types';
 import { TEXT } from './text';
@@ -40,6 +42,38 @@ export interface Preferences {
   density: (typeof DENSITIES)[number];
 }
 
+/** What the person can ask the organisation for in My account (a copy is downloaded without a request). */
+export const ASK_TYPES = ['rectification', 'restriction', 'erasure'] as const;
+export type AskType = (typeof ASK_TYPES)[number];
+export type MyRequestType = AskType | 'access';
+export type MyRequestStatus = 'received' | 'in_progress' | 'completed' | 'refused' | 'withdrawn';
+
+/** One of the person's own requests (`GET /me/privacy-requests`). */
+export interface MyRequest {
+  id: string;
+  requestNo: string;
+  type: MyRequestType;
+  status: MyRequestStatus;
+  receivedAt: string;
+  dueAt: string;
+  closedAt: string | null;
+}
+
+/** "Download my data": a queued export (API) or a file made in the browser (the sample build). */
+export type MyDataTicket = { taskId: string } | { file: { text: string; fileName: string } };
+
+/** The state of the queued export of one's own data. */
+export interface MyDataState {
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  downloadUrl: string | null;
+}
+
+/** The profile a correction saves. */
+export interface ProfileCorrection {
+  displayName: string;
+  jobTitle: string | null;
+}
+
 export interface AccountAdapter {
   security(): Promise<Result<SecurityModel>>;
   /** The organisation's company sign-in providers; empty when none (or when they cannot be read). */
@@ -56,6 +90,31 @@ export interface AccountAdapter {
   replaceAuthenticator(): Result<null>;
   /** The email of a session person without `Me` (a persona of the sample build); null in API builds, where `Me` has it. */
   personEmail(name: string): Promise<string | null>;
+  /** The person's own requests in the current organisation. */
+  myRequests(): Promise<Result<MyRequest[]>>;
+  /** Asks the organisation for a correction, a stop to the use or an erasure; the number of the new request. */
+  askOrganisation(type: AskType, note: string | null): Promise<Result<{ requestNo: string }>>;
+  /** Queues the export of one's own data (API), or makes the file in the browser from `profile` (sample). */
+  requestMyData(profile: { name: string; email: string | null; jobTitle: string | null }): Promise<Result<MyDataTicket>>;
+  /** The state of a queued export of one's own data. */
+  myDataState(taskId: string): Promise<Result<MyDataState>>;
+  /** Corrects one's own display name and job title. */
+  correctProfile(correction: ProfileCorrection): Promise<Result<null>>;
+}
+
+export const ASK_TEXT: Readonly<Record<AskType, TextPair>> = {
+  rectification: TEXT.askRectification, restriction: TEXT.askRestriction, erasure: TEXT.askErasure,
+};
+export const MY_TYPE_TEXT: Readonly<Record<MyRequestType, TextPair>> = {
+  access: TEXT.typeAccess, rectification: TEXT.typeRectification, restriction: TEXT.typeRestriction, erasure: TEXT.typeErasure,
+};
+export const MY_STATUS_TEXT: Readonly<Record<MyRequestStatus, TextPair>> = {
+  received: TEXT.statusReceived, in_progress: TEXT.statusInProgress, completed: TEXT.statusCompleted, refused: TEXT.statusRefused, withdrawn: TEXT.statusWithdrawn,
+};
+
+/** The file name of a copy of one's own data (`personal-data-bagus-2026-10-31.json`). */
+export function myDataFileName(handle: string, today: string): string {
+  return `personal-data-${handle.replace(/[^a-z0-9._-]+/gi, '-').toLowerCase()}-${today}.json`;
 }
 
 export const LANGUAGE_TEXT: Readonly<Record<Preferences['language'], TextPair>> = { en: TEXT.langEn, id: TEXT.langId };

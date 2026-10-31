@@ -118,3 +118,60 @@ test.describe('My account @sample-only', () => {
     });
   }
 });
+
+// My data (MILESTONE-3 M3-04, D.6.6) of the sample build: the copy made in the browser, the correction of name and job
+// title, and the requests to the organisation with the rule of one open request per type.
+test.describe('My data of My account @sample-only', () => {
+  const card = (page) => page.locator('main section.mx-card').filter({ has: page.locator('h2', { hasText: /^My data$/ }) });
+
+  test('downloads a copy, corrects the name and asks the organisation', async ({ page }) => {
+    await openScreen(page, meta);
+    await expect(card(page)).toContainText('You have not asked the organisation about your data.');
+    const download = page.waitForEvent('download');
+    await card(page).locator('button', { hasText: 'Download my data' }).click();
+    expect((await download).suggestedFilename()).toMatch(/^personal-data-rina\.kusuma-\d{4}-\d{2}-\d{2}\.json$/);
+    await expectToast(page, 'Your data is downloaded');
+
+    await card(page).locator('button', { hasText: 'Correct my name and job title' }).click();
+    await expect(dialog(page)).toContainText('Correct your name and job title');
+    await dialog(page).locator('input').first().fill('');
+    await dialog(page).locator('button', { hasText: 'Save correction' }).click();
+    await expect(dialog(page)).toContainText('Enter your name.');
+    await expectOverlayReadable(page);
+    await dialog(page).locator('input').first().fill('Rina K. Kusuma');
+    await dialog(page).locator('button', { hasText: 'Save correction' }).click();
+    await expectToast(page, 'Your name and job title are saved');
+    await expect(page.locator('main section.mx-card').first()).toContainText('Rina K. Kusuma');
+
+    await card(page).locator('button', { hasText: 'Ask the organisation' }).click();
+    await expect(dialog(page)).toContainText('A Tenant Admin answers by the deadline your organisation set.');
+    await dialog(page).locator('label', { hasText: 'Erase my data in this organisation' }).click();
+    await dialog(page).locator('textarea').fill('I am leaving the company at the end of the month');
+    await expectOverlayReadable(page);
+    await dialog(page).locator('button', { hasText: 'Send request' }).click();
+    await expectToast(page, /Request PR-\d{4}-041 sent/);
+    await expect(card(page).locator('table tbody tr')).toHaveCount(1);
+    await expect(card(page)).toContainText('Erasure');
+    await expect(card(page)).toContainText('Received');
+    await card(page).locator('button', { hasText: 'Ask the organisation' }).click();
+    await dialog(page).locator('label', { hasText: 'Erase my data in this organisation' }).click();
+    await dialog(page).locator('button', { hasText: 'Send request' }).click();
+    await expect(dialog(page).locator('[role="alert"]')).toContainText('You already have an open request of this type.');
+    await expectNoHorizontalOverflow(page);
+  });
+
+  for (const theme of ['light', 'dark']) {
+    test(`the My data forms are readable in Indonesian, ${theme} theme`, async ({ page }) => {
+      await openScreen(page, meta, `lang=id&theme=${theme}`);
+      const id = page.locator('main section.mx-card').filter({ has: page.locator('h2', { hasText: /^Data saya$/ }) });
+      await expect(id).toContainText('Permintaan saya');
+      await id.locator('button', { hasText: 'Koreksi nama dan jabatan saya' }).click();
+      await expect(dialog(page)).toContainText('Koreksi nama dan jabatan Anda');
+      await expectOverlayReadable(page);
+      await page.keyboard.press('Escape');
+      await id.locator('button', { hasText: 'Minta kepada organisasi' }).click();
+      await expect(dialog(page)).toContainText('Yang Anda minta');
+      await expectOverlayReadable(page);
+    });
+  }
+});

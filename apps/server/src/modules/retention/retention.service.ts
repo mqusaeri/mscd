@@ -22,6 +22,7 @@ import type {
   RetentionReviewItem, RetentionReviewListQuery, RetentionRuleItem, RetentionRulePut,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { ConflictError, NotFoundError, ProblemError, BusinessRuleError, ValidationError } from '../../common/problems';
 import { toSafeCsv } from '../../common/spreadsheet-safe';
@@ -483,10 +484,13 @@ export class RetentionService {
       const system = await this.records.resolveMs(trx, ms);
       const { rows } = await sql<HoldRow>`
         select h.id, h.record_class, h.item_id, h.reason, h.set_by, h.set_at, h.released_by, h.released_at, h.release_reason,
-               su.handle as set_handle, su.display_name as set_name, ru.handle as released_handle, ru.display_name as released_name
+               ${shownHandle('su', 'se')} as set_handle, ${shownName('su', 'se')} as set_name, ${shownHandle('ru', 're')} as released_handle,
+               ${shownName('ru', 're')} as released_name
           from retention_hold h
           left join platform.app_user su on su.id = h.set_by
+          ${erasedJoin('se', 'h.set_by')}
           left join platform.app_user ru on ru.id = h.released_by
+          ${erasedJoin('re', 'h.released_by')}
          where h.management_system_id = ${system.id} and h.deleted_at is null
          order by (h.released_at is null) desc, coalesce(h.released_at, h.set_at) desc, h.id`.execute(trx);
       const codes = new Map<string, string>();
@@ -694,7 +698,8 @@ export class RetentionService {
     const held = sql<boolean>`exists (select 1 from retention_hold h where h.record_class = r.record_class and h.item_id = r.item_id
                                         and h.released_at is null and h.deleted_at is null)`;
     const { rows } = await sql<ReviewRow>`
-      select r.*, du.handle as decided_handle, du.display_name as decided_name, au.handle as approved_handle, au.display_name as approved_name,
+      select r.*, ${shownHandle('du', 'de')} as decided_handle, ${shownName('du', 'de')} as decided_name, ${shownHandle('au', 'ae')} as approved_handle,
+             ${shownName('au', 'ae')} as approved_name,
              ${held} as on_hold,
              ${this.docTypeOfReview()} as doc_type,
              ${filter.order === 'decided'
@@ -707,7 +712,9 @@ export class RetentionService {
              count(*) over () as total
         from retention_review r
         left join platform.app_user du on du.id = r.decided_by
+        ${erasedJoin('de', 'r.decided_by')}
         left join platform.app_user au on au.id = r.approved_by
+        ${erasedJoin('ae', 'r.approved_by')}
        where r.management_system_id = ${msId} and r.deleted_at is null
          ${filter.status ? sql`and r.status = any(${[...filter.status]}::text[])` : sql``}
          ${filter.recordClass ? sql`and r.record_class = ${filter.recordClass}` : sql``}

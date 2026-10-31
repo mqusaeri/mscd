@@ -13,6 +13,7 @@ import type {
   CommandResult, ManagementReviewCreate, ManagementReviewInputRequest, ManagementReviewItem, ManagementReviewPatch, ManagementReviewTransition,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, handleOfUser, shownHandle } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { assertIfMatch } from '../../common/etag';
 import { JOB_QUEUE, type JobQueue } from '../../common/jobs/job-queue';
@@ -80,12 +81,13 @@ export class ManagementReviewsService {
       const system = await this.records.resolveMs(trx, ms);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
       const { rows } = await sql<ReviewRow & { owner_handle: string | null; linked: string[] }>`
-        select r.*, o.handle as owner_handle,
+        select r.*, ${shownHandle('o', 'oe')} as owner_handle,
                (select array_agg(m.slug order by l2.is_primary desc, m.slug) from entity_ms_link l2
                   join management_system m on m.id = l2.management_system_id and m.deleted_at is null
                  where l2.entity_type = 'management_review' and l2.entity_id = r.id and l2.deleted_at is null) as linked
           from management_review r
           left join platform.app_user o on o.id = r.owner_user_id
+          ${erasedJoin('oe', 'r.owner_user_id')}
          where r.deleted_at is null
            and exists (select 1 from entity_ms_link l where l.entity_type = 'management_review' and l.entity_id = r.id
                          and l.management_system_id = ${system.id} and l.deleted_at is null)
@@ -361,7 +363,7 @@ export class ManagementReviewEditService {
         const owner = await this.members.resolveHandle(trx, patch.ownerHandle);
         if (owner !== row.owner_user_id) {
           set.owner_user_id = owner;
-          before.owner = (await sql<{ handle: string }>`select handle from platform.app_user where id = ${row.owner_user_id}`.execute(trx)).rows[0]?.handle ?? 'none';
+          before.owner = (await sql<{ handle: string | null }>`select ${handleOfUser(sql`${row.owner_user_id}::uuid`)} as handle`.execute(trx)).rows[0]?.handle ?? 'none';
           after.owner = patch.ownerHandle;
         }
       }

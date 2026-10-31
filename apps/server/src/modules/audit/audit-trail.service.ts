@@ -4,7 +4,8 @@
 // whole organisation also lists the organisation's rows of `platform.audit_log` (sign-ins, users, licences).
 // Rows of another organisation are never visible: tenant rows live in the organisation's schema and both tables
 // carry RLS on `app.org_id`. Milestone 3 (D.2, D.5.4, M3-03): every entry says whether an attested redaction removed
-// its personal values (`redacted`, `redactedAt`), and the CSV export carries both as columns.
+// its personal values (`redacted`, `redactedAt`), and the CSV export carries both as columns. Milestone 3 (D.6.5,
+// M3-04): an actor erased in this organisation (`erased_person`) is named by the pseudonym in the list and the export.
 import { Readable } from 'node:stream';
 import { Injectable } from '@nestjs/common';
 import type { AuditEntry, AuditEntryMeta, AuditTrailQuery } from '@mscd/shared';
@@ -13,6 +14,7 @@ import { addDays, startOfLocalDay } from '../../common/dates';
 import { NotFoundError } from '../../common/problems';
 import { createSafeCsvStream } from '../../common/spreadsheet-safe';
 import type { Principal, TenantInfo, Trx } from '../../common/tokens';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import { TenantScope, tenantContextOf, type TenantContext } from '../tenancy/tenant-scope';
 import { PLATFORM_CHAIN, tenantChainName } from './chain-verifier';
 import { signedAnchorOf, type AnchorRow, type SignedAnchor } from './anchors';
@@ -65,6 +67,14 @@ export const AUDIT_CSV_COLUMNS = [
 
 const EXPORT_BATCH = 1000;
 
+/**
+ * The actor's handle and display name, or for an actor erased in this organisation (D.6.5) the handle form of the
+ * pseudonym (`former-user-7f3a`) and the pseudonym ("Former user 7F3A").
+ */
+const ACTOR_HANDLE = shownHandle('u', 'ep');
+const ACTOR_NAME = shownName('u', 'ep');
+const ACTOR_ERASED = erasedJoin('ep', 'e.actor_user_id');
+
 @Injectable()
 export class AuditTrailService {
   constructor(private readonly scope: TenantScope) {}
@@ -93,9 +103,10 @@ export class AuditTrailService {
       const totalRow = await sql<{ total: string }>`select count(*) as total from (${entries}) e`.execute(trx);
       const offset = (query.page - 1) * query.pageSize;
       const { rows } = await sql<EntryRow>`
-        select e.*, u.handle, u.display_name, ms.slug as ms_slug
+        select e.*, ${ACTOR_HANDLE} as handle, ${ACTOR_NAME} as display_name, ms.slug as ms_slug
         from (${entries}) e
         left join platform.app_user u on u.id = e.actor_user_id
+        ${ACTOR_ERASED}
         left join management_system ms on ms.id = e.management_system_id
         order by e.occurred_at desc, e.seq desc, e.chain
         limit ${query.pageSize} offset ${offset}`.execute(trx);
@@ -129,9 +140,10 @@ export class AuditTrailService {
       const batch = await this.scope.withTenant(context, async (trx) => {
         const entries = this.entriesSql({ msId, includePlatform: false, afterSeq }, org);
         const result = await sql<EntryRow>`
-          select e.*, u.handle, u.display_name, ms.slug as ms_slug
+          select e.*, ${ACTOR_HANDLE} as handle, ${ACTOR_NAME} as display_name, ms.slug as ms_slug
           from (${entries}) e
           left join platform.app_user u on u.id = e.actor_user_id
+          ${ACTOR_ERASED}
           left join management_system ms on ms.id = e.management_system_id
           order by e.seq asc limit ${EXPORT_BATCH}`.execute(trx);
         return result.rows;

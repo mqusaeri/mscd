@@ -5,6 +5,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CommandResult, Page, RaiseFindingRequest, SelfAssessmentItem, SelfAssessmentListQuery, SelfAssessmentUpdate } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, handleOfUser, shownHandle, shownName } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { ConflictError, NotFoundError } from '../../common/problems';
 import {
@@ -184,7 +185,7 @@ export class SelfAssessmentsService {
         throw unprocessable('audit.raise_needs_gap', 'A finding is raised from a gap only', 'Temuan hanya dapat diajukan dari kesenjangan');
       }
       const code = await this.nextFindingCode(trx, record.ms.id, todayOf(this.clock, orgOf(principal)).slice(0, 4));
-      const owner = row.owner_user_id ? ((await sql<{ handle: string }>`select handle from platform.app_user where id = ${row.owner_user_id}`.execute(trx)).rows[0]?.handle ?? 'none') : 'none';
+      const owner = row.owner_user_id ? ((await sql<{ handle: string | null }>`select ${handleOfUser(sql`${row.owner_user_id}::uuid`)} as handle`.execute(trx)).rows[0]?.handle ?? 'none') : 'none';
       const finding = await this.findings.insert(
         trx,
         principal,
@@ -213,7 +214,7 @@ export class SelfAssessmentsService {
     const edition = await editionOf(trx, msId);
     const { rows } = await sql<ConditionRow>`
       select c.id as condition_id, c.code, c.classification, c.requirement_code, c.text,
-             s.id, s.updated_at, s.status, s.owner_user_id, o.handle as owner_handle, o.display_name as owner_name, s.target_fix_at, s.note, s.assessed_at,
+             s.id, s.updated_at, s.status, s.owner_user_id, ${shownHandle('o', 'oe')} as owner_handle, ${shownName('o', 'oe')} as owner_name, s.target_fix_at, s.note, s.assessed_at,
              f.code as finding_code,
              (select array_agg(e.evidence_code order by e.evidence_code)
                 from self_assessment_evidence se join evidence e on e.id = se.evidence_id and e.deleted_at is null
@@ -221,6 +222,7 @@ export class SelfAssessmentsService {
         from ref.finding_condition c
         left join self_assessment s on s.finding_condition_id = c.id and s.management_system_id = ${msId} and s.deleted_at is null
         left join platform.app_user o on o.id = s.owner_user_id
+        ${erasedJoin('oe', 's.owner_user_id')}
         left join finding f on f.id = s.finding_id and f.deleted_at is null
        where c.framework_version_id = ${edition} and (${code}::text is null or c.code = ${code})
        order by c.code`.execute(trx);

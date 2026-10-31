@@ -9,7 +9,7 @@ import type { ApiClient, ApiResult } from '../../data/api/ApiClient';
 import type { ControllerData } from '../../data/types';
 import { call, newIdempotencyKey } from '../api';
 import type { AcknowledgementsAdapter, Outcome, PersonRow, RequestDetail, RequestRow, Result } from './model';
-import { recordSettings, refusal, settingsBody } from './model';
+import { DEFAULT_SETTINGS, recordSettings, refusal, settingsBody } from './model';
 import { ROUTES, pathOf } from './routes';
 import { TEXT } from './text';
 
@@ -143,7 +143,9 @@ export function createApiAdapter(client: ApiClient | null, getD: () => Controlle
 
     settingsOf(ms, code, record) {
       const key = savedKey(ms, code);
-      return recordSettings(record) ?? (key ? saved.get(key) : undefined) ?? null;
+      // The snapshot carries the `acknowledgement` member of a document whose settings differ from the defaults (M3-04),
+      // so a document record without it has the default settings.
+      return recordSettings(record) ?? (key ? saved.get(key) : undefined) ?? (record ? { ...DEFAULT_SETTINGS } : null);
     },
 
     documentId: (ms, code) => ref(`${ms}:doc:${code}`)?.id ?? null,

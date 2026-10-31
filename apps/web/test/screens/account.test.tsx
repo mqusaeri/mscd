@@ -1,7 +1,8 @@
 // My account (MILESTONE-2 M2-16): routes against the shared table, the API adapter over a fake fetch (a 401 of the
 // password change or the identity link stays in the form and never ends the session), the preferences applied at
 // once through the controller's own header controls, the page parts in both languages and themes, the top bar entry
-// and the sample adapter.
+// and the sample adapter. My data (MILESTONE-3 M3-04, D.6.6): the copy of one's own data, the correction of name and
+// job title, and the requests to the organisation, through both adapters and in both languages and themes.
 import { readFileSync } from 'node:fs';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
@@ -13,7 +14,8 @@ import { createApiAdapter, fromSecurity } from '../../src/screens/account/api';
 import { adapterFor, deferredAdapter } from '../../src/screens/account/adapter';
 import { applyDisplay, currentDensity } from '../../src/screens/account/display';
 import type { ButtonLike, RootLike } from '../../src/screens/account/display';
-import { codesFile, linkable, methodText, passwordErrors, preferencesOf, rememberSaved, resetSaved, savedFor } from '../../src/screens/account/model';
+import { ASK_TEXT, MY_STATUS_TEXT, MY_TYPE_TEXT, codesFile, linkable, methodText, myDataFileName, passwordErrors, preferencesOf, rememberSaved, resetSaved, savedFor } from '../../src/screens/account/model';
+import { AskDialog, CorrectDialog, MyDataCard, MyRequestsTable } from '../../src/screens/account/my-data';
 import { createSampleAdapter, resetSampleAccount, sampleEmail } from '../../src/screens/account/sample';
 import { CalendarCard, IdentitiesCard, PreferencesCard, ProfileCard, SecurityCard, profileOf } from '../../src/screens/account/Screen';
 import { CodesList, PasswordDialog } from '../../src/screens/account/dialogs';
@@ -74,7 +76,7 @@ describe('My account routes and definition', () => {
   });
 
   it('every text has both languages, Indonesian that differs, and no em dash or centre dot', () => {
-    expect(textProblems(TEXT, ['email'])).toEqual([]);
+    expect(textProblems(TEXT, ['email', 'colStatus'])).toEqual([]);
   });
 });
 
@@ -331,4 +333,98 @@ describe('My account sample adapter', () => {
     expect((await adapter.security()).ok).toBe(true);
     expect(await adapter.providers(null)).toEqual([{ slug: 'entra', kind: 'oidc', label: 'Sign in with Microsoft' }]);
   });
+});
+
+describe('My data (M3-04)', () => {
+  const REQUEST = { id: '6b7c8d9e-0f1a-4b2c-8d3e-4f5a6b7c8d9e', requestNo: 'PR-2026-004', type: 'rectification', status: 'received', receivedAt: '2026-10-30T09:00:00Z', dueAt: '2026-11-02T09:00:00Z', closedAt: null } as const;
+  const TASK = '8e9f0a1b-2c3d-4e4f-9a5b-6c7d8e9f0a1b';
+
+  it('the routes need an active session only', () => {
+    for (const name of ['myRequests', 'askOrganisation', 'myDataExport', 'profile'] as const) {
+      const route = routeById(ROUTE_IDS[name]);
+      expect(route.permission, name).toBeUndefined();
+      expect(route.auth, name).toBe('session');
+    }
+    expect(routeById(ROUTE_IDS.askOrganisation).idempotent).toBe(true);
+    expect(myDataFileName('Bagus Prasetyo', '2026-10-31')).toBe('personal-data-bagus-prasetyo-2026-10-31.json');
+  });
+
+  it('API adapter: the requests, a new request with an Idempotency-Key, the export and its state, the profile correction', async () => {
+    const twice = problem(409, 'conflict', { messageKey: 'privacy.open_request', messages: { en: 'You already have an open request of this type.', id: 'Anda sudah memiliki permintaan terbuka dengan jenis ini.' } });
+    const { client: c, calls, ended } = client({
+      'GET /api/v1/me/privacy-requests': json([REQUEST]),
+      'POST /api/v1/me/privacy-requests': [json({ ok: true, changed: [], data: { id: REQUEST.id, requestNo: 'PR-2026-004' } }, 201), twice],
+      'POST /api/v1/me/data-export': json({ ok: true, changed: [], taskId: TASK }, 202),
+      [`GET /api/v1/exports/${TASK}`]: [json({ id: TASK, kind: 'export', status: 'queued', progress: 0 }), json({ id: TASK, kind: 'export', status: 'succeeded', progress: 100, downloadUrl: `/api/v1/exports/${TASK}/download` })],
+      'PATCH /api/v1/me/profile': { status: 204 },
+    });
+    const adapter = createApiAdapter(c, vi.fn());
+    expect(await adapter.myRequests()).toEqual({ ok: true, data: [REQUEST] });
+    expect(await adapter.askOrganisation('rectification', 'My surname is Prasetyo')).toEqual({ ok: true, data: { requestNo: 'PR-2026-004' } });
+    const post = calls.find((x) => x.path === '/api/v1/me/privacy-requests' && x.method === 'POST')!;
+    expect(post.body).toEqual({ type: 'rectification', note: 'My surname is Prasetyo' });
+    expect(post.headers['idempotency-key']).toBeTruthy();
+    expect(await adapter.askOrganisation('rectification', null)).toMatchObject({ ok: false, error: { status: 409, messageKey: 'privacy.open_request' } });
+    expect(calls.at(-1)!.body).toEqual({ type: 'rectification' });
+    expect(await adapter.requestMyData({ name: 'Rina Kusuma', email: null, jobTitle: null })).toEqual({ ok: true, data: { taskId: TASK } });
+    expect(await adapter.myDataState(TASK)).toEqual({ ok: true, data: { status: 'queued', downloadUrl: null } });
+    expect(await adapter.myDataState(TASK)).toEqual({ ok: true, data: { status: 'succeeded', downloadUrl: `/api/v1/exports/${TASK}/download` } });
+    expect(await adapter.correctProfile({ displayName: 'Rina Kusuma', jobTitle: null })).toEqual({ ok: true, data: null });
+    expect(calls.at(-1)).toMatchObject({ method: 'PATCH', body: { displayName: 'Rina Kusuma', jobTitle: null } });
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('sample adapter: one open request per type, a copy made in the browser, a name is needed', async () => {
+    const adapter = createSampleAdapter();
+    expect(await adapter.myRequests()).toEqual({ ok: true, data: [] });
+    const sent = await adapter.askOrganisation('erasure', null);
+    expect(sent.ok && sent.data.requestNo).toMatch(/^PR-\d{4}-041$/);
+    expect(await adapter.askOrganisation('erasure', null)).toMatchObject({ ok: false, error: { status: 409, messageKey: 'privacy.open_request' } });
+    expect(await adapter.askOrganisation('restriction', 'Stop the newsletter')).toMatchObject({ ok: true });
+    const mine = await adapter.myRequests();
+    expect(mine.ok && mine.data.map((r) => [r.type, r.status])).toEqual([['restriction', 'received'], ['erasure', 'received']]);
+    const copy = await adapter.requestMyData({ name: 'Rina Kusuma', email: 'rina.kusuma@nusantaradigital.co.id', jobTitle: 'ISMS Manager' });
+    if (!copy.ok || !('file' in copy.data)) throw new Error('no file');
+    expect(copy.data.file.fileName).toMatch(/^personal-data-rina\.kusuma-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(JSON.parse(copy.data.file.text)).toMatchObject({ format: 'mscd-personal-data-v1', account: { displayName: 'Rina Kusuma', jobTitle: 'ISMS Manager' } });
+    expect(await adapter.myDataState('x')).toEqual({ ok: true, data: { status: 'succeeded', downloadUrl: null } });
+    expect(await adapter.correctProfile({ displayName: ' ', jobTitle: null })).toMatchObject({ ok: false, error: { status: 400 } });
+    expect(await adapter.correctProfile({ displayName: 'Rina K.', jobTitle: null })).toEqual({ ok: true, data: null });
+    resetSampleAccount();
+    expect(await adapter.myRequests()).toEqual({ ok: true, data: [] });
+    const deferred = deferredAdapter(async () => createSampleAdapter());
+    expect(await deferred.myRequests()).toEqual({ ok: true, data: [] });
+    const broken = deferredAdapter(() => Promise.reject(new Error('chunk')));
+    expect(await broken.myRequests()).toMatchObject({ ok: false, error: { status: 0 } });
+  });
+
+  it('a correction saved on the page shows at once in the profile', () => {
+    const ctx = ctxOf({ me: ME as never });
+    expect(profileOf(ctx, null, { displayName: 'Rina K. Kusuma', jobTitle: null })).toEqual({ name: 'Rina K. Kusuma', email: ME.user.email, jobTitle: null });
+    expect(render(<ProfileCard ctx={ctx} corrected={{ displayName: 'Rina K. Kusuma', jobTitle: 'Lead' }} />, ctx)).toContain('Rina K. Kusuma');
+  });
+
+  for (const lang of ['en', 'id'] as Lang[]) {
+    for (const theme of ['light', 'dark'] as const) {
+      it(`the My data card, its forms and the requests in ${lang}, ${theme} theme`, () => {
+        const ctx = ctxOf({ lang, theme });
+        const adapter = createSampleAdapter();
+        const tr = (p: readonly [string, string]) => esc(t(p, lang));
+        const profile = { name: 'Rina Kusuma', email: 'rina.kusuma@nusantaradigital.co.id', jobTitle: 'ISMS Manager' };
+        const card = render(<MyDataCard ctx={ctx} adapter={adapter} profile={profile} handle="rina" onCorrected={() => undefined} />, ctx, theme);
+        for (const p of [TEXT.myData, TEXT.myDataSub, TEXT.downloadData, TEXT.downloadDataNote, TEXT.correctProfile, TEXT.askOrganisation, TEXT.myRequests]) expect(card, p[0]).toContain(tr(p));
+        expect(card).toContain('data-section="my-data"');
+        const correct = render(<CorrectDialog ctx={ctx} adapter={adapter} open profile={profile} onClose={() => undefined} onSaved={() => undefined} />, ctx, theme);
+        for (const p of [TEXT.correctTitle, TEXT.correctSub, TEXT.name, TEXT.jobTitle, TEXT.correctSave]) expect(correct, p[0]).toContain(tr(p));
+        expect(correct).toContain('value="Rina Kusuma"');
+        const ask = render(<AskDialog ctx={ctx} adapter={adapter} open onClose={() => undefined} onSent={() => undefined} />, ctx, theme);
+        for (const p of [TEXT.askTitle, TEXT.askSub, TEXT.askType, ASK_TEXT.rectification, ASK_TEXT.restriction, ASK_TEXT.erasure, TEXT.askNote, TEXT.askSend]) expect(ask, p[0]).toContain(tr(p));
+        const rows = [REQUEST, { ...REQUEST, id: 'b', requestNo: 'PR-2026-002', type: 'access' as const, status: 'completed' as const, closedAt: '2026-10-31T02:00:00Z' }];
+        const table = render(<MyRequestsTable ctx={ctx} rows={rows} />, ctx, theme);
+        for (const p of [TEXT.colRequest, TEXT.colType, TEXT.colStatus, TEXT.colReceived, TEXT.colDue, MY_TYPE_TEXT.rectification, MY_TYPE_TEXT.access, MY_STATUS_TEXT.received, MY_STATUS_TEXT.completed]) expect(table, p[0]).toContain(tr(p));
+        expect(table).toContain('PR-2026-004');
+        expect(card + correct + ask + table).not.toMatch(/[—·]/);
+      });
+    }
+  }
 });

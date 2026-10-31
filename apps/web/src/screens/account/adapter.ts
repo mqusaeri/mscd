@@ -32,6 +32,11 @@ export function deferredAdapter(load: () => Promise<AccountAdapter>): AccountAda
     // Synchronous: the module is loaded by the first read of the page.
     replaceAuthenticator: () => (loaded ? loaded.replaceAuthenticator() : { ok: false, error: { status: 0, message: [TEXT.sampleOnly[0], TEXT.sampleOnly[1]] } }),
     personEmail: (name) => get().then((a) => a.personEmail(name), () => null),
+    myRequests: () => settled(get().then((a) => a.myRequests())),
+    askOrganisation: (type, note) => settled(get().then((a) => a.askOrganisation(type, note))),
+    requestMyData: (profile) => settled(get().then((a) => a.requestMyData(profile))),
+    myDataState: (taskId) => settled(get().then((a) => a.myDataState(taskId))),
+    correctProfile: (correction) => settled(get().then((a) => a.correctProfile(correction))),
   };
 }
 

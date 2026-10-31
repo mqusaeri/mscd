@@ -12,6 +12,7 @@ import type {
   CommandResult, FindingCreate, FindingItem, FindingListQuery, FindingPatch, FindingTransition, Page, RecordRef,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle, shownName } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { assertIfMatch } from '../../common/etag';
 import { ValidationError } from '../../common/problems';
@@ -96,12 +97,13 @@ export class FindingsService {
       const system = await this.records.resolveMs(trx, ms);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
       const { rows } = await sql<FindingRow & { owner_handle: string | null; owner_name: string | null; event_label: string | null; actions: CaLink[] | null }>`
-        select f.*, o.handle as owner_handle, o.display_name as owner_name, e.short_label as event_label,
+        select f.*, ${shownHandle('o', 'oe')} as owner_handle, ${shownName('o', 'oe')} as owner_name, e.short_label as event_label,
                (select json_agg(json_build_object('id', c.id, 'code', c.code, 'status', c.status, 'updated_at', c.updated_at) order by c.code)
                   from corrective_action_finding l join corrective_action c on c.id = l.corrective_action_id and c.deleted_at is null
                  where l.finding_id = f.id and l.deleted_at is null) as actions
           from finding f
           left join platform.app_user o on o.id = f.owner_user_id
+          ${erasedJoin('oe', 'f.owner_user_id')}
           left join audit_event e on e.id = f.audit_event_id and e.deleted_at is null
          where f.management_system_id = ${system.id} and f.deleted_at is null
            and (${query.status ?? null}::text is null or f.status = ${query.status ?? null})

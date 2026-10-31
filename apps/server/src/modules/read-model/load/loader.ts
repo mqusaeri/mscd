@@ -12,8 +12,15 @@
 // - an activity's output resolves to the document linked to its pack code when no document has that code
 //   (`document_code_link`, BR-40);
 // - the competence records a person owns with a renewal action are open tasks of that person (D-29).
+//
+// Milestone 3 (D.6.5, D.7, M3-04):
+// - a person erased in this organisation (`erased_person`) comes back as the handle form of the pseudonym
+//   (`former-user-7f3a`, which `PEOPLE` names "Former user 7F3A") in every person column, so the snapshots never show
+//   the name, email or handle of an erased person;
+// - documents carry their read confirmation settings (`acknowledgement`), for the document detail.
 import { sql, type RawBuilder } from 'kysely';
 import type { Trx } from '../../../common/tokens';
+import { handleOfUser } from '../../privacy/pseudonym';
 import { COMPETENCE_RENEWAL_ACTION, competenceCode } from '../../risk-registers/competence';
 import type { AuditEventRow, CycleItemRow, FindingRow, PrepTaskRow } from '../derive/audit';
 import type { DriftResultRow, DriftRuleDefRow } from '../derive/drift';
@@ -60,10 +67,36 @@ export interface LoadedEntryRow extends EntryRow {
   retired: boolean;
 }
 
-/** A document as the loader gives it: its origin and the change summary of its current version (Milestone 2 D.2). */
+/** The read confirmation settings of a document as stored (Milestone 3 D.7). */
+export interface LoadedAcknowledgement {
+  required: boolean;
+  scope: 'system_roles' | 'roles' | 'organisation';
+  roles: ('ms_manager' | 'programme_owner' | 'domain_owner' | 'risk_owner' | 'internal_auditor' | 'top_management' | 'compliance_investigator')[] | null;
+  dueDays: number;
+}
+
+/**
+ * A document as the loader gives it: its origin and the change summary of its current version (Milestone 2 D.2), and
+ * its read confirmation settings (Milestone 3 D.7).
+ */
 export interface LoadedDocumentRow extends DocumentRow {
   origin: 'internal' | 'external';
   changeSummary: string | null;
+  acknowledgement: LoadedAcknowledgement;
+}
+
+/** The default read confirmation settings of a document (H.7, D.3 column defaults): not required, the people with a role in its systems, 14 days. */
+export const DEFAULT_ACKNOWLEDGEMENT: LoadedAcknowledgement = { required: false, scope: 'system_roles', roles: null, dueDays: 14 };
+
+/**
+ * The Milestone 3 member of a document of `bundle.docs` (D.7): `acknowledgement` with the stored settings, left out
+ * when they are the defaults, so the snapshots of documents nobody configured stay as they were (the parity of J.4).
+ * A document without the member has the default settings.
+ */
+export function documentAcknowledgementField(doc: Pick<LoadedDocumentRow, 'acknowledgement'>): { acknowledgement?: LoadedAcknowledgement } {
+  const a = doc.acknowledgement;
+  const isDefault = !a.required && a.scope === DEFAULT_ACKNOWLEDGEMENT.scope && (a.roles === null || a.roles.length === 0) && a.dueDays === DEFAULT_ACKNOWLEDGEMENT.dueDays;
+  return isDefault ? {} : { acknowledgement: { required: a.required, scope: a.scope, roles: a.scope === 'roles' && a.roles ? [...a.roles] : null, dueDays: a.dueDays } };
 }
 
 /**
@@ -154,9 +187,12 @@ export interface LoadOptions {
 // Helpers
 // ---------------------------------------------------------------------------------------------------------------
 
-/** `(select handle ...)` of a person column, so rows carry handles. */
+/**
+ * `(select handle ...)` of a person column, so rows carry handles: the account's handle, or the handle form of the
+ * pseudonym of a person erased in this organisation (Milestone 3 D.6.5, `handleOfUser` of `privacy/pseudonym.ts`).
+ */
 function handleOf(column: string): RawBuilder<string | null> {
-  return sql<string | null>`(select u.handle from platform.app_user u where u.id = ${sql.ref(column)})`;
+  return handleOfUser(column);
 }
 
 function uuids(ids: readonly string[]): RawBuilder<string[]> {
@@ -716,12 +752,13 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[], catalogueVer
       classification: DocumentRow['classification']; owner: string | null; approver: string | null; approved_at: string | null;
       next_review_at: string | null; is_org_wide: boolean; linked_ms_ids: string[] | null; version_label: string | null;
       pending_holder: string | null; pending_due_at: string | null; position: number; origin: LoadedDocumentRow['origin'];
-      change_summary: string | null;
+      change_summary: string | null; acknowledgement_required: boolean; acknowledgement_scope: LoadedAcknowledgement['scope'];
+      acknowledgement_roles: LoadedAcknowledgement['roles']; acknowledgement_due_days: number;
     }>`
       select s.ms_id, d.id, d.updated_at, d.doc_code, d.title, d.doc_type, d.status, d.classification,
              ${handleOf('d.owner_user_id')} as owner, ${handleOf('d.approver_user_id')} as approver, d.approved_at, d.next_review_at,
              d.is_org_wide, d.position, ${handleOf('d.pending_holder_user_id')} as pending_holder, d.pending_due_at, d.origin,
-             v.change_summary,
+             v.change_summary, d.acknowledgement_required, d.acknowledgement_scope, d.acknowledgement_roles, d.acknowledgement_due_days,
              (select array_agg(l.management_system_id order by m.position, m.slug) from entity_ms_link l
                 join management_system m on m.id = l.management_system_id and m.deleted_at is null
               where l.entity_type = 'document' and l.entity_id = d.id and l.deleted_at is null) as linked_ms_ids,
@@ -883,6 +920,12 @@ async function loadBundles(trx: Trx, systems: readonly SystemRow[], catalogueVer
         position: num(d.position),
         origin: d.origin,
         changeSummary: d.change_summary,
+        acknowledgement: {
+          required: d.acknowledgement_required === true,
+          scope: d.acknowledgement_scope ?? 'system_roles',
+          roles: d.acknowledgement_roles && d.acknowledgement_roles.length > 0 ? [...d.acknowledgement_roles] : null,
+          dueDays: d.acknowledgement_due_days === null || d.acknowledgement_due_days === undefined ? 14 : num(d.acknowledgement_due_days),
+        },
       })),
       evidence: (evsByMs.get(s.id) ?? [])
         .map((e) => ({

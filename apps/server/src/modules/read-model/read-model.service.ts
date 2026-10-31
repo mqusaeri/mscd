@@ -1,6 +1,10 @@
 // The read model of the UI parity reads (build plan D-05, G.5, D-04, D-29): loads the organisation's rows in a
 // tenant transaction, derives the snapshots on the full data, then applies `ScopePolicy` (F.7). Used by the `ui`
 // module (`GET /ui/org`, `GET /ui/ms/{ms}`, `GET /tasks`) and, for the per-screen endpoints, by WP-32.
+//
+// Milestone 3 (D.6.5, M3-04): a person erased in this organisation is named by the pseudonym ("Former user 7F3A"), which
+// the loader puts in every person column; the people of `PEOPLE` and of the build context list each pseudonym under
+// itself, so the screens show it where they showed the name.
 import { Inject, Injectable } from '@nestjs/common';
 import {
   UI_ROLE_LABELS, type LicenceCard, type Permission, type RolesMap, type TaskList, type UiMsSnapshot, type UiOrgSnapshot, type UiRole,
@@ -20,6 +24,7 @@ import { buildSystemSnapshot, type BuildContext } from './build/system';
 import { licenceCard, repoRow } from './derive/org-formats';
 import { deriveTaskList, type StoredTask } from './derive/tasks';
 import { loadOpenTasks, loadOrgData, type OrgData, type SystemData } from './load/loader';
+import { erasedPeople } from '../privacy/pseudonym';
 
 interface Member {
   handle: string;
@@ -110,7 +115,13 @@ export class ReadModelService {
         licence,
       });
       const visibleCodesByMs = await this.ownVisibleCodes(trx, org, principal.user.handle, scope);
-      return this.scopePolicy.filterOrgSnapshot(scope, snapshot, { visibleCodesByMs, exampleKeysByMs: exampleKeysByMs(data.systems) });
+      const filtered = this.scopePolicy.filterOrgSnapshot(scope, snapshot, { visibleCodesByMs, exampleKeysByMs: exampleKeysByMs(data.systems) });
+      // People erased in this organisation hold no role, so the people filter leaves them out; their pseudonym reveals
+      // nothing, and the records the caller sees may name it (D.6.5).
+      for (const person of await this.erasedPeople(trx)) {
+        filtered.PEOPLE[person.handle] = [person.displayName, scope.externalAuditorOnly ? '-' : (person.jobTitle ?? '-')];
+      }
+      return filtered;
     });
   }
 
@@ -138,6 +149,15 @@ export class ReadModelService {
         order by u.handle`.execute(trx)
     ).rows;
     return rows.map((r) => ({ handle: r.handle, displayName: r.display_name, jobTitle: r.job_title, hasRole: r.has_role }));
+  }
+
+  /**
+   * The people erased in this organisation (Milestone 3 D.6.5): the handle form of the pseudonym that the loader puts
+   * in person columns, named by the pseudonym, with "Former member" in place of the job title (so a list of people
+   * tells them apart from members).
+   */
+  private async erasedPeople(trx: Trx): Promise<Member[]> {
+    return (await erasedPeople(trx)).map((p) => ({ handle: p.handle, displayName: p.displayName, jobTitle: p.jobTitle, hasRole: true }));
   }
 
   /** Every repository of the organisation (G.5 `LOC`), in card order. */
@@ -235,7 +255,7 @@ export class ReadModelService {
   // -------------------------------------------------------------------------------------------------------------
 
   private async buildContext(trx: Trx, org: TenantInfo, data: OrgData): Promise<BuildContext> {
-    const members = await this.members(trx, org.id);
+    const members = [...(await this.members(trx, org.id)), ...(await this.erasedPeople(trx))];
     const codes = await trx.selectFrom('management_system').select(['id', 'code']).where('deleted_at', 'is', null).execute();
     return {
       today: this.today(org),

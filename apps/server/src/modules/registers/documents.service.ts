@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { CommandResult, DocumentAcknowledgement, DocumentCreateRequest, DocumentPatch, DocumentTransitionRequest, DocumentVersionItem } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { addDays } from '../../common/dates';
 import { assertIfMatch } from '../../common/etag';
@@ -446,11 +447,13 @@ export class DocumentVersionsService {
       });
       if (!visible) throw new NotFoundError();
       const { rows } = await sql<VersionListRow>`
-        select v.id, v.version_label, v.status, v.storage_object_id, s.handle as submitted_by, v.submitted_by as submitted_by_id, v.submitted_at,
-               a.handle as approved_by, v.approved_by as approved_by_id, v.approved_at, v.rejection_note, v.change_summary
+        select v.id, v.version_label, v.status, v.storage_object_id, ${shownHandle('s', 'se')} as submitted_by, v.submitted_by as submitted_by_id, v.submitted_at,
+               ${shownHandle('a', 'ae')} as approved_by, v.approved_by as approved_by_id, v.approved_at, v.rejection_note, v.change_summary
           from document_version v
           left join platform.app_user s on s.id = v.submitted_by
+          ${erasedJoin('se', 'v.submitted_by')}
           left join platform.app_user a on a.id = v.approved_by
+          ${erasedJoin('ae', 'v.approved_by')}
          where v.document_id = ${id} and v.deleted_at is null
          order by v.created_at desc, v.id desc`.execute(trx);
       const shown = (userId: string | null) =>

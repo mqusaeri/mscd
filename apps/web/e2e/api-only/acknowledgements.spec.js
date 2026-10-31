@@ -82,17 +82,11 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await openRow(page, 'QM-01');
     await expect(section(page, 'QM-01')).toContainText('Read confirmation');
     await expect(section(page, 'QM-01').locator('[data-latest]')).toHaveText('No confirmation request for this document yet.');
-    // The snapshot does not carry the stored settings yet: the section and the dialog say so, and nothing is saved
-    // until rina chose whether people are asked.
-    await expect(section(page, 'QM-01').locator('[data-setting]'))
-      .toHaveText('The read confirmation settings stored for this document are not shown on this page. Saving new settings replaces them.');
+    // The snapshot carries the stored settings (M3-04): QM-01 has the defaults, so nobody is asked yet.
+    await expect(section(page, 'QM-01').locator('[data-setting]')).toHaveText('New approved versions are not sent for read confirmation.');
     await button(section(page, 'QM-01'), 'Read confirmation settings').click();
     await expect(dialog(page)).toContainText('Read confirmation of QM-01');
-    await expect(dialog(page)).toContainText('The settings stored for this document are not shown here.');
-    await expect(dialog(page).getByLabel('Ask people to confirm each new approved version')).not.toBeChecked();
-    await expect(dialog(page).getByLabel('Do not ask for read confirmation')).not.toBeChecked();
-    await button(dialog(page), 'Save').click();
-    await expect(dialog(page).locator('[role="alert"]')).toHaveText('Choose whether people are asked to confirm new versions.');
+    await expect(dialog(page)).not.toContainText('The settings stored for this document are not shown here.');
     await dialog(page).getByLabel('Ask people to confirm each new approved version').check();
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Save').click();

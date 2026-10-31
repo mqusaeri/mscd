@@ -14,6 +14,7 @@ import type {
   CorrectiveActionTransition, Page, RecordRef,
 } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle } from '../privacy/pseudonym';
 import { Clock } from '../../common/clock';
 import { assertIfMatch } from '../../common/etag';
 import { ValidationError } from '../../common/problems';
@@ -94,14 +95,17 @@ export class CorrectiveActionsService {
       const system = await this.records.resolveMs(trx, ms);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
       const { rows } = await sql<ListRow>`
-        select c.*, o.handle as owner_handle, i.handle as implemented_by_handle, v.handle as verified_by_handle,
+        select c.*, ${shownHandle('o', 'oe')} as owner_handle, ${shownHandle('i', 'ie')} as implemented_by_handle, ${shownHandle('v', 've')} as verified_by_handle,
                (select json_agg(json_build_object('id', f.id, 'code', f.code, 'updated_at', f.updated_at) order by f.code)
                   from corrective_action_finding l join finding f on f.id = l.finding_id and f.deleted_at is null
                  where l.corrective_action_id = c.id and l.deleted_at is null) as findings
           from corrective_action c
           left join platform.app_user o on o.id = c.owner_user_id
+          ${erasedJoin('oe', 'c.owner_user_id')}
           left join platform.app_user i on i.id = c.implemented_by_user_id
+          ${erasedJoin('ie', 'c.implemented_by_user_id')}
           left join platform.app_user v on v.id = c.verified_by_user_id
+          ${erasedJoin('ve', 'c.verified_by_user_id')}
          where c.management_system_id = ${system.id} and c.deleted_at is null
            and (${query.status ?? null}::text is null or c.status = ${query.status ?? null})
          order by c.code`.execute(trx);

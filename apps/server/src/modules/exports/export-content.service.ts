@@ -12,6 +12,9 @@
 //
 // Used by the synchronous routes in the api (the session principal) and by `export.build` in the worker (the
 // requester rebuilt from the task, `principalFor`).
+//
+// Milestone 3 (D.6.5, M3-04): a person erased in the organisation shows as the pseudonym ("Former user 7F3A") in every
+// export, as on the screens.
 import type { Readable } from 'node:stream';
 import { Inject, Injectable } from '@nestjs/common';
 // The kinds and formats of POST /exports (Milestone 1). The personal data export of Milestone 3 (kind personal_data,
@@ -25,6 +28,7 @@ import { PERMISSION_EVALUATOR, type PermissionEvaluator, type Principal, type Te
 import { AuditTrailService } from '../audit/audit-trail.service';
 import { ScopePolicyService } from '../authz/scope-policy';
 import { ReadModelService, portfolioCounts, systemFields } from '../read-model';
+import { erasedPeople } from '../privacy/pseudonym';
 import { ScreenReadService } from '../read-model-api/screen-read.service';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { PdfReport } from './pdf-report';
@@ -278,7 +282,10 @@ export class ExportContentService {
     return this.clock.todayIn(this.orgOf(principal).timeZone);
   }
 
-  /** The system of the path (404 unknown) and the display names of the organisation's members. */
+  /**
+   * The system of the path (404 unknown) and the display names of the organisation's members, plus the people erased
+   * in the organisation under the handle form of their pseudonym (D.6.5), which the read model puts in person columns.
+   */
   private async context(principal: Principal, ms: string | null): Promise<{ system: SystemInfo | null; names: Map<string, string> }> {
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       let system: SystemInfo | null = null;
@@ -291,7 +298,9 @@ export class ExportContentService {
         select u.handle, u.display_name from platform.org_membership m
         join platform.app_user u on u.id = m.user_id and u.deleted_at is null
         where m.organization_id = ${this.orgOf(principal).id}::uuid and m.deleted_at is null`.execute(trx);
-      return { system, names: new Map(rows.map((r) => [r.handle, r.display_name])) };
+      const names = new Map(rows.map((r) => [r.handle, r.display_name]));
+      for (const person of await erasedPeople(trx)) names.set(person.handle, person.displayName);
+      return { system, names };
     });
   }
 

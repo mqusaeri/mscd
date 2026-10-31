@@ -7,6 +7,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { AuditActivityItem, AuditActivityPatch, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
+import { erasedJoin, shownHandle } from '../privacy/pseudonym';
 import { ForbiddenError } from '../../common/problems';
 import {
   AUDIT_WRITER, MEMBERSHIP_SERVICE, PERMISSION_EVALUATOR, RECORD_RESOLVER, SCOPE_POLICY, type AuditWriter, type AuthzState, type MembershipService,
@@ -76,9 +77,11 @@ export class AuditActivitiesService {
       const event = await auditEventOf(trx, system, eventId);
       const readScope = await this.scope.readScope(trx, principal, ms, authz ?? { ms, granted: new Map(), ownOnly: false });
       const { rows } = await sql<ActivityRow & { auditee: string | null; auditor: string | null }>`
-        select a.*, u.handle as auditee, au.handle as auditor from audit_activity a
+        select a.*, ${shownHandle('u', 'ue')} as auditee, ${shownHandle('au', 'aue')} as auditor from audit_activity a
           left join platform.app_user u on u.id = a.auditee_user_id
+          ${erasedJoin('ue', 'a.auditee_user_id')}
           left join platform.app_user au on au.id = a.auditor_user_id
+          ${erasedJoin('aue', 'a.auditor_user_id')}
          where a.audit_event_id = ${event.id} and a.management_system_id = ${system.id} and a.deleted_at is null
          order by a.position, a.template_code nulls last, a.title`.execute(trx);
       const items = rows.map((row) => ({ holderUserId: row.auditee_user_id, item: itemOf(row, row.auditee, row.auditor) }));
