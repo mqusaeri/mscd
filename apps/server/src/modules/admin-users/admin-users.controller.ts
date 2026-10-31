@@ -1,6 +1,7 @@
 // The user, organisation settings and role grant routes of D.3 "Administration" (WP-39), with the organisation settings
 // read and the extended organisation update of Milestone 2 (D.1, D.2, M2-06): the read sends the ETag of the
-// organisation row, which the update takes as `If-Match`.
+// organisation row, which the update takes as `If-Match`. Milestone 3 (D.1, D.9, M3-07): removing a member's linked
+// company sign-in (`IdentitiesService`).
 import { Controller, Req, Res } from '@nestjs/common';
 import {
   adminOrganizationGetRoute,
@@ -23,14 +24,15 @@ import {
   type RoleGrantResult,
   type UserCreate,
   type UserIdentityRegistration,
+  type UserIdentityRemoval,
   type UserListQuery,
   type UserPatch,
   type UserView,
 } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ApiRoute, CurrentAuthz, CurrentPrincipal, IfMatchHeader, RouteInputParam } from '../../common/api-route';
-import { routeStub } from '../../common/problems';
 import type { AuthzState, Principal } from '../../common/tokens';
+import { IdentitiesService } from './identities.service';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
 import { UsersService } from './users.service';
@@ -41,6 +43,7 @@ export class AdminUsersController {
     private readonly users: UsersService,
     private readonly organization: OrganizationService,
     private readonly grants: RoleGrantsService,
+    private readonly identities: IdentitiesService,
   ) {}
 
   @ApiRoute(adminUsersListRoute)
@@ -79,10 +82,14 @@ export class AdminUsersController {
     return { ok: true, changed: [] };
   }
 
-  /** Milestone 3 D.1: stub of M3-01 answering 501 `not-implemented` after the guard; M3-07 replaces it (D.9). */
+  /** Milestone 3 D.1, D.9: removes a member's linked company sign-in of one of this organisation's providers. */
   @ApiRoute(adminUsersRemoveIdentityRoute)
-  removeIdentity(): never {
-    return routeStub(adminUsersRemoveIdentityRoute);
+  removeIdentity(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: { id: string },
+    @RouteInputParam('body') body: UserIdentityRemoval,
+  ): Promise<CommandResult> {
+    return this.identities.remove(principal, params.id, body);
   }
 
   @ApiRoute(adminOrganizationUpdateRoute)

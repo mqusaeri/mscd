@@ -8,7 +8,7 @@
 // proposes the evidence item of that control. A single Tenant Admin completes with the warning `REVIEW-SINGLE-ADMIN`.
 import { z } from 'zod';
 import { AccessReviewDecision, AccessReviewItemKind, AccessReviewPartStatus, AccessReviewStatus } from '../enums.js';
-import { BinaryBody, CommandResult, IdParams, Instant, IsoDate, MsId, MsParams, MsRecordParams, Uuid, defineRoute, named } from './common.js';
+import { BinaryBody, CommandResult, IdParams, Instant, IsoDate, MsId, MsParams, MsRecordParams, Uuid, Warning, defineRoute, named } from './common.js';
 import type { RouteDef } from './common.js';
 
 const Person = z.object({ handle: z.string(), displayName: z.string() });
@@ -83,8 +83,10 @@ export type AccessReviewSummary = z.infer<typeof AccessReviewSummary>;
 const EXAMPLE_ITEM = {
   id: '9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f', kind: 'business_role', subject: { handle: 'bagus', displayName: 'Bagus Prasetyo' }, ms: 'isms',
   role: 'domain_owner', grantedBy: { handle: 'tenant.admin', displayName: 'Tenant Admin' }, grantedAt: '2025-03-01T02:00:00Z', validUntil: null,
+  requestedBy: { handle: 'rina', displayName: 'Rina Kusuma' }, approvedBy: { handle: 'tenant.admin', displayName: 'Tenant Admin' },
   lastSignInAt: '2026-10-14T02:00:00Z', decision: 'keep', decisionNote: null, decidedBy: { handle: 'rina', displayName: 'Rina Kusuma' },
-  decidedAt: '2026-10-20T02:00:00Z', appliedAt: null, appliedBy: null, appliedAction: null, notAppliedReason: null, ownAccess: false,
+  decidedAt: '2026-10-20T02:00:00Z', appliedAt: null, appliedBy: null, appliedAction: null, appliedNote: null, notAppliedReason: null, ownAccess: false,
+  pendingApproval: false, needsSecondReviewer: false,
 } as const;
 
 export const AccessReviewItemView = named(
@@ -99,6 +101,10 @@ export const AccessReviewItemView = named(
     role: z.string().min(1).max(30).nullable(),
     grantedBy: NullablePerson,
     grantedAt: Instant.nullable(),
+    /** Who asked for a business role grant (D.9); null for the other kinds and for a grant made without a request. */
+    requestedBy: NullablePerson,
+    /** Who approved a business role grant under the four-eyes flow (D.9); null when it needed no approval or still waits. */
+    approvedBy: NullablePerson,
     validUntil: IsoDate.nullable(),
     lastSignInAt: Instant.nullable(),
     decision: AccessReviewDecision.nullable(),
@@ -107,19 +113,31 @@ export const AccessReviewItemView = named(
     decidedAt: Instant.nullable(),
     appliedAt: Instant.nullable(),
     appliedBy: NullablePerson,
+    /** How the decision was applied: the event of the service that applied it, `already_removed`, `marked_applied` or `not_applied`. */
     appliedAction: z.string().nullable(),
+    /** The note of "Mark as applied" (what was changed, and where). */
+    appliedNote: z.string().nullable(),
     notAppliedReason: z.string().nullable(),
     /** The caller's own access, which the caller cannot decide (REVIEW-OWN-ACCESS). */
     ownAccess: z.boolean(),
+    /** A business role grant that was still waiting for its four-eyes approval when the snapshot was taken. */
+    pendingApproval: z.boolean(),
+    /**
+     * Undecided, and only the person it concerns holds the right to decide it (the single Tenant Admin, or the only
+     * Management System Manager or Programme Owner of the system): it stays undecided and the review completes with
+     * the warning REVIEW-SINGLE-ADMIN. False when nobody holds that right (the part's `noReviewer`).
+     */
+    needsSecondReviewer: z.boolean(),
   }),
   'One right of the snapshot of an access review: whose, which, granted by and when, last sign-in, the decision and how it was applied (Milestone 3 D.9)',
-  { valid: [EXAMPLE_ITEM, { ...EXAMPLE_ITEM, kind: 'membership', ms: null, role: 'active', decision: null, decidedBy: null, decidedAt: null }], invalid: [{ ...EXAMPLE_ITEM, kind: 'api_key' }, { ...EXAMPLE_ITEM, decision: 'remove' }] },
+  { valid: [EXAMPLE_ITEM, { ...EXAMPLE_ITEM, kind: 'membership', ms: null, role: 'active', requestedBy: null, approvedBy: null, decision: null, decidedBy: null, decidedAt: null }], invalid: [{ ...EXAMPLE_ITEM, kind: 'api_key' }, { ...EXAMPLE_ITEM, decision: 'remove' }] },
 );
 export type AccessReviewItemView = z.infer<typeof AccessReviewItemView>;
 
 const EXAMPLE_PART = {
   id: '0d1e2f3a-4b5c-4d6e-9f7a-8b9c0d1e2f3a', reviewId: '8b9c0d1e-2f3a-4b4c-9d5e-6f7a8b9c0d1e', reviewNo: 'AR-2026-Q4', reviewStatus: 'open', ms: 'isms',
-  status: 'open', dueOn: '2026-10-29', items: 48, decided: 40, signedOffBy: null, signedOffAt: null, evidenceId: null,
+  status: 'open', dueOn: '2026-10-29', items: 48, decided: 40, needsSecondReviewer: 1, noReviewer: false, signedOffBy: null, signedOffAt: null, evidenceId: null,
+  evidenceCode: null, evidenceFiledAt: null,
 } as const;
 
 const partShape = {
@@ -133,9 +151,21 @@ const partShape = {
   dueOn: IsoDate,
   items: z.int().min(0),
   decided: z.int().min(0),
+  /** Undecided items that only the person they concern could decide (they do not hold up the sign-off). */
+  needsSecondReviewer: z.int().min(0),
+  /**
+   * The review is open, the part is not signed off, and nobody holds the right to decide its items now (a system
+   * without an active Management System Manager or Programme Owner): the part can be signed off only after one is
+   * assigned, else the review can only be cancelled.
+   */
+  noReviewer: z.boolean(),
   signedOffBy: NullablePerson,
   signedOffAt: Instant.nullable(),
+  /** The evidence item named at the sign-off, which receives this system's rows when the review completes. */
   evidenceId: Uuid.nullable(),
+  evidenceCode: z.string().nullable(),
+  /** When the system's rows were filed as a new file of that evidence item (at completion). */
+  evidenceFiledAt: Instant.nullable(),
 };
 
 export const AccessReviewPartSummary = named(
@@ -162,10 +192,12 @@ export const AccessReviewDetail = named(
     parts: z.array(AccessReviewPartSummary),
     /** Decided revocations and changes not yet applied or explained, across every part. */
     pendingApplications: z.array(AccessReviewItemView),
+    /** Warnings the review completed with (REVIEW-SINGLE-ADMIN), and those that completing it now would give. */
+    warnings: z.array(Warning),
   }),
   'GET /admin/access-reviews/{id}: the organisation part with its items, the status of every system part, and the decided revocations still to apply',
   {
-    valid: [{ ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: null }, parts: [EXAMPLE_PART], pendingApplications: [] }],
+    valid: [{ ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: null }, parts: [EXAMPLE_PART], pendingApplications: [], warnings: [] }],
     invalid: [EXAMPLE_REVIEW],
   },
 );

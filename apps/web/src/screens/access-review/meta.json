@@ -1,0 +1,13 @@
+{
+  "id": "access-review",
+  "label": ["Access review of this system", "Tinjauan akses sistem ini"],
+  "group": "audit",
+  "order": 75,
+  "scope": "ms",
+  "perm": "access_review.decide",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

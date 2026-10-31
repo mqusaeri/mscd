@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminUsersController } from './admin-users.controller';
+import { IdentitiesService } from './identities.service';
 import { OnboardingModule } from './onboarding.module';
 import { OrganizationService } from './organization.service';
 import { RoleGrantsService } from './role-grants.service';
@@ -9,12 +10,15 @@ import { UsersService } from './users.service';
  * Users, memberships, identity pre-registration, the organisation's local sign-in policy and role grants with the
  * four-eyes approval flow (F.6, C.13, D-25, WP-39). Uses the global identity services (invitations, sessions, MFA
  * reset, mail), the authorisation services (`RoleResolver`, `MembershipDirectory`, `MEMBERSHIP_SERVICE`), tenancy,
- * audit, notifications and the licence gate.
+ * audit, notifications and the licence gate. Milestone 3 (D.9, M3-07): `IdentitiesService` removes a linked company
+ * sign-in; `UsersService`, `RoleGrantsService` and `IdentitiesService` are exported for the access review
+ * (`access-reviews/`), which applies decided revocations through them.
  */
 @Module({
   // Milestone 2 sub-module (D.3): the onboarding checklist (M2-06).
   imports: [OnboardingModule],
   controllers: [AdminUsersController],
-  providers: [UsersService, OrganizationService, RoleGrantsService],
+  providers: [UsersService, OrganizationService, RoleGrantsService, IdentitiesService],
+  exports: [UsersService, RoleGrantsService, IdentitiesService],
 })
 export class AdminUsersModule {}

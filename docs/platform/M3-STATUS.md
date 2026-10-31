@@ -22,7 +22,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-05 Read confirmation of policies | 2 | Done, follow-up running | Register screen, "Policies to confirm", banner, daily reminders, close and file as evidence. Follow-up: people without file rights must be able to open the version (major finding) |
 | M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
 | M3-04 Requests from one person | 3 | Running | Started 2026-10-31 after M3-03 |
-| M3-07 Periodic access review | 3 | Running | Started 2026-10-31 in wave 2's free slot (it needs only M3-01) |
+| M3-07 Periodic access review | 3 | Done | Screens `access-reviews` (Tenant Admins) and `access-review` (each system's managers); daily `access-review.open` every 3 months with reminders; keep, change or revoke with the existing services; nobody decides on their own access; the report CSV is filed as evidence for A.5.18 |
 | M3-09 Export and deletion screens | 3 | Waiting | |
 | M3-10 Demo personas | 4 | Waiting | |
 | M3-11 Data lifecycle run and documents | 4 | Waiting | |
@@ -40,7 +40,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 - From M3-02: `GRANT SELECT` on each tenant schema's `kysely_migration` to `mscd_app` in `platform.apply_tenant_grants` (a later platform migration); the manifest then names the migrations from the schema.
 - From M3-02: keep retired anchor keys in `TRUSTED_KEYS` (D-16) for as long as exports signed with them are kept; the in-app anchor checks (`AuditChainVerifier`, `audit.verify-chain`) still trust only the compiled keys, so on-premise they reject the installation's own anchor key (owner of `modules/audit/**`, next to the M2-S05 K.9 item).
 - For M3-11: `KIND_SCREENS` entries for `organization_export_requested` and `organization_export_ready` (screen `org-export`).
-- For the orchestrator: `host.test.tsx` and `controller.test.ts` need the sidebar entries of M3-07 (`access-reviews`) and of the M3-05 follow-up (`my-confirmations`).
+- For the orchestrator: `host.test.tsx` needs the "tasks" sidebar group of the M3-05 follow-up (`my-confirmations`) when it is committed; the M3-07 entry is in.
 
 - For M3-04 (owns `read-model/**` in wave 3): fill the `acknowledgement` member of the document record in the snapshot, so the document detail shows its read confirmation settings after a reload (M3-05 follow-up 2).
 

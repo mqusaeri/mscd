@@ -1,5 +1,5 @@
 // Record tables of the routes of M3-07: periodic access review (docs/platform/MILESTONE-3.md D.1, F).
-// Owned by M3-07; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs.
+// Owned by M3-07; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs; kept by M3-07.
 // The `{id}` of the system routes is the access review, which spans every system; its system part
 // (`access_review_part`, one per system) carries `management_system_id`.
 

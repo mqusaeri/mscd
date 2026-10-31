@@ -1,0 +1,13 @@
+{
+  "id": "access-reviews",
+  "label": ["Access reviews", "Tinjauan akses"],
+  "group": "admin",
+  "order": 45,
+  "scope": "org",
+  "perm": "access_review.manage",
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}
