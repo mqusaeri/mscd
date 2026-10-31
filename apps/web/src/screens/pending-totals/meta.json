@@ -1,0 +1,13 @@
+{
+  "id": "pending-totals",
+  "label": ["Open work totals", "Total pekerjaan terbuka"],
+  "group": "audit",
+  "order": 25,
+  "scope": "ms",
+  "perm": "audit.pending.aggregate",
+  "roles": ["top", "manager"],
+  "nav": false,
+  "pageActions": [],
+  "sampleRole": "top",
+  "open": "query"
+}

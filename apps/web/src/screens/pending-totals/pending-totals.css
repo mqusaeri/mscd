@@ -1,0 +1,24 @@
+/* Open work totals (M3-08): tokens of src/styles.css only, text of 12px or more, AA contrast in both themes. */
+.mx-pt-note{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.mx-pt-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:0;padding:0;list-style:none}
+.mx-pt-stat{display:flex;flex-direction:column;gap:4px;min-width:0;padding:12px 14px;border:1px solid var(--bd);border-radius:var(--r);background:var(--sur2)}
+.mx-pt-stat-label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--tx2)}
+.mx-pt-stat-value{font-size:26px;font-weight:700;line-height:1.15;color:var(--tx);font-variant-numeric:tabular-nums}
+.mx-pt-stat-value[data-tone="bad"]{color:var(--bad)}
+.mx-pt-stat-sub{font-size:12px;line-height:1.4;color:var(--tx2)}
+.mx-pt-matrix .mx-table{min-width:520px}
+.mx-pt-matrix .mx-table thead th{white-space:normal;vertical-align:bottom;min-width:96px}
+.mx-pt-matrix .mx-table thead th:first-child{min-width:150px}
+.mx-pt-matrix .mx-table tbody th,.mx-pt-matrix .mx-table tfoot th,.mx-pt-all .mx-table tbody th,.mx-pt-all .mx-table tfoot th{text-align:left;font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--tx);padding:10px 12px;border-bottom:1px solid var(--bd);white-space:normal;vertical-align:top}
+.mx-pt-matrix .mx-table tfoot th,.mx-pt-matrix .mx-table tfoot td,.mx-pt-all .mx-table tfoot th,.mx-pt-all .mx-table tfoot td{background:var(--sur2);font-weight:600;border-bottom:0}
+.mx-pt-matrix .mx-table td{vertical-align:top}
+.mx-pt-cell{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px}
+.mx-pt-open{font-size:15px;font-weight:600;color:var(--tx);font-variant-numeric:tabular-nums}
+.mx-pt-overdue{font-size:12px;font-weight:600;color:var(--bad);white-space:nowrap}
+.mx-pt-zero{font-size:13px;color:var(--tx3);font-variant-numeric:tabular-nums}
+.mx-pt-system{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mx-pt-system-short{font-weight:600;color:var(--tx)}
+.mx-pt-system-name{font-size:12px;font-weight:400;color:var(--tx2);overflow-wrap:anywhere}
+.mx-pt-all .mx-table{min-width:560px}
+.mx-pt-all .mx-table td{vertical-align:middle;font-variant-numeric:tabular-nums}
+.mx-pt-failed{font-size:12px;color:var(--bad)}

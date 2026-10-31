@@ -15,7 +15,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | Package | Wave | Status | Notes for the next session |
 |---|---|---|---|
 | M3-01 Contract, schema, permissions and storage functions | 1 | Running | Started 2026-10-31 next to M2-21 |
-| M3-08 Open work totals | 1 | Running | Started 2026-10-31 |
+| M3-08 Open work totals | 1 | Done | Screen `pending-totals` (`/ms/:ms/pending-totals`), opened from Chain stages and the Overview in API builds; totals only, no names (decision 2) |
 | M3-M01 Open follow-ups | 1 | Done | Installer saves the Compose project name, `install.sh --yes` default organisation, `THIRD-PARTY-NOTICES.md` with a CI check. Every dependency change regenerates the notices file |
 | M3-02 Organisation export | 2 | Next, after M3-01 | |
 | M3-03 End of contract and verified deletion | 2 | Next, after M3-01 | |
