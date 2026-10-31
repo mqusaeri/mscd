@@ -1,5 +1,6 @@
 // Record tables of the routes of M3-06: retention and disposal review (docs/platform/MILESTONE-3.md D.1, F).
-// Owned by M3-06; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs.
+// Owned by M3-06; merged by ../record-tables.ts. Written by M3-01 with the tables of the stubs; kept by M3-06 (the
+// reads name no record id: every list is of the system in the path).
 import type { RecordTables } from '../record-tables';
 
 export const RECORD_TABLES: RecordTables = {

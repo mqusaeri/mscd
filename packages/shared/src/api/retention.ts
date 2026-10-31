@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { DisposalFileAction, RetentionDecision, RetentionRecordClass, RetentionReviewStatus } from '../enums.js';
 import {
-  BinaryBody, CommandResult, IsoDate, Instant, MsId, MsParams, MsRecordParams, Uuid, defineRoute, named, pageOf, pageQueryShape,
+  BinaryBody, CommandResult, IsoDate, Instant, MsId, MsParams, MsRecordParams, Pair, Uuid, defineRoute, named, pageOf, pageQueryShape,
 } from './common.js';
 import type { RouteDef } from './common.js';
 
@@ -16,13 +16,15 @@ const Person = z.object({ handle: z.string(), displayName: z.string() }).nullabl
 const DocType = z.string().regex(/^[a-z][a-z0-9_]{0,19}$/);
 const RetainMonths = z.int().min(1).max(1200);
 
-const EXAMPLE_RULE = { recordClass: 'document_version', docType: 'policy', retainMonths: 36, source: 'default', basis: null } as const;
+const EXAMPLE_RULE = { recordClass: 'document_version', docType: 'policy', docTypeLabel: ['Policy', 'Kebijakan'], retainMonths: 36, source: 'default', basis: null } as const;
 
 export const RetentionRuleItem = named(
   'RetentionRuleItem',
   z.object({
     recordClass: RetentionRecordClass,
     docType: DocType.nullable(),
+    /** The document type's name in the pack lookup (M3-06), null for the other classes. */
+    docTypeLabel: Pair.nullable(),
     retainMonths: RetainMonths,
     /** `default` (36 months, H.8) or `set` by a manager of this system. */
     source: z.enum(['default', 'set']),
@@ -30,7 +32,7 @@ export const RetentionRuleItem = named(
   }),
   'The retention period in force for a record class (and document type) of this system, marked default or set (Milestone 3 D.8)',
   {
-    valid: [EXAMPLE_RULE, { recordClass: 'finding', docType: null, retainMonths: 60, source: 'set', basis: 'Customer contract clause 12.3' }],
+    valid: [EXAMPLE_RULE, { recordClass: 'finding', docType: null, docTypeLabel: null, retainMonths: 60, source: 'set', basis: 'Customer contract clause 12.3' }],
     invalid: [{ ...EXAMPLE_RULE, recordClass: 'risk' }, { ...EXAMPLE_RULE, retainMonths: 0 }, { ...EXAMPLE_RULE, source: 'pack' }],
   },
 );
@@ -57,9 +59,15 @@ export type RetentionRulePut = z.infer<typeof RetentionRulePut>;
 
 export const RetentionReviewListQuery = named(
   'RetentionReviewListQuery',
-  z.strictObject({ ...pageQueryShape, status: RetentionReviewStatus.optional(), recordClass: RetentionRecordClass.optional() }),
-  'GET /ms/{ms}/retention/reviews query: status and record class filters, paging',
-  { valid: [{}, { status: 'open', recordClass: 'evidence_file', page: '2' }], invalid: [{ status: 'closed' }, { sort: 'date' }] },
+  z.strictObject({
+    ...pageQueryShape,
+    status: RetentionReviewStatus.optional(),
+    recordClass: RetentionRecordClass.optional(),
+    /** The reviews of one record (M3-06): items whose code is this document or evidence code, or starts with it and a space. */
+    code: z.string().trim().min(1).max(60).optional(),
+  }),
+  'GET /ms/{ms}/retention/reviews query: status, record class and record code filters, paging; open reviews of items under a legal hold are left out',
+  { valid: [{}, { status: 'open', recordClass: 'evidence_file', page: '2' }, { code: 'ISP-001' }], invalid: [{ status: 'closed' }, { sort: 'date' }, { code: '' }] },
 );
 export type RetentionReviewListQuery = z.infer<typeof RetentionReviewListQuery>;
 
@@ -182,9 +190,26 @@ export type RetentionHoldItem = z.infer<typeof RetentionHoldItem>;
 
 export const RetentionHoldCreate = named(
   'RetentionHoldCreate',
-  z.strictObject({ recordClass: RetentionRecordClass, itemId: Uuid, reason: z.string().trim().min(1).max(500) }),
-  'POST /ms/{ms}/retention/holds body: keep an item whatever its period says; a hold takes an item with an open review out of the review list',
-  { valid: [{ recordClass: 'finding', itemId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d', reason: 'Legal claim by a former supplier' }], invalid: [{ recordClass: 'finding', itemId: 'F-2025-07', reason: 'x' }, { recordClass: 'finding', itemId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d' }] },
+  z.strictObject({
+    recordClass: RetentionRecordClass,
+    itemId: Uuid.optional(),
+    /** The item's business code instead of its id (M3-06), for example `NC-2025-01` or `ISP-001 v1.0`. */
+    itemCode: z.string().trim().min(1).max(60).optional(),
+    reason: z.string().trim().min(1).max(500),
+  }).refine((b) => (b.itemId === undefined) !== (b.itemCode === undefined), { message: 'Name the item by itemId or by itemCode, not both', path: ['itemId'] }),
+  'POST /ms/{ms}/retention/holds body: keep an item (by id, or by its business code) whatever its period says; a hold takes an item with an open review out of the review list',
+  {
+    valid: [
+      { recordClass: 'finding', itemId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d', reason: 'Legal claim by a former supplier' },
+      { recordClass: 'document_version', itemCode: 'ISP-001 v1.0', reason: 'Customer dispute about the 2024 policy' },
+    ],
+    invalid: [
+      { recordClass: 'finding', itemId: 'F-2025-07', reason: 'x' },
+      { recordClass: 'finding', itemId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d' },
+      { recordClass: 'finding', reason: 'x' },
+      { recordClass: 'finding', itemId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d', itemCode: 'F-2025-07', reason: 'x' },
+    ],
+  },
 );
 export type RetentionHoldCreate = z.infer<typeof RetentionHoldCreate>;
 

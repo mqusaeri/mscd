@@ -1,0 +1,13 @@
+{
+  "id": "retention",
+  "label": ["Retention and disposal", "Retensi dan pemusnahan"],
+  "group": "impl",
+  "order": 55,
+  "scope": "ms",
+  "perm": ["retention.manage", "retention.approve"],
+  "roles": ["manager"],
+  "nav": true,
+  "pageActions": [],
+  "sampleRole": "manager",
+  "open": "nav"
+}

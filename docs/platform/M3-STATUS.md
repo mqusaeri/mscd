@@ -20,7 +20,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-02 Organisation export | 2 | Running | Started 2026-10-31 |
 | M3-03 End of contract and verified deletion | 2 | Running | Started 2026-10-31 |
 | M3-05 Read confirmation of policies | 2 | Running | Started 2026-10-31 |
-| M3-06 Retention and disposal review | 2 | Running | Started 2026-10-31 |
+| M3-06 Retention and disposal review | 2 | Done | Screen `retention` (rules, due for review, awaiting approval, holds, disposal register with CSV); daily `retention.review`; disposal needs a second person and deletes Managed Vault content only. Follow-ups below |
 | M3-04 Requests from one person | 3 | Waiting | |
 | M3-07 Periodic access review | 3 | Waiting | |
 | M3-09 Export and deletion screens | 3 | Waiting | |
@@ -33,3 +33,9 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 - 2026-10-31: scope is section 2 of `docs/ROADMAP.md` as listed, plus the maintenance track.
 - 2026-10-31: every default of section H (H.1 to H.11) accepted; H.12 (no second approval for an erasure) keeps its default unless the owner decides otherwise before M3-04.
 - Open questions for the owner from the plan review: the real versioning, lifecycle rule or object lock of the backup bucket (the deletion certificate date depends on it); `docs/saas/legal-inputs.md` and `records-of-processing.md` still say "about 12 months" for backups until M3-11 corrects them.
+
+## Open items for later packages
+
+- From M3-06: a `retain_months` column on `retention_review` in a correction migration (R-14), so the disposal register stores the period of each decision in a column; today it reads it from the audit entries `retention_review.decided` and `retention_review.approved`.
+- For M3-10: once the seed writes a due review, add API browser tests of decide, approve as a second person (the proposer's Approve disabled), reject and "File removed" to `e2e/api-only/retention.spec.js`, each with `expectOverlayReadable` in both themes; add `sponsor` to the roles of `screens/retention/index.tsx` and `meta.json`.
+- For M3-11: map the notification kinds `retention_review_due` and `disposal_approval_pending` to the screen `retention` (tabs due and approval) in `KIND_SCREENS`.

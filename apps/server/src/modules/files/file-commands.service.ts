@@ -5,7 +5,8 @@
 // the request (Milestone 2 D.2); BR-23 also reads mappings that start at a catalogue item (ref 0002). Both commands
 // queue `readiness.recompute` and `cycle.derive` (Milestone 2 D.6) for the systems the record counts in. Milestone 3
 // (M3-01): the step that makes an object the evidence's current file is `attachEvidenceFile` of generated-evidence.ts,
-// which `fileGeneratedEvidence` (server-generated files of M3-05 and M3-07) shares.
+// which `fileGeneratedEvidence` (server-generated files of M3-05 and M3-07) shares. Milestone 3 (M3-06, D.2): the file
+// that a new file replaces gets `storage_object.replaced_at`, the start of its retention period (D.8).
 import { Inject, Injectable } from '@nestjs/common';
 import {
   type CommandResult,
@@ -57,6 +58,22 @@ import { insertProviderObject, providerObjectRef, type NewObject } from './stora
 /** Link states that need no relink (valid and verified). */
 const LINK_OK = new Set(['intact', 'moved']);
 
+/**
+ * Milestone 3 D.2 (M3-06): the object an evidence item held before a new file became current gets `replaced_at`, the
+ * start of its retention period (D.8 `evidence_file`). An object that is still the current file of another evidence
+ * item is not replaced.
+ */
+async function markReplaced(trx: Trx, previous: string | null, current: string, at: Date, userId: string): Promise<void> {
+  if (!previous || previous === current) return;
+  await trx
+    .updateTable('storage_object')
+    .set({ replaced_at: at, updated_at: at, updated_by: userId })
+    .where('id', '=', previous)
+    .where('replaced_at', 'is', null)
+    .where((eb) => eb.not(eb.exists(eb.selectFrom('evidence').select('evidence.id').where('evidence.storage_object_id', '=', previous).where('evidence.deleted_at', 'is', null))))
+    .execute();
+}
+
 interface LinkSource {
   kind: 'link';
   repository: RepositoryRow;
@@ -107,8 +124,10 @@ export class FileCommandsService {
    * `evidenceFile` (audit `evidence.file_uploaded`, freshness queued). Runs in the caller's tenant transaction. Used by
    * the read confirmation register (M3-05) and the access review report (M3-07).
    */
-  fileGeneratedEvidence(trx: Trx, actor: EvidenceFileActor, input: GeneratedEvidenceInput): Promise<GeneratedEvidenceResult> {
-    return fileGeneratedEvidence(
+  async fileGeneratedEvidence(trx: Trx, actor: EvidenceFileActor, input: GeneratedEvidenceInput): Promise<GeneratedEvidenceResult> {
+    // The evidence row is locked first, so the file it holds now is the one the new file replaces (M3-06).
+    const before = await trx.selectFrom('evidence').select('storage_object_id').where('id', '=', input.evidenceId).where('deleted_at', 'is', null).forUpdate().executeTakeFirst();
+    const result = await fileGeneratedEvidence(
       {
         routing: this.routing,
         storage: this.common.storage,
@@ -122,6 +141,8 @@ export class FileCommandsService {
       actor,
       input,
     );
+    await markReplaced(trx, before?.storage_object_id ?? null, result.storageObjectId, this.common.clock.now(), actor.userId);
+    return result;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -180,6 +201,8 @@ export class FileCommandsService {
         now,
         userId: principal.user.id,
       });
+      // Milestone 3 D.2: the file this one replaces starts its retention period (D.8 evidence_file).
+      await markReplaced(trx, row.storage_object_id, object.id, now, principal.user.id);
       const { systems, warnings } = attached;
       return {
         ok: true,
