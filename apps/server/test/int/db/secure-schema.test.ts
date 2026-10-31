@@ -19,7 +19,11 @@ async function securitySnapshot(database: Kysely<DB>, schema: string): Promise<u
     where n.nspname = ${schema} and c.relkind in ('r', 'p')
     order by c.relname`.execute(database);
   const namespace = await sql<{ acl: string | null }>`select nspacl::text as acl from pg_namespace where nspname = ${schema}`.execute(database);
-  return { tables: rows, schemaAcl: namespace.rows[0]?.acl };
+  // The grants to mscd_report are left out: the role is created cluster-wide by the bootstrap test of the report role
+  // (test/int/smoke/db.test.ts), which can run between two snapshots, and the secure functions grant to it only once
+  // it exists. Every other grant is compared.
+  const withoutReport = (acl: string | null | undefined) => acl?.replace(/,mscd_report=[^,}]*/g, '') ?? acl;
+  return { tables: rows.map((row) => ({ ...row, acl: withoutReport(row.acl) })), schemaAcl: withoutReport(namespace.rows[0]?.acl) };
 }
 
 describe('secure functions (C.4)', () => {
