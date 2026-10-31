@@ -55,6 +55,7 @@ Inside the bundle:
 | `SECURITY-SCAN.txt` | Vulnerability scan of the images, made before the release was signed |
 | `VERSION`, `BUNDLE-INFO` | Release details |
 | `INSTALL-ONPREM.md` | This guide |
+| `THIRD-PARTY-NOTICES.md` | The open-source software inside MSCD, with its licences. Both MSCD images carry the same file (`/app/THIRD-PARTY-NOTICES.md` in the server image, `/usr/share/doc/mscd/THIRD-PARTY-NOTICES.md` in the web image) |
 
 MSCD has these parts. All of them come with the bundle, and you can replace PostgreSQL and the object storage with your own (section 11).
 
@@ -164,6 +165,8 @@ sudo ./install.sh --yes --domain mscd.example.co.id --self-signed \
 
 The organisation slug names your organisation inside MSCD and the database. The slug cannot be changed after the organisation is created. Use a lower-case letter, then 2 to 40 lower-case letters, digits or `_`. With `--yes` the installer prints this reminder and asks nothing.
 
+With `--yes` and no `--org-slug`, a new installation gets the organisation with the slug `default` and the name "Default organisation" (or the name you give with `--org-name`). The installer says so before it installs and again in its summary. The slug `default` is permanent like any other slug; a Tenant Admin can change the name at any time in **Administration**, **Organisation** (section 7). Without `--yes` the installer asks for the slug and the name.
+
 A successful run ends like this:
 
 ```text
@@ -218,8 +221,8 @@ Keep the extracted bundle directory. `install.sh` and `upgrade.sh` run from it.
 | `--http-redirect on/off` | on | Redirect HTTP to HTTPS |
 | `--hsts on/off` | off | Send Strict-Transport-Security (only with a trusted certificate) |
 | `--external-fonts on/off` | off | Allow the optional Google Fonts |
-| `--org-slug SLUG` | Asked | Short name of your organisation. It cannot change later. |
-| `--org-name NAME` | Asked | Display name of your organisation |
+| `--org-slug SLUG` | Asked; `default` with `--yes` | Short name of your organisation. It cannot change later. |
+| `--org-name NAME` | Asked; "Default organisation" with `--yes` and no `--org-slug` | Display name of your organisation. It can change later in the app. |
 | `--admin-email EMAIL` | | Invite this person as the first administrator and print the one-time invitation link |
 | `--smtp-host HOST` | `smtp` | SMTP relay for outgoing email |
 | `--smtp-port PORT` | 25 | SMTP port |
@@ -232,6 +235,8 @@ Keep the extracted bundle directory. `install.sh` and `upgrade.sh` run from it.
 | `--yes` | | Ask no questions. Required when there is no terminal, for example in automation. |
 
 To change a setting later, run `sudo ./install.sh` again from the bundle directory with the new option, for example `--smtp-host mail.acme.co.id`. Every other setting is kept.
+
+**Compose project name.** The installation is the Docker Compose project `mscd`, unless the variable `COMPOSE_PROJECT_NAME` names another project when you run `install.sh` for the first time (for example `sudo env COMPOSE_PROJECT_NAME=mscd-test ./install.sh`). The installer saves the name in `.env` as `COMPOSE_PROJECT_NAME`. `upgrade.sh`, `uninstall.sh`, a new run of `install.sh` and `docker compose` in the install directory read it from there, so you never set the variable again. When the variable is set to another name, the scripts stop with a message and change nothing.
 
 ### 4.3 What the installer sets up
 
@@ -246,8 +251,9 @@ In the install directory (`/opt/mscd` by default):
 | `config/` | The database start-up script |
 | `backups/` | Settings saved before each upgrade |
 | `upgrade.sh`, `uninstall.sh`, `lib/` | Scripts for later use |
+| `INSTALL-ONPREM.md`, `THIRD-PARTY-NOTICES.md` | This guide, and the open-source software inside MSCD with its licences |
 
-The installer runs these Docker Compose services in the project `mscd`:
+The installer runs these Docker Compose services in the project `mscd` (or the project name saved in `.env`, section 4.2; the volume names below then start with that name):
 
 | Service | Image | Notes |
 |---|---|---|
@@ -835,7 +841,8 @@ A Platform Operator account (set up with `admin create-operator`, section 16) se
 | `FAIL Checksum mismatch: <file>` | The bundle was damaged in transfer | Copy the bundle again and check it with `sha256sum -c` |
 | `FAIL The bundle is signed, but there is no public key to check it with` | `mscd-release.pub` is not next to the bundle directory | Put it there, or pass `--verify-key FILE` |
 | `FAIL Bundle signature does not match` | The bundle was not made by CyberLentera, or the wrong key was used | Do not install. Contact CyberLentera support. |
-| `ERROR Name your organisation with --org-slug` | `--yes` without the organisation | Add `--org-slug` and `--org-name` |
+| `ERROR Give the display name of your organisation with --org-name` | `--yes` with `--org-slug` but without `--org-name` | Add `--org-name`, or leave out both to get the organisation `default` (section 4.1) |
+| `FAIL The installation in /opt/mscd uses the Compose project <name> (saved in /opt/mscd/.env), but COMPOSE_PROJECT_NAME is set to <other>` | The variable `COMPOSE_PROJECT_NAME` is set in the shell, for example from an earlier test | Run the script without it (`unset COMPOSE_PROJECT_NAME`). The scripts read the project name from `.env`. |
 | `FAIL The database volume mscd_pgdata of an earlier installation exists, but its passwords are gone` | The `secrets` folder was deleted, but the data was kept | Restore `secrets` from your backup. Only for a fresh start: `sudo docker volume rm mscd_pgdata mscd_s3data` (this deletes all data). |
 | `migrate` shows `exited (1)` | A database change or pack installation failed | Read `sudo docker compose logs migrate`. Fix the cause (for example the database connection) and run `sudo ./install.sh --yes` again. |
 | api not healthy; the log says it cannot connect to the database | Wrong address or password in `secrets/db-app.url`, or a firewall blocks your own PostgreSQL | Check the address, and that the server reaches the database port |
@@ -893,9 +900,9 @@ sudo /opt/mscd/uninstall.sh --purge
 
 Both commands ask for confirmation. Add `--yes` to skip it. For an installation in another directory, pass `--dir DIR`.
 
-`--purge` deletes every tag of the `cyberlentera/mscd-server` and `cyberlentera/mscd-web` images on the host, including versions other than the one you installed. The confirmation lists them. If you keep other MSCD versions on the same host, for example for a rehearsal, tag them with another name first (`docker tag cyberlentera/mscd-web:1.0.0 keep/mscd-web:1.0.0`) or load them again from their bundle afterwards.
+`--purge` deletes the `cyberlentera/mscd-server` and `cyberlentera/mscd-web` images of the versions this installation used: the version in `.env` and the versions of the settings saved before each upgrade (`backups/`). The confirmation lists them. Other versions of these images on the host stay. If you keep a copy of one of those versions for another purpose, for example a rehearsal, tag it with another name first (`docker tag cyberlentera/mscd-web:1.0.0 keep/mscd-web:1.0.0`) or load it again from its bundle afterwards.
 
-The scripts use the Compose project name `mscd`. If you set the `COMPOSE_PROJECT_NAME` variable when you ran `install.sh`, set the same value for `upgrade.sh` and `uninstall.sh`, for example `sudo env COMPOSE_PROJECT_NAME=mscd-test /opt/mscd/uninstall.sh`. Without it they do not find the containers, volumes and networks of that installation and leave them in place. Most operators never set this variable.
+`uninstall.sh` finds the containers, networks and volumes through the Compose project name that `install.sh` saved in `.env` (section 4.2), also when the installation was made with `COMPOSE_PROJECT_NAME`. You do not set the variable again. An installation made with an MSCD version that did not save the name is found through its containers; the next run of `upgrade.sh` or `install.sh` saves the name in `.env`.
 
 On Kubernetes: `helm uninstall mscd -n mscd`, then delete the Secrets and the database when you no longer need them.
 

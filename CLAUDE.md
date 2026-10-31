@@ -116,9 +116,6 @@ Decided by the product owner on 2026-10-29:
 
 ## Open follow-ups
 
-- Installer scripts: save the Compose project name so an install made with `COMPOSE_PROJECT_NAME` can be removed without it; optionally accept a default organisation with `install.sh --yes`.
-- Server: a command to grant `platform_operator` and an offline `mscd-server diagnostics` command.
-- Helm chart: a Job or documented values for `tenant create` and `admin create-user`.
-- Bundle: a third-party notices file (the common-passwords list carries the SecLists notice).
-- `docs/DEVELOPMENT.md`: a section for the API E2E project and the current default data source (`api`).
-- Web E2E stack (`apps/web/e2e-api/stack.mjs`): only remove leftover containers whose expiry label has passed.
+- Installer: an option for the internal subnet (`MSCD_SUBNET`, `MSCD_WEB_ADDRESS`) of a new install. When `172.31.250.0/24` is taken on the host, the first run of `install.sh` fails when it starts the stack; the operator then edits `.env` and runs `install.sh` again.
+- CI nightly bundle rehearsal (`ci.yml`, job `bundle`): install without `--org-slug` and with `COMPOSE_PROJECT_NAME`, and uninstall without it, as the M3-M01 rehearsal does.
+- Every dependency change runs `node tools/scripts/third-party-notices.mjs` in the same change, or the CI step "Third-party notices" fails (Dependabot pull requests included).

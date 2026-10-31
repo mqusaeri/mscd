@@ -152,6 +152,9 @@ COPY --from=nginx-config site.conf security-headers.conf https.conf api.conf api
 COPY --from=nginx-config --chmod=0755 40-mscd-runtime.sh /docker-entrypoint.d/40-mscd-runtime.sh
 COPY --from=build /src/apps/web/external-fonts.html /etc/nginx/mscd/external-fonts.html
 COPY --from=build /src/apps/web/dist/ /usr/share/nginx/html/
+# Licences and notices of the third-party software in the image (tools/scripts/third-party-notices.mjs),
+# outside the served folder.
+COPY --chmod=0644 THIRD-PARTY-NOTICES.md /usr/share/doc/mscd/THIRD-PARTY-NOTICES.md
 
 # Configuration and content are owned by root and read-only for the NGINX user.
 # The configuration test runs as root with a stand-in for the API upstream file

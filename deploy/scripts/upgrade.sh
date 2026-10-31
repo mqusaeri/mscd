@@ -6,7 +6,8 @@
 # Roll back to the version that ran before the last upgrade:
 #   sudo /opt/mscd/upgrade.sh --rollback
 #
-# Settings (.env), secrets and certificates are kept. Order of an upgrade:
+# Settings (.env), secrets and certificates are kept, and the Compose project name
+# is read from .env (COMPOSE_PROJECT_NAME, saved by install.sh). Order of an upgrade:
 #   1. the new images are loaded and the new web image is started once on its
 #      own as a test (canary);
 #   2. the database migrations of the new version run (docker compose run --rm
@@ -48,6 +49,10 @@ Options:
   --timeout SECONDS        How long to wait for the services to become healthy (default: 600)
   -y, --yes                Do not ask for confirmation. Required when there is no terminal.
   -h, --help               Show this help
+
+The Compose project name comes from COMPOSE_PROJECT_NAME in the installation's .env,
+which install.sh saved. COMPOSE_PROJECT_NAME in the environment is not needed; when it
+is set to another name, the upgrade stops before anything changes.
 EOF
 }
 
@@ -90,6 +95,7 @@ check_installation() {
     fi
     CURRENT_SERVER_IMAGE+=:$CURRENT_VERSION
     pass "MSCD $CURRENT_VERSION is installed in $INSTALL_DIR"
+    resolve_project "$INSTALL_DIR"
     check_container_owner "$INSTALL_DIR"
 }
 
@@ -124,6 +130,8 @@ save_backup() {
 restore_files() {
     local backup=$1
     cp -p "$backup/.env" "$INSTALL_DIR/.env"
+    # Settings saved before the Compose project name was kept in .env.
+    save_project "$INSTALL_DIR/.env"
     cp -p "$backup/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
     if [[ -f $backup/VERSION ]]; then cp -p "$backup/VERSION" "$INSTALL_DIR/VERSION"; fi
     if [[ -d $backup/config ]]; then
@@ -214,6 +222,9 @@ install_new_files() {
     install -m 0644 "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/"
     if [[ -f $SCRIPT_DIR/INSTALL-ONPREM.md ]]; then
         install -m 0644 "$SCRIPT_DIR/INSTALL-ONPREM.md" "$INSTALL_DIR/"
+    fi
+    if [[ -f $SCRIPT_DIR/THIRD-PARTY-NOTICES.md ]]; then
+        install -m 0644 "$SCRIPT_DIR/THIRD-PARTY-NOTICES.md" "$INSTALL_DIR/"
     fi
     env_merge_defaults "$SCRIPT_DIR/compose/.env.example" "$INSTALL_DIR/.env"
     env_set "$INSTALL_DIR/.env" MSCD_IMAGE "$BUNDLE_IMAGE"
@@ -351,6 +362,9 @@ upgrade_main() {
     warn "Back up the database and the object store before you continue (INSTALL-ONPREM.md, Upgrades and backups)"
     confirm "Upgrade MSCD from $CURRENT_VERSION to $TARGET_VERSION?" || die "Cancelled. Nothing was changed."
     lock_dir "$INSTALL_DIR"
+    # An installation made before the project name was saved keeps it from now on
+    # (also in the settings saved for a rollback).
+    save_project "$INSTALL_DIR/.env"
 
     step "Loading the new images"
     local had_image=false

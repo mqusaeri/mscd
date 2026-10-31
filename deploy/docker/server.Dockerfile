@@ -203,6 +203,8 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
  && mkdir -p /app
 WORKDIR /app
 COPY --from=prod-deps /src/ /app/
+# Licences and notices of the third-party software in the image (tools/scripts/third-party-notices.mjs).
+COPY --chmod=0644 THIRD-PARTY-NOTICES.md /app/THIRD-PARTY-NOTICES.md
 ENV NODE_ENV=production HOME=/tmp
 
 # ---- Demo target -----------------------------------------------------------

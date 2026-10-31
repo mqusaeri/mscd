@@ -4,6 +4,7 @@
 # Run it from the extracted bundle directory:
 #   sudo ./install.sh                      (asks a few questions)
 #   sudo ./install.sh --yes --self-signed --org-slug acme --org-name "PT Acme"
+#   sudo ./install.sh --yes --self-signed  (organisation "default", "Default organisation")
 #
 # It loads the images of the bundle, writes the settings (.env), creates the
 # secrets that are missing (database passwords, the two key-encryption keys,
@@ -11,7 +12,8 @@
 # certificates of the storage gateway, api and worker), starts the stack (the
 # database migrations run first), creates the organisation (its slug cannot be
 # changed later, so a new slug is confirmed first) and invites the first
-# administrator or prints how to do it.
+# administrator or prints how to do it. The Compose project name (COMPOSE_PROJECT_NAME,
+# default mscd) is saved in .env, where upgrade.sh, uninstall.sh and Compose read it.
 #
 # Safe to run again: existing settings and secrets are kept unless you pass new
 # values. An installation of the web-only package (MSCD 1.0) is extended to the
@@ -21,6 +23,10 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/common.sh disable=SC1091  # followed with shellcheck -x
 . "$SCRIPT_DIR/lib/common.sh"
+
+# Organisation created by "install.sh --yes" on a new install without --org-slug.
+readonly MSCD_DEFAULT_ORG_SLUG=default
+readonly MSCD_DEFAULT_ORG_NAME="Default organisation"
 
 usage() {
     cat <<'EOF'
@@ -44,8 +50,10 @@ Options:
   --hsts on|off            Send Strict-Transport-Security (default: off; needs a trusted certificate)
   --external-fonts on|off  Allow the optional Google Fonts (default: off)
   --org-slug SLUG          Short name of your organisation: a lower-case letter, then 2 to 40
-                           lower-case letters, digits or _ (it cannot change once created)
-  --org-name NAME          Display name of your organisation
+                           lower-case letters, digits or _ (it cannot change once created).
+                           Asked; with --yes on a new install the default is "default"
+  --org-name NAME          Display name of your organisation (it can change later in the app).
+                           Asked; with --yes and no --org-slug the default is "Default organisation"
   --admin-email EMAIL      Invite this person as the first administrator: the invitation is
                            emailed, or its one-time link printed when email does not work
                            (default: print the command to do it)
@@ -62,6 +70,12 @@ Options:
   -y, --yes                Ask no questions; use flags, saved settings, then defaults.
                            Required when there is no terminal.
   -h, --help               Show this help
+
+Environment:
+  COMPOSE_PROJECT_NAME     Docker Compose project name of a new installation (default: mscd).
+                           install.sh saves it in .env; upgrade.sh and uninstall.sh read it
+                           there, so it is not needed again. A value that differs from the
+                           saved one stops the scripts before anything changes.
 EOF
 }
 
@@ -225,6 +239,14 @@ resolve_settings() {
     if [[ -n $SAVED_ORG_SLUG && $ORG_SLUG != "$SAVED_ORG_SLUG" ]]; then
         die "The organisation of this installation is $SAVED_ORG_SLUG; its slug cannot change (--org-slug $ORG_SLUG)"
     fi
+    # --yes on a new install without --org-slug: the default organisation. Without
+    # --yes the installer asks for the slug and the name instead.
+    DEFAULT_ORG=false
+    if [[ -z $ORG_SLUG && $ASSUME_YES == true ]]; then
+        ORG_SLUG=$MSCD_DEFAULT_ORG_SLUG
+        ORG_NAME=${ORG_NAME:-$MSCD_DEFAULT_ORG_NAME}
+        DEFAULT_ORG=true
+    fi
 
     local have_cert=false
     SAVED_TLS_MODE=$(kv_get "$ENV_FILE" MSCD_TLS_MODE)
@@ -293,7 +315,7 @@ resolve_settings() {
     is_ipv4 "$BIND" || die "Bind address '$BIND' must be an IPv4 address such as 0.0.0.0"
     [[ -n $ORG_SLUG ]] || die "Name your organisation with --org-slug (for example --org-slug acme) and --org-name"
     valid_slug "$ORG_SLUG" || die "The organisation slug '$ORG_SLUG' is not valid"
-    [[ -n $ORG_NAME ]] || die "Give the display name of your organisation with --org-name"
+    [[ -n $ORG_NAME ]] || die "Give the display name of your organisation with --org-name (for example --org-name \"PT Acme Indonesia\")"
     env_safe "$ORG_NAME" || die "The organisation name '$ORG_NAME' cannot be written to .env"
     env_safe "$MAIL_FROM" || die "The sender address '$MAIL_FROM' cannot be written to .env"
     if [[ -n $SMTP_USER && -z $OPT_SMTP_PASSWORD_FILE && ! -f $INSTALL_DIR/secrets/smtp.password ]]; then
@@ -312,6 +334,7 @@ show_settings() {
     smtp="$SMTP_HOST:$SMTP_PORT${SMTP_USER:+ as $SMTP_USER}, from $MAIL_FROM"
     printf '  %-20s %s\n' \
         "Install directory" "$INSTALL_DIR" \
+        "Compose project" "$MSCD_PROJECT" \
         "Version" "$BUNDLE_VERSION ($IMAGE, $SERVER_IMAGE)" \
         "Organisation" "$ORG_NAME ($ORG_SLUG)" \
         "Host name" "$DOMAIN" \
@@ -374,6 +397,9 @@ install_files() {
     if [[ -f $SCRIPT_DIR/INSTALL-ONPREM.md ]]; then
         install -m 0644 "$SCRIPT_DIR/INSTALL-ONPREM.md" "$INSTALL_DIR/"
     fi
+    if [[ -f $SCRIPT_DIR/THIRD-PARTY-NOTICES.md ]]; then
+        install -m 0644 "$SCRIPT_DIR/THIRD-PARTY-NOTICES.md" "$INSTALL_DIR/"
+    fi
     printf 'MSCD on-premise install directory. Do not delete this file.\n' >"$INSTALL_DIR/$MSCD_MARKER"
     pass "Files copied to $INSTALL_DIR"
 }
@@ -425,7 +451,8 @@ write_env() {
     env_set "$ENV_FILE" MSCD_MAIL_FROM "$MAIL_FROM"
     env_set "$ENV_FILE" MSCD_RUN_UID "$RUN_UID"
     env_set "$ENV_FILE" MSCD_RUN_GID "$RUN_GID"
-    pass "Settings saved to $ENV_FILE"
+    save_project "$ENV_FILE"
+    pass "Settings saved to $ENV_FILE (Compose project $MSCD_PROJECT)"
 }
 
 # write_secrets: every secret that is missing, then owners and modes (I.3).
@@ -515,6 +542,8 @@ restore_previous() {
     local dir=$INSTALL_DIR/tls
     if [[ -f $SNAPSHOT/.env ]]; then
         cp -p "$SNAPSHOT/.env" "$INSTALL_DIR/.env"
+        # Settings of an installation made before the project name was saved.
+        save_project "$INSTALL_DIR/.env"
     fi
     if [[ -f $SNAPSHOT/docker-compose.yml ]]; then
         cp -p "$SNAPSHOT/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
@@ -566,8 +595,15 @@ start_stack() {
 # --yes only the notice is printed.
 confirm_new_slug() {
     [[ -z $SAVED_ORG_SLUG ]] || return 0
+    if [[ $DEFAULT_ORG == true ]]; then
+        printf '\n  No --org-slug was given, so the organisation is created with the slug %s\n' "$ORG_SLUG"
+        printf '  and the name "%s".\n' "$ORG_NAME"
+    fi
     printf '\n  The organisation slug %s cannot be changed after the organisation is created:\n' "$ORG_SLUG"
     printf '  it names the database schema of the organisation.\n'
+    if [[ $DEFAULT_ORG == true ]]; then
+        printf '  The name can be changed later in the app: Administration, Organisation.\n'
+    fi
     if [[ $INTERACTIVE == true ]] && ! confirm "Create the organisation with the slug $ORG_SLUG?"; then
         echo "Cancelled. Nothing was changed. Run ./install.sh again and choose the slug you want (--org-slug)."
         exit 0
@@ -621,6 +657,10 @@ print_done() {
         "Status" "cd $INSTALL_DIR && ${sudo}docker compose ps" \
         "Logs" "cd $INSTALL_DIR && ${sudo}docker compose logs api web" \
         "Uninstall" "$sudo$INSTALL_DIR/uninstall.sh"
+    if [[ $DEFAULT_ORG == true ]]; then
+        printf '\n  No --org-slug was given, so the organisation has the slug %s, which cannot change.\n' "$ORG_SLUG"
+        printf '  A Tenant Admin can change its name in the app: Administration, Organisation.\n'
+    fi
     if [[ ${INVITATION_EMAILED:-false} == true ]]; then
         printf '\n  First administrator: the invitation (valid 72 hours) was emailed to %s.\n' "$OPT_ADMIN_EMAIL"
     elif [[ -n ${INVITATION:-} ]]; then
@@ -665,6 +705,7 @@ main() {
     check_docker
     check_resources "$INSTALL_DIR"
     check_install_dir "$INSTALL_DIR"
+    resolve_project "$INSTALL_DIR"
     check_container_owner "$INSTALL_DIR"
     check_tool openssl "needed for keys and certificates"
     if ! command -v curl >/dev/null 2>&1; then

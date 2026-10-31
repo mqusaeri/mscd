@@ -16,7 +16,8 @@
 #
 # The bundle holds the web image, the release server image, PostgreSQL,
 # SeaweedFS and Valkey, the Compose files, the Helm chart, the packs, the
-# release public keys, the scripts and INSTALL-ONPREM.md. Nothing is downloaded
+# release public keys, the scripts, INSTALL-ONPREM.md and THIRD-PARTY-NOTICES.md
+# (the licences of the third-party software). Nothing is downloaded
 # at install time. The bundle is checked for development keys, development
 # secrets, demo profiles and demo data (check-release-artefacts.sh, R-13)
 # before its checksums are written.
@@ -34,6 +35,9 @@ REPO_DIR=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 
 # Third-party images of the bundle (build plan A.3), in BUNDLE-INFO order.
 readonly EXTRA_IMAGES=(postgres:16.15-alpine chrislusf/seaweedfs:4.48 valkey/valkey:8.1-alpine)
+# Licences and notices of the third-party software, at the repository root; the
+# bundle and both MSCD images carry it (tools/scripts/third-party-notices.mjs).
+readonly NOTICES_FILE=THIRD-PARTY-NOTICES.md
 HELM_IMAGE=${HELM_IMAGE:-alpine/k8s:1.34.1}
 TRIVY_IMAGE=${TRIVY_IMAGE:-aquasec/trivy:0.74.0}
 TRIVY_CACHE=${TRIVY_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mscd-trivy}
@@ -50,7 +54,9 @@ Usage: deploy/scripts/build-bundle.sh --trusted-keys-dir DIR --pack-signing-key 
 
 Builds the MSCD on-premise offline bundle: the web image (API mode), the
 release server image, the bundled PostgreSQL, SeaweedFS and Valkey images,
-the Compose files, the Helm chart, the packs and the install scripts.
+the Compose files, the Helm chart, the packs, the install scripts and
+THIRD-PARTY-NOTICES.md (checked against package-lock.json when Node.js and
+node_modules are on this machine; a stale file stops a --release build).
 
 With --images-only it builds only the two MSCD images, runs the release
 artefact check (R-13) and the vulnerability scan on them, and stops. No bundle
@@ -315,6 +321,44 @@ check_pack_versions() {
             "Use a version that is at least the engine_min_version of every pack in packs/sources"
     else
         pass "Every pack can be installed by server version $VERSION"
+    fi
+}
+
+# check_notices: THIRD-PARTY-NOTICES.md exists (the bundle and both images carry it)
+# and, when Node.js and node_modules are on this machine, is current for
+# package-lock.json. A stale file stops a --release build; CI runs the same check.
+check_notices() {
+    local out rc=0 problem fix
+    if [[ ! -f $REPO_DIR/$NOTICES_FILE ]]; then
+        fail "$NOTICES_FILE is missing from the repository root" \
+            "Run: node tools/scripts/third-party-notices.mjs (after npm ci), and commit the file"
+        return 0
+    fi
+    if ! command -v node >/dev/null 2>&1 || [[ ! -d $REPO_DIR/node_modules ]]; then
+        info "$NOTICES_FILE not compared with package-lock.json here (needs Node.js and npm ci); CI checks it"
+        return 0
+    fi
+    out=$(node "$REPO_DIR/tools/scripts/third-party-notices.mjs" --check 2>&1) || rc=$?
+    if ((rc == 0)); then
+        pass "$NOTICES_FILE is current for package-lock.json"
+        return 0
+    fi
+    # Exit 1: the file is out of date; exit 2: node_modules does not match package-lock.json;
+    # exit 3 (or any other code): the generator could not build the file (the message above names the cause).
+    fix="Run npm ci, then node tools/scripts/third-party-notices.mjs, and commit the file"
+    case $rc in
+        1) problem="is out of date" ;;
+        2) problem="could not be compared with package-lock.json (run npm ci)" ;;
+        *)
+            problem="could not be generated (exit $rc, cause above)"
+            fix="Correct what the generator names above (package-lock.json or the common password list), then run node tools/scripts/third-party-notices.mjs and commit the file"
+            ;;
+    esac
+    printf '%s\n' "$out" | sed 's/^/        /'
+    if [[ $RELEASE == true ]]; then
+        fail "$NOTICES_FILE $problem" "$fix"
+    else
+        warn "$NOTICES_FILE $problem; the test bundle carries it as it is (a --release build stops here)"
     fi
 }
 
@@ -670,8 +714,9 @@ copy_files() {
     [[ ! -e $STAGE/compose/config/demo-secrets ]] || die "compose/config/demo-secrets must not be in the bundle"
     install -m 0644 "$KEYS_CONTEXT"/*.pub "$STAGE/keys/"
     install -m 0644 "$REPO_DIR/docs/INSTALL-ONPREM.md" "$STAGE/INSTALL-ONPREM.md"
+    install -m 0644 "$REPO_DIR/$NOTICES_FILE" "$STAGE/$NOTICES_FILE"
     printf '%s\n' "$VERSION" >"$STAGE/VERSION"
-    pass "Scripts, Compose files, configuration, release public keys and INSTALL-ONPREM.md"
+    pass "Scripts, Compose files, configuration, release public keys, INSTALL-ONPREM.md and $NOTICES_FILE"
 }
 
 write_bundle_info() {
@@ -727,6 +772,7 @@ images_only_main() {
     check_build_ca
     check_release_keys
     check_pack_versions
+    check_notices
     if [[ $REVISION == *-dirty ]]; then
         # The images are labelled with the revision; build-release-images.sh
         # refuses to push images built from uncommitted sources.
@@ -821,6 +867,7 @@ main() {
     check_build_ca
     check_release_keys
     check_pack_versions
+    check_notices
     if [[ $REVISION == *-dirty ]]; then
         if [[ $RELEASE == true ]]; then
             fail "The sources have uncommitted or untracked files ($REVISION)" "Commit the sources before building a release"

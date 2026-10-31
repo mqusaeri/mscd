@@ -69,6 +69,8 @@ jobs:
         run: |
           node packs/scripts/extract-from-sample.mjs --check
           node packs/scripts/validate-sources.mjs
+      - name: Third-party notices match package-lock.json (THIRD-PARTY-NOTICES.md, M3-M01)
+        run: node tools/scripts/third-party-notices.mjs --check
       - name: Shell scripts
         # Each folder from its own place, so -x follows the files the scripts source.
         run: |

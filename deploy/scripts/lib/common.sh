@@ -2,9 +2,16 @@
 # MSCD on-premise: helpers shared by install.sh, upgrade.sh and uninstall.sh.
 # This file is sourced, not executed.
 
-# Compose project name: the "name:" of docker-compose.yml, unless
+# Compose project name: "mscd", the "name:" of docker-compose.yml, unless
 # COMPOSE_PROJECT_NAME names another one (Compose itself reads that variable too).
-readonly MSCD_PROJECT=${COMPOSE_PROJECT_NAME:-mscd}
+# install.sh saves the name of an installation in its .env (COMPOSE_PROJECT_NAME,
+# which Compose reads from there as well); resolve_project sets MSCD_PROJECT from
+# that file for install.sh, upgrade.sh and uninstall.sh. The SaaS and backup
+# scripts export COMPOSE_PROJECT_NAME from their .env before sourcing this file.
+readonly MSCD_DEFAULT_PROJECT=mscd
+# The value of COMPOSE_PROJECT_NAME in the environment of the calling script.
+readonly MSCD_ENV_PROJECT=${COMPOSE_PROJECT_NAME:-}
+MSCD_PROJECT=${COMPOSE_PROJECT_NAME:-$MSCD_DEFAULT_PROJECT}
 readonly MSCD_WEB_SERVICE=web
 # Name of the web container of installations made before the full platform
 # (one container, mscd-web); still recognised so they can be upgraded.
@@ -203,6 +210,94 @@ env_merge_defaults() {
 }
 
 # ---------------------------------------------------------------------------
+# Compose project name of an installation
+# ---------------------------------------------------------------------------
+
+# valid_project_name NAME: a Docker Compose project name (lower-case letters,
+# digits, - and _, starting with a letter or digit, at most 63 characters).
+valid_project_name() {
+    [[ $1 =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]
+}
+
+# dir_projects DIR: the Compose projects of the containers (running or not) that
+# Docker Compose created for the project directory DIR, one per line.
+dir_projects() {
+    command -v docker >/dev/null 2>&1 || return 0
+    docker ps -a --filter "label=com.docker.compose.project.working_dir=$1" \
+        --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u | grep . || true
+}
+
+# resolve_project INSTALL_DIR: sets MSCD_PROJECT to the Compose project of the
+# installation in INSTALL_DIR and exports COMPOSE_PROJECT_NAME with it, so the
+# docker compose calls and the container, network and volume lookups of this
+# script use the same name. In order:
+#   1. COMPOSE_PROJECT_NAME saved in INSTALL_DIR/.env (install.sh writes it);
+#      COMPOSE_PROJECT_NAME in the environment must then name the same project,
+#      otherwise the check fails and nothing is changed;
+#   2. COMPOSE_PROJECT_NAME in the environment (a new installation);
+#   3. for an installation made before the name was saved: the project of the
+#      containers that Compose created for INSTALL_DIR;
+#   4. mscd.
+# Sets MSCD_PROJECT_SOURCE to saved, environment, containers or default.
+resolve_project() {
+    local dir=$1 saved dir_project=()
+    MSCD_PROJECT_SOURCE=default
+    if [[ -n $MSCD_ENV_PROJECT ]] && ! valid_project_name "$MSCD_ENV_PROJECT"; then
+        fail "COMPOSE_PROJECT_NAME '$MSCD_ENV_PROJECT' is not a valid Compose project name" \
+            "Use lower-case letters, digits, - and _ (starting with a letter or digit, at most 63 characters), or unset it"
+        return 0
+    fi
+    saved=$(kv_get "$dir/.env" COMPOSE_PROJECT_NAME)
+    if [[ -n $saved ]]; then
+        if ! valid_project_name "$saved"; then
+            fail "COMPOSE_PROJECT_NAME '$saved' in $dir/.env is not a valid Compose project name" \
+                "Put back the project name the installation was made with (docker compose ls lists the projects)"
+            return 0
+        fi
+        MSCD_PROJECT=$saved
+        MSCD_PROJECT_SOURCE=saved
+        if [[ -n $MSCD_ENV_PROJECT && $MSCD_ENV_PROJECT != "$saved" ]]; then
+            fail "The installation in $dir uses the Compose project $saved (saved in $dir/.env), but COMPOSE_PROJECT_NAME is set to $MSCD_ENV_PROJECT" \
+                "Unset COMPOSE_PROJECT_NAME (or set it to $saved) and run $(basename -- "$0") again; it reads the project name from $dir/.env"
+            return 0
+        fi
+    elif [[ -n $MSCD_ENV_PROJECT ]]; then
+        MSCD_PROJECT=$MSCD_ENV_PROJECT
+        MSCD_PROJECT_SOURCE=environment
+    else
+        mapfile -t dir_project < <(dir_projects "$dir")
+        if ((${#dir_project[@]} == 1)) && valid_project_name "${dir_project[0]}"; then
+            MSCD_PROJECT=${dir_project[0]}
+            MSCD_PROJECT_SOURCE=containers
+        else
+            MSCD_PROJECT=$MSCD_DEFAULT_PROJECT
+        fi
+    fi
+    export COMPOSE_PROJECT_NAME=$MSCD_PROJECT
+    case $MSCD_PROJECT_SOURCE in
+        saved) pass "Compose project $MSCD_PROJECT (saved in $dir/.env)" ;;
+        environment) pass "Compose project $MSCD_PROJECT (from COMPOSE_PROJECT_NAME)" ;;
+        containers) pass "Compose project $MSCD_PROJECT (found from the containers of $dir)" ;;
+        *) pass "Compose project $MSCD_PROJECT" ;;
+    esac
+}
+
+# save_project ENV_FILE: writes COMPOSE_PROJECT_NAME=$MSCD_PROJECT into ENV_FILE
+# (with an explanation the first time), so later runs of upgrade.sh and
+# uninstall.sh, and docker compose in the install directory, use that project.
+save_project() {
+    local env=$1
+    [[ $(kv_get "$env" COMPOSE_PROJECT_NAME) != "$MSCD_PROJECT" ]] || return 0
+    if ! grep -q '^COMPOSE_PROJECT_NAME=' "$env"; then
+        printf '\n%s\n%s\n%s\n' \
+            '# Docker Compose project of this installation: its containers, networks and data' \
+            '# volumes carry this name. install.sh saved it; upgrade.sh, uninstall.sh and' \
+            '# docker compose read it here. Do not change it, or the data volumes are not found.' >>"$env"
+    fi
+    env_set "$env" COMPOSE_PROJECT_NAME "$MSCD_PROJECT"
+}
+
+# ---------------------------------------------------------------------------
 # Host checks
 # ---------------------------------------------------------------------------
 DOCKER_OK=false
@@ -368,8 +463,8 @@ mscd_container_dir() {
     fi
 }
 
-# check_container_owner DIR: the MSCD containers, if any, belong to DIR.
-# Only one MSCD installation can run on a Docker host (Compose project "mscd").
+# check_container_owner DIR: the containers of the Compose project MSCD_PROJECT,
+# if any, belong to DIR (one installation per project; the default project is mscd).
 check_container_owner() {
     local dir=$1 owner
     [[ $DOCKER_OK == true ]] || return 0
@@ -752,6 +847,8 @@ tls_config_test() {
 # ---------------------------------------------------------------------------
 
 # compose_in DIR ARGS...: docker compose for the install in DIR (reads DIR/.env).
+# The project is COMPOSE_PROJECT_NAME, which resolve_project exports, or else the
+# value saved in DIR/.env, or the "name:" of the Compose file.
 compose_in() {
     local dir=$1
     shift

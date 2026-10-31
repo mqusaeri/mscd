@@ -7,6 +7,9 @@
 #   sudo /opt/mscd/uninstall.sh --purge   also delete the data volumes (database, object
 #                                         store, queue), the install directory with its
 #                                         secrets, and the MSCD images
+#
+# The Compose project name of the installation is read from its .env
+# (COMPOSE_PROJECT_NAME, saved by install.sh).
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -29,6 +32,10 @@ Options:
                This cannot be undone.
   -y, --yes    Do not ask for confirmation. Required when there is no terminal.
   -h, --help   Show this help
+
+The Compose project name comes from COMPOSE_PROJECT_NAME in the installation's .env,
+which install.sh saved. COMPOSE_PROJECT_NAME in the environment is not needed; when it
+is set to another name, the script stops before anything changes.
 EOF
 }
 
@@ -68,6 +75,7 @@ main() {
     step "Checking"
     check_privileges
     check_docker
+    resolve_project "$INSTALL_DIR"
     abort_if_failed
 
     [[ -f $INSTALL_DIR/$MSCD_MARKER ]] && installed=true
