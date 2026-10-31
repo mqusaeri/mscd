@@ -26,6 +26,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-09 Export and deletion screens | 3 | Done | Screen "Organisation export" (request, approve or reject, parts and manifest with SHA-256, read-only banner); operator console columns "Read-only until" and "Deletion on", drawer tabs Export and Deletion (schedule, change date, cancel, retry, steps and checks, certificate), status moves of J.8 |
 | M3-10 Demo personas | 4 | Running | Started 2026-11-01 |
 | M3-11 Data lifecycle run and documents | 4 | Running | Started 2026-11-01 |
+| M3-12 Hardening follow-ups | 4 | Running | Added 2026-11-01 for the free slot: operator idempotency, on-premise anchor key, export snapshot, migration grant, `retain_months`, scratch cleanup, findings Close |
 | M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
 
 ## Product owner decisions for Milestone 3

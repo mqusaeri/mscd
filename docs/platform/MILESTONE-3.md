@@ -978,6 +978,33 @@ npm run check:text
 flock /tmp/mscd-stack.lock sh -c 'test -z "$(docker ps -q --filter label=mscd.test=true)"'
 ```
 
+#### M3-12 Hardening follow-ups
+
+| | |
+|---|---|
+| Wave, depends on | 4; every package of waves 1 to 3. Added by the orchestrator on 2026-11-01 at the product owner's request to use the free slot of wave 4 |
+| Owns | `apps/server/src/common/api-route.interceptor.ts` (the idempotency scope), `apps/server/src/modules/audit/**` (anchor keys), `apps/server/src/modules/tenancy/**` (a read-only snapshot option), `apps/server/src/modules/org-export/builder.ts`, `apps/server/src/modules/retention/**`, `apps/server/src/modules/jobs/cleanup-expired.job.ts`, the correction migrations `tenant/0010_milestone3_fix.sql` and `platform/0009_milestone3_fix.sql` (new) with their Kysely types, `apps/web/src/screens/findings/**` except `index.tsx` and `meta.json` (M3-10 changes their roles), their tests under `apps/server/test/int/**` and `apps/web/test/screens/findings.test.tsx`, the J.7 line of `retention_review` in this plan, `docs/platform/handoff/M3-12.md` |
+| Host stack | none (integration tests and targeted browser specs only) |
+
+Brief, each item from the open items of `docs/platform/M3-STATUS.md` and `M2-STATUS.md`:
+- Idempotency for platform operators (M2-19 follow-up 8): `idempotencyScope` ignores Idempotency-Key for a principal without an organisation, so a retried `ops.organizations.create`, `ops.operators.add` or `ops.accounts.*` action runs twice. Scope platform keys by user (organisation null or a platform sentinel) without changing organisation keys, and add a replay test for one create route and one account action.
+- Anchor keys on-premise (M3-02 follow-up note): the in-app anchor checks (`AuditChainVerifier`, `audit.verify-chain`) trust only the compiled keys, so an on-premise installation's own anchor key is refused. Trust the installation's public anchor key the way `export verify --anchor-key` does, keep retired keys trusted, and test both.
+- One snapshot for the organisation export (M3-02): a `withTenant` option for a REPEATABLE READ, read-only transaction (isolation set before `set_config`), used by the export builder; existing callers unchanged.
+- `GRANT SELECT` on each tenant schema's `kysely_migration` to `mscd_app` in `platform.apply_tenant_grants` (correction migration `platform/0009_milestone3_fix.sql`), so the export manifest names the migrations from the schema; reapply to existing schemas.
+- The disposal register stores the period of each decision (M3-06): a `retain_months` smallint column on `retention_review` (correction migration `tenant/0010_milestone3_fix.sql`, null for reviews decided before it), written at decision and at approval, read by the register with the audit fallback kept.
+- `cleanup.expired` calls `removeStaleWorkDirs` every hour, so a stopped export build's scratch files do not wait for the next export (M3-02).
+- Findings (M2-21 follow-up): Close right after "Save texts" uses the version of the saved finding, so a quick click never sends a stale version.
+
+Acceptance:
+
+```bash
+npm run typecheck && npm run lint && npm test
+flock /tmp/mscd-stack.lock flock -s /tmp/mscd-npm.lock npm run test:int -w @mscd/server -- test/int/ops test/int/platform test/int/db test/int/org-export test/int/retention test/int/jobs test/int/seed test/int/parity test/int/contract
+CI=1 npm run test:e2e -w @mscd/web -- e2e/screens/findings.spec.js
+flock /tmp/mscd-stack.lock flock /tmp/mscd-e2e.lock flock -s /tmp/mscd-npm.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/findings.spec.js
+npm run check:text
+```
+
 ## H. Questions for the product owner
 
 Each question has a default that is built when no answer arrives before the package that needs it.

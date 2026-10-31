@@ -100,7 +100,7 @@ describe('route table against the plan', () => {
   it('names an existing work package as owner of every route', () => {
     const planned = new Set(planWorkPackages());
     expect(planned.size).toBe(WORK_PACKAGE_IDS.length);
-    expect(WORK_PACKAGE_IDS.length).toBe(39 + 21 + 13 + 11 + 2);
+    expect(WORK_PACKAGE_IDS.length).toBe(39 + 21 + 13 + 12 + 2);
     expect([...planned].sort()).toEqual([...WORK_PACKAGE_IDS].sort());
     for (const r of routes) {
       expect(WORK_PACKAGE_IDS, r.id).toContain(r.owner);

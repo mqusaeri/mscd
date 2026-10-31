@@ -424,7 +424,7 @@ export const WORK_PACKAGE_IDS: readonly WorkPackageId[] = [
   ...Array.from({ length: 39 }, (_, i) => `WP-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 21 }, (_, i) => `M2-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 13 }, (_, i) => `M2-S${String(i + 1).padStart(2, '0')}` as const),
-  ...Array.from({ length: 11 }, (_, i) => `M3-${String(i + 1).padStart(2, '0')}` as const),
+  ...Array.from({ length: 12 }, (_, i) => `M3-${String(i + 1).padStart(2, '0')}` as const),
   ...Array.from({ length: 2 }, (_, i) => `M3-M${String(i + 1).padStart(2, '0')}` as const),
 ];
 
