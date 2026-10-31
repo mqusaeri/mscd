@@ -1,0 +1,13 @@
+{
+  "workPackage": "M3-02",
+  "routes": [
+    "exports.organization.list",
+    "exports.organization.create",
+    "exports.organization.get",
+    "exports.organization.decide",
+    "exports.organization.manifest",
+    "exports.organization.download",
+    "ops.exports.list",
+    "ops.exports.create"
+  ]
+}
