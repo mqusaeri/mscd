@@ -56,13 +56,13 @@ test.describe('Handover @sample-only', () => {
     await expect(typed).toContainText('Type a user name: lower-case letters, digits, dots, dashes or underscores, starting with a letter.');
     // Without anyone listed apart, the picker has no groups.
     await expect(person(page).locator('optgroup')).toHaveCount(0);
-    await typed.locator('input[name="holderHandle"]').fill('wulan');
+    await typed.locator('input[name="holderHandle"]').fill('joko');
     await typed.locator('button', { hasText: 'Show items' }).click();
-    await expect(person(page)).toHaveValue('wulan');
-    await expect(person(page).locator('optgroup[data-group="former"] option[value="wulan"]')).toHaveCount(1);
-    await expect(page.locator('main')).toContainText('wulan is not an active member with a role in this organisation.');
+    await expect(person(page)).toHaveValue('joko');
+    await expect(person(page).locator('optgroup[data-group="former"] option[value="joko"]')).toHaveCount(1);
+    await expect(page.locator('main')).toContainText('joko is not an active member with a role in this organisation.');
     await expect(page.locator('main')).toContainText('The open items could not be loaded.');
-    await expect(page.locator('main')).toContainText('wulan is not a member of this organisation');
+    await expect(page.locator('main')).toContainText('joko is not a member of this organisation');
     await expectReadableText(page, 4.5);
     await typed.locator('input[name="holderHandle"]').fill(' Bagus ');
     await typed.locator('button', { hasText: 'Show items' }).click();

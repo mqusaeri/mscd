@@ -5,7 +5,7 @@
   "order": 75,
   "scope": "ms",
   "perm": "access_review.decide",
-  "roles": ["manager"],
+  "roles": ["manager", "sponsor"],
   "nav": true,
   "pageActions": [],
   "sampleRole": "manager",

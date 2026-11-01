@@ -165,7 +165,7 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     // bagus owns QM-01, so he reads it through the file routes, without a read confirmation token.
     expect((await openAnswer.json()).url).not.toContain('via=acknowledgement');
     await (await popup).close();
-    await expect(item).toContainText(/Opened on \d{2} [A-Z][a-z]{2} 2026/);
+    await expect(item).toContainText(/Opened on \d{1,2} [A-Z][a-z]{2} \d{4}/);
     await expect(item).toContainText('Tick the statement first.');
     await item.getByLabel('I have read and understood this document').check();
     await button(item, 'Confirm').click();
@@ -235,7 +235,7 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     expect(file.status()).toBe(200);
     expect((await file.body()).toString('utf8')).toContain('MSCD E2E quality manual');
     expect((await page.request.get(`${baseURL}${hendraUrl.split('&via=')[0]}`)).status()).toBe(403);
-    await expect(hendraItem).toContainText(/Opened on \d{2} [A-Z][a-z]{2} 2026/);
+    await expect(hendraItem).toContainText(/Opened on \d{1,2} [A-Z][a-z]{2} \d{4}/);
     await hendraItem.getByLabel('I have read and understood this document').check();
     await button(hendraItem, 'Confirm').click();
     await expectToast(page, `You confirmed QM-01 version ${version}`);

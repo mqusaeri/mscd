@@ -14,7 +14,7 @@ const screen: ScreenDef = {
   label: [TEXT.title[0], TEXT.title[1]],
   icon: ICON,
   scope: 'ms',
-  roles: ['manager'],
+  roles: ['manager', 'sponsor'],
   perm: 'record.assign',
   Component: lazy(() => import('./Screen')),
   tera: {

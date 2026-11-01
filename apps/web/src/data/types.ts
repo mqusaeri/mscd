@@ -28,8 +28,12 @@ export type Tone = 'ok' | 'warn' | 'bad';
 /** Repository kind, LOC entry [1]: SharePoint, OneDrive, Google Drive, Managed Vault, file share. */
 export type LocKind = 'sp' | 'od' | 'gd' | 'vault' | 'smb';
 
-/** UI role of the session user in a system (F.7 "UI role per system"); also the demo personas. */
-export type UiRole = 'manager' | 'owner' | 'auditor' | 'top';
+/**
+ * UI role of the session user in a system (F.7 "UI role per system"); also the demo personas. Milestone 3 E adds
+ * `sponsor` (Programme Owner, shown as `manager`), `riskowner` and `investigator` (Risk Owner and Compliance
+ * Investigator, shown as `owner`); `baseRole` of MscdApp.jsx maps them.
+ */
+export type UiRole = 'manager' | 'owner' | 'auditor' | 'top' | 'sponsor' | 'riskowner' | 'investigator';
 
 /** Permission codes of the F.6 matrix. */
 export type Permission =

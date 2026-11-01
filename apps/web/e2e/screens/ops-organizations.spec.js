@@ -36,7 +36,7 @@ test.describe('Operator console organisations @sample-only', () => {
     for (const header of ['Status', 'Plan', 'Users', 'Valid until', 'Licence', 'Read-only until', 'Deletion on', 'Verified domains']) await expect(main.locator('thead')).toContainText(header);
     await expect(row(page, 'ndt')).toContainText('Active');
     await expect(row(page, 'ndt')).toContainText('enterprise');
-    await expect(row(page, 'ndt')).toContainText('86 of 100');
+    await expect(row(page, 'ndt')).toContainText('89 of 100');
     await expect(row(page, 'ndt')).toContainText('31 Mar 2027');
     await expect(row(page, 'ndt')).toContainText('183 days left');
     await expect(row(page, 'ndt')).toContainText('nusantaradigital.co.id');
@@ -99,7 +99,7 @@ test.describe('Operator console organisations @sample-only', () => {
     await openOrganisations(page);
     await manage(page, 'ndt');
     const drawer = ui.drawer(page);
-    for (const text of ['PT Nusantara Digital Teknologi', 'Set by the operator', '86 of 100', '4 of 5', 'ndt.co.id', 'Pending', 'nusantaradigital.co.id', 'Verified', '29 Sep 2026']) {
+    for (const text of ['PT Nusantara Digital Teknologi', 'Set by the operator', '89 of 100', '4 of 5', 'ndt.co.id', 'Pending', 'nusantaradigital.co.id', 'Verified', '29 Sep 2026']) {
       await expect(drawer).toContainText(text);
     }
     await expectOverlayReadable(page);
@@ -120,7 +120,7 @@ test.describe('Operator console organisations @sample-only', () => {
     await dialog.getByRole('button', { name: 'Suspend' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(drawer).toContainText('PT Nusantara Digital Teknologi is now Suspended');
-    await expect(drawer).toContainText('Sessions ended: 29.');
+    await expect(drawer).toContainText('Sessions ended: 30.');
     await expect(drawer).toContainText('Tenant Admins emailed: 2 of 2.');
     await expectToast(page, 'PT Nusantara Digital Teknologi is now Suspended');
     await expect(drawer.locator('[data-status-meaning="suspended"]')).toBeVisible();
@@ -383,7 +383,7 @@ test.describe('Operator console organisations @sample-only', () => {
     const drawer = ui.drawer(page);
     await drawerTab(page, 'Entitlements').click();
     const form = drawer.locator('[data-entitlement-form]');
-    await expect(drawer.locator('[data-entitlement-version="3"]')).toContainText('86 of 100');
+    await expect(drawer.locator('[data-entitlement-version="3"]')).toContainText('89 of 100');
     await expect(form.locator('select')).toHaveValue('');
     await expectOverlayReadable(page);
     const users = form.getByLabel('Users');
@@ -394,11 +394,11 @@ test.describe('Operator console organisations @sample-only', () => {
     await form.getByLabel('Management systems').fill('3');
     await form.getByRole('button', { name: 'Save the entitlement' }).click();
     await expect(drawer).toContainText('Saved with a warning');
-    await expect(drawer).toContainText('The organisation has 86 active members and the new limit is 50.');
+    await expect(drawer).toContainText('The organisation has 89 active members and the new limit is 50.');
     await expect(drawer).toContainText('The organisation has 4 management systems and the new limit is 3.');
-    await expect(drawer.locator('[data-entitlement-version="4"]')).toContainText('86 of 50');
+    await expect(drawer.locator('[data-entitlement-version="4"]')).toContainText('89 of 50');
     await expectToast(page, 'Entitlement of PT Nusantara Digital Teknologi saved');
-    await expect(row(page, 'ndt')).toContainText('86 of 50');
+    await expect(row(page, 'ndt')).toContainText('89 of 50');
     await expectOverlayReadable(page);
     // A preset sets every limit and starts today (the sample's day), not on the first day of the current plan; the
     // last day follows from the first.

@@ -5,7 +5,7 @@
   "order": 25,
   "scope": "ms",
   "perm": "audit.pending.aggregate",
-  "roles": ["top", "manager"],
+  "roles": ["top", "manager", "sponsor"],
   "nav": false,
   "pageActions": [],
   "sampleRole": "top",

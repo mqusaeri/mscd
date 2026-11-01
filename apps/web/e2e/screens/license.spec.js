@@ -14,7 +14,7 @@ test.describe('Licence screen @sample-only', () => {
     await expect(main.locator('h1')).toHaveText('Licence');
     await expect(main).toContainText('Administration');
     await expect(main.locator('.mx-badge')).toHaveText(['Valid']);
-    for (const text of ['PT Nusantara Digital Teknologi', '31 Mar 2027', '30 days', '86 of 150 active members', 'Guests such as certification auditors are not counted.', '4 of 10', 'ISO/IEC 27001', 'Managed Vault, Microsoft 365, Google Drive', 'Integrated Management System']) {
+    for (const text of ['PT Nusantara Digital Teknologi', '31 Mar 2027', '30 days', '89 of 150 active members', 'Guests such as certification auditors are not counted.', '4 of 10', 'ISO/IEC 27001', 'Managed Vault, Microsoft 365, Google Drive', 'Integrated Management System']) {
       await expect(main).toContainText(text);
     }
     await expect(ui.nav(page, 'Licence')).toHaveCSS('font-weight', '600');
@@ -44,7 +44,7 @@ test.describe('Licence screen @sample-only', () => {
     await expectToast(page, 'Licence installed');
     await expect(dialog(page)).toHaveCount(0);
     await expect(page.locator('main')).toContainText('LIC-SAMPLE-2028');
-    await expect(page.locator('main')).toContainText('86 of 200 active members');
+    await expect(page.locator('main')).toContainText('89 of 200 active members');
     await expect(page.locator('main')).toContainText('31 Mar 2028');
   });
 
@@ -82,6 +82,6 @@ test.describe('Licence screen @sample-only', () => {
     await expect(page.locator('main h1')).toHaveText('Licence');
     await expect(page.locator('header')).toContainText('Top Management');
     await expect(page.locator('main button[title="Install licence"]')).toHaveCount(0);
-    await expect(page.locator('main')).toContainText('86 of 150 active members');
+    await expect(page.locator('main')).toContainText('89 of 150 active members');
   });
 });

@@ -70,6 +70,16 @@ export function taskCounts(items: readonly Pick<TaskItem, 'st' | 'due'>[], today
   return { total: items.length, overdue, week, later };
 }
 
+/**
+ * Screens that complete a stored task of Milestone 3 (D3-13, C.3), by the task's entity type: "Mark done" refuses
+ * those tasks (`task_completes_on_screen`), so My Tasks links them to their screen instead.
+ */
+export const TASK_SCREENS: Readonly<Record<string, string>> = {
+  acknowledgement: 'my-confirmations',
+  privacy_check: 'privacy-checks',
+  access_review_part: 'access-review',
+};
+
 /** D-29: the person's chain items in every system, then the stored tasks that are not already one of them. */
 export function deriveTaskList(handle: string, today: string, sources: readonly SystemTaskSource[], stored: readonly StoredTask[]): TaskList {
   const items: TaskItem[] = [];
@@ -97,6 +107,7 @@ export function deriveTaskList(handle: string, today: string, sources: readonly 
       st: chainItemStatus({ holder: handle, due: task.dueAt }, today),
       after: dueAfterAudit(task.dueAt, auditDates.get(task.ms) ?? null),
       stage: null,
+      ...(TASK_SCREENS[task.entityType] ? { screen: TASK_SCREENS[task.entityType] } : {}),
     });
   }
   const sorted = sortTasks(items, today);

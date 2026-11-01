@@ -66,7 +66,7 @@ describe('access review of a system: routes and definition', () => {
   });
 
   it('is the audit screen of a system of the plan', () => {
-    expect(screen).toMatchObject({ id: 'access-review', path: '/ms/:ms/access-review', group: 'audit', scope: 'ms', perm: 'access_review.decide', roles: ['manager'] });
+    expect(screen).toMatchObject({ id: 'access-review', path: '/ms/:ms/access-review', group: 'audit', scope: 'ms', perm: 'access_review.decide', roles: ['manager', 'sponsor'] });
     expect(meta).toMatchObject({ id: 'access-review', label: ['Access review of this system', 'Tinjauan akses sistem ini'], sampleRole: 'manager', scope: 'ms' });
   });
 

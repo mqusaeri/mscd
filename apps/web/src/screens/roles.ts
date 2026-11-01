@@ -41,7 +41,23 @@ export const UI_ROLE_LABEL: Readonly<Record<UiRole, Pair>> = {
   owner: BUSINESS_ROLE_LABELS.domain_owner,
   auditor: BUSINESS_ROLE_LABELS.internal_auditor,
   top: BUSINESS_ROLE_LABELS.top_management,
+  sponsor: BUSINESS_ROLE_LABELS.programme_owner,
+  riskowner: BUSINESS_ROLE_LABELS.risk_owner,
+  investigator: BUSINESS_ROLE_LABELS.compliance_investigator,
 };
+
+/**
+ * The UI role a persona is shown as (MILESTONE-3 E): the Programme Owner (`sponsor`) sees what a Management System
+ * Manager sees, the Risk Owner (`riskowner`) and the Compliance Investigator (`investigator`) what a Domain Owner sees.
+ * Every comparison of UI roles goes through it: the controller (sidebar, own-item filters, landing screen, sample
+ * checks) and the sample checks of host screens (full grants, own rows). Host screens keep the persona itself in
+ * `roles` (C.2). It lives here, in a module without runtime imports, so screen models use it without a cycle.
+ */
+export function baseRole(role: UiRole | null | undefined): UiRole | null {
+  if (role === 'sponsor') return 'manager';
+  if (role === 'riskowner' || role === 'investigator') return 'owner';
+  return role ?? null;
+}
 
 /** The first business role of `roles` in ROLE_PRECEDENCE; null when none is a business role. */
 export function primaryBusinessRole(roles: readonly string[] | null | undefined): BusinessRole | null {

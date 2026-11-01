@@ -67,7 +67,7 @@ describe('My account routes and definition', () => {
 
   it('has no sidebar entry, opens for every sample persona and with ms.read in API mode', () => {
     expect(screen).toMatchObject({ id: 'account', path: '/account', nav: false, scope: 'ms', perm: 'ms.read' });
-    expect([...screen.roles].sort()).toEqual(['auditor', 'manager', 'owner', 'top']);
+    expect([...screen.roles].sort()).toEqual(['auditor', 'investigator', 'manager', 'owner', 'riskowner', 'sponsor', 'top']);
     expect(mayOpenScreen(ctxOf())).toBe(true);
     expect(mayOpenScreen(ctxOf({ mode: 'api', ms: { isms: ['ms.read'] } }))).toBe(true);
     // An administrator without a business role: the drawer of the top bar entry.

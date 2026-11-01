@@ -5,7 +5,7 @@
   "order": 80,
   "scope": "ms",
   "perm": "record.assign",
-  "roles": ["manager"],
+  "roles": ["manager", "sponsor"],
   "nav": true,
   "pageActions": [],
   "sampleRole": "manager",

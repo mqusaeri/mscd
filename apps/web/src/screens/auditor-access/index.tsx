@@ -17,7 +17,7 @@ const screen: ScreenDef = {
   label: [TEXT.title[0], TEXT.title[1]],
   icon: ICON,
   scope: 'ms',
-  roles: ['manager', 'auditor', 'top'],
+  roles: ['manager', 'auditor', 'top', 'sponsor'],
   perm: ['auditor_access.grant', 'ms.read'],
   Component: lazy(() => import('./Screen')),
   pageActions: (ctx) => (mayGrant(ctx, ctx.msObj?.id)

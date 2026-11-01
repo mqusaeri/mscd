@@ -44,8 +44,8 @@ type RouteKey = (typeof ROUTE_KEYS)[number];
 /** Query values of the sample build's start query (C.2); read once at start and then removed from the address. */
 const START_KEYS = ['screen', 'persona'] as const;
 
-/** The sample personas (`UI_ROLES`). */
-export const PERSONAS = ['manager', 'owner', 'auditor', 'top'] as const;
+/** The sample personas (`UI_ROLES`, with the three of Milestone 3 E). */
+export const PERSONAS = ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'] as const;
 
 /** Screen ids (registry.ts: lower case letters, digits and hyphens). */
 const SCREEN_ID = /^[a-z][a-z0-9-]{0,63}$/;

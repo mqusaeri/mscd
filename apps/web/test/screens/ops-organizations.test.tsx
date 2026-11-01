@@ -472,7 +472,7 @@ describe('Organisation lifecycle sample adapter', () => {
     const mismatch = await adapter.changeStatus('ndt', { status: 'offboarding', reason: 'Contract ended', confirmSlug: 'ndx' });
     expect(!mismatch.ok && mismatch.error.messageKey).toBe('confirmation_mismatch');
     const moved = await adapter.changeStatus('ndt', { status: 'suspended', reason: 'Invoice overdue' });
-    expect(moved.ok && moved.data).toMatchObject({ from: 'active', to: 'suspended', sessionsRevoked: 29, tenantAdmins: 2, tenantAdminsEmailed: 2 });
+    expect(moved.ok && moved.data).toMatchObject({ from: 'active', to: 'suspended', sessionsRevoked: 30, tenantAdmins: 2, tenantAdminsEmailed: 2 });
     const offboarding = await adapter.changeStatus('ndt', { status: 'offboarding', reason: 'Contract ended', confirmSlug: 'ndt' });
     expect(offboarding.ok && offboarding.data.sessionsRevoked).toBe(0);
     const history = await adapter.events('ndt', 1, 20);
@@ -542,11 +542,11 @@ describe('Organisation lifecycle sample adapter', () => {
     const first = await adapter.setEntitlement('klinik', { preset: 'trial', validFrom: '2026-10-28' }, '*');
     expect(first.ok && first.data.entitlement).toMatchObject({ plan: 'trial', source: 'preset', maxUsers: 10, validUntil: '2026-11-26', version: 1 });
     const read = await adapter.entitlement('ndt');
-    expect(read.ok && read.data.entitlement?.usage).toEqual({ users: 86, managementSystems: 4 });
+    expect(read.ok && read.data.entitlement?.usage).toEqual({ users: 89, managementSystems: 4 });
     const etag = read.ok ? read.data.etag : '';
     const lowered = await adapter.setEntitlement('ndt', entitlementBody({ ...entitlementForm(read.ok ? read.data.entitlement : null, '2026-09-29'), maxUsers: '50', maxSystems: '3' }), etag);
     expect(lowered.ok && lowered.data.warnings).toHaveLength(2);
-    expect(lowered.ok && lowered.data.warnings[0][0]).toContain('86 active members and the new limit is 50');
+    expect(lowered.ok && lowered.data.warnings[0][0]).toContain('89 active members and the new limit is 50');
     const stale = await adapter.setEntitlement('ndt', { preset: 'standard' }, etag);
     expect(!stale.ok && refusalText(stale.error)).toBe(ORG_TEXT.conflict);
     expect((await adapter.setEntitlement('ndt', { preset: 'gold' }, '*')).ok).toBe(false);

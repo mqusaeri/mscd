@@ -5,7 +5,7 @@
   "order": 900,
   "scope": "ms",
   "perm": "ms.read",
-  "roles": ["manager", "owner", "auditor", "top"],
+  "roles": ["manager", "owner", "auditor", "top", "sponsor", "riskowner", "investigator"],
   "nav": false,
   "pageActions": [],
   "sampleRole": "manager",

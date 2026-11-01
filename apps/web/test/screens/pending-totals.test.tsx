@@ -83,9 +83,9 @@ describe('pending-totals route', () => {
 describe('pending-totals definition', () => {
   it('is an Audit screen of the system without a sidebar entry, opened by the permission of F.6', () => {
     expect(screen).toMatchObject({ id: 'pending-totals', path: '/ms/:ms/pending-totals', group: 'audit', scope: 'ms', perm: TOTALS_PERM, nav: false });
-    expect(screen.roles).toEqual(['top', 'manager']);
+    expect(screen.roles).toEqual(['top', 'manager', 'sponsor']);
     expect(TOTALS_PERM).toBe('audit.pending.aggregate');
-    expect(meta).toMatchObject({ id: screen.id, roles: ['top', 'manager'], sampleRole: 'top', open: 'query', nav: false, pageActions: [] });
+    expect(meta).toMatchObject({ id: screen.id, roles: ['top', 'manager', 'sponsor'], sampleRole: 'top', open: 'query', nav: false, pageActions: [] });
     expect(TABS).toEqual(['system', 'all']);
   });
 

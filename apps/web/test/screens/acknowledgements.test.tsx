@@ -397,7 +397,7 @@ describe('acknowledgement views', () => {
   });
 
   it('is in the Implementation group of the system with the three permissions of C.2', () => {
-    expect(screen).toMatchObject({ id: 'acknowledgements', path: '/ms/:ms/acknowledgements', group: 'impl', scope: 'ms', roles: ['manager', 'top'] });
+    expect(screen).toMatchObject({ id: 'acknowledgements', path: '/ms/:ms/acknowledgements', group: 'impl', scope: 'ms', roles: ['manager', 'top', 'sponsor'] });
     expect(screen.perm).toEqual([...SCREEN_PERMS]);
   });
 });

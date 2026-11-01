@@ -2,12 +2,15 @@
 // and the screen host of Milestone 2 (MILESTONE-2 C.3 to C.5, M2-01) in both modes.
 // MscdApp is used as a plain object (no DOM): setState merges at once, and renderVals() builds the view model of
 // every screen, which is what AppView renders.
+import { permissionsFor } from '@mscd/shared';
+import type { BusinessRole } from '@mscd/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MscdApp from '../../src/MscdApp.jsx';
 import { createSampleDataSource } from '../../src/data/SampleDataSource.js';
 import { HOST_SCREENS } from '../../src/screens/registry';
 import { BUILTIN_SCREEN_IDS } from '../../src/screens/types';
 import { BUSINESS_ROLE_LABELS } from '../../src/screens/roles';
+import { PERSONAS } from '../../src/routing/address';
 import { NOT_COMPUTED } from '../../src/data/api/wire';
 import { clauseFixture } from '../fixtures/screens/clauses';
 import { json, meOf, readRoutes, refOf, sourceWith, uuidOf, wireOf } from './fixtures';
@@ -363,6 +366,156 @@ describe('controller in API mode', () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------
+// The personas of Milestone 3 in the API build (MILESTONE-3 E): `me.get` gives real users the UI roles `sponsor`,
+// `riskowner` and `investigator` (uiRoleFor), and the controller shows them as `manager` and `owner` (baseRole).
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The F.6 permissions of a business role in one system (`Me.permissions.ms` of the api). */
+const msPermsOf = (role: BusinessRole) => permissionsFor('ms', { tenancy: 'single', msRoles: [role], anyMsRoles: [role], orgRoles: [], platformRoles: [] });
+
+/** A person of PT Nusantara Digital Teknologi with one business role in every given system, as `me.get` answers. */
+async function personaApp(handle: string, uiRole: string, role: BusinessRole, systems: string[], prepare?: (fx: AnyRecord) => void) {
+  const fx = await wireOf();
+  prepare?.(fx);
+  const orgs = [{ id: 'ndt', name: 'PT Nusantara Digital Teknologi', ms: systems, deploy: 'saas', sites: 3 }];
+  const perms = { org: [] as string[], ms: Object.fromEntries(systems.map((ms) => [ms, msPermsOf(role)])) };
+  const me = personMe({
+    handle, orgs, perms,
+    rolesByMs: Object.fromEntries(systems.map((ms) => [ms, [role]])),
+    uiRoleByMs: Object.fromEntries(systems.map((ms) => [ms, uiRole])),
+  });
+  const org = { ...fx.org, orgs, MS: fx.org.MS.filter((m: AnyRecord) => systems.includes(m.id)), permissions: perms };
+  const env = await start({ ...readRoutes(fx, me), 'GET /api/v1/ui/org': json(org) });
+  return { ...env, fx, me };
+}
+
+/** The built-in screens of the sidebar and the record counts of the own-item screens of the selected system. */
+function viewOf(app: AnyRecord) {
+  const d = app.data(app.msObj);
+  return {
+    builtin: BUILTIN_SCREEN_IDS.filter((id) => app.builtinOpen(id, app.state.role)),
+    controls: app.controlsScreen(d).tabs.find((t: AnyRecord) => t.id === 'implemented').sub,
+    docs: app.docsScreen(d).chips.find((c: AnyRecord) => c.id === 'all').n,
+    evidence: app.freshScreen(d).tabs.find((t: AnyRecord) => t.id === 'fresh').sub,
+  };
+}
+
+describe('the personas of Milestone 3 in the API build (MILESTONE-3 E)', () => {
+  beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  // Two controls, one document and one evidence item of the ISMS belong to the person.
+  const ownSome = (handle: string) => (fx: AnyRecord) => {
+    const isms = fx.ms.isms.bundle;
+    isms.reqs[0].owner = handle;
+    isms.reqs[1].owner = handle;
+    isms.docs[0].owner = handle;
+    isms.evs[0].owner = handle;
+  };
+
+  for (const [handle, uiRole, role] of [['ratna', 'riskowner', 'risk_owner'], ['gilang', 'investigator', 'compliance_investigator']] as const) {
+    it(`a ${role.replace('_', ' ')} keeps the own-item filter of a Domain Owner and lands on My Tasks`, async () => {
+      const { app } = await personaApp(handle, uiRole, role, ['isms'], ownSome(handle));
+      expect(app.me).toBe(handle);
+      expect(app.state.role).toBe(uiRole);
+      expect(app.startScreen()).toBe('mytasks');
+      const view = viewOf(app);
+      expect(view).toEqual({ builtin: ['m1overview', 'controls', 'docs', 'fresh', 'mytasks'], controls: `${app.t('of')} 2`, docs: 1, evidence: `${app.t('of')} 1` });
+      // Exactly what a Domain Owner with the same records sees.
+      const owner = await personaApp(handle, 'owner', 'domain_owner', ['isms'], ownSome(handle));
+      expect(viewOf(owner.app)).toEqual(view);
+      expect(owner.app.startScreen()).toBe('mytasks');
+      // The landing keeps a screen of the owner's sidebar and gives way to My Tasks for one outside it.
+      expect(app.landing(uiRole, 'controls', true)).toBe('controls');
+      expect(app.landing(uiRole, 'chain', true)).toBe('mytasks');
+      // An address of a screen outside the owner's sidebar is not opened; every screen renders.
+      expect(app.openable('controls')).toBe(true);
+      expect(app.openable('audit')).toBe(false);
+      expect(app.openable('chain')).toBe(false);
+      renderAll(app);
+    });
+  }
+
+  it('a Programme Owner sees what a Management System Manager sees, with the rights of a Programme Owner', async () => {
+    const systems = ['isms', 'qms', 'bcms', 'abms'];
+    const { app } = await personaApp('wulan', 'sponsor', 'programme_owner', systems, ownSome('wulan'));
+    const { app: manager } = await personaApp('rina', 'manager', 'ms_manager', systems, ownSome('wulan'));
+    expect(app.state.role).toBe('sponsor');
+    expect(app.startScreen()).toBe('portfolio');
+    expect(manager.startScreen()).toBe('portfolio');
+    // Every built-in screen and every record, not only the person's own.
+    const view = viewOf(app);
+    expect(view).toEqual(viewOf(manager));
+    expect(view.builtin).toEqual([...BUILTIN_SCREEN_IDS]);
+    expect(view.docs).toBe(app.data(app.msObj).docs.length);
+    // F.6: the Programme Owner verifies (decision 6 of CLAUDE.md) and sees everyone's pending work.
+    const d = app.data(app.msObj);
+    const done = { ...d.reqs[0], st: 'complete', by: 'bagus' };
+    expect(app.reqDetail(done, d).actions.some((a: AnyRecord) => a.label === app.t('verify'))).toBe(true);
+    app.state = { ...app.state, screen: 'chain' };
+    expect(app.renderVals().people).not.toBeNull();
+    // Host screens follow the permissions: retention approval and the system's access review, no administration.
+    const labels = app.renderVals().nav.flatMap((g: AnyRecord) => g.items.map((i: AnyRecord) => i.label));
+    const label = (id: string) => HOST_SCREENS.find((def) => def.id === id)!.label[0];
+    expect(labels).toEqual(expect.arrayContaining(['retention', 'access-review', 'handover', 'my-confirmations'].map(label)));
+    expect(labels).not.toContain(label('users'));
+    expect(labels).not.toContain(label('import'));
+    expect(app.openable('pending-totals')).toBe(true);
+    expect(app.openable('privacy-checks')).toBe(false);
+    renderAll(app);
+  });
+
+  it('a persona switch to the new personas lands as their base persona does (demo stack)', async () => {
+    const fx = await wireOf();
+    const personas = fx.org.ROLES;
+    expect(Object.keys(personas)).toEqual([...PERSONAS]);
+    const systems = ['isms', 'qms', 'bcms', 'abms'];
+    const as = (handle: string, uiRole: string) => meOf({ handle, personas, uiRoleByMs: Object.fromEntries(systems.map((k) => [k, uiRole])) });
+    const routes = { ...readRoutes(fx, meOf({ personas })), 'POST /api/v1/auth/demo/persona': json(as('ratna', 'riskowner')) } as Routes;
+    const { app } = await start(routes);
+    expect(app.renderVals().roleOptions.map((r: AnyRecord) => r.label).slice(0, PERSONAS.length)).toEqual([
+      'Management System Manager', 'Domain Owner', 'Internal Auditor', 'Top Management', 'Programme Owner', 'Risk Owner', 'Compliance Investigator',
+    ]);
+    app.state = { ...app.state, screen: 'controls' };
+    routes['GET /api/v1/me'] = json(as('ratna', 'riskowner'));
+    app.setRole('riskowner', 'controls', false);
+    await vi.waitFor(() => expect(app.state.role).toBe('riskowner'));
+    expect(app.me).toBe('ratna');
+    expect(app.state.screen).toBe('mytasks');
+    routes['POST /api/v1/auth/demo/persona'] = json(as('wulan', 'sponsor'));
+    routes['GET /api/v1/me'] = json(as('wulan', 'sponsor'));
+    app.state = { ...app.state, screen: 'chain' };
+    app.setRole('sponsor', 'chain', false);
+    await vi.waitFor(() => expect(app.state.role).toBe('sponsor'));
+    expect(app.me).toBe('wulan');
+    expect(app.state.screen).toBe('chain');
+  });
+
+  it('My Tasks: a read confirmation opens Policies to confirm instead of the Done button (Milestone 3 D3-13)', async () => {
+    const fx = await wireOf();
+    const task = (id: string, screen?: string) => ({
+      key: `isms:task:${uuidOf(id)}`, ms: 'isms', kind: 'task', id: uuidOf(id), title: ['POL-01', 'POL-01'], act: ['Confirm you have read POL-01 v4.0', 'Konfirmasi Anda telah membaca POL-01 v4.0'],
+      due: '2026-10-10', st: 'pending', after: false, stage: null, ...(screen ? { screen } : {}),
+    });
+    fx.tasks.items.push(task('ack-1', 'my-confirmations'), task('ack-2', 'no-such-screen'));
+    const { app, calls } = await start(readRoutes(fx, meOf()));
+    app.state = { ...app.state, screen: 'mytasks' };
+    const feed = app.renderVals().tasks.feed as AnyRecord[];
+    const confirm = feed.find((x) => x.id === uuidOf('ack-1'))!;
+    expect(confirm).toMatchObject({ title: 'Confirm you have read POL-01 v4.0', what: 'Finish it in Policies to confirm.', btn: 'Open' });
+    // A screen this build does not know keeps the Done button of a stored task.
+    expect(feed.find((x) => x.id === uuidOf('ack-2'))!.btn).toBe(app.t('doneTask'));
+    confirm.go();
+    expect(app.state.screen).toBe('my-confirmations');
+    expect(app.state.ms).toBe('isms');
+    await settle(app);
+    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    app.state = { ...app.state, screen: 'mytasks', lang: 'id' };
+    expect((app.renderVals().tasks.feed as AnyRecord[]).find((x) => x.id === uuidOf('ack-1'))).toMatchObject({ what: 'Selesaikan di Kebijakan untuk dikonfirmasi.', btn: 'Buka' });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
 // Screen host (MILESTONE-2 C.3 to C.6, M2-01)
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -395,9 +548,27 @@ describe('screen host in sample mode', () => {
 
   it('every screen, host screens included, renders for every persona in both languages', async () => {
     const app = await sampleApp();
-    for (const role of ['manager', 'owner', 'auditor', 'top']) {
+    for (const role of PERSONAS) {
       app.state = { ...app.state, role };
       renderAll(app);
+    }
+  });
+
+  it('the sample checks of verify and the people list use the base persona of the new personas (MILESTONE-3 E)', async () => {
+    const app = await sampleApp();
+    const d = app.data();
+    const done = { ...d.reqs[0], st: 'complete', by: 'bagus' };
+    const act = { ...d.phases[0].acts[0], st: 'complete', by: 'bagus' };
+    const offers = (detail: AnyRecord, label: string) => detail.actions.some((a: AnyRecord) => a.label === label);
+    // The Programme Owner verifies and sees everyone's pending work as the manager does; the Risk Owner and the
+    // Compliance Investigator do neither, as the Domain Owner.
+    for (const [role, full] of [['manager', true], ['sponsor', true], ['owner', false], ['riskowner', false], ['investigator', false]] as const) {
+      app.state = { ...app.state, role, screen: 'chain', sel: null };
+      expect(offers(app.reqDetail(done, d), app.t('verify')), `${role} verifies a control`).toBe(full);
+      expect(offers(app.actDetail(act, d.phases[0], d), app.t('verifyOutput')), `${role} verifies an activity`).toBe(full);
+      const people = app.renderVals().people;
+      if (full) expect(people, `${role} sees the people list`).not.toBeNull();
+      else expect(people, `${role} sees no people list`).toBeNull();
     }
   });
 
@@ -588,7 +759,8 @@ describe('screen host in API mode', () => {
 
   it('the top bar shows the label of the role the person holds: one distinct label per business role', async () => {
     const fx = await wireOf();
-    const ui: Record<string, string> = { ms_manager: 'manager', programme_owner: 'manager', domain_owner: 'owner', risk_owner: 'owner', internal_auditor: 'auditor', top_management: 'top', external_auditor: 'auditor', compliance_investigator: 'owner' };
+    // The UI role `me.get` gives each business role (uiRoleFor, MILESTONE-3 E).
+    const ui: Record<string, string> = { ms_manager: 'manager', programme_owner: 'sponsor', domain_owner: 'owner', risk_owner: 'riskowner', internal_auditor: 'auditor', top_management: 'top', external_auditor: 'auditor', compliance_investigator: 'investigator' };
     const shown = new Set<string>();
     for (const [role, label] of Object.entries(BUSINESS_ROLE_LABELS)) {
       const me = personMe({ handle: 'rina', rolesByMs: { isms: [role] }, uiRoleByMs: { isms: ui[role] }, orgs: [{ id: 'ndt', name: 'PT Nusantara Digital Teknologi', ms: ['isms'], deploy: 'saas', sites: 3 }], perms: { org: [], ms: { isms: ['ms.read'] } } });

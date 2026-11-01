@@ -217,7 +217,7 @@ describe('my confirmation views', () => {
   });
 
   it('is in the My Tasks group of the sidebar for every business role (ms.read), after My Tasks', () => {
-    expect(screen).toMatchObject({ id: 'my-confirmations', path: '/my-confirmations', group: 'tasks', order: 20, scope: 'ms', perm: 'ms.read', roles: ['manager', 'owner', 'auditor', 'top'] });
+    expect(screen).toMatchObject({ id: 'my-confirmations', path: '/my-confirmations', group: 'tasks', order: 20, scope: 'ms', perm: 'ms.read', roles: ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'] });
     expect(screen.nav).not.toBe(false);
     expect(screen.pageActions).toBeUndefined();
   });

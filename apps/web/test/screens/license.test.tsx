@@ -26,7 +26,7 @@ import { fakeFetch, json, problem } from '../auth/helpers';
 const VIEW: WireLicence = {
   licenseId: 'LIC-DEMO-NDT', organization: 'PT Nusantara Digital Teknologi', binding: { organizationId: '00000000-0000-4000-8000-00000000a001', trial: false },
   validFrom: '2026-04-01', validUntil: '2027-03-31', graceDays: 30, state: 'valid', clockRollback: false, frameworks: ['ISO27001', 'ISO9001'],
-  maxManagementSystems: 10, maxUsers: 150, activeUsers: 86, managementSystems: 4, storageAdapters: ['managed_vault', 'm365'],
+  maxManagementSystems: 10, maxUsers: 150, activeUsers: 89, managementSystems: 4, storageAdapters: ['managed_vault', 'm365'],
   features: ['integrated_mode', 'auditor_guest_access'], signature: { alg: 'Ed25519', keyId: '0a1b2c3d4e5f6789', verified: true, offline: true },
 };
 
@@ -138,7 +138,7 @@ describe('Licence view', () => {
         expect(html).toContain('LIC-DEMO-NDT');
         expect(html).toContain(t(TEXT.stateValid));
         expect(html).toContain(t(TEXT.details));
-        expect(html).toContain(lang === 'id' ? '86 dari 150 anggota aktif' : '86 of 150 active members');
+        expect(html).toContain(lang === 'id' ? '89 dari 150 anggota aktif' : '89 of 150 active members');
         expect(html).toContain(lang === 'id' ? '4 dari 10' : '4 of 10');
         expect(html).toContain('ISO/IEC 27001, ISO 9001');
         expect(html).toContain('Managed Vault, Microsoft 365');
@@ -217,7 +217,7 @@ describe('Licence API adapter', () => {
 describe('Licence sample adapter', () => {
   it('maps the sample licence card', () => {
     const lic = fromSample(D)!;
-    expect(lic).toMatchObject({ organization: LICENCE.org, validUntil: '2027-03-31', users: { used: 86, limit: 150 }, systems: { used: 4, limit: 10 }, state: 'valid', sample: true });
+    expect(lic).toMatchObject({ organization: LICENCE.org, validUntil: '2027-03-31', users: { used: 89, limit: 150 }, systems: { used: 4, limit: 10 }, state: 'valid', sample: true });
     expect(lic.storageAdapters).toEqual(['managed_vault', 'm365', 'google_drive', 'smb']);
     expect(fromSample(null)).toBeNull();
     expect(isoOfDay('1 Sep 2026')).toBe('2026-09-01');
@@ -233,7 +233,7 @@ describe('Licence sample adapter', () => {
     const good = await adapter.install({ license_id: 'LIC-NEW', signature: 'ed25519:x', organization: 'PT Baru', valid_until: '2028-03-31', max_users: 200, frameworks: ['ISO9001'] });
     expect(good.ok).toBe(true);
     const again = await createSampleAdapter(() => D).load();
-    expect(again).toMatchObject({ ok: true, licence: { licenseId: 'LIC-NEW', organization: 'PT Baru', users: { used: 86, limit: 200 }, frameworks: ['ISO9001'] } });
+    expect(again).toMatchObject({ ok: true, licence: { licenseId: 'LIC-NEW', organization: 'PT Baru', users: { used: 89, limit: 200 }, frameworks: ['ISO9001'] } });
   });
 
   it('the build chooses the adapter: outside an api build the sample one, loaded on first use', async () => {

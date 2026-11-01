@@ -5,7 +5,7 @@
   "order": 50,
   "scope": "ms",
   "perm": "ms.read",
-  "roles": ["manager", "auditor", "top", "owner"],
+  "roles": ["manager", "auditor", "top", "owner", "sponsor", "riskowner", "investigator"],
   "nav": true,
   "pageActions": [["Raise finding", "Catat temuan"]],
   "sampleRole": "manager",

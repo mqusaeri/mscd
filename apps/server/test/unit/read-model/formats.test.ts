@@ -93,7 +93,8 @@ describe('pack and licence cards (G.5 PACKS, LICENCE)', () => {
     expect(licenceCard({
       organization: 'PT Nusantara Digital Teknologi', validUntil: '2027-03-31', frameworks: ['ISO27001', 'ISO9001', 'ISO22301', 'ISO37001'],
       storageAdapters: ['managed_vault', 'm365', 'google_drive', 'smb'], features: ['integrated_mode', 'edition_transition', 'link_health_monitor', 'auditor_guest_access'],
-      maxManagementSystems: 10, maxUsers: 150, frameworksUsed: 4, managementSystems: 4, activeUsers: 86, verified: true,
+      // MILESTONE-3 E: 89 active members in each sample organisation (86 before the three new personas).
+      maxManagementSystems: 10, maxUsers: 150, frameworksUsed: 4, managementSystems: 4, activeUsers: 89, verified: true,
     })).toEqual(ndt.LICENCE);
     expect(licenceCard({ organization: 'x', validUntil: '2027-03-31', frameworks: [], storageAdapters: [], features: [], maxManagementSystems: 1, maxUsers: 1, frameworksUsed: 0, managementSystems: 0, activeUsers: 0, verified: false }).sig).toEqual(['Ed25519, not verified', 'Ed25519, tidak terverifikasi']);
   });

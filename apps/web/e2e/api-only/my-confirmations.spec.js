@@ -84,13 +84,13 @@ test.describe('Policies to confirm against the api @api-only', () => {
     expect(url).toMatch(/^https?:\/\//);
     expect(url).not.toContain('/api/v1/');
     await (await popup).close();
-    await expect(item).toContainText(/Opened on \d{2} [A-Z][a-z]{2} 2026/);
+    await expect(item).toContainText(/Opened on \d{1,2} [A-Z][a-z]{2} \d{4}/);
     await expect(button(item, 'Open again')).toBeVisible();
     await item.getByLabel('I have read and understood this document').check();
     await button(item, 'Confirm').click();
     await expectToast(page, 'You confirmed POL-01 version 4.0');
     await expect(body(page)).toContainText('Nothing to confirm');
-    await expect(body(page).locator('tbody tr', { hasText: 'POL-01' }).first()).toContainText(/Confirmed on \d{2} [A-Z][a-z]{2} 2026/);
+    await expect(body(page).locator('tbody tr', { hasText: 'POL-01' }).first()).toContainText(/Confirmed on \d{1,2} [A-Z][a-z]{2} \d{4}/);
     await inBothThemes(page, () => expectReadableText(page, 4.5));
 
     await go(page, 'Overview');

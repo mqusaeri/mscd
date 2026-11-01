@@ -10,6 +10,7 @@ import type { ApiError, ApiResult } from '../../data/api/ApiClient';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { AuditEvent, ControllerData, MsId } from '../../data/types';
 import type { HostContext, TextPair } from '../types';
+import { baseRole } from '../roles';
 import type { Tone } from '../ui';
 import { TEXT } from './text';
 
@@ -393,7 +394,8 @@ export const mayMoveCycle = (ctx: Pick<HostContext, 'can'>, ms: MsId | null | un
 
 /** The business roles of the session in a system (API), or the sample persona's role. */
 function rolesOf(ctx: Who, ms: MsId): readonly string[] {
-  if (ctx.mode !== 'api') return ctx.role === 'manager' ? ['ms_manager'] : [];
+  // Sample: the manager persona and the Programme Owner, whom the sample shows as the manager (MILESTONE-3 E, baseRole).
+  if (ctx.mode !== 'api') return baseRole(ctx.role) === 'manager' ? ['ms_manager'] : [];
   return (ctx.me?.rolesByMs?.[ms] ?? []) as readonly string[];
 }
 

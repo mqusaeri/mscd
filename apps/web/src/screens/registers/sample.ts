@@ -9,6 +9,7 @@
 import type { RegisterKind, TreatmentStatus } from '@mscd/shared';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { ControllerData, DataSource, MsId, UiRole } from '../../data/types';
+import { baseRole } from '../roles';
 import type { PickedFile } from '../types';
 import { COMPETENCE_REMINDER_DAYS, KINDS, KIND_DEFS, competenceCode, proofHoldersOf } from './model';
 import type {
@@ -333,7 +334,9 @@ export function createSampleAdapter(scope: SampleScope): RegistersAdapter {
     }
   };
   const visible = (kind: RegisterKind, row: RowModel): RowModel | null => {
-    const role = scope.role();
+    // The base persona (MILESTONE-3 E): the Risk Owner and the Compliance Investigator read own rows as a Domain Owner
+    // does (the api's `own` read scope), the Programme Owner every row as the manager does (full scope).
+    const role = baseRole(scope.role());
     const me = scope.me();
     const person = (row as { personHandle?: string }).personHandle;
     const own = row.owner === me || person === me;

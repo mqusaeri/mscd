@@ -268,6 +268,7 @@ test.describe('Chain stages', () => {
     await expect(listRows(page)).toHaveCount(30);
     // 31 requirements since Milestone 2 E.2 (M2-04): clause 10.3 left ISO 37001:2025, so one row waits behind "+ 1".
     await expect(moreButton(page)).toHaveText('+ 1');
-    await expect(people(page)).toHaveCount(2);
+    // MILESTONE-3 E: the due diligence requirement 8.2 belongs to the Compliance Investigator Gilang Saputra (2 to 3 people).
+    await expect(people(page)).toHaveCount(3);
   });
 });

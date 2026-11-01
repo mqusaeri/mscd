@@ -25,7 +25,7 @@ test.describe('Policies to confirm @sample-only', () => {
     await expect(ui.title(page)).toHaveText('Policies to confirm');
     await expect(body(page)).toContainText('Nothing to confirm');
     await expect(body(page).locator('svg').first()).toBeVisible();
-    await expect(body(page).locator('tbody tr', { hasText: 'POL-01' })).toContainText(/Confirmed on \d{2} [A-Z][a-z]{2} 2026/);
+    await expect(body(page).locator('tbody tr', { hasText: 'POL-01' })).toContainText(/Confirmed on \d{1,2} [A-Z][a-z]{2} \d{4}/);
     await expect(banner(page)).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await expectNoTextOverflow(page);

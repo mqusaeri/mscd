@@ -18,7 +18,7 @@ const screen: ScreenDef = {
   label: [TEXT.title[0], TEXT.title[1]],
   icon: ICON,
   scope: 'ms',
-  roles: ['manager', 'owner', 'auditor', 'top'],
+  roles: ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'],
   perm: 'ms.read',
   Component: lazy(screenModule),
   pageActions: (ctx) => (ctx.msObj && ctx.can(ctx.msObj.id, ['register.manage', 'risk.manage'])

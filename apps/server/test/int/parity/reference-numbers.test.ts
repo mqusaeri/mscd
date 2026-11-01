@@ -1,6 +1,6 @@
 // Reference numbers of the sample (build plan J.4, UI 4.7): per system of ndt the requirements, evidence, documents,
 // chain items, items that are not pending, gate items and critical evidence, read through `GET /ui/ms/{ms}` as
-// `rina`; and the My Tasks counts of the four personas through `GET /tasks`.
+// `rina`; and the My Tasks counts of the seven personas through `GET /tasks`.
 import type { TaskList, UiMsSnapshot } from '@mscd/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { portfolioCounts } from '../../../src/modules/read-model/derive/portfolio';
@@ -23,7 +23,8 @@ const CARDS: Record<string, { gate: number; docExp: number; evCrit: number; evBa
   abms: { gate: 1, docExp: 0, evCrit: 0, evBad: 0, af: 0 },
 };
 
-const MY_TASKS: Record<string, number> = { rina: 3, bagus: 31, maya: 1, hendra: 3 };
+// MILESTONE-3 E: gilang holds the ABMS due diligence requirement (8.2); wulan and ratna hold no chain item in ndt.
+const MY_TASKS: Record<string, number> = { rina: 3, bagus: 31, maya: 1, hendra: 3, wulan: 0, ratna: 0, gilang: 1 };
 
 describe('UI 4.7 reference numbers through the API', () => {
   const db = useTestDatabase('demo');
@@ -48,7 +49,7 @@ describe('UI 4.7 reference numbers through the API', () => {
     }
   });
 
-  it('gives the My Tasks counts of the four personas (rina 3, bagus 31, maya 1, hendra 3)', async () => {
+  it('gives the My Tasks counts of the seven personas (rina 3, bagus 31, maya 1, hendra 3, wulan 0, ratna 0, gilang 1)', async () => {
     for (const [handle, total] of Object.entries(MY_TASKS)) {
       const client = await sessionFor(ctx, db, handle, 'ndt');
       const response = await client.get<TaskList>('/api/v1/tasks');

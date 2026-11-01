@@ -643,8 +643,12 @@ export const DRIFT_SRCS = ['unverif', 'metric', 'exercise', 'nohash'] as const;
 export const DriftSrc = enumSchema('DriftSrc', DRIFT_SRCS, 'UI drift pattern with live rows (G.5)');
 export type DriftSrc = z.infer<typeof DriftSrc>;
 
-/** UI roles (UI 1.4): the persona a screen is rendered for. */
-export const UI_ROLES = ['manager', 'owner', 'auditor', 'top'] as const;
+/**
+ * UI roles (UI 1.4): the persona a screen is rendered for. Milestone 3 E adds `sponsor` (Programme Owner), `riskowner`
+ * (Risk Owner) and `investigator` (Compliance Investigator); the web app shows `sponsor` as `manager` and the other two
+ * as `owner`.
+ */
+export const UI_ROLES = ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'] as const;
 export const UiRole = enumSchema('UiRole', UI_ROLES, 'UI role per management system (F.7)');
 export type UiRole = z.infer<typeof UiRole>;
 
@@ -654,6 +658,9 @@ export const UI_ROLE_LABELS: Readonly<Record<UiRole, readonly [string, string]>>
   owner: ['Domain Owner', 'Pemilik Domain'],
   auditor: ['Internal Auditor', 'Auditor Internal'],
   top: ['Top Management', 'Manajemen Puncak'],
+  sponsor: ['Programme Owner', 'Pemilik Program'],
+  riskowner: ['Risk Owner', 'Pemilik Risiko'],
+  investigator: ['Compliance Investigator', 'Investigator Kepatuhan'],
 };
 
 /** Frequency codes of the sample and the development packs (UI 1.16). Frequencies are pack data (A-43). */

@@ -260,10 +260,17 @@ function knownOrgDifferences(org: DemoOrg, api: Record<string, unknown>, expecte
     apiStages.abms = apiStages.abms.map((stage, i) => ({ ...stage, q: sampleAbms[i]?.q ?? '' }));
   }
   if (org === 'ndt') return checks;
+  // MILESTONE-3 E: the Compliance Investigator holds his role in the ABMS, which bsd and rmn do not run; there he is a
+  // member without a business role, whom PEOPLE (the members holding one, G.5) leaves out. The sample has one PEOPLE
+  // list for every organisation.
+  const apiPeople = api.PEOPLE as Record<string, unknown>;
+  checks.push(() => expect(apiPeople.gilang).toBeUndefined());
+  expected.PEOPLE = Object.fromEntries(Object.entries(expected.PEOPLE as Record<string, unknown>).filter(([handle]) => handle !== 'gilang'));
   const systems = (api.MS as { id: string; code: string }[]).length;
   const licence = api.LICENCE as Record<string, unknown>;
   const name = org === 'bsd' ? 'PT Bank Sentosa Digital' : 'RS Medika Nusantara';
-  checks.push(() => expect(licence).toMatchObject({ org: name, fw: `${systems} of 4`, ms: `${systems} of 10`, users: '86 of 150' }));
+  // MILESTONE-3 E (R-15): 89 active members in every sample organisation (86 before the three new personas).
+  checks.push(() => expect(licence).toMatchObject({ org: name, fw: `${systems} of 4`, ms: `${systems} of 10`, users: '89 of 150' }));
   expected.LICENCE = { ...(expected.LICENCE as Record<string, unknown>), org: name, fw: `${systems} of 4`, ms: `${systems} of 10` };
   const codes = new Set(Object.values(api.CHAINS as Record<string, { id: string; nodes: [string, string | null][] }[]>).flat().flatMap((c) => [c.id, ...c.nodes.map((n) => n[1])]));
   expected.TITLES = Object.fromEntries(Object.entries(expected.TITLES as Record<string, string>).filter(([k]) => codes.has(k)));

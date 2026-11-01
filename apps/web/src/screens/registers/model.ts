@@ -8,6 +8,7 @@ import type {
 } from '@mscd/shared';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { MsId } from '../../data/types';
+import { baseRole } from '../roles';
 import type { HostContext, PickedFile, TextPair } from '../types';
 import { KIND_TEXT, TEXT, VALUE_TEXT } from './text';
 
@@ -283,7 +284,8 @@ export function meOf(ctx: Pick<HostContext, 'person' | 'me'>): string {
 /** True when the session holds the permission in full in the system (not only for own records). */
 export function holdsInFull(ctx: Pick<HostContext, 'can' | 'me' | 'mode' | 'role'>, ms: MsId, perm: keyof typeof FULL_ROLES): boolean {
   if (!ctx.can(ms, perm)) return false;
-  if (ctx.mode !== 'api') return ctx.role === 'manager';
+  // Sample: a persona holds a grant in full when its base persona is the manager (MILESTONE-3 E, baseRole).
+  if (ctx.mode !== 'api') return baseRole(ctx.role) === 'manager';
   const roles = ctx.me?.rolesByMs?.[ms] ?? [];
   return roles.some((r) => FULL_ROLES[perm].includes(r));
 }

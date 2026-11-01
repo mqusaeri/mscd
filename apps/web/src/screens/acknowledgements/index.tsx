@@ -19,7 +19,7 @@ const screen: ScreenDef = {
   label: [TEXT.title[0], TEXT.title[1]],
   icon: ICON,
   scope: 'ms',
-  roles: ['manager', 'top'],
+  roles: ['manager', 'top', 'sponsor'],
   perm: SCREEN_PERMS,
   Component: lazy(() => import('./Screen')),
   pageActions: (ctx) => (ctx.msObj && ctx.can(ctx.msObj.id, MANAGE_PERM)

@@ -183,8 +183,8 @@ describe('roles and permissions', () => {
     expect(new Set(PERMISSIONS).size).toBe(PERMISSIONS.length);
   });
 
-  it('use the four UI roles for demo personas', () => {
-    expect([...UI_ROLES].sort()).toEqual(['auditor', 'manager', 'owner', 'top']);
+  it('use the seven UI roles for demo personas (Milestone 3 E)', () => {
+    expect([...UI_ROLES].sort()).toEqual(['auditor', 'investigator', 'manager', 'owner', 'riskowner', 'sponsor', 'top']);
     for (const role of UI_ROLES) expect(DemoPersonaRequest.safeParse({ role }).success).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import { withScreenTab } from '../routing/tab';
 import { claimFor, detailExtensionsFor, extraPageActionsFor, slotItems } from './actions';
 import type { ActionId } from './actions';
 import { HOST_SCREENS, hostById } from './registry';
+import { baseRole } from './roles';
 import { SCREEN_GROUPS } from './types';
 import type {
   ActionArgs, DetailKind, DetailProps, GoExtra, HostContext, HostPerm, Lang, PickedFile, PickerOptions, ScreenDef, ScreenGroup, TextLike, TextPair, Theme,
@@ -23,17 +24,56 @@ export { HOST_SCREENS, hostById };
 
 const permList = (perm: HostPerm): readonly string[] => (Array.isArray(perm) ? perm : [perm as string]);
 
+// The UI role a persona is shown as (MILESTONE-3 E, `roles.ts`): `sponsor` as `manager`, `riskowner` and `investigator`
+// as `owner`. The controller and the sample checks of host screens compare UI roles through it.
+export { baseRole };
+
+/** The business role of each sample persona (G.3 `ROLES`, MILESTONE-3 E), whose F.6 permissions it holds. */
+export const SAMPLE_PERSONA_ROLES: Readonly<Record<Exclude<UiRole, 'manager'>, string>> = {
+  owner: 'domain_owner',
+  auditor: 'internal_auditor',
+  top: 'top_management',
+  sponsor: 'programme_owner',
+  riskowner: 'risk_owner',
+  investigator: 'compliance_investigator',
+};
+
 /**
- * Permissions of the sample personas (sample builds only). The sample has no permission data; the manager persona
- * stands for the administrators of the sample organisation (C.2), the others get read access and the rights of their
- * persona that the host screens ask for. Permissions taken from the F.6 matrix are Milestone 3 (plan B).
+ * Permissions of the sample personas (sample builds only), from the F.6 matrix (MILESTONE-3 E): `permissionsFor` of
+ * the persona's business role, system and organisation scope, in matrix order (full and own grants alike; the sample
+ * adapters check ownership themselves). The manager persona keeps every permission, because it stands for the
+ * administrators of the sample organisation (MILESTONE-2 C.2). The lists are written out so the main bundle holds no
+ * copy of the matrix; `test/screens/host.test.tsx` compares them with `permissionsFor` of `@mscd/shared`.
  */
 const SAMPLE_GRANTS: Readonly<Record<UiRole, '*' | readonly string[]>> = {
   manager: '*',
-  top: ['ms.read', 'license.read', 'pack.read', 'audit.pending.aggregate', 'management_review.manage'],
-  auditor: ['ms.read', 'finding.raise', 'internal_audit.manage', 'audit_trail.read', 'reminder.send'],
-  owner: ['ms.read', 'applicability.complete', 'evidence.file.submit', 'document.version.create', 'record.complete_action'],
+  owner: [
+    'ms.read', 'applicability.complete', 'activity.transition', 'record.complete_action', 'document.review', 'document.version.create',
+    'evidence.file.submit', 'evidence.manage', 'register.manage', 'metric.record', 'risk.treatment.update', 'risk.residual.accept',
+    'prep_task.update', 'cycle_item.update', 'corrective_action.update', 'storage.object.read',
+  ],
+  auditor: [
+    'ms.read', 'reminder.send', 'prep_task.update', 'cycle_item.update', 'finding.raise', 'corrective_action.verify', 'self_assessment.manage',
+    'evidence_pack.build', 'export.run', 'storage.object.read', 'internal_audit.manage', 'pack.read',
+  ],
+  top: ['ms.read', 'audit.pending.aggregate', 'export.run', 'license.read'],
+  sponsor: [
+    'ms.read', 'applicability.verify', 'activity.verify', 'record.assign', 'document.approve', 'risk.residual.accept', 'reminder.send',
+    'audit.pending.all', 'audit.pending.aggregate', 'corrective_action.verify', 'management_review.manage', 'export.run', 'storage.object.read',
+    'retention.approve', 'access_review.decide',
+  ],
+  riskowner: [
+    'ms.read', 'applicability.complete', 'activity.transition', 'record.complete_action', 'evidence.file.submit', 'evidence.manage',
+    'register.manage', 'metric.record', 'risk.manage', 'risk.treatment.update', 'risk.residual.accept', 'corrective_action.update',
+    'storage.object.read',
+  ],
+  investigator: ['ms.read', 'record.complete_action', 'storage.object.read'],
 };
+
+/** The permissions of a sample persona: `'*'` for the manager, else its F.6 list (tests). */
+export function sampleGrants(role: UiRole): '*' | readonly string[] {
+  return SAMPLE_GRANTS[role];
+}
 
 /** True when the sample persona holds one of the permissions. */
 export function sampleCan(role: UiRole | null | undefined, perm: HostPerm): boolean {

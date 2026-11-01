@@ -8,6 +8,7 @@ import { addDays, startOfLocalDay } from '../common/dates';
 import { SYSTEM_USER_ID } from '../common/tokens';
 import type { DB } from '../db/types';
 import type { DemoOrg, DemoUser } from './people';
+import { writeMilestone3Records } from './milestone3';
 import { KEYCLOAK_ORGS, KEYCLOAK_SUBJECTS } from './people';
 import { planChainRecords, type ChainTable, type PlannedRecord, type SystemChainPlan } from './plan';
 import { SYSTEM_PACKS, type VersionContent } from './ref-data';
@@ -972,6 +973,21 @@ export async function writeOrganisation(trx: Trx, input: OrgSeedInput): Promise<
       })),
     );
   }
+
+  // ------------------------------------------------------------------------------------------------------------
+  // Records of the personas of Milestone 3 and the routines of RS Medika Nusantara (MILESTONE-3 E, milestone3.ts)
+  // ------------------------------------------------------------------------------------------------------------
+  const memberIds = new Set(members.map((m) => m.handle));
+  await writeMilestone3Records(trx, {
+    org,
+    schema: input.schema,
+    timeZone: input.timeZone,
+    today,
+    now,
+    memberId: (handle) => (memberIds.has(handle) ? userId(handle) : null),
+    msIds,
+    repoIds,
+  });
 
   return {
     slug: org.slug,

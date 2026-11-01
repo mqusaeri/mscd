@@ -207,8 +207,19 @@ export function readScopeKind(roles: readonly BusinessRole[]): ReadScopeKind | n
   return null;
 }
 
-/** Demo personas by UI role (G.3 `ROLES`): the users the demo persona switch signs in as (D-20). */
-export const DEMO_PERSONAS: Readonly<Record<UiRole, string>> = { manager: 'rina', owner: 'bagus', auditor: 'maya', top: 'hendra' };
+/**
+ * Demo personas by UI role (G.3 `ROLES`, Milestone 3 E): the users the demo persona switch signs in as (D-20). The
+ * Programme Owner, Risk Owner and Compliance Investigator of Milestone 3 are demo material only (R-13).
+ */
+export const DEMO_PERSONAS: Readonly<Record<UiRole, string>> = {
+  manager: 'rina',
+  owner: 'bagus',
+  auditor: 'maya',
+  top: 'hendra',
+  sponsor: 'wulan',
+  riskowner: 'ratna',
+  investigator: 'gilang',
+};
 
 /** Permissions of one scope that the context grants (full or own), in matrix order. */
 export function permissionsFor(scope: PermissionScope, ctx: RoleContext): Permission[] {
@@ -225,13 +236,17 @@ export function rolesHolding(permission: Permission, mode: TenancyMode): {
 }
 
 /**
- * UI role for a user's business roles in one system (F.7): `manager` for MM or PO, `auditor` for IA or EA, `top`
- * for TM, `owner` for DO, RO or CI; the first match in that order wins. Null when the user holds no business role.
+ * UI role for a user's business roles in one system (F.7, Milestone 3 E): the first match in this order wins: MM gives
+ * `manager`, PO `sponsor`, IA or EA `auditor`, TM `top`, DO `owner`, RO `riskowner`, CI `investigator`. Null when the
+ * user holds no business role. The web app shows `sponsor` as `manager`, and `riskowner` and `investigator` as `owner`.
  */
 export function uiRoleFor(roles: readonly BusinessRole[]): UiRole | null {
-  if (roles.includes(MM) || roles.includes(PO)) return 'manager';
+  if (roles.includes(MM)) return 'manager';
+  if (roles.includes(PO)) return 'sponsor';
   if (roles.includes(IA) || roles.includes(EA)) return 'auditor';
   if (roles.includes(TM)) return 'top';
-  if (roles.includes(DO) || roles.includes(RO) || roles.includes(CI)) return 'owner';
+  if (roles.includes(DO)) return 'owner';
+  if (roles.includes(RO)) return 'riskowner';
+  if (roles.includes(CI)) return 'investigator';
   return null;
 }

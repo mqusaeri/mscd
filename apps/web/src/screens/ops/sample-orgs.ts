@@ -70,7 +70,7 @@ const deletionId = (n: string) => `1e2f3a4b-5c6d-4e7f-8a9b-0000000d${n}`;
 /** Lifecycle data of the snapshot's organisations, by slug. */
 const KNOWN: Record<string, Omit<SampleOrg, 'slug' | 'name' | 'systemCount'>> = {
   ndt: {
-    status: 'active', region: 'id', createdAt: '2026-01-15T03:00:00Z', memberCount: 86, tenantAdmins: 2, lastSignInAt: '2026-09-29T01:12:00Z',
+    status: 'active', region: 'id', createdAt: '2026-01-15T03:00:00Z', memberCount: 89, tenantAdmins: 2, lastSignInAt: '2026-09-29T01:12:00Z',
     entitlement: entitlement({ plan: 'enterprise', source: 'manual', maxUsers: 100, maxManagementSystems: 5, validFrom: '2026-04-01', validUntil: '2027-03-31', version: 3, updatedAt: '2026-04-01T03:00:00.000Z' }),
     domains: [
       { domain: 'nusantaradigital.co.id', status: 'verified', method: 'dns', requestedAt: '2026-01-16T03:00:00Z', verifiedAt: '2026-01-16T04:35:00Z', lastCheckedAt: '2026-09-16T04:35:00Z', pendingUntil: null, txtName: txt('nusantaradigital.co.id'), checks: 9 },

@@ -2,7 +2,8 @@
 // UI role mapping.
 import { describe, expect, it } from 'vitest';
 import {
-  BUSINESS_ROLES, PERMISSIONS, PERMISSION_MATRIX, effectiveGrant, evaluatePermission, permissionsFor, rolesHolding, uiRoleFor,
+  BUSINESS_ROLES, DEMO_PERSONAS, PERMISSIONS, PERMISSION_MATRIX, UI_ROLES, UI_ROLE_LABELS, effectiveGrant, evaluatePermission, permissionsFor, rolesHolding,
+  uiRoleFor,
 } from '../src/index.js';
 import type { BusinessRole, OrgRole, Permission, PermissionGrant, PlatformRole, RoleContext, TenancyMode } from '../src/index.js';
 import { m2PermissionRows, m3PermissionRows, planPermissionRows } from './helpers.js';
@@ -192,22 +193,35 @@ describe('permissionsFor and rolesHolding', () => {
 });
 
 describe('uiRoleFor', () => {
-  it('maps business roles to the UI role of F.7', () => {
+  it('maps business roles to the UI role of F.7 and Milestone 3 E', () => {
     expect(uiRoleFor(['ms_manager'])).toBe('manager');
-    expect(uiRoleFor(['programme_owner'])).toBe('manager');
+    expect(uiRoleFor(['programme_owner'])).toBe('sponsor');
     expect(uiRoleFor(['internal_auditor'])).toBe('auditor');
     expect(uiRoleFor(['external_auditor'])).toBe('auditor');
     expect(uiRoleFor(['top_management'])).toBe('top');
     expect(uiRoleFor(['domain_owner'])).toBe('owner');
-    expect(uiRoleFor(['risk_owner'])).toBe('owner');
-    expect(uiRoleFor(['compliance_investigator'])).toBe('owner');
+    expect(uiRoleFor(['risk_owner'])).toBe('riskowner');
+    expect(uiRoleFor(['compliance_investigator'])).toBe('investigator');
     expect(uiRoleFor([])).toBeNull();
   });
 
-  it('takes the first match in the order manager, auditor, top, owner', () => {
+  it('takes the first match in the order manager, sponsor, auditor, top, owner, riskowner, investigator', () => {
     expect(uiRoleFor(['domain_owner', 'ms_manager'])).toBe('manager');
+    expect(uiRoleFor(['programme_owner', 'ms_manager'])).toBe('manager');
+    expect(uiRoleFor(['internal_auditor', 'programme_owner'])).toBe('sponsor');
     expect(uiRoleFor(['domain_owner', 'internal_auditor'])).toBe('auditor');
     expect(uiRoleFor(['risk_owner', 'top_management'])).toBe('top');
+    expect(uiRoleFor(['risk_owner', 'domain_owner'])).toBe('owner');
+    expect(uiRoleFor(['compliance_investigator', 'risk_owner'])).toBe('riskowner');
     for (const role of BUSINESS_ROLES) expect(uiRoleFor([role]), role).not.toBeNull();
+  });
+
+  it('names a demo persona with a label for every UI role', () => {
+    for (const role of UI_ROLES) {
+      expect(DEMO_PERSONAS[role], role).toMatch(/^[a-z]+$/);
+      expect(UI_ROLE_LABELS[role], role).toHaveLength(2);
+    }
+    expect(new Set(Object.values(DEMO_PERSONAS)).size).toBe(UI_ROLES.length);
+    expect(DEMO_PERSONAS).toMatchObject({ sponsor: 'wulan', riskowner: 'ratna', investigator: 'gilang' });
   });
 });

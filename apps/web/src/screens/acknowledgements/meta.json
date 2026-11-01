@@ -5,7 +5,7 @@
   "order": 45,
   "scope": "ms",
   "perm": ["acknowledgement.manage", "audit.pending.all", "audit.pending.aggregate"],
-  "roles": ["manager", "top"],
+  "roles": ["manager", "top", "sponsor"],
   "nav": true,
   "pageActions": [["Ask for confirmation", "Minta konfirmasi"]],
   "sampleRole": "manager",

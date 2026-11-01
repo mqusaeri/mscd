@@ -26,7 +26,8 @@ test.describe('People and roles @sample-only', () => {
     const main = page.locator('main');
     await expect(main.locator('h1')).toHaveText('People and roles');
     await expect(main).toContainText('2 role grants are waiting for the approval of a second Tenant Admin.');
-    await expect(rows(page)).toHaveCount(12);
+    // MILESTONE-3 E: the Programme Owner, the Risk Owner and the Compliance Investigator join the sample (12 to 15 people).
+    await expect(rows(page)).toHaveCount(15);
     await expect(row(page, 'Sari Wulandari')).toContainText('Management System Manager in QMS, primary');
     await expect(row(page, 'Rina Kusuma')).toContainText('You');
     await expect(row(page, 'Rina Kusuma')).toContainText('Tenant Admin');
@@ -43,7 +44,7 @@ test.describe('People and roles @sample-only', () => {
     await main.locator('select[name="ms"]').selectOption({ label: 'QMS' });
     await expect(rows(page)).toHaveCount(1);
     await expect(rows(page).first()).toContainText('Maya Putri');
-    await expect(main).toContainText('1 of 12 people');
+    await expect(main).toContainText('1 of 15 people');
     await expectNoHorizontalOverflow(page);
     await expectNoTextOverflow(page);
     await expectReadableText(page, 4.5);

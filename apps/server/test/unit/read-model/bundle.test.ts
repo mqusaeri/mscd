@@ -211,5 +211,12 @@ describe('My Tasks (UI 2.11, D-29)', () => {
       ['isms:task:b', 'task', 'pending', true],
     ]);
     expect(list.items[1]!.title).toEqual(['Fix', 'Perbaiki']);
+    expect(list.items[1]).not.toHaveProperty('screen');
+  });
+
+  it('names the screen that completes a confirmation, a personal data check and an access review part (Milestone 3 D3-13)', () => {
+    const stored = (id: string, entityType: string) => ({ id, ms: 'isms', entityType, entityId: `${id}1111111-1111-4111-8111-111111111111`, entityCode: null, title: ['t', 't'] as [string, string], dueAt: null });
+    const list = deriveTaskList('rina', today, [], [stored('a', 'acknowledgement'), stored('b', 'privacy_check'), stored('c', 'access_review_part'), stored('d', 'risk')]);
+    expect(Object.fromEntries(list.items.map((i) => [i.id, i.screen ?? null]))).toEqual({ a: 'my-confirmations', b: 'privacy-checks', c: 'access-review', d: null });
   });
 });

@@ -25,11 +25,20 @@ export const TaskItem = named(
     st: ItemStatus,
     after: z.boolean(),
     stage: StageKey.nullable(),
+    /**
+     * The screen that completes a stored task which "Mark done" refuses (Milestone 3 D3-13, C.3): `my-confirmations`
+     * for a read confirmation, `privacy-checks` for a personal data check, `access-review` for a part of an access review.
+     */
+    screen: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
   }),
-  'One item of My Tasks: a chain item held by the user, or a stored task (kind task, key <ms>:task:<uuid>, stage null) (D.2, D-29)',
+  'One item of My Tasks: a chain item held by the user, or a stored task (kind task, key <ms>:task:<uuid>, stage null, `screen` when it is completed on a screen of its own) (D.2, D-29, Milestone 3 D3-13)',
   {
-    valid: [EXAMPLE_TASK, { ...EXAMPLE_TASK, key: 'isms:task:8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6b', kind: 'task', id: '8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6b', stage: null }],
-    invalid: [{ ...EXAMPLE_TASK, kind: 'drift' }, { ...EXAMPLE_TASK, title: 'x' }],
+    valid: [
+      EXAMPLE_TASK,
+      { ...EXAMPLE_TASK, key: 'isms:task:8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6b', kind: 'task', id: '8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6b', stage: null },
+      { ...EXAMPLE_TASK, key: 'isms:task:8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6c', kind: 'task', id: '8a1f2d3c-4b5e-4f60-9a7b-1c2d3e4f5a6c', stage: null, screen: 'my-confirmations' },
+    ],
+    invalid: [{ ...EXAMPLE_TASK, kind: 'drift' }, { ...EXAMPLE_TASK, title: 'x' }, { ...EXAMPLE_TASK, kind: 'task', screen: 'My Confirmations' }],
   },
 );
 export type TaskItem = z.infer<typeof TaskItem>;

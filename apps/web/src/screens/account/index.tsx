@@ -17,7 +17,7 @@ const screen: ScreenDef = {
   label: [TEXT.title[0], TEXT.title[1]],
   icon: ACCOUNT_ICON,
   scope: 'ms',
-  roles: ['manager', 'owner', 'auditor', 'top'],
+  roles: ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'],
   perm: 'ms.read',
   nav: false,
   Component: lazy(() => import('./Screen')),

@@ -9,14 +9,22 @@ export const TODAY_S = '2026-09-29';
 export const { P, dd, iso, addD, fmt } = makeDates(TODAY_S);
 
 export const PEOPLE = {
-  rina:['Rina Kusuma','ISMS Manager'], bagus:['Bagus Prasetyo','IT Infrastructure Lead'], dewi:['Dewi Anggraini','HR Manager'], fajar:['Fajar Nugroho','Facilities Manager'], sari:['Sari Wulandari','Head of Quality'], hendra:['Hendra Wijaya','CISO'], maya:['Maya Putri','Internal Auditor'], andi:['Andi Saputra','Procurement Lead'], tono:['Tono Hartono','BCM Coordinator'], yusuf:['Yusuf Rahman','Application Development Lead'], lina:['Lina Marlina','Legal & Compliance Officer'], none:['Unassigned','-']
+  rina:['Rina Kusuma','ISMS Manager'], bagus:['Bagus Prasetyo','IT Infrastructure Lead'], dewi:['Dewi Anggraini','HR Manager'], fajar:['Fajar Nugroho','Facilities Manager'], sari:['Sari Wulandari','Head of Quality'], hendra:['Hendra Wijaya','CISO'], maya:['Maya Putri','Internal Auditor'], andi:['Andi Saputra','Procurement Lead'], tono:['Tono Hartono','BCM Coordinator'], yusuf:['Yusuf Rahman','Application Development Lead'], lina:['Lina Marlina','Legal & Compliance Officer'],
+  // The Programme Owner, the Risk Owner and the Compliance Investigator of MILESTONE-3 E (H.10): invented people.
+  wulan:['Wulan Hartono','Director of Operations'], ratna:['Ratna Kusumawati','Finance and Risk Manager'], gilang:['Gilang Saputra','Compliance Investigator'],
+  none:['Unassigned','-']
 };
 
+// The sample personas, in the order of `UI_ROLES` (MILESTONE-3 E adds the Programme Owner, the Risk Owner and the
+// Compliance Investigator; their labels are those of `UI_ROLE_LABELS`).
 export const ROLES = {
   manager:{ who:'rina', label:ROLE_LABELS.manager },
   owner:{ who:'bagus', label:ROLE_LABELS.owner },
   auditor:{ who:'maya', label:ROLE_LABELS.auditor },
   top:{ who:'hendra', label:ROLE_LABELS.top },
+  sponsor:{ who:'wulan', label:['Programme Owner','Pemilik Program'] },
+  riskowner:{ who:'ratna', label:['Risk Owner','Pemilik Risiko'] },
+  investigator:{ who:'gilang', label:['Compliance Investigator','Investigator Kepatuhan'] },
 };
 
 // Repository locations: [name, kind, short label, colour, icon]; the colour and icon come from LOC_VISUALS by kind.
@@ -39,7 +47,7 @@ export const MS = [
     scope:'Data centre operations: Jakarta', certifier:'PT Sertifikasi Nusantara', lead:['To be assigned','Belum ditentukan'], cert:['Not yet certified, Stage 1 planned','Belum tersertifikasi, Tahap 1 direncanakan'], stage:['Implementation, phase 4 of 8','Implementasi, fase 4 dari 8'],
     audit:{ name:['Stage 1 audit','Audit Tahap 1'], date:'2027-02-10', days:1, prepWindowDays:60 }, clauses:[100,90,60,55,40,20,10], findings:{open:0,major:0}, loc:'gd', locMode:'Customer Repository, Zero-transit', pack:'ISO22301-2019 v1.0.0', phase:['BIA & risk assessment','BIA & penilaian risiko'], unit:'req',
     banner:{ tone:'bad', text:['Google Shared Drive token expired 27 Sep 2026. Integrity checks paused for 11 files.','Token Google Shared Drive kedaluwarsa 27 Sep 2026. Pemeriksaan integritas 11 berkas tertunda.'], kind:'connector' },
-    gateName:['BIA & Risk Assessment','BIA & Penilaian Risiko'], gtSuggestions:['BIA-03','PLN-B02'], approver:'hendra' },
+    gateName:['BIA & Risk Assessment','BIA & Penilaian Risiko'], gtSuggestions:['BIA-03','PLN-B02'], approver:'wulan' },
   { id:'abms', code:'ISO 37001', ed:'2025', short:'ABMS', name:['Anti-bribery management system','Sistem manajemen anti-penyuapan'], mgr:'lina', mgrRole:'Anti-Bribery Compliance Function', color:'#7a4fd3',
     scope:'Procurement, sales and partner management: all sites', certifier:'PT Integritas Sertifikasi Indonesia', lead:'-', cert:['Not yet certified, no audit event','Belum tersertifikasi, belum ada event audit'], stage:['Implementation, phase 1 of 8','Implementasi, fase 1 dari 8'],
     audit:null, clauses:[20,0,0,0,0,0,0], findings:{open:0,major:0}, loc:'vault', locMode:'Managed Vault', pack:'ISO37001-2025 v0.6 (beta)', phase:['Initiate: context & bribery risk','Inisiasi: konteks & risiko penyuapan'], unit:'req',
@@ -107,7 +115,7 @@ const C8 = {
 const REQCFG = {
   qms:{ st:{ '8.4':'partial','9.1':'partial','6.3':'partial','7.2':'partial','10.3':'planned','8.7':'complete' }, own:{ '8.3':'yusuf','8.4':'andi','7.2':'dewi','9.2':'maya','8.5':'yusuf' }, def:'sari', doc:{ '7.5':'IMS-01','9.2':'IMS-02','10.2':'IMS-03','9.3':'IMS-04','8.3':'PRC-Q02','8.4':'PRC-Q03','8.7':'PRC-Q04','8.2':'REG-Q01','9.1':'REG-Q01' }, ddoc:'QM-01', freq:{ '9.1':'monthly','8.4':'annual','8.7':'event','8.6':'event','9.2':'annual','9.3':'annual','7.2':'annual','8.2':'event','8.3':'event','8.5':'monthly','10.2':'event' }, dfreq:'annual', note:{ '8.4':'External provider evaluations 2026 done for 6 of 9 critical suppliers', '9.1':'Customer satisfaction survey Q3 not analysed', '6.3':'Transition change plan (ISO 9001:2026) not approved', '7.2':'Competence matrix missing 4 new hires', '8.7':'Marked complete by process owner: awaiting verification' } },
   bcms:{ st:{ '6.3':'partial','7.1':'partial','7.2':'partial','7.3':'partial','7.4':'partial','7.5':'implemented','8.1':'implemented','8.2':'blocked','8.3':'planned','8.4':'planned','8.5':'ns','8.6':'ns','9.1':'ns','9.2':'ns','9.3':'ns','10.1':'ns','10.2':'ns' }, own:{ '8.2':'tono','8.3':'bagus','8.4':'bagus','8.5':'tono','8.6':'tono','7.2':'dewi','9.2':'maya' }, def:'tono', doc:{ '7.5':'IMS-01','9.2':'IMS-02','10.1':'IMS-03','9.3':'IMS-04','8.2':'PLN-B01','8.3':'PLN-B02','8.4':'PLN-B02','4.4':'REG-B01' }, ddoc:'POL-B01', freq:{ '8.2':'annual','8.5':'annual','9.1':'quarterly' }, dfreq:'annual', note:{ '8.2':'BIA-03: RTO 8h exceeds MTPD 4h; BIA-06 not started: blocks the BIA & Risk Assessment checkpoint', '8.3':'Awaiting BIA checkpoint', '8.4':'Awaiting BIA checkpoint', '7.4':'Emergency communication tree not tested' } },
-  abms:{ st:{ '4.1':'partial','4.2':'partial','4.5':'blocked' }, own:{ '4.5':'lina','8.2':'andi','8.3':'andi','8.7':'andi' }, def:'lina', doc:{}, ddoc:'POL-A01', freq:{}, dfreq:'annual', note:{ '4.5':'Bribery risk assessment not started: blocks the checkpoint for phase 2', '4.1':'Context workshop held 18 Sep; issues not yet recorded' } },
+  abms:{ st:{ '4.1':'partial','4.2':'partial','4.5':'blocked' }, own:{ '4.5':'lina','8.2':'gilang','8.3':'andi','8.7':'andi' }, def:'lina', doc:{}, ddoc:'POL-A01', freq:{}, dfreq:'annual', note:{ '4.5':'Bribery risk assessment not started: blocks the checkpoint for phase 2', '4.1':'Context workshop held 18 Sep; issues not yet recorded' } },
 };
 
 export const DOCS = {
@@ -319,11 +327,14 @@ export const PAST = {
   qms:[ ['NC-2025-03','Minor','8.4','Supplier re-evaluation overdue for 2 suppliers','open','Corrective action in progress'], ['OFI-2025-04','OFI','9.1.3','Trend analysis of customer complaints','closed','Quarterly trend report added'] ],
   bcms:[], abms:[],
 };
+// MILESTONE-3 E: the Risk Owner Ratna Kusumawati holds the BCMS disruption risk assessment and the Compliance
+// Investigator Gilang Saputra the ABMS due diligence (the ISMS rows are shared with the test organisation of the demo
+// seed, which the new personas do not join).
 export const CYCLE_ITEMS = {
   isms:[ ['6.1.2','Risk assessment reviewed this cycle','rina','2026-10-30','progress','32 of 38 risks reassessed; 6 older than 12 months'], ['9.2','Internal audit covering all requirements and controls','maya','2026-10-06','progress','Fieldwork complete, report in drafting'], ['9.3','Management review with all mandatory inputs','hendra','2026-10-28','open','2 of 7 inputs not yet prepared'], ['10.2','Corrective actions closed with verification','bagus','2026-10-20','progress','1 of 2 NC awaiting effectiveness verification'], ['9.1','Performance measured and analysed','rina','2026-10-15','open','3 metrics not updated since June'], ['7.5.2','Document reviews on time','rina','2026-10-31','open','5 documents past review date'] ],
   qms:[ ['6.1','Risks and opportunities reviewed','sari','2026-11-05','progress','2 items pending'], ['9.1.2','Customer satisfaction analysed','sari','2026-10-05','open','Q3 survey not analysed'], ['9.2','Internal audit against 2026 edition','maya','2026-11-14','open','Programme approved'], ['9.3','Management review incl. transition','hendra','2026-11-20','open',''], ['10.2','Corrective actions closed with verification','sari','2026-11-01','progress','NC-2025-03 in progress'], ['-','Edition transition tasks complete','sari','2026-11-10','progress','9 of 14 complete'] ],
-  bcms:[ ['8.2.2','Business impact analysis approved','tono','2026-12-01','open','2 BIAs outstanding'], ['8.2.3','Disruption risk assessment approved','bagus','2026-12-10','open',''], ['8.5','Exercise programme executed','tono','2027-01-15','open','No exercise scheduled yet'], ['9.2','Internal audit of the BCMS','maya','2027-01-25','open',''], ['9.3','Management review','hendra','2027-01-30','open',''] ],
-  abms:[ ['4.5','Bribery risk assessment approved','lina','2026-11-30','open','Not started'], ['5.1.1','Governing body oversight recorded','hendra','2026-12-15','open',''], ['8.2','Due diligence on business associates','andi','2027-01-31','open',''], ['9.4','Compliance function report to governing body','lina','2027-03-31','open',''] ],
+  bcms:[ ['8.2.2','Business impact analysis approved','tono','2026-12-01','open','2 BIAs outstanding'], ['8.2.3','Disruption risk assessment approved','ratna','2026-12-10','open',''], ['8.5','Exercise programme executed','tono','2027-01-15','open','No exercise scheduled yet'], ['9.2','Internal audit of the BCMS','maya','2027-01-25','open',''], ['9.3','Management review','hendra','2027-01-30','open',''] ],
+  abms:[ ['4.5','Bribery risk assessment approved','lina','2026-11-30','open','Not started'], ['5.1.1','Governing body oversight recorded','hendra','2026-12-15','open',''], ['8.2','Due diligence on business associates','gilang','2027-01-31','open',''], ['9.4','Compliance function report to governing body','lina','2027-03-31','open',''] ],
 };
 export const DRIFT = {
   isms:[ { id:'risk12', l:['Risks not reassessed in 12 months','Risiko tidak dinilai ulang 12 bulan'], rows:[ ['R-005','Data centre power failure','bagus','2026-10-30'], ['R-009','Loss of key personnel','dewi','2026-10-30'], ['R-011','Ransomware on file servers','bagus','2026-10-30'], ['R-017','Physical intrusion Surabaya','fajar','2026-10-30'], ['R-020','Misconfigured cloud storage','yusuf','2026-10-30'], ['R-029','Regulatory penalty (PDP Law)','lina','2026-10-30'] ] }, { id:'unverif', l:['Evidence files that cannot be verified','Berkas bukti tak terverifikasi'], src:'unverif' }, { id:'metric', l:['Metrics no longer updated','Metrik berhenti diperbarui'], src:'metric' }, { id:'mr', l:['Management review inputs missing','Input tinjauan manajemen hilang'], rows:[ ['9.3.2 c)','Trends in nonconformities and corrective actions','rina','2026-10-21'], ['9.3.2 f)','Results of risk assessment and treatment plan status','rina','2026-10-21'] ] } ],
@@ -339,7 +350,7 @@ export const REPOS = [
   { id:'od', adapter:'m365', ownershipType:'personal', actions:['test','moveToLibrary'], name:'OneDrive personal', type:'Microsoft 365', modes:'Link', status:'warn', msg:['Personal repository, account disabled 15 Aug 2026, move evidence to the team library','Repositori pribadi, akun dinonaktifkan 15 Agu 2026, pindahkan bukti ke library tim'], tenant:['F. Nugroho, account disabled','F. Nugroho, akun dinonaktifkan'], ms:['ISMS'], last:'29 Sep 2026 06:00' },
 ];
 export const ROUTING = [ ['ISMS','SharePoint Online','Link',['Restricted to Zero-transit','Terbatas ke Zero-transit']], ['QMS','Managed Vault','Upload','-'], ['BCMS','Google Shared Drive','Zero-transit',['Internal to Link','Internal ke Link']], ['ABMS','Managed Vault','Upload',['Concerns & investigations to restricted vault','Laporan & investigasi ke vault terbatas']] ];
-export const LICENCE = { org:'PT Nusantara Digital Teknologi', to:'31 Mar 2027', fw:'4 of 4', ms:'4 of 10', users:'86 of 150', adapters:'Managed Vault, Microsoft 365, Google Workspace, SMB', features:[['Integrated Management System','Sistem Manajemen Terintegrasi'],['Edition Transition Assistant','Asisten Transisi Edisi'],['Link Health Monitor','Pemantau Kesehatan Tautan'],['Auditor guest access','Akses tamu auditor']], sig:['Ed25519, verified','Ed25519, terverifikasi'] };
+export const LICENCE = { org:'PT Nusantara Digital Teknologi', to:'31 Mar 2027', fw:'4 of 4', ms:'4 of 10', users:'89 of 150', adapters:'Managed Vault, Microsoft 365, Google Workspace, SMB', features:[['Integrated Management System','Sistem Manajemen Terintegrasi'],['Edition Transition Assistant','Asisten Transisi Edisi'],['Link Health Monitor','Pemantau Kesehatan Tautan'],['Auditor guest access','Akses tamu auditor']], sig:['Ed25519, verified','Ed25519, terverifikasi'] };
 export const PACKS = { isms:{ v:'1.2.0', installed:'02 Feb 2026', eds:'2022', update:null, status:'current' }, qms:{ v:'0.9.0 (2026), 1.4.2 (2015)', installed:'18 Sep 2026', eds:['2026 current, 2015 in transition','2026 berlaku, 2015 dalam transisi'], update:['1.0.0: subclause numbering verified against published text','1.0.0: penomoran subklausul diverifikasi terhadap teks terbitan'], status:'transition' }, bcms:{ v:'1.0.0', installed:'02 Apr 2026', eds:'2019', update:null, status:'current' }, abms:{ v:'0.6.0 (beta)', installed:'01 Sep 2026', eds:['2025 current, 2016 withdrawn','2025 berlaku, 2016 ditarik'], update:['0.7.0: 26 more activities, 80 finding conditions','0.7.0: tambahan 26 aktivitas, 80 kondisi temuan'], status:'beta' } };
 
 export const PICKER_FILES = {

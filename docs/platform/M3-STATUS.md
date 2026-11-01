@@ -24,7 +24,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-04 Requests from one person | 3 | Done | Screens `privacy-requests` (register, system checks, correction, stop to the use, erasure under a pseudonym with the word ERASE) and `privacy-checks`; "My data" in My account (copy, correction, requests); `privacy.deadlines`; cleanup of old sessions and tokens (D.6.7); pseudonyms in every person column |
 | M3-07 Periodic access review | 3 | Done | Screens `access-reviews` (Tenant Admins) and `access-review` (each system's managers); daily `access-review.open` every 3 months with reminders; keep, change or revoke with the existing services; nobody decides on their own access; the report CSV is filed as evidence for A.5.18 |
 | M3-09 Export and deletion screens | 3 | Done | Screen "Organisation export" (request, approve or reject, parts and manifest with SHA-256, read-only banner); operator console columns "Read-only until" and "Deletion on", drawer tabs Export and Deletion (schedule, change date, cancel, retry, steps and checks, certificate), status moves of J.8 |
-| M3-10 Demo personas | 4 | Running | Started 2026-11-01 |
+| M3-10 Demo personas | 4 | Done | Wulan Hartono (Programme Owner), Ratna Kusumawati (Risk Owner), Gilang Saputra (Compliance Investigator) in the demo seed, sample build and Keycloak realm; `baseRole` maps them to manager or owner views; Milestone 3 routines seeded in RS Medika Nusantara; My Tasks links read confirmations to "Policies to confirm"; retention API tests of decide, approve, reject and File removed |
 | M3-11 Data lifecycle run and documents | 4 | Running | Started 2026-11-01 |
 | M3-12 Hardening follow-ups | 4 | Running | Added 2026-11-01 for the free slot: operator idempotency, on-premise anchor key, export snapshot, migration grant, `retain_months`, scratch cleanup, findings Close |
 | M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
@@ -38,7 +38,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 ## Open items for later packages
 
-- For M3-10 (after M3-04 releases `read-model/**`): link My Tasks rows of entity type acknowledgement to "Policies to confirm" (optional `TaskItem.screen` set in `read-model/derive/tasks.ts`, a branch in the My Tasks screen of `MscdApp.jsx`; follow-up 3 of the M3-05 handoff). Today the generic Done button there is refused with 422 `task_completes_on_screen`.
+- From M3-10 (demo only): the persona menu of `bsd` and `rmn` offers the Compliance Investigator, who has no role there; either `me-assembler.ts` lists only personas with a business role (and `Me.personas` carries the display name, a contract change), or Gilang Saputra joins `ndt` only (member counts 88). Also sample-mode tests of `canVerify` and `canSeePeople` for the three new roles, and `baseRole` in `screens/findings/shared.ts` line 146 once M3-12 is committed.
 - For M3-11: the `errors` list of `me.acknowledgements.open` may add 422 (`no_file`, `file_not_readable`).
 - Optional, for a later owner of `jobs/cleanup-expired.job.ts`: call `removeStaleWorkDirs` on every hourly `cleanup.expired` run, so a stopped export build's scratch files do not wait for the next export.
 - From M3-02: a REPEATABLE READ read-only option of `withTenant` (owner of `modules/tenancy/**`) so the export reads every table in one snapshot.
@@ -49,5 +49,4 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 
 - From M3-06: a `retain_months` column on `retention_review` in a correction migration (R-14), so the disposal register stores the period of each decision in a column; today it reads it from the audit entries `retention_review.decided` and `retention_review.approved`.
-- For M3-10: once the seed writes a due review, add API browser tests of decide, approve as a second person (the proposer's Approve disabled), reject and "File removed" to `e2e/api-only/retention.spec.js`, each with `expectOverlayReadable` in both themes; add `sponsor` to the roles of `screens/retention/index.tsx` and `meta.json`.
 - For M3-11: map the notification kinds `retention_review_due` and `disposal_approval_pending` to the screen `retention` (tabs due and approval) in `KIND_SCREENS`.

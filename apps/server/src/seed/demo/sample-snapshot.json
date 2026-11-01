@@ -284,7 +284,7 @@
       "BIA-03",
       "PLN-B02"
      ],
-     "approver": "hendra"
+     "approver": "wulan"
     },
     {
      "id": "abms",
@@ -394,6 +394,18 @@
      "Lina Marlina",
      "Legal & Compliance Officer"
     ],
+    "wulan": [
+     "Wulan Hartono",
+     "Director of Operations"
+    ],
+    "ratna": [
+     "Ratna Kusumawati",
+     "Finance and Risk Manager"
+    ],
+    "gilang": [
+     "Gilang Saputra",
+     "Compliance Investigator"
+    ],
     "none": [
      "Unassigned",
      "-"
@@ -426,6 +438,27 @@
      "label": [
       "Top Management",
       "Manajemen Puncak"
+     ]
+    },
+    "sponsor": {
+     "who": "wulan",
+     "label": [
+      "Programme Owner",
+      "Pemilik Program"
+     ]
+    },
+    "riskowner": {
+     "who": "ratna",
+     "label": [
+      "Risk Owner",
+      "Pemilik Risiko"
+     ]
+    },
+    "investigator": {
+     "who": "gilang",
+     "label": [
+      "Compliance Investigator",
+      "Investigator Kepatuhan"
      ]
     }
    },
@@ -576,7 +609,7 @@
     "to": "31 Mar 2027",
     "fw": "4 of 4",
     "ms": "4 of 10",
-    "users": "86 of 150",
+    "users": "89 of 150",
     "adapters": "Managed Vault, Microsoft 365, Google Workspace, SMB",
     "features": [
      [
@@ -9988,7 +10021,7 @@
        "owner": "tono",
        "shared": false,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10003,7 +10036,7 @@
        "owner": "tono",
        "shared": false,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10018,7 +10051,7 @@
        "owner": "tono",
        "shared": false,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10033,7 +10066,7 @@
        "owner": "bagus",
        "shared": false,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10048,7 +10081,7 @@
        "owner": "rina",
        "shared": true,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10063,7 +10096,7 @@
        "owner": "maya",
        "shared": true,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10078,7 +10111,7 @@
        "owner": "rina",
        "shared": true,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       },
@@ -10093,7 +10126,7 @@
        "owner": "hendra",
        "shared": true,
        "ms": "bcms",
-       "approver": "hendra",
+       "approver": "wulan",
        "path": "Compliance / BCMS / Documents",
        "hashAlg": "SHA-256 (provider)"
       }
@@ -11899,7 +11932,7 @@
        "title": "Due diligence",
        "theme": "Clause 8",
        "st": "ns",
-       "owner": "andi",
+       "owner": "gilang",
        "doc": "POL-A01",
        "freq": "annual",
        "note": "",
@@ -12686,7 +12719,7 @@
          "Assign and start",
          "Tugaskan dan mulai"
         ],
-        "h": "andi",
+        "h": "gilang",
         "due": "2026-12-07",
         "st": "pending",
         "after": false,
@@ -15037,7 +15070,7 @@
      [
       "8.2.3",
       "Disruption risk assessment approved",
-      "bagus",
+      "ratna",
       "2026-12-10",
       "open",
       ""
@@ -15087,7 +15120,7 @@
      [
       "8.2",
       "Due diligence on business associates",
-      "andi",
+      "gilang",
       "2027-01-31",
       "open",
       ""
@@ -15537,6 +15570,18 @@
      "Lina Marlina",
      "Legal & Compliance Officer"
     ],
+    "wulan": [
+     "Wulan Hartono",
+     "Director of Operations"
+    ],
+    "ratna": [
+     "Ratna Kusumawati",
+     "Finance and Risk Manager"
+    ],
+    "gilang": [
+     "Gilang Saputra",
+     "Compliance Investigator"
+    ],
     "none": [
      "Unassigned",
      "-"
@@ -15569,6 +15614,27 @@
      "label": [
       "Top Management",
       "Manajemen Puncak"
+     ]
+    },
+    "sponsor": {
+     "who": "wulan",
+     "label": [
+      "Programme Owner",
+      "Pemilik Program"
+     ]
+    },
+    "riskowner": {
+     "who": "ratna",
+     "label": [
+      "Risk Owner",
+      "Pemilik Risiko"
+     ]
+    },
+    "investigator": {
+     "who": "gilang",
+     "label": [
+      "Compliance Investigator",
+      "Investigator Kepatuhan"
      ]
     }
    },
@@ -15705,7 +15771,7 @@
     "to": "31 Mar 2027",
     "fw": "4 of 4",
     "ms": "4 of 10",
-    "users": "86 of 150",
+    "users": "89 of 150",
     "adapters": "Managed Vault, Microsoft 365, Google Workspace, SMB",
     "features": [
      [
@@ -25932,6 +25998,18 @@
      "Lina Marlina",
      "Legal & Compliance Officer"
     ],
+    "wulan": [
+     "Wulan Hartono",
+     "Director of Operations"
+    ],
+    "ratna": [
+     "Ratna Kusumawati",
+     "Finance and Risk Manager"
+    ],
+    "gilang": [
+     "Gilang Saputra",
+     "Compliance Investigator"
+    ],
     "none": [
      "Unassigned",
      "-"
@@ -25964,6 +26042,27 @@
      "label": [
       "Top Management",
       "Manajemen Puncak"
+     ]
+    },
+    "sponsor": {
+     "who": "wulan",
+     "label": [
+      "Programme Owner",
+      "Pemilik Program"
+     ]
+    },
+    "riskowner": {
+     "who": "ratna",
+     "label": [
+      "Risk Owner",
+      "Pemilik Risiko"
+     ]
+    },
+    "investigator": {
+     "who": "gilang",
+     "label": [
+      "Compliance Investigator",
+      "Investigator Kepatuhan"
      ]
     }
    },
@@ -26092,7 +26191,7 @@
     "to": "31 Mar 2027",
     "fw": "4 of 4",
     "ms": "4 of 10",
-    "users": "86 of 150",
+    "users": "89 of 150",
     "adapters": "Managed Vault, Microsoft 365, Google Workspace, SMB",
     "features": [
      [
@@ -34026,7 +34125,7 @@
   "docApprover": {
    "isms": "hendra",
    "qms": "sari",
-   "bcms": "hendra",
+   "bcms": "wulan",
    "abms": "lina"
   }
  },

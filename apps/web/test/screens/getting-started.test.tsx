@@ -234,7 +234,7 @@ describe('Getting started sample adapter', () => {
     if (!res.ok) return;
     const D = sampleD();
     expect(res.steps.filter((s) => s.key === 'ms_manager').map((s) => s.ms)).toEqual(D.MS.map((m) => m.id));
-    expect(res.steps.find((s) => s.key === 'licence')).toMatchObject({ state: 'done', count: 86, limit: 150 });
+    expect(res.steps.find((s) => s.key === 'licence')).toMatchObject({ state: 'done', count: 89, limit: 150 });
     // ABMS: only its manager verifies, so its separation of duties warning shows.
     expect(res.steps.find((s) => s.key === 'verifiers' && s.ms === 'abms')).toMatchObject({ state: 'pending', count: 1 });
     // ISMS has a Stage 1 and a Stage 2 event in the sample; ABMS has none.

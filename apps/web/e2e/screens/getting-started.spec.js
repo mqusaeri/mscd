@@ -20,7 +20,7 @@ test.describe('Getting started @sample-only', () => {
     // ABMS has one person who can verify: separation of duties keeps its work from Implemented.
     await expect(main).toContainText('Fewer than two people can verify in this system');
     await expect(main.locator('li[data-step="internal_auditor"] .mx-badge', { hasText: 'Optional' }).first()).toBeVisible();
-    await expect(main).toContainText('86 of 150 seats in use');
+    await expect(main).toContainText('89 of 150 seats in use');
     await expectNoHorizontalOverflow(page);
     await expectNoTextOverflow(page);
     await expectReadableText(page, 4.5);

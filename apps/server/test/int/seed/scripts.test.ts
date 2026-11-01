@@ -34,7 +34,7 @@ describe('export-sample-snapshot.mjs and the demo mock fixture (G.2, G.8)', () =
     expect(Object.keys(sample.snapshots)).toEqual(['ndt', 'bsd', 'rmn']);
     expect(sample.today).toBe('2026-09-29');
     expect(Object.keys(sample.raw).sort()).toEqual(['FREQ', 'OUTPUT_MAP', 'PHASES', 'PHASE_STATE', 'PICKER_FILES', 'TERA_KEYS']);
-    expect(sample.literals.docApprover).toEqual({ isms: 'hendra', qms: 'sari', bcms: 'hendra', abms: 'lina' });
+    expect(sample.literals.docApprover).toEqual({ isms: 'hendra', qms: 'sari', bcms: 'wulan', abms: 'lina' });
     const items = sample.snapshots.ndt!.bundles.isms!.chain.items;
     for (const item of items) if (item.ref !== undefined) expect(item.ref).toBe(item.key);
     const acts = sample.snapshots.ndt!.bundles.isms!.phases.flatMap((p) => p.acts);

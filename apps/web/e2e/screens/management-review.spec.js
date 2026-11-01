@@ -121,10 +121,15 @@ test.describe('Management review @sample-only', () => {
     await expect(drawer(page)).toContainText('Recorded from QMS: switch to that system to change it.');
   });
 
-  test('Top Management plans reviews in the sample; the Internal Auditor reads them', async ({ page }) => {
-    await page.goto('/?screen=management-review&persona=top');
+  // The sample personas hold the F.6 permissions of their business role (MILESTONE-3 E): `management_review.manage` is a
+  // right of the Management System Manager and the Programme Owner, not of Top Management.
+  test('the Programme Owner plans reviews in the sample; Top Management and the Internal Auditor read them', async ({ page }) => {
+    await page.goto('/?screen=management-review&persona=sponsor');
     await expect(page.locator('main h1')).toHaveText('Management review');
     await expect(ui.pageAction(page, 'Plan review')).toBeVisible();
+    await page.goto('/?screen=management-review&persona=top');
+    await expect(page.locator('main h1')).toHaveText('Management review');
+    await expect(ui.pageAction(page, 'Plan review')).toHaveCount(0);
     await page.goto('/?screen=management-review&persona=auditor');
     await expect(page.locator('main h1')).toHaveText('Management review');
     await expect(ui.pageAction(page, 'Plan review')).toHaveCount(0);

@@ -76,9 +76,9 @@ test.describe('Framework library', () => {
     await expect(licence(page)).toContainText('PT Nusantara Digital Teknologi');
     await expect(licence(page)).toContainText('Valid to 31 Mar 2027, Signature ✓ Ed25519, verified');
     await expect(licence(page).locator('span[style*="border-radius: 999px"]')).toHaveText(['Integrated Management System', 'Edition Transition Assistant', 'Link Health Monitor', 'Auditor guest access']);
-    await expect(meters(page)).toHaveText([/4\s*Frameworks/, /4\s*Management systems/, /86\s*Users/]);
+    await expect(meters(page)).toHaveText([/4\s*Frameworks/, /4\s*Management systems/, /89\s*Users/]);
     const widths = await meters(page).locator('div[style*="height: 100%"]').evaluateAll((els) => els.map((e) => e.style.width));
-    expect(widths).toEqual(['100%', '40%', '57%']);
+    expect(widths).toEqual(['100%', '40%', '59%']);
   });
 
   // @sample-only: in API mode the deployment comes from the api's profile (I.1; the test profile is on-premise) and Check for updates calls the api (H.4).
@@ -113,7 +113,7 @@ test.describe('Framework library', () => {
     await go(page, 'Framework library');
     await expect(rows(page)).toHaveCount(2);
     await expect(licence(page)).toContainText('PT Bank Sentosa Digital');
-    await expect(meters(page)).toHaveText([/2\s*Frameworks/, /2\s*Management systems/, /86\s*Users/]);
+    await expect(meters(page)).toHaveText([/2\s*Frameworks/, /2\s*Management systems/, /89\s*Users/]);
     // Bank Sentosa runs on-premise
     await expect(channel(page)).toContainText('Offline update channel');
   });

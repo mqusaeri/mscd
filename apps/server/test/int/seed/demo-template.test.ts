@@ -85,27 +85,33 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
     }
   });
 
-  it('has 86 active members in each sample organisation and the users of G.3', async () => {
+  // MILESTONE-3 E (R-15): the Programme Owner, the Risk Owner and the Compliance Investigator join the three sample
+  // organisations (86 to 89 active members there, 90 to 93 demo users); the test organisation tst keeps its members.
+  it('has 89 active members in each sample organisation and the users of G.3 and MILESTONE-3 E', async () => {
     const active = (org: OrgSlug) =>
       inPlatform(db.migrator, (trx) =>
         count(sql<{ count: string }>`select count(*) from platform.org_membership m join platform.app_user u on u.id = m.user_id
           where m.organization_id = ${ORG_IDS[org]} and m.status = 'active' and u.kind = 'person' and u.status = 'active'`.execute(trx)),
       );
-    expect(await active('ndt')).toBe(86);
-    expect(await active('bsd')).toBe(86);
-    expect(await active('rmn')).toBe(86);
+    expect(await active('ndt')).toBe(89);
+    expect(await active('bsd')).toBe(89);
+    expect(await active('rmn')).toBe(89);
+    expect(await active('tst')).toBe(11);
     const users = await db.migrator.selectFrom('platform.app_user').select(['handle', 'email', 'display_name', 'job_title', 'kind', 'is_demo']).where('is_demo', '=', true).execute();
     const byHandle = new Map(users.map((u) => [u.handle, u]));
-    expect(users).toHaveLength(11 + 4 + 75);
+    expect(users).toHaveLength(14 + 4 + 75);
     expect(byHandle.get('rina')).toMatchObject({ email: 'rina.kusuma@nusantaradigital.co.id', display_name: 'Rina Kusuma', job_title: 'ISMS Manager', kind: 'person' });
     expect(byHandle.get('dewi')).toMatchObject({ email: 'dewi.anggraini@nusantaradigital.co.id' });
     expect(byHandle.get('ext.auditor')).toMatchObject({ display_name: 'Eko Santoso', job_title: 'Lead Auditor', kind: 'guest', email: 'ext.auditor@mscd.test' });
     expect(byHandle.get('staff75')).toMatchObject({ display_name: 'Staff 75', job_title: 'Employee', email: 'staff75@nusantaradigital.co.id' });
+    expect(byHandle.get('wulan')).toMatchObject({ email: 'wulan.hartono@nusantaradigital.co.id', display_name: 'Wulan Hartono', job_title: 'Director of Operations', kind: 'person' });
+    expect(byHandle.get('ratna')).toMatchObject({ email: 'ratna.kusumawati@nusantaradigital.co.id', display_name: 'Ratna Kusumawati', job_title: 'Finance and Risk Manager' });
+    expect(byHandle.get('gilang')).toMatchObject({ email: 'gilang.saputra@nusantaradigital.co.id', display_name: 'Gilang Saputra', job_title: 'Compliance Investigator' });
     const memberships = await inPlatform(db.migrator, (trx) =>
       sql<{ handle: string; slug: string; admin_roles: string[]; is_default: boolean }>`
         select u.handle, o.slug, m.admin_roles, m.is_default from platform.org_membership m
         join platform.app_user u on u.id = m.user_id join platform.organization o on o.id = m.organization_id
-        where u.handle in ('rina', 'sari', 'tenant.admin', 'ext.auditor', 'mfa.tester', 'ops') order by u.handle, o.position`.execute(trx),
+        where u.handle in ('rina', 'sari', 'tenant.admin', 'ext.auditor', 'mfa.tester', 'ops', 'wulan', 'ratna', 'gilang') order by u.handle, o.position`.execute(trx),
     );
     const of = (handle: string) => memberships.rows.filter((m) => m.handle === handle);
     expect(of('rina').map((m) => [m.slug, m.admin_roles, m.is_default])).toEqual([
@@ -119,6 +125,9 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
     expect(of('ext.auditor').map((m) => m.slug)).toEqual(['tst']);
     expect(of('mfa.tester').map((m) => m.slug)).toEqual(['tst']);
     expect(of('ops')).toEqual([]);
+    for (const handle of ['wulan', 'ratna', 'gilang']) {
+      expect(of(handle).map((m) => [m.slug, m.admin_roles, m.is_default]), handle).toEqual([['ndt', [], true], ['bsd', [], false], ['rmn', [], false]]);
+    }
     const operator = await db.migrator.selectFrom('platform.platform_role as r').innerJoin('platform.app_user as u', 'u.id', 'r.user_id').select(['u.handle', 'r.role']).execute();
     expect(operator).toEqual([{ handle: 'ops', role: 'platform_operator' }]);
   });
@@ -158,6 +167,9 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
     expect(of('maya')).toEqual(['abms:internal_auditor', 'bcms:internal_auditor', 'isms:internal_auditor', 'qms:internal_auditor']);
     expect(of('hendra')).toEqual(['abms:top_management', 'bcms:top_management', 'isms:top_management', 'qms:top_management']);
     expect(of('staff01')).toEqual([]);
+    expect(of('wulan')).toEqual(['abms:programme_owner', 'bcms:programme_owner', 'isms:programme_owner', 'qms:programme_owner']);
+    expect(of('ratna')).toEqual(['bcms:risk_owner', 'isms:risk_owner']);
+    expect(of('gilang')).toEqual(['abms:compliance_investigator']);
     expect(roles.filter((r) => r.role === 'domain_owner').map((r) => r.handle)).toEqual(expect.arrayContaining(['bagus', 'dewi', 'fajar', 'andi', 'yusuf']));
   });
 
@@ -508,7 +520,8 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
     expect(isms.prep.filter((p) => p.status === 'done')).toHaveLength(3); // 2 ISMS, 1 QMS
     expect(isms.prep.every((p) => p.template_code !== null)).toBe(true);
     const findings = (slug: string) => isms.findings.filter((f) => f.slug === slug);
-    const open = (slug: string) => findings(slug).filter((f) => f.status !== 'closed');
+    // MS.findings counts major, minor and OFI findings (G.5); the open signal of MILESTONE-3 E in the ABMS is none.
+    const open = (slug: string) => findings(slug).filter((f) => f.status !== 'closed' && f.classification !== 'signal');
     for (const ms of sample.snapshots.ndt!.MS) {
       expect(open(ms.id).length, ms.id).toBe(ms.findings.open);
       expect(open(ms.id).filter((f) => f.classification === 'major').length, ms.id).toBe(ms.findings.major);
@@ -517,6 +530,7 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
       'NC-2025-01:certification_audit', 'NC-2025-02:certification_audit', 'OFI-2025-01:certification_audit', 'IA-2026-01:internal_audit', 'IA-2026-02:internal_audit',
     ]);
     expect(findings('qms').map((f) => f.code)).toEqual(['NC-2025-03', 'OFI-2025-04', 'IA-2026-03']);
+    expect(findings('abms').map((f) => `${f.code}:${f.classification}:${f.status}:${f.source}`)).toEqual(['INV-2026-01:signal:in_progress:other']);
     expect(isms.chains.map((c) => c.anchor_code)).toEqual(['R-014', 'R-022', 'R-031', 'R-003', 'RO-11', 'RO-07', 'PA-05']);
     expect(Number(isms.nodes.rows[0]!.count)).toBe(7 * 8);
     expect(isms.cycle).toHaveLength(6 + 6 + 5 + 4);
@@ -540,6 +554,83 @@ describe('seed demo: the demo template (G.3 to G.8)', () => {
     expect(grant[0]!.link_used_at).not.toBeNull();
     expect(grant[0]!.valid_until!.getTime()).toBe(grant[0]!.expires_at.getTime());
     expect(grant[0]!.expires_at.getTime()).toBeGreaterThan(Date.now() + 13 * 86_400_000);
+  });
+
+  it('gives the personas of Milestone 3 their records: risks of the Risk Owner with a residual acceptance, the signal of the Compliance Investigator (E)', async () => {
+    const ndt = await inOrg(db.migrator, 'ndt', async (trx) => {
+      const ratna = await trx.selectFrom('platform.app_user').select('id').where('handle', '=', 'ratna').executeTakeFirstOrThrow();
+      const risks = await sql<{ slug: string; code: string; pending_action: string | null }>`
+        select m.slug, r.code, r.pending_action from risk r
+          join entity_ms_link l on l.entity_type = 'risk' and l.entity_id = r.id and l.is_primary
+          join management_system m on m.id = l.management_system_id
+         where r.owner_user_id = ${ratna.id} order by m.position, r.position`.execute(trx);
+      const accepted = await sql<{ code: string; treatment_status: string; accepted_by: string; implemented_by: string; residual_accepted_at: string | null }>`
+        select r.code, t.status as treatment_status, a.accepted_by_user_id as accepted_by, a.implemented_by_user_id as implemented_by,
+               r.residual_accepted_at::text as residual_accepted_at
+          from residual_acceptance a join risk r on r.id = a.risk_id join risk_treatment t on t.id = a.risk_treatment_id`.execute(trx);
+      return { ratna: ratna.id, risks: risks.rows, accepted: accepted.rows };
+    });
+    // Ready risks only, so no chain item, task or sample count changes (the sample has no record of hers).
+    expect(ndt.risks.filter((r) => r.slug === 'isms')).toHaveLength(3);
+    expect(ndt.risks.filter((r) => r.slug === 'bcms')).toHaveLength(3);
+    expect(ndt.risks.every((r) => r.pending_action === null)).toBe(true);
+    expect(ndt.accepted).toHaveLength(1);
+    expect(ndt.accepted[0]).toMatchObject({ treatment_status: 'residual_accepted', accepted_by: ndt.ratna, residual_accepted_at: '2026-09-09' });
+    expect(ndt.accepted[0]!.implemented_by).not.toBe(ndt.ratna);
+    expect(ndt.risks.map((r) => r.code)).toContain(ndt.accepted[0]!.code);
+    // tst holds none of their records and is no organisation of theirs.
+    expect(await inOrg(db.migrator, 'tst', (trx) => count(sql<{ count: string }>`select count(*) from residual_acceptance`.execute(trx)))).toBe(0);
+  });
+
+  it('runs the routines of Milestone 3 in RS Medika Nusantara only: management review, read confirmation, retention review and access review (E)', async () => {
+    const routines = (org: OrgSlug) =>
+      inOrg(db.migrator, org, async (trx) => ({
+        reviews: (await sql<{ code: string; status: string; owner: string; planned_at: string; inputs: number }>`
+          select r.code, r.status, u.handle as owner, r.planned_at::text as planned_at,
+                 (select count(*)::int from management_review_input i where i.management_review_id = r.id) as inputs
+            from management_review r join platform.app_user u on u.id = r.owner_user_id`.execute(trx)).rows,
+        requests: (await sql<{ code: string; version: string; status: string; audience_scope: string; audience_roles: string[]; audience_count: number; due_on: string }>`
+          select d.doc_code as code, v.version_label as version, q.status, q.audience_scope, q.audience_roles, q.audience_count, q.due_on::text as due_on
+            from acknowledgement_request q join document d on d.id = q.document_id join document_version v on v.id = q.document_version_id`.execute(trx)).rows,
+        asked: (await sql<{ handle: string; status: string; task: string | null }>`
+          select u.handle, a.status, (select t.status from task t where t.entity_type = 'acknowledgement' and t.entity_id = a.id) as task
+            from acknowledgement a join platform.app_user u on u.id = a.user_id order by u.handle`.execute(trx)).rows,
+        rules: (await sql<{ record_class: string; retain_months: number; basis: string }>`select record_class, retain_months, basis from retention_rule`.execute(trx)).rows,
+        retention: (await sql<{ item_code: string; item_title: string; status: string; retention_ends_on: string; record_class: string }>`
+          select item_code, item_title, status, retention_ends_on::text as retention_ends_on, record_class from retention_review`.execute(trx)).rows,
+        withdrawn: (await sql<{ code: string; deleted: boolean; repo: string }>`
+          select e.evidence_code as code, e.deleted_at is not null as deleted, s.slug as repo from evidence e
+            join storage_object o on o.id = e.storage_object_id join storage_repository s on s.id = o.storage_repository_id
+           where e.evidence_code = 'EV-0090'`.execute(trx)).rows,
+        access: (await sql<{ review_no: string; status: string; opened_on: string; due_on: string; parts: number; items: number }>`
+          select r.review_no, r.status, r.opened_on::text as opened_on, r.due_on::text as due_on,
+                 (select count(*)::int from access_review_part p where p.access_review_id = r.id) as parts,
+                 (select count(*)::int from access_review_item i where i.access_review_id = r.id) as items
+            from access_review r`.execute(trx)).rows,
+        tasks: (await sql<{ source_rule: string; entity_type: string; owner: string }>`
+          select t.source_rule, t.entity_type, u.handle as owner from task t join platform.app_user u on u.id = t.owner_user_id
+           where t.status = 'open' order by t.source_rule, u.handle`.execute(trx)).rows,
+      }));
+    const rmn = await routines('rmn');
+    expect(rmn.reviews).toEqual([{ code: 'MR-2026', status: 'planned', owner: 'wulan', planned_at: '2026-10-26', inputs: expect.any(Number) }]);
+    expect(rmn.reviews[0]!.inputs).toBeGreaterThan(0);
+    expect(rmn.requests).toEqual([{ code: 'POL-01', version: '4.0', status: 'open', audience_scope: 'roles', audience_roles: ['programme_owner', 'risk_owner'], audience_count: 2, due_on: '2026-10-10' }]);
+    expect(rmn.asked).toEqual([{ handle: 'ratna', status: 'pending', task: 'open' }, { handle: 'wulan', status: 'pending', task: 'open' }]);
+    expect(rmn.rules).toEqual([{ record_class: 'evidence_file', retain_months: 12, basis: 'Access logs are kept for one year after they are withdrawn (records schedule RS-04)' }]);
+    expect(rmn.retention).toEqual([{ item_code: 'EV-0090 v1.0', item_title: 'Badge access log of the former server room', status: 'open', retention_ends_on: '2026-07-29', record_class: 'evidence_file' }]);
+    expect(rmn.withdrawn).toEqual([{ code: 'EV-0090', deleted: true, repo: 'sp' }]);
+    expect(rmn.access).toEqual([{ review_no: 'AR-2026-01', status: 'open', opened_on: '2026-09-29', due_on: '2026-10-13', parts: 2, items: expect.any(Number) }]);
+    expect(rmn.access[0]!.items).toBeGreaterThan(89);
+    expect(rmn.tasks).toEqual([
+      { source_rule: 'access_review', entity_type: 'access_review_part', owner: 'rina' },
+      { source_rule: 'acknowledgement', entity_type: 'acknowledgement', owner: 'ratna' },
+      { source_rule: 'acknowledgement', entity_type: 'acknowledgement', owner: 'wulan' },
+    ]);
+    // The integration suites of the routines work in ndt and tst, which stay without them.
+    for (const org of ['ndt', 'bsd', 'tst'] as const) {
+      const other = await routines(org);
+      expect({ org, ...other }).toEqual({ org, reviews: [], requests: [], asked: [], rules: [], retention: [], withdrawn: [], access: [], tasks: [] });
+    }
   });
 
   it('records the finished seed in platform.system_setting', async () => {

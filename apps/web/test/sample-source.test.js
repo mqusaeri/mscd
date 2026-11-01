@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEMO_PERSONAS, UI_ROLES, UI_ROLE_LABELS } from '@mscd/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as SAMPLE from '../src/data/mscd-data.js';
 import * as STATIC from '../src/data/static.js';
@@ -16,7 +17,8 @@ import { LegacyController, legacyDates } from './fixtures/legacy-controller.js';
 const DATA_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/data');
 const LANGS = ['en', 'id'];
 const li = (a, lang) => (Array.isArray(a) ? a[lang === 'id' ? 1 : 0] : a);
-const ME = { manager: 'rina', owner: 'bagus', auditor: 'maya', top: 'hendra' };
+// The sample personas (MILESTONE-3 E adds the Programme Owner, the Risk Owner and the Compliance Investigator).
+const ME = { manager: 'rina', owner: 'bagus', auditor: 'maya', top: 'hendra', sponsor: 'wulan', riskowner: 'ratna', investigator: 'gilang' };
 
 // The bundle as the controller shows it in one language (MscdApp chain() and gateItems()).
 function localise(b, lang) {
@@ -106,9 +108,15 @@ describe('snapshot of the sample source', () => {
     expect(row('abms')).toEqual([31, 2, 5, 34, 3, 1, 0]);
   });
 
-  it('gives My Tasks counts per persona: rina 3, bagus 31, maya 1, hendra 3', async () => {
+  it('gives My Tasks counts per persona: rina 3, bagus 31, maya 1, hendra 3, gilang 1, wulan and ratna none', async () => {
     const snap = await createSampleDataSource().load('ndt');
-    expect(Object.fromEntries(Object.entries(ME).map(([role, who]) => [role, tasks(snap, who).length]))).toEqual({ manager: 3, owner: 31, auditor: 1, top: 3 });
+    // MILESTONE-3 E: gilang owns the ABMS due diligence requirement (8.2, before andi), which waits for him; the other
+    // records of the new personas are no chain items (the BCMS document approvals, a cycle requirement, and the demo
+    // seed's own rows), so the counts of the four personas stay.
+    expect(Object.fromEntries(Object.entries(ME).map(([role, who]) => [role, tasks(snap, who).length]))).toEqual({
+      manager: 3, owner: 31, auditor: 1, top: 3, sponsor: 0, riskowner: 0, investigator: 1,
+    });
+    expect(tasks(snap, 'gilang').map((i) => i.key)).toEqual(['abms:req:Cl. 8.2']);
   });
 
   it('numbers clause 10 per standard and names the scope and policy document of each system (M2-04, E.2)', async () => {
@@ -209,7 +217,8 @@ describe('snapshot of the sample source', () => {
     expect(ms.bcms.gateName).toEqual(['BIA & Risk Assessment', 'BIA & Penilaian Risiko']);
     expect(ms.abms.gateName).toEqual(['Bribery Risk Assessment', 'Penilaian Risiko Penyuapan']);
     expect([ms.isms, ms.qms, ms.bcms, ms.abms].map((m) => m.gtSuggestions)).toEqual([['A.8.13', 'PRC-07', 'A.5.23'], ['Cl. 8.4', 'PRC-Q04'], ['BIA-03', 'PLN-B02'], ['Cl. 4.5']]);
-    expect([ms.isms, ms.qms, ms.bcms, ms.abms].map((m) => m.approver)).toEqual(['hendra', 'sari', 'hendra', 'lina']);
+    // MILESTONE-3 E: the Programme Owner Wulan Hartono approves the BCMS documents.
+    expect([ms.isms, ms.qms, ms.bcms, ms.abms].map((m) => m.approver)).toEqual(['hendra', 'sari', 'wulan', 'lina']);
     expect([ms.qms, ms.bcms, ms.abms].map((m) => m.banner.kind)).toEqual(['transition', 'connector', 'beta']);
     expect(ms.isms.banner).toBeUndefined();
     expect([ms.isms, ms.qms, ms.bcms].map((m) => m.audit.prepWindowDays)).toEqual([60, 60, 60]);
@@ -470,7 +479,11 @@ describe('modules', () => {
       expect(l[1]).toBe(kind);
       expect([l[3], l[4]]).toEqual([STATIC.LOC_VISUALS[kind].color, STATIC.LOC_VISUALS[kind].icon]);
     }
-    for (const [role, r] of Object.entries(SAMPLE.ROLES)) expect(r).toEqual({ who: ME[role], label: STATIC.ROLE_LABELS[role] });
+    for (const [role, r] of Object.entries(SAMPLE.ROLES)) expect(r).toEqual({ who: ME[role], label: STATIC.ROLE_LABELS[role] ?? [...UI_ROLE_LABELS[role]] });
+    // The sample personas are the demo personas of the api, with the same labels (G.3, MILESTONE-3 E).
+    expect(Object.keys(SAMPLE.ROLES)).toEqual([...UI_ROLES]);
+    for (const role of UI_ROLES) expect(SAMPLE.ROLES[role]).toEqual({ who: DEMO_PERSONAS[role], label: [...UI_ROLE_LABELS[role]] });
+    for (const who of Object.values(ME)) expect(SAMPLE.PEOPLE[who], who).toHaveLength(2);
   });
 
   it('data modules import only each other, so Node can load them', () => {

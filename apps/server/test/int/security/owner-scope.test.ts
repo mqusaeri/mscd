@@ -89,8 +89,10 @@ function pendingOfOthers(body: unknown, self: string, out: string[] = [], path =
  * that exposes a pending holder or due date under a new name does not pass unnoticed.
  */
 const PAST_PERSON_KEYS: ReadonlySet<string> = new Set(['implementedBy', 'verifiedBy']);
+// `residualAcceptedAt`: the day the risk owner accepted the residual risk (BR-04), a past fact; the demo seed holds one
+// since MILESTONE-3 E (the Risk Owner's accepted risk).
 const PAST_DATE_KEYS: ReadonlySet<string> = new Set([
-  'implementedAt', 'verifiedAt', 'heldAt', 'raisedAt', 'detectedAt', 'assessedAt', 'updatedAt', 'scheduledAt', 'plannedAt',
+  'implementedAt', 'verifiedAt', 'heldAt', 'raisedAt', 'detectedAt', 'assessedAt', 'updatedAt', 'scheduledAt', 'plannedAt', 'residualAcceptedAt',
 ]);
 /** `date` of a phase activity is its verification date when the activity is verified, else its due date. */
 const pastDate = (o: Record<string, unknown>, k: string) => PAST_DATE_KEYS.has(k) || (k === 'date' && (o.st === 'verified' || o.status === 'verified'));

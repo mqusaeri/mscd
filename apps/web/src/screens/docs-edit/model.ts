@@ -7,6 +7,7 @@ import type { ApiError, ApiResult } from '../../data/api/ApiClient';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { ChainItem, ControllerData, Document, MsId } from '../../data/types';
 import type { HostContext, PickedFile, TextPair } from '../types';
+import { baseRole } from '../roles';
 import type { PersonOption } from '../ui';
 
 /** The answer of an adapter call: its data, or the api's error with its message pair, rule and field errors. */
@@ -204,7 +205,8 @@ type PermCtx = Pick<HostContext, 'can' | 'me' | 'mode' | 'role'>;
 /** True when the session holds the permission in the system for every record (a full grant). */
 export function holdsInFull(ctx: PermCtx, ms: MsId, perm: FullPerm): boolean {
   if (!ctx.can(ms, perm)) return false;
-  if (ctx.mode !== 'api') return ctx.role === 'manager';
+  // Sample: the Programme Owner holds her grants in full as the manager persona does (MILESTONE-3 E, baseRole).
+  if (ctx.mode !== 'api') return baseRole(ctx.role) === 'manager';
   const roles = ctx.me?.rolesByMs?.[ms] ?? [];
   return roles.some((r) => (FULL_ROLES[perm] as readonly string[]).includes(r));
 }

@@ -5,7 +5,7 @@
   "order": 40,
   "scope": "ms",
   "perm": "ms.read",
-  "roles": ["manager", "auditor", "top"],
+  "roles": ["manager", "auditor", "top", "sponsor"],
   "nav": true,
   "pageActions": [["Plan internal audit", "Rencanakan audit internal"]],
   "sampleRole": "manager",

@@ -98,8 +98,8 @@ describe('access-review.open and the single Tenant Admin (Milestone 3 D.9)', () 
       if (row.subject.handle !== 'rina') expect((await rina.post(`${ADMIN}/${review!.id}/items/${row.id}/decision`, { decision: 'keep' })).status).toBe(200);
     }
     // Every system part: rina decides what she may, the system's own manager decides rina's role, and rina signs off.
-    // In the ISMS rina is the only manager, so her own role there needs a second reviewer.
-    const others: Record<string, string> = { qms: 'sari', bcms: 'tono', abms: 'lina' };
+    // In the ISMS rina is the only manager; its Programme Owner wulan (MILESTONE-3 E) reviews rina's role there.
+    const others: Record<string, string> = { isms: 'wulan', qms: 'sari', bcms: 'tono', abms: 'lina' };
     for (const part of detail.parts) {
       const items = (await rina.get<{ rows: { id: string; ownAccess: boolean; needsSecondReviewer: boolean }[] }>(`/api/v1/ms/${part.ms}/access-reviews/${review!.id}`)).body.rows;
       for (const item of items) {

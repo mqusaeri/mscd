@@ -5,7 +5,7 @@
   "order": 70,
   "scope": "ms",
   "perm": ["auditor_access.grant", "ms.read"],
-  "roles": ["manager", "auditor", "top"],
+  "roles": ["manager", "auditor", "top", "sponsor"],
   "nav": true,
   "pageActions": [["Grant access", "Berikan akses"]],
   "sampleRole": "manager",

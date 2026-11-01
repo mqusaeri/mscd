@@ -10,7 +10,7 @@ import { createDataSource } from './data/createDataSource.js';
 import { findX, titleOf, overviewPhase } from './data/sample-derive.js';
 // Milestone 2 screen host (MILESTONE-2 C.3): host screens, their sidebar entries, the host context and the slots of
 // the generated views. Every later web package adds files in src/screens/<folder>/ only.
-import { canOpenHost, claimed, createHostContext, detailNode, firstAdminScreen, firstPlatformScreen, hostById, hostExtraActions, hostNav, hostVals, slotNode } from './screens/host.tsx';
+import { baseRole, canOpenHost, claimed, createHostContext, detailNode, firstAdminScreen, firstPlatformScreen, hostById, hostExtraActions, hostNav, hostVals, slotNode } from './screens/host.tsx';
 import { heldRoleLabel } from './screens/roles.ts';
 import { BUILTIN_SCREEN_IDS } from './screens/types.ts';
 // Screen addresses (MILESTONE-2 M2-20): the screen, system, organisation and tab of the address, and the browser history.
@@ -55,6 +55,9 @@ const errorText = (e) => (e && e.error && e.error.message) || CONNECTION_LOST;
 // A stored fingerprint is shown as its first 10 and last 4 characters; a check time as its date.
 const shortHash = (h) => h.length > 17 ? h.slice(0,10)+'...'+h.slice(-4) : h;
 const dayOf = (t) => String(t).split(' ').slice(0,3).join(' ');
+// My Tasks rows of a task that its own screen completes (MILESTONE-3 D3-13).
+const OPEN_SCREEN = ['Open','Buka'];
+const TASK_SCREEN_HINT = ['No file is needed: the task closes when you finish it on that screen','Tidak perlu berkas: tugas tertutup setelah Anda menyelesaikannya di layar tersebut'];
 
 // Management system colours are brand hues. As text and as badge fills behind white text they need
 // theme-specific variants to reach 4.5:1, so every view-model object carrying a colour also gets
@@ -137,7 +140,7 @@ export default class MscdApp extends React.Component {
   // a Domain Owner opens My Tasks, an Internal Auditor of a single-system organisation Audit readiness, every other role
   // the portfolio (shown as the overview with one system); a user without a system the landing of C.3. Opened by an
   // address without a screen, or with a screen the person cannot open or that does not exist.
-  startScreen(){ if(!this.MSL.length) return (this.api&&this.landingWithoutSystem())||this.state.screen; const role=this.state.role; return this.landing(role,role==='owner'?'mytasks':'portfolio',this.MSL.length<2); }
+  startScreen(){ if(!this.MSL.length) return (this.api&&this.landingWithoutSystem())||this.state.screen; const role=this.state.role; return this.landing(role,baseRole(role)==='owner'?'mytasks':'portfolio',this.MSL.length<2); }
   // The screen the shell shows for the state: the portfolio of one system is its overview, and a host screen the session
   // may not open gives way to the landing (C.2, C.3).
   shownScreen(ctx){ const st=this.state; const noMs=!this.MSL.length; const single=this.MSL.length<2; let screen=st.screen==='portfolio'&&single?'m1overview':st.screen;
@@ -274,8 +277,9 @@ export default class MscdApp extends React.Component {
     return this.ds.switchOrg(id).then(snap=>new Promise(res=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,{...s,ms:null}):{org:id,ms:o.ms[0],role:s.role}; const no=(W.D.orgs||[]).find(x=>x.id===ap.org)||o; const n=no?no.ms.length:1;
       return {...W,...ap,deploy:no?no.deploy:s.deploy,orgMenu:false,anim:s.anim+1,screen:this.landing(ap.role,n>1?'portfolio':'m1overview',n<2,W.D),htab:null,sel:null,person:null,q:'',tab:{},chip:{},freq:null,expanded:{},evt:null,drift:null,traceId:null,gtId:null,gtQ:'',more:0,taskFilter:null,params:null}; },()=>{ if(this.api) forgetOrgTried(); const to=this.api&&!this.MSL.length?this.landingWithoutSystem():null; if(to&&to!==this.state.screen) this.setState({screen:to},()=>res(true)); else res(true); })),
       e=>{ console.warn('organisation switch failed',e); if(e&&e.reauth) return new Promise(()=>{}); if(this.api) forgetOrgTried(); this.toast(this.li(errorText(e))); return false; }); }
-  // Screens each role can open; null means every screen.
-  visFor(role){ return {manager:null,owner:['mytasks','m1overview','controls','docs','fresh'],auditor:['portfolio','audit','chain','gt','docs','controls','fresh','timeline','mytasks'],top:['portfolio','m1overview','timeline','audit','chain','mytasks']}[role]; }
+  // Built-in screens each role can open; null means every screen. A Programme Owner sees what a Management System
+  // Manager sees, a Risk Owner and a Compliance Investigator what a Domain Owner sees (MILESTONE-3 E, baseRole).
+  visFor(role){ return {manager:null,owner:['mytasks','m1overview','controls','docs','fresh'],auditor:['portfolio','audit','chain','gt','docs','controls','fresh','timeline','mytasks'],top:['portfolio','m1overview','timeline','audit','chain','mytasks']}[baseRole(role)]; }
   // Keep the wanted screen when the role may open it, otherwise fall back to the role's first screen. A host screen
   // stays when the role may open it (canOpenHost, C.3); `view` is the snapshot the check uses (default the current one).
   landing(role,want,single,view){ if(hostById(want)){ if(canOpenHost(want,this.hostCtx(view,role),role)) return want; want=single?'m1overview':'portfolio'; }
@@ -379,7 +383,7 @@ export default class MscdApp extends React.Component {
     const fq=D.FREQ[c.freq][L==='id'?1:0].toLowerCase();
     // The status does not change by itself: after new evidence is linked the owner marks the control complete and someone else verifies it.
     let note=null; if(c.gate) note={text:(c.note||'')+': '+this.li(['the '+this.gateName(ms)+' checkpoint cannot close until this is resolved.','checkpoint '+this.gateName(ms)+' tidak dapat ditutup sebelum ini diselesaikan.']),...this.tone('bad')}; else if(c.st==='partial'&&ev&&(ev.fresh==='expired'||ev.fresh==='critical')) note={text:this.li(['Status is held at Partial because the last evidence is '+this.t(ev.fresh).toLowerCase()+' for a '+fq+' control. Link current-cycle evidence, then mark the control complete so it can be verified.','Status ditahan di Sebagian karena bukti terakhir berstatus '+this.t(ev.fresh).toLowerCase()+' untuk kontrol '+fq+'. Tautkan bukti siklus ini, lalu tandai kontrol selesai agar dapat diverifikasi.']),...this.tone('warn')}; else if(c.st==='complete') note={text:this.li(['Marked complete by '+this.pname(c.by||c.owner)+'. Verification by a different person is required before status becomes Implemented.','Ditandai selesai oleh '+this.pname(c.by||c.owner)+'. Verifikasi oleh orang lain diperlukan sebelum status menjadi Diterapkan.']),...this.tone('info')};
-    const actions=[]; const canVerify=this.api?this.can(ms.id,'applicability.verify'):this.state.role==='manager'||this.state.role==='auditor';
+    const actions=[]; const canVerify=this.api?this.can(ms.id,'applicability.verify'):['manager','auditor'].includes(baseRole(this.state.role));
     if(['partial','planned','ns','blocked'].includes(c.st)&&!c.gate) actions.push(this.act(this.t('markComplete'),()=>this.command(ds=>ds.markComplete(key),()=>this.toast(this.t('toastComplete'))),true));
     if(c.st==='complete'&&canVerify) actions.push(this.act(this.t('verify'),()=>{ const by=c.by||c.owner; if(by===this.me) return this.toast(this.t('toastSelfVerify')); this.setState({modal:{type:'verify',key,meta:c.id+this.li([', completed by ',', diselesaikan oleh '])+this.pname(by)+this.li([', verify as ',', diverifikasi oleh '])+this.pname(this.me)+', '+D.fmt(D.TODAY_S,L)}}); },true));
     if(c.gate) actions.push(this.act(this.t('trace'),()=>this.go('chain',{tab:{...this.state.tab,chain:'soa'}}),true));
@@ -456,7 +460,7 @@ export default class MscdApp extends React.Component {
   titleOf(id,d){ return titleOf(this.D,d,id); }
 
   // ---------- screens ----------
-  controlsScreen(d){ const D=this.D, ms=d.ms, L=this.L, st=this.state, q=st.q; const own=st.role==='owner'?this.me:null; const reqs=own?d.reqs.filter(c=>c.owner===own):d.reqs; const docs=own?d.docs.filter(x=>x.owner===own):d.docs;
+  controlsScreen(d){ const D=this.D, ms=d.ms, L=this.L, st=this.state, q=st.q; const own=baseRole(st.role)==='owner'?this.me:null; const reqs=own?d.reqs.filter(c=>c.owner===own):d.reqs; const docs=own?d.docs.filter(x=>x.owner===own):d.docs;
     const cnt=s=>reqs.filter(c=>c.st===s).length; const gate=this.gateItems(d); const tab=st.tab.controls||'implemented';
     const tabs=[{id:'implemented',label:this.t(ms.unit==='ctrl'?'ctrlImpl':'reqImpl'),n:cnt('implemented'),tone:'ok',sub:this.t('of')+' '+reqs.length},{id:'partial',label:this.t('partialImpl'),n:cnt('partial')+cnt('complete'),tone:'warn'},{id:'gate',label:this.t('gateItems')+', '+this.gateName(ms),n:gate.length,tone:'bad'},{id:'docsApproved',label:this.t('docsApproved'),n:docs.filter(x=>x.st==='approved').length,tone:'info',sub:this.t('of')+' '+docs.length},{id:'docsExpired',label:this.t('docsExpired'),n:docs.filter(x=>x.st==='expired').length,tone:'bad'}].map(tb=>({...tb,active:tb.id===tab,go:()=>this.setTab('controls',tb.id),...this.tabStyle(tb.id===tab,tb.tone)}));
     let cols,rows,chips,empty=null;
@@ -493,12 +497,12 @@ export default class MscdApp extends React.Component {
     let rows=list.filter(i=>this.match(q,i.id,i.title,i.act,this.pname(i.h),this.t(i.st))).map(i=>this.itemRow(i,d,!!person)); if(chip==='ready') rows=readyRows.filter(r=>this.match(q,r.cells[0].v,r.cells[1].v)); else if(chip==='all') rows=rows.concat(readyRows.filter(r=>this.match(q,r.cells[0].v,r.cells[1].v)));
     const cols=[this.t('c_id'),this.t('c_record'),this.t('c_status'),this.t('c_action'),this.t('c_holder'),this.t('c_due')];
     const byP={}; items.forEach(i=>{ const p=byP[i.h]||(byP[i.h]={h:i.h,open:0,overdue:0,after:0,next:null,stages:new Set()}); p.open++; if(i.st!=='pending') p.overdue++; if(i.after) p.after++; if(i.due&&(!p.next||i.due<p.next)) p.next=i.due; p.stages.add(this.li((stages.find(s=>s.id===i.stage)||{}).l)); });
-    const canSeePeople=this.api?this.can(ms.id,'audit.pending.all'):st.role==='manager'||st.role==='auditor';
+    const canSeePeople=this.api?this.can(ms.id,'audit.pending.all'):['manager','auditor'].includes(baseRole(st.role));
     const people=canSeePeople&&items.length?Object.values(byP).sort((a,b)=>b.overdue-a.overdue||b.open-a.open).map(p=>{ const pc=this.person(p.h); return {name:pc.v,role:pc.s,i:pc.i,abg:pc.bg,afg:pc.fg,open:p.open,overdue:p.overdue,after:p.after,ovColor:p.overdue?'var(--bad)':'var(--tx3)',afColor:p.after?'var(--bad)':'var(--tx3)',next:D.fmt(p.next,L),stages:[...p.stages],stagesText:[...p.stages].join(', '),bg:person===p.h?'var(--accbg)':'transparent',go:()=>this.setState(s=>({person:s.person===p.h?null:p.h,sel:null,expanded:{},chip:{...s.chip,chain:'open'}}))}; }):null;
     const empty=!rows.length?(items.length?{title:this.t('noRows'),sub:''}:{title:this.t('emptyEv'),sub:this.t('emptyEvSub')}):null;
     return {tabs,cols,rows,chips,empty,hero,people,freq:null,stageQ:person?null:(stageDef&&stageDef.q)||null,personBanner:person?this.pname(person)+', '+(D.PEOPLE[person]||D.PEOPLE.none)[1]:null,noAuditState:!audit}; }
 
-  freshScreen(d){ const D=this.D, ms=d.ms, L=this.L, st=this.state, q=st.q; const own=st.role==='owner'?this.me:null; const evs=own?d.evs.filter(e=>e.owner===own):d.evs; const docs=own?d.docs.filter(x=>x.owner===own):d.docs; const tab=st.tab.fresh||null; const fq=st.freq;
+  freshScreen(d){ const D=this.D, ms=d.ms, L=this.L, st=this.state, q=st.q; const own=baseRole(st.role)==='owner'?this.me:null; const evs=own?d.evs.filter(e=>e.owner===own):d.evs; const docs=own?d.docs.filter(x=>x.owner===own):d.docs; const tab=st.tab.fresh||null; const fq=st.freq;
     const cannot=e=>!['ok','nohash','pending'].includes(e.integ); const cnt=s=>evs.filter(e=>e.fresh===s).length; const due30=docs.filter(x=>D.dd(x.rev)<=30);
     const tabs=[{id:'fresh',label:this.t('fresh'),n:cnt('fresh'),tone:'ok'},{id:'aging',label:this.t('aging'),n:cnt('aging'),tone:'warn'},{id:'expired',label:this.t('expired'),n:cnt('expired'),tone:'warn'},{id:'critical',label:this.t('critical'),n:cnt('critical'),tone:'bad'},{id:'cannot',label:this.t('cannot'),n:evs.filter(cannot).length,tone:'bad'},{id:'docs30',label:this.t('docs30'),n:due30.length,tone:'info'}].map(tb=>({...tb,active:tb.id===tab,go:()=>this.setTab('fresh',tb.id),...this.tabStyle(tb.id===tab,tb.tone),sub:tb.id==='fresh'?this.t('of')+' '+evs.length:''}));
     const FC={fresh:'var(--ok)',aging:'var(--gold)',expired:'var(--warn)',critical:'var(--bad)'};
@@ -531,7 +535,7 @@ export default class MscdApp extends React.Component {
 
   // ---------- phases ----------
   phases(d){ return d.phases; }
-  actDetail(a,ph,d){ const D=this.D, ms=d.ms, L=this.L; const stT={verified:'ok',complete:'info',progress:'warn',blocked:'bad',ns:'mute',locked:'mute'}[a.st]; const canVerify=this.api?this.can(ms.id,'activity.verify'):this.state.role==='manager'||this.state.role==='auditor';
+  actDetail(a,ph,d){ const D=this.D, ms=d.ms, L=this.L; const stT={verified:'ok',complete:'info',progress:'warn',blocked:'bad',ns:'mute',locked:'mute'}[a.st]; const canVerify=this.api?this.can(ms.id,'activity.verify'):['manager','auditor'].includes(baseRole(this.state.role));
     const facts=[this.fact(this.t('phase'),ph.no+'. '+ph.n+(ph.gate?', '+this.t('gateTag'):'')),this.fact(this.t('outcome'),a.title+this.li([': approved and recorded in the register',': disetujui dan dicatat di register'])),this.fact(this.t('c_output'),a.doc?a.doc.id+', '+a.doc.title+', v'+a.doc.ver+', '+this.t(a.doc.st):(a.out||this.li(['Record in MSCD','Rekaman di MSCD'])),{go:a.doc?()=>this.go('controls',{tab:{...this.state.tab,controls:a.doc.st==='expired'?'docsExpired':'docsApproved'},chip:{...this.state.chip,controls:a.doc.st},sel:this.pat==='inline'?null:ms.id+':doc:'+a.doc.id,expanded:{[ms.id+':doc:'+a.doc.id]:true}}):null}),this.fact(this.t('c_owner'),this.pname(a.owner)+', '+(D.PEOPLE[a.owner]||D.PEOPLE.none)[1]),this.fact(a.st==='verified'?this.t('done'):this.t('c_due'),D.fmt(a.date,L))];
     if(a.blocker) facts.push(this.fact(this.t('blockedBy'),a.blocker+', '+this.titleOf(a.blocker,d),{go:()=>this.go('controls',{tab:{...this.state.tab,controls:'gate'}})}));
     const badges=[this.badge(this.t(a.st),stT)]; if(a.blocker) badges.push(this.badge(this.t('gate'),'bad'));
@@ -579,7 +583,7 @@ export default class MscdApp extends React.Component {
     const blockers=[...gate.map(g=>({id:g.id,title:this.titleOf(g.id,d)||g.why,act:g.why,holder:this.pname(g.h)+', '+(D.PEOPLE[g.h]||D.PEOPLE.none)[1],tag:this.t('gate'),...this.tone('bad'),go:()=>this.go('controls',{tab:{...this.state.tab,controls:'gate'}})})),...ch.items.filter(i=>i.st==='overdue'&&!i.gate).sort((a,b)=>a.due<b.due?-1:1).map(i=>({id:i.id,title:i.title,act:i.act,holder:this.pname(i.h)+', '+(D.PEOPLE[i.h]||D.PEOPLE.none)[1],tag:this.t('overdue')+' '+(-D.dd(i.due))+'d',...this.tone('bad'),go:()=>this.go('chain',{tab:{...this.state.tab,chain:i.stage},sel:this.pat==='inline'?null:i.key,expanded:{[i.key]:true}})}))].slice(0,5);
     const tabs=[];
     return {ov:{scoreTitle:this.li(SCORE_TITLE),scoreMethod:this.li(anyKnown||!clauses.length?SCORE_METHOD:SCORE_PENDING),clauses,dims,legend,phases,blockers,nextGate:gatePh&&gatePh.c.verified<gatePh.total?gatePh.n+', '+this.count(gate.length,'item','items'):this.li(['All checkpoints passed','Semua checkpoint terlewati']),gateLine:this.li(ms.phase)},tabs,cols:[],rows:[],chips:[]}; }
-  docsScreen(d){ const D=this.D, st=this.state, q=st.q; const own=st.role==='owner'?this.me:null; const docs=own?d.docs.filter(x=>x.owner===own):d.docs; const chip=st.chip.docs||'all'; const dc=s=>docs.filter(x=>x.st===s).length;
+  docsScreen(d){ const D=this.D, st=this.state, q=st.q; const own=baseRole(st.role)==='owner'?this.me:null; const docs=own?d.docs.filter(x=>x.owner===own):d.docs; const chip=st.chip.docs||'all'; const dc=s=>docs.filter(x=>x.st===s).length;
     const chips=this.chipList('docs',[{id:'all',label:this.t('all'),n:docs.length,always:true},{id:'approved',label:this.t('approved'),n:dc('approved')},{id:'expired',label:this.t('expired'),n:dc('expired')},{id:'review',label:this.t('review'),n:dc('review')},{id:'draft',label:this.t('draft'),n:dc('draft')}],chip);
     const tiers=['Policy','Standard','Procedure','Plan','Register','Record','Form'];
     const list=docs.filter(x=>(chip==='all'||x.st===chip)&&this.match(q,x.id,x.title,x.tier,this.pname(x.owner),this.t(x.st))); const rows=[]; tiers.forEach(t=>{ const g=list.filter(x=>x.tier===t).sort((a,b)=>a.id.localeCompare(b.id)); if(!g.length) return; rows.push({isGroup:true,key:'g:'+t,label:this.tierName(t,true),n:g.length,color:'var(--tx2)'}); g.forEach(x=>rows.push(this.docRow(x,d))); });
@@ -641,7 +645,7 @@ export default class MscdApp extends React.Component {
   // Chain items held by a person across systems. A control they marked complete waits for someone else to verify it.
   // API mode adds the user's stored tasks of GET /tasks (kind task, D-29) of the systems shown.
   taskItems(me){ const all=[]; this.MSL.forEach(m=>{ const dm=this.data(m); this.chain(dm).items.filter(i=>i.h===me&&!(i.kind==='req'&&i.ref&&i.ref.st==='complete'&&(i.ref.by||i.ref.owner)===me)).forEach(i=>all.push({i,m,dm})); });
-    if(this.api) (this.D.tasks||[]).forEach(t=>{ const m=this.MSL.find(x=>x.id===t.ms); if(!m) return; all.push({i:{key:t.key,kind:'task',id:t.id,title:this.li(t.title),act:this.li(t.act),h:me,due:t.due,st:t.st,after:t.after,gate:false,stage:t.stage,up:[],down:[]},m,dm:this.data(m)}); });
+    if(this.api) (this.D.tasks||[]).forEach(t=>{ const m=this.MSL.find(x=>x.id===t.ms); if(!m) return; all.push({i:{key:t.key,kind:'task',id:t.id,title:this.li(t.title),act:this.li(t.act),h:me,due:t.due,st:t.st,after:t.after,gate:false,stage:t.stage,up:[],down:[],screen:t.screen||null},m,dm:this.data(m)}); });
     return all; }
   // The accepted-evidence hint comes from EXAMPLES under the system and the row (`qms:7.2`, `isms:7.2` for Annex A 7.2),
   // so a row never shows the example of another system's row with the same number.
@@ -658,6 +662,9 @@ export default class MscdApp extends React.Component {
       else if(i.kind==='req'&&i.ref){ const c=i.ref; title=this.li(['Finish setting up ','Selesaikan penerapan '])+c.title.toLowerCase(); what=c.note||i.act; examples=this.li(['Approved procedure or configuration screenshot showing the control operates','Prosedur yang disetujui atau tangkapan layar konfigurasi yang menunjukkan kontrol berjalan']); btn=this.t('doneTask'); go=()=>this.command(ds=>ds.markComplete(i.key),()=>this.toast(this.t('toastComplete'))); }
       else if(i.kind==='doc'&&i.ref){ const doc=i.ref; title=(doc.st==='draft'?this.li(['Finish the draft of ','Selesaikan draf ']):'Review ')+doc.title; what=i.act+this.li(['. Version v','. Versi v'])+doc.ver+'.'; examples=this.li(['Reviewed document with change log and approval','Dokumen yang sudah direview dengan catatan perubahan dan persetujuan']); btn=doc.st==='expired'?this.t('startReview'):this.t('openDoc'); go=()=>{ const done=()=>this.toast(this.t('toastOpen')+' '+doc.id); if(doc.st==='expired') this.command(ds=>ds.startReview(i.key),done); else this.claimGo('mytasks.openDoc',{ms:m.id,key:i.key,record:doc},done)(); }; }
       else if(i.gate){ title=i.act; what=i.title; examples=this.li(['Decision recorded in the register and linked to the checkpoint','Keputusan dicatat di register dan ditautkan ke checkpoint']); btn=this.t('openGate'); go=openGate; }
+      // A stored task that its own screen completes (a read confirmation, a personal data check, an access review part:
+      // MILESTONE-3 D3-13) opens that screen in its system; "Mark done" would be refused (task_completes_on_screen).
+      else if(i.kind==='task'&&i.screen&&hostById(i.screen)){ const def=hostById(i.screen); title=i.act; what=this.li(['Finish it in ','Selesaikan di '])+this.li(def.label)+'.'; examples=this.li(TASK_SCREEN_HINT); btn=this.li(OPEN_SCREEN); go=()=>this.go(i.screen,{ms:m.id}); }
       else { title=i.act; what=i.title; examples=this.li(['Updated record in the register','Rekaman yang diperbarui di register']); btn=this.t('doneTask'); go=()=>this.command(ds=>ds.completeRecordAction(i.key),()=>this.toast(this.t('toastSaved'))); }
       const dn=i.due?D.dd(i.due):null; const tone=i.st!=='pending'?'bad':i.after?'bad':dn!==null&&dn<=7?'warn':'mute'; const c=this.tone(tone);
       const KI={ev:'M12 3v12M7 10l5 5 5-5M4 19h16',req:'M4 6h2M9 6h11M4 12h2M9 12h11M4 18h2M9 18h11',doc:'M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6',x:'M5 5h14v14H5zM8 12l3 3 5-6'}; const KL={ev:this.t('kEv'),req:this.t('kReq'),doc:this.t('kDoc'),x:this.t('kRec')}; const kind=KI[i.kind]?i.kind:'x';
@@ -776,8 +783,8 @@ export default class MscdApp extends React.Component {
       modal:this.modalVals(),peopleOptions:Object.entries(D.PEOPLE).map(([id,p])=>({id,label:p[0]+', '+p[1]})),modalSetH:e=>this.setState(s=>({modal:{...s.modal,h:e.target.value}})),modalSetDue:e=>this.setState(s=>({modal:{...s.modal,due:e.target.value}})),modalOk:()=>this.modalOk()}; }
   // Persona switch (demo): the source acts as the new persona from now on; the snapshot and the state change together.
   // API mode: the new session's Me decides the role in the current system (H.5 step 5).
-  setRole(id,screen,single){ this.ds.switchPersona(id).then(snap=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,s):{role:id}; const r=ap.role;
-      const to=this.landing(r,r==='owner'?'mytasks':r==='top'?'portfolio':screen,single,W.D); return {...W,...ap,roleMenu:false,screen:to,htab:to===s.screen?s.htab:null,sel:null,expanded:{},person:null,taskFilter:null}; }),
+  setRole(id,screen,single){ this.ds.switchPersona(id).then(snap=>this.setState(s=>{ const W=this.withSnap(snap); const ap=this.api?this.apiState(W.D,s):{role:id}; const r=ap.role; const b=baseRole(r);
+      const to=this.landing(r,b==='owner'?'mytasks':b==='top'?'portfolio':screen,single,W.D); return {...W,...ap,roleMenu:false,screen:to,htab:to===s.screen?s.htab:null,sel:null,expanded:{},person:null,taskFilter:null}; }),
       e=>{ console.warn('persona switch failed',e); this.toast(this.li(errorText(e))); }); }
   // Interface language; API requests follow it (Accept-Language).
   setLang(l){ this.setState({lang:l}); if(this.api&&this.ds.setLanguage) this.ds.setLanguage(l); }

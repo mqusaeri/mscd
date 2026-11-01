@@ -5,7 +5,7 @@
   "order": 55,
   "scope": "ms",
   "perm": ["retention.manage", "retention.approve"],
-  "roles": ["manager"],
+  "roles": ["manager", "sponsor"],
   "nav": true,
   "pageActions": [],
   "sampleRole": "manager",

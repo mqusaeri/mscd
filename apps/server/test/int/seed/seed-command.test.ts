@@ -58,7 +58,7 @@ describe('seed demo command (G.1, G.3)', () => {
   });
 
   it(
-    'seeds with demo.keycloak: the provider of ndt and tst and the pre-registered subjects of four users (G.3)',
+    'seeds with demo.keycloak: the provider of ndt and tst and the pre-registered subjects of the demo personas (G.3, MILESTONE-3 E)',
     async () => {
       const config = db.config(KEYCLOAK, 'cli');
       const keys = LocalKeyService.fromConfig(config);
@@ -93,11 +93,20 @@ describe('seed demo command (G.1, G.3)', () => {
             .orderBy('i.subject')
             .execute(),
         );
+        // MILESTONE-3 E: the three new personas sign in through the realm too, in ndt (they are no members of tst).
+        const personas = provider.slug === 'keycloak'
+          ? [
+            { handle: 'wulan', subject: '00000000-0000-4000-8000-0000000000c5', link_method: 'admin', email_at_link: 'wulan.hartono@nusantaradigital.co.id' },
+            { handle: 'ratna', subject: '00000000-0000-4000-8000-0000000000c6', link_method: 'admin', email_at_link: 'ratna.kusumawati@nusantaradigital.co.id' },
+            { handle: 'gilang', subject: '00000000-0000-4000-8000-0000000000c7', link_method: 'admin', email_at_link: 'gilang.saputra@nusantaradigital.co.id' },
+          ]
+          : [];
         expect(identities).toEqual([
           { handle: 'rina', subject: '00000000-0000-4000-8000-0000000000c1', link_method: 'admin', email_at_link: 'rina.kusuma@nusantaradigital.co.id' },
           { handle: 'bagus', subject: '00000000-0000-4000-8000-0000000000c2', link_method: 'admin', email_at_link: 'bagus.prasetyo@nusantaradigital.co.id' },
           { handle: 'maya', subject: '00000000-0000-4000-8000-0000000000c3', link_method: 'admin', email_at_link: 'maya.putri@nusantaradigital.co.id' },
           { handle: 'hendra', subject: '00000000-0000-4000-8000-0000000000c4', link_method: 'admin', email_at_link: 'hendra.wijaya@nusantaradigital.co.id' },
+          ...personas,
         ]);
       }
 
@@ -108,7 +117,8 @@ describe('seed demo command (G.1, G.3)', () => {
       expect(again.status).toBe('already_seeded');
       expect(lines).toContain('seed demo: already seeded (run seed demo --reset to seed again)');
       expect(await counts()).toEqual(before);
-      expect(before).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 90, memberships: 3 * 86 + 12, licences: 4, packs: 6 });
+      // MILESTONE-3 E (R-15): three personas join the three sample organisations.
+      expect(before).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 93, memberships: 3 * 89 + 12, licences: 4, packs: 6 });
     },
     SEED_TIMEOUT,
   );
@@ -163,9 +173,9 @@ describe('seed demo command (G.1, G.3)', () => {
       const result = await seedDemo(config, { reset: true, keys, log });
       await keys.close();
       expect(result.status).toBe('seeded');
-      expect(result.removed).toEqual({ organisations: expect.arrayContaining(['ndt', 'bsd', 'rmn', 'tst']), users: 90 });
-      expect(lines).toEqual(expect.arrayContaining(['seed demo: removed organisation ndt and schema org_ndt', 'seed demo: removed 90 demo users']));
-      expect(await counts()).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 90, memberships: 3 * 86 + 12, licences: 4, packs: 6 });
+      expect(result.removed).toEqual({ organisations: expect.arrayContaining(['ndt', 'bsd', 'rmn', 'tst']), users: 93 });
+      expect(lines).toEqual(expect.arrayContaining(['seed demo: removed organisation ndt and schema org_ndt', 'seed demo: removed 93 demo users']));
+      expect(await counts()).toEqual({ organisations: ['ndt', 'bsd', 'rmn', 'tst'], users: 93, memberships: 3 * 89 + 12, licences: 4, packs: 6 });
       expect(await ledgerOrgs()).toEqual([]);
       expect(await inPlatform(db.migrator, (trx) => trx.selectFrom('platform.entitlement').select('organization_id').execute())).toEqual([]);
       expect(await statusEvents()).toEqual([]);

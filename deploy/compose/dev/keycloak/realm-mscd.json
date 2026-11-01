@@ -66,6 +66,42 @@
       "requiredActions": []
     },
     {
+      "id": "00000000-0000-4000-8000-0000000000c5",
+      "username": "wulan",
+      "enabled": true,
+      "email": "wulan.hartono@nusantaradigital.co.id",
+      "emailVerified": true,
+      "firstName": "Wulan",
+      "lastName": "Hartono",
+      "credentials": [{ "type": "password", "value": "Mscd-Demo-2026!", "temporary": false }],
+      "attributes": { "saml.persistent.name.id.for.mscd-dev-sp": ["00000000-0000-4000-8000-0000000000c5"] },
+      "requiredActions": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000c6",
+      "username": "ratna",
+      "enabled": true,
+      "email": "ratna.kusumawati@nusantaradigital.co.id",
+      "emailVerified": true,
+      "firstName": "Ratna",
+      "lastName": "Kusumawati",
+      "credentials": [{ "type": "password", "value": "Mscd-Demo-2026!", "temporary": false }],
+      "attributes": { "saml.persistent.name.id.for.mscd-dev-sp": ["00000000-0000-4000-8000-0000000000c6"] },
+      "requiredActions": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000c7",
+      "username": "gilang",
+      "enabled": true,
+      "email": "gilang.saputra@nusantaradigital.co.id",
+      "emailVerified": true,
+      "firstName": "Gilang",
+      "lastName": "Saputra",
+      "credentials": [{ "type": "password", "value": "Mscd-Demo-2026!", "temporary": false }],
+      "attributes": { "saml.persistent.name.id.for.mscd-dev-sp": ["00000000-0000-4000-8000-0000000000c7"] },
+      "requiredActions": []
+    },
+    {
       "id": "00000000-0000-4000-8000-0000000000d1",
       "username": "sso.only",
       "enabled": true,

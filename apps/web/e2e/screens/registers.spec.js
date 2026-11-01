@@ -244,14 +244,16 @@ test.describe('Registers @sample-only', () => {
     await expect(links).toHaveCount(2);
   });
 
-  test('the Domain Owner persona sees own rows only and reads; Top Management sees no owner of other rows', async ({ page }) => {
+  test('the Domain Owner persona sees own rows only and adds records of their own; Top Management sees no owner of other rows', async ({ page }) => {
     await page.goto('/?screen=registers&persona=owner');
     await expect(page.locator('main h1')).toHaveText('Registers');
-    await expect(ui.pageAction(page, 'Add record')).toHaveCount(0);
+    // The sample personas hold the F.6 permissions of their business role (MILESTONE-3 E): a Domain Owner adds records
+    // of their own (`register.manage`, own rows) and updates the treatments of own risks, as in the API build.
+    await expect(ui.pageAction(page, 'Add record')).toBeVisible();
     await tab(page, 'Risks').click();
     await expect(listRows(page)).toHaveCount(1);
     await expect(listRows(page).first()).toContainText('R-014');
-    await expect(page.locator('main')).toContainText('You can read this register.');
+    await expect(page.locator('main')).not.toContainText('You can read this register.');
     await tab(page, 'Competence').click();
     await expect(listRows(page)).toHaveCount(1);
     await expect(listRows(page).first()).toContainText('Bagus Prasetyo');

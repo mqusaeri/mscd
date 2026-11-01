@@ -88,6 +88,16 @@ const PRIMARY_MANAGER: Record<string, string> = { rina: 'isms', sari: 'qms', ton
  */
 const ISMS_RECORD_HOLDERS_IN_TST = new Set(['dewi', 'fajar', 'andi', 'yusuf', 'lina']);
 
+/** Systems where the demo Risk Owner `ratna` holds `risk_owner` (Milestone 3 E). */
+export const RISK_OWNER_SYSTEMS: ReadonlySet<string> = new Set(['isms', 'bcms']);
+
+/**
+ * The demo personas of Milestone 3 E (H.10): invented people, demo material only (R-13, R-19). They are members of the
+ * three sample organisations, not of `tst`: the test organisation keeps the member list its integration and browser
+ * suites rely on (rina the only reviewer of its ISMS, D.9), and holds no record of theirs.
+ */
+export const MILESTONE3_PERSONAS: readonly string[] = ['wulan', 'ratna', 'gilang'];
+
 /** `<first>.<last>@nusantaradigital.co.id` from a sample display name (G.3). */
 export function sampleEmail(displayName: string): string {
   return `${displayName.toLowerCase().split(/\s+/).join('.')}@nusantaradigital.co.id`;
@@ -139,6 +149,11 @@ export function demoUsers(people: SampleOrgSnapshot['PEOPLE']): DemoUser[] {
     sample('tono', SAMPLE_ORGS, manager('tono')),
     sample('lina', orgsOf('lina'), manager('lina')),
     ...['dewi', 'fajar', 'andi', 'yusuf'].map((handle) => sample(handle, orgsOf(handle), only('domain_owner'))),
+    // The personas of Milestone 3 E (H.10), members of the three sample organisations: the Programme Owner of every
+    // system, the Risk Owner of the ISMS and the BCMS, the Compliance Investigator of the ABMS.
+    sample('wulan', SAMPLE_ORGS, only('programme_owner')),
+    sample('ratna', SAMPLE_ORGS, (_org, system) => (RISK_OWNER_SYSTEMS.has(system) ? [{ role: 'risk_owner', primary: false }] : [])),
+    sample('gilang', SAMPLE_ORGS, (_org, system) => (system === 'abms' ? [{ role: 'compliance_investigator', primary: false }] : [])),
     testUser({ handle: 'tenant.admin', displayName: 'Tenant Admin', jobTitle: 'IT Administrator', memberships: [{ org: 'tst', adminRoles: ['tenant_admin'] }] }),
     // The external auditor's role comes with the seeded auditor access grant (F.14), not from this list.
     testUser({ handle: 'ext.auditor', displayName: 'Eko Santoso', jobTitle: 'Lead Auditor', kind: 'guest', password: false, memberships: [{ org: 'tst', adminRoles: [] }] }),
@@ -172,6 +187,10 @@ export const KEYCLOAK_SUBJECTS: Readonly<Record<string, string>> = {
   bagus: '00000000-0000-4000-8000-0000000000c2',
   maya: '00000000-0000-4000-8000-0000000000c3',
   hendra: '00000000-0000-4000-8000-0000000000c4',
+  // Milestone 3 E: the Programme Owner, the Risk Owner and the Compliance Investigator.
+  wulan: '00000000-0000-4000-8000-0000000000c5',
+  ratna: '00000000-0000-4000-8000-0000000000c6',
+  gilang: '00000000-0000-4000-8000-0000000000c7',
 };
 /** Organisations that get the Keycloak provider when `demo.keycloak` is set (G.3). */
 export const KEYCLOAK_ORGS: readonly DemoOrgSlug[] = ['ndt', 'tst'];

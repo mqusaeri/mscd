@@ -80,7 +80,7 @@ describe('Required documented information routes and definition', () => {
 
   it('is a screen of the Implementation group after Document register, for everyone who reads the system', () => {
     expect(screen).toMatchObject({ id: 'documented-info', group: 'impl', order: 45, scope: 'ms', perm: 'ms.read', path: '/ms/:ms/documented-info' });
-    expect(screen.roles).toEqual(['manager', 'owner', 'auditor', 'top']);
+    expect(screen.roles).toEqual(['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator']);
     expect(screen.label).toEqual(['Required documented information', 'Informasi terdokumentasi wajib']);
     expect(layerItems.map((l) => l.id)).toEqual(['documented-info-badge']);
     const ctx = ctxOf('en', null);

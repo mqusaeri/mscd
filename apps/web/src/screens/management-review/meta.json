@@ -5,7 +5,7 @@
   "order": 60,
   "scope": "ms",
   "perm": "ms.read",
-  "roles": ["manager", "top", "auditor"],
+  "roles": ["manager", "top", "auditor", "sponsor"],
   "nav": true,
   "pageActions": [["Plan review", "Rencanakan tinjauan"]],
   "sampleRole": "manager",

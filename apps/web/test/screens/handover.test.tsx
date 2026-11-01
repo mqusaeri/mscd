@@ -85,9 +85,9 @@ describe('handover model', () => {
     expect(peopleOf(left).map((p) => p.id)).not.toContain('bagus');
     expect(formerPeople(left, 'isms')).toEqual([{ id: 'bagus', name: 'bagus', jobTitle: '' }]);
     // The person People and roles opened the screen with, and typed user names, with the names given.
-    expect(formerPeople(left, 'isms', ['bagus', 'wulan', 'Not A Handle', 'none'], { bagus: 'Bagus Prasetyo' })).toEqual([
+    expect(formerPeople(left, 'isms', ['bagus', 'joko', 'Not A Handle', 'none'], { bagus: 'Bagus Prasetyo' })).toEqual([
       { id: 'bagus', name: 'Bagus Prasetyo', jobTitle: '' },
-      { id: 'wulan', name: 'wulan', jobTitle: '' },
+      { id: 'joko', name: 'joko', jobTitle: '' },
     ]);
     expect(formerPeople(left, 'isms', ['dewi'])).toEqual([{ id: 'bagus', name: 'bagus', jobTitle: '' }]);
     expect(nameOf(left, 'bagus')).toBe('bagus');
@@ -241,7 +241,7 @@ describe('handover views', () => {
   });
 
   it('is in the Audit group of the system with record.assign', () => {
-    expect(screen).toMatchObject({ id: 'handover', path: '/ms/:ms/handover', group: 'audit', scope: 'ms', perm: 'record.assign', roles: ['manager'] });
+    expect(screen).toMatchObject({ id: 'handover', path: '/ms/:ms/handover', group: 'audit', scope: 'ms', perm: 'record.assign', roles: ['manager', 'sponsor'] });
     expect(screen.pageActions).toBeUndefined();
   });
 });

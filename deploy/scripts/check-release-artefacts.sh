@@ -15,7 +15,12 @@
 #     "Internal audit 2026 report" in any file of the pack, SharePoint in its
 #     preparation tasks and cycle requirements, and the demo's transition phase
 #     "ISO 9001:2026 transition" in the ISO 9001:2026 pack), and a pack id and
-#     version without a lead auditor sign-off row in packs/README.md (E.2).
+#     version without a lead auditor sign-off row in packs/README.md (E.2);
+#   - the display name of a demo persona (MILESTONE-3 E: the handles of
+#     DEMO_PERSONAS in packages/shared/src/authz/matrix.ts, their names in
+#     PEOPLE of apps/web/src/data/mscd-data.js, read when this check runs) in
+#     any file of a framework pack or in a server profile (a .yaml or .yml file
+#     in a profiles folder).
 #
 # The development bundles of the journey, the smoke test and the test suites
 # are not release runs and do not use this check. A rehearsal build (CI, the
@@ -49,6 +54,9 @@ readonly DEV_KEY_IDS_FILE=packages/pack-tools/dev-keys/dev-key-ids.json
 readonly SEED_DIR=apps/server/src/seed/demo
 # The lead auditor sign-off table of the framework packs (MILESTONE-2 E.2).
 readonly SIGNOFF_FILE=packs/README.md
+# The demo personas (MILESTONE-3 E): their handles, and the sample people with their display names.
+readonly PERSONAS_FILE=packages/shared/src/authz/matrix.ts
+readonly PEOPLE_FILE=apps/web/src/data/mscd-data.js
 # Demo texts that must never reach a released pack (MILESTONE-2 E.4), in any file of a pack.
 readonly PACK_DEMO_TEXTS=(
     'NC-2025-02'
@@ -76,6 +84,10 @@ artefacts (image files, image layers, the Helm chart, packs) are checked too.
 Framework packs (.pack and .bundle files) must also be free of the demo texts
 of MILESTONE-2 E.4, and their pack id and version need a lead auditor sign-off
 row in packs/README.md (E.2).
+
+Framework packs and server profiles (.yaml and .yml files in a profiles
+folder) must not name a demo persona (MILESTONE-3 E): the display names of the
+DEMO_PERSONAS handles, read from the repository when the check runs.
 
 Environment:
   MSCD_ALLOW_UNSIGNED_PACKS=1   rehearsal builds and release candidates for
@@ -118,7 +130,7 @@ warning() {
 # ---------------------------------------------------------------------------
 # Reference data, read from the repository when the check runs
 # ---------------------------------------------------------------------------
-KEY_IDS_FILE='' HASHES_FILE='' SIZES='' SIGNOFFS_FILE=''
+KEY_IDS_FILE='' HASHES_FILE='' SIZES='' SIGNOFFS_FILE='' NAMES_FILE=''
 
 load_reference() {
     local ids dir file size hash count=0
@@ -158,8 +170,38 @@ load_reference() {
             if (date !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) next
             print pack " " version
         }' "$REPO_DIR/$SIGNOFF_FILE" >"$SIGNOFFS_FILE"
-    printf '  Reference: %s development key ids, %s files of the development secret folders and the seed data, %s signed-off pack versions\n' \
-        "$(wc -l <"$KEY_IDS_FILE")" "$count" "$(wc -l <"$SIGNOFFS_FILE")"
+
+    # Display names of the demo personas (MILESTONE-3 E): the handles of DEMO_PERSONAS, then the name of each handle
+    # in PEOPLE of the sample data (`rina:['Rina Kusuma','ISMS Manager']`). A handle without a name stops the check,
+    # so a renamed file or a new persona never makes it pass silently.
+    local handles handle name
+    [[ -f $REPO_DIR/$PERSONAS_FILE ]] || die "Cannot find $PERSONAS_FILE (DEMO_PERSONAS, the demo personas)"
+    [[ -f $REPO_DIR/$PEOPLE_FILE ]] || die "Cannot find $PEOPLE_FILE (PEOPLE, the names of the demo personas)"
+    handles=$(awk '/^export const DEMO_PERSONAS/ { inside = 1 } inside { print } inside && /^};/ { exit }' "$REPO_DIR/$PERSONAS_FILE" |
+        grep -oE ":[[:space:]]*'[a-z][a-z0-9.]*'" | grep -oE "[a-z][a-z0-9.]*" || true)
+    [[ -n $handles ]] || die "$PERSONAS_FILE lists no demo persona in DEMO_PERSONAS"
+    NAMES_FILE=$WORK/persona-names.txt
+    : >"$NAMES_FILE"
+    for handle in $handles; do
+        name=$(grep -oE "(^|[^a-z0-9.])${handle//./\\.}:\['[^']+'" "$REPO_DIR/$PEOPLE_FILE" | head -n 1 | sed -E "s/.*\['//; s/'\$//" || true)
+        [[ -n $name ]] || die "$PEOPLE_FILE names no person for the demo persona $handle"
+        printf '%s\n' "$name" >>"$NAMES_FILE"
+    done
+    printf '  Reference: %s development key ids, %s files of the development secret folders and the seed data, %s signed-off pack versions, %s demo persona names\n' \
+        "$(wc -l <"$KEY_IDS_FILE")" "$count" "$(wc -l <"$SIGNOFFS_FILE")" "$(wc -l <"$NAMES_FILE")"
+}
+
+# persona_names DIR LABEL WHAT: a finding for every file below DIR (or the file DIR itself) that holds the display
+# name of a demo persona (MILESTONE-3 E); WHAT names the kind of file in the report.
+persona_names() {
+    local target=$1 label=$2 what=$3 file rel names
+    while IFS= read -r file; do
+        [[ -n $file ]] || continue
+        rel=''
+        [[ $file == "$target" ]] || rel=${file#"$target"/}
+        names=$(grep -aoF -f "$NAMES_FILE" -- "$file" 2>/dev/null | sort -u | paste -sd ',' - | sed 's/,/, /g' || true)
+        finding "$label${rel:+: $rel}" "$what names the demo persona(s) ${names:-?} (MILESTONE-3 E)"
+    done < <(grep -rlaF -f "$NAMES_FILE" -- "$target" 2>/dev/null || true)
 }
 
 # json_string FILE KEY: the string value of a top-level key of a pack manifest (no JSON tool is needed).
@@ -202,6 +244,8 @@ check_pack() {
             finding "$label: ${file#"$dir"/}" "contains the demo phase \"ISO 9001:2026 transition\" (MILESTONE-2 E.4)"
         done < <(grep -rlaF -- 'ISO 9001:2026 transition' "$dir" 2>/dev/null || true)
     fi
+    # 7. Demo persona names (MILESTONE-3 E), in any file of the pack.
+    persona_names "$dir" "$label" "a file of the pack"
     # 6. Lead auditor sign-off (E.2).
     if ! grep -qxF -- "$pack $version" "$SIGNOFFS_FILE"; then
         if [[ ${MSCD_ALLOW_UNSIGNED_PACKS:-} == 1 ]]; then
@@ -267,6 +311,17 @@ check_tree() {
         esac
     done < <(find "$dir" \( -type f -o -type l \) \( -name 'demo.yaml' -o -name 'test.yaml' \
         -o -name 'sample-snapshot.json' -o -path '*/seed/demo/*' \) 2>/dev/null)
+
+    # 7. Demo persona names (MILESTONE-3 E) in a server profile. The demo and test profiles are reported above.
+    while IFS= read -r -d '' file; do
+        case "$file" in
+            */demo.yaml | */test.yaml) continue ;;
+        esac
+        rel=${file#"$dir"/}
+        if grep -qaF -f "$NAMES_FILE" -- "$file" 2>/dev/null; then
+            persona_names "$file" "$label: $rel" "the server profile"
+        fi
+    done < <(find "$dir" -type f -path '*profiles/*' \( -name '*.yaml' -o -name '*.yml' \) -not -path '*/node_modules/*' -print0 2>/dev/null)
 }
 
 # is_archive FILE: archives that are opened and checked inside.
@@ -350,7 +405,7 @@ check_target() {
         die "$target is not a directory, an archive or a local Docker image"
     fi
     if ((FINDINGS == before)); then
-        printf '  %sPASS%s  no development key, development secret, demo or test profile, seed data, demo pack text or pack without sign-off\n' "$C_GREEN" "$C_RESET"
+        printf '  %sPASS%s  no development key, development secret, demo or test profile, seed data, demo pack text, demo persona name or pack without sign-off\n' "$C_GREEN" "$C_RESET"
     fi
 }
 
@@ -383,7 +438,7 @@ main() {
     if ((WARNINGS > 0)); then
         printf '%s%s warning(s)%s: see above. A final release must not need MSCD_ALLOW_UNSIGNED_PACKS.\n' "$C_YELLOW$C_BOLD" "$WARNINGS" "$C_RESET"
     fi
-    printf '%sPASSED%s: the artefacts carry no development key, development secret, demo or test profile, seed data, demo pack text or pack without sign-off.\n' \
+    printf '%sPASSED%s: the artefacts carry no development key, development secret, demo or test profile, seed data, demo pack text, demo persona name or pack without sign-off.\n' \
         "$C_GREEN$C_BOLD" "$C_RESET"
 }
 
