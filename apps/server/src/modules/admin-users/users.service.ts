@@ -73,7 +73,7 @@ export class UsersService {
    * H.13's 422 `invitation.erased_person` for the email address of a person this organisation erased whose account is
    * kept for another organisation. It tells the organisation whether the account it erased still belongs to the
    * person somewhere else now (never where); asked again later, the answer can show that the person has since left
-   * every other organisation (case b of H.13, which waits for the owner's confirmation).
+   * every other organisation (case b of H.13, accepted by the product owner on 2026-11-02).
    */
   async create(principal: Principal, body: UserCreate): Promise<{ status: 'invited' }> {
     const org = orgOf(principal);
