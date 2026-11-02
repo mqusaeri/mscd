@@ -33,7 +33,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 - 2026-10-31: scope is section 2 of `docs/ROADMAP.md` as listed, plus the maintenance track.
 - 2026-10-31: every default of section H (H.1 to H.11) accepted; H.12 (no second approval for an erasure) keeps its default unless the owner decides otherwise before M3-04.
-- 2026-11-01, H.13: a person erased in an organisation and later invited again rejoins with a fresh account; records from before the erasure keep the pseudonym (built by the M3-04 follow-up).
+- 2026-11-01, H.13: a person erased in an organisation and later invited again rejoins with a fresh account; records from before the erasure keep the pseudonym (built by the M3-04 follow-up, committed 2026-11-02). Waiting for the owner: case (a) same email refused while the erased account still belongs to the person elsewhere (recommended: accept); case (b) account kept at erasure whose other membership ended since: built as anonymise and allow the same email, recommended: refuse as in (a).
 - Open questions for the owner from the plan review: the real versioning, lifecycle rule or object lock of the backup bucket (the deletion certificate date depends on it). The documents now give the certificate's end date (deletion date plus `lifecycle.backup_copies_end_days`, 780 days by default) and say the owner confirms the bucket settings.
 
 ## Open items for later packages

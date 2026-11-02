@@ -5,7 +5,10 @@
 // - `POST /admin/users` answers the same 202 for a new and an existing email, so other tenants' accounts are never
 //   revealed; an existing account gets an `invited` membership that its owner accepts after signing in, and an
 //   existing active account is told by email and by a `membership_invited` notification (Milestone 2 D.2);
-// - every path that enables a non-guest member checks the licence user limit (`LIC-USERS`, D-15).
+// - every path that enables a non-guest member checks the licence user limit (`LIC-USERS`, D-15);
+// - Milestone 3 H.13: an email address of a person erased in this organisation never revives the removed membership:
+//   the person rejoins with a fresh account (`InvitationService.releaseErasedAccount`), or the invitation is refused
+//   with 422 `invitation.erased_person` while the erased account still belongs to the person elsewhere.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OrgRole, Page, UserCreate, UserIdentityRegistration, UserListQuery, UserPatch, UserView } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -66,7 +69,11 @@ export class UsersService {
   /**
    * `POST /admin/users`: invites a new account, or gives an existing account an `invited` membership (F.6). The
    * answer is the same 202 in every case that does not hit the licence limit, including an email of an account that
-   * is already a member or is disabled, so nothing about other tenants' accounts is revealed.
+   * is already a member or is disabled, so nothing about other tenants' accounts is revealed. The one other refusal is
+   * H.13's 422 `invitation.erased_person` for the email address of a person this organisation erased whose account is
+   * kept for another organisation. It tells the organisation whether the account it erased still belongs to the
+   * person somewhere else now (never where); asked again later, the answer can show that the person has since left
+   * every other organisation (case b of H.13, which waits for the owner's confirmation).
    */
   async create(principal: Principal, body: UserCreate): Promise<{ status: 'invited' }> {
     const org = orgOf(principal);
@@ -104,7 +111,9 @@ export class UsersService {
    * - a new account's `user.created` is a platform entry without organisation (the account is global), so it is not
    *   listed in the organisation's view; the inviting organisation is in its `after` data for the operator;
    * - an invitation link is issued only for an account that was never activated (new, or invited and not accepted);
-   *   an active account accepts after signing in, a disabled one once it is enabled again.
+   *   an active account accepts after signing in, a disabled one once it is enabled again;
+   * - an email address of a person erased in this organisation (H.13) gives a fresh account when nothing else keeps
+   *   the erased account (which is anonymised first), and a 422 otherwise; the removed membership is never revived.
    * Returns the link to mail, the existing active account to tell (Milestone 2 D.2), or null (nothing to send: an
    * active member, or a disabled account).
    */
@@ -122,7 +131,7 @@ export class UsersService {
     const actor = { userId: actorUserId, kind: 'user' as const };
     const email = body.email.trim();
     await this.licence.assertCanAddUser(trx, orgId);
-    const existing = await trx
+    let existing = await trx
       .selectFrom('platform.app_user')
       .select(['id', 'handle', 'email', 'status'])
       .where(sql<string>`lower(email)`, '=', email.toLowerCase())
@@ -130,6 +139,8 @@ export class UsersService {
       .where('deleted_at', 'is', null)
       .forUpdate()
       .executeTakeFirst();
+    // H.13: an account erased in this organisation is anonymised (true, a fresh account follows) or refused (422).
+    if (existing && (await this.invitations.releaseErasedAccount(trx, orgId, existing.id, actor))) existing = undefined;
 
     let user: { id: string; handle: string; email: string; status: 'active' | 'invited' | 'disabled' };
     let newAccount = false;

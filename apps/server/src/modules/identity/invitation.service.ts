@@ -10,6 +10,13 @@
 // Milestone 2 (D.2, J.4): an existing active account that gets an invited membership is told by the account email
 // `membership_invited` and by the in-app notification `membership_invited` in the organisation the account signs in
 // to, so the invitation does not wait unseen.
+//
+// Milestone 3 H.13 (D.6.5): a person erased in an organisation who is invited there again rejoins with a fresh account
+// and membership. The erased account, its removed membership, its pseudonym (`erased_person`) and every record that
+// names it stay as they are, so the records from before the erasure keep the pseudonym and the new account shows no
+// link to it. `releaseErasedAccount` decides what an invitation of such an email address does (see there); both
+// invitation paths (`inviteUser` here and `POST /admin/users`) call it before they look at the membership, so a
+// removed membership of an erased person is never revived.
 import { Injectable, Logger } from '@nestjs/common';
 import type { InvitationAcceptRequest, LoginResponse, OrgRole } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -17,6 +24,8 @@ import { sql } from 'kysely';
 import { ConflictError, NotFoundError, ProblemError, UnauthenticatedError, ValidationError } from '../../common/problems';
 import { SYSTEM_USER_ID, type Trx } from '../../common/tokens';
 import { afterCommit } from '../../common/transaction-hooks';
+import { TENANT_SCHEMA } from '../tenancy/tenant-scope';
+import { AccountAnonymiser } from './account-anonymiser';
 import { AccountMailer } from './account-mailer';
 import { AuthService, invalidCredentials, invalidLinkToken, normaliseEmail } from './auth.service';
 import { checkPassword } from './credentials';
@@ -92,6 +101,51 @@ export function handleBase(email: string): string {
   return base;
 }
 
+/**
+ * Milestone 3 H.13: the refusal of an invitation of an email address whose account was erased in the organisation and
+ * still belongs to the person elsewhere (a membership of another organisation, or the platform operator role). An email
+ * address names one account only (C.4), so the fresh account the person rejoins with needs another email address.
+ */
+export const ERASED_PERSON_INVITATION = {
+  key: 'invitation.erased_person',
+  en: 'This email address belongs to a person who was erased in this organisation, and it cannot be used for a new invitation here. Invite the person with a different email address: they join with a fresh account.',
+  id: 'Alamat email ini milik orang yang telah dihapus di organisasi ini dan tidak dapat dipakai untuk undangan baru di sini. Undang orang tersebut dengan alamat email lain: mereka bergabung dengan akun baru.',
+} as const;
+
+/** 422 `business-rule` with messageKey `invitation.erased_person` (H.13). */
+export function erasedPersonInvitationRefused(): ProblemError {
+  const { key, en, id } = ERASED_PERSON_INVITATION;
+  return new ProblemError('business-rule', { messageKey: key, detail: en, messages: { en, id } });
+}
+
+/**
+ * Whether the account is erased in the organisation (Milestone 3 D.6.5): a live row of the organisation's
+ * `erased_person`. Works in a tenant transaction and in platform scope alike: the table is read in the organisation's
+ * schema with `app.org_id` of the organisation for this one statement (the row-level policy of tenant tables), and the
+ * previous value is restored afterwards.
+ */
+export async function erasedInOrganisation(trx: Trx, orgId: string, userId: string): Promise<boolean> {
+  const org = await trx.selectFrom('platform.organization').select('schema_name').where('id', '=', orgId).executeTakeFirst();
+  if (!org || !TENANT_SCHEMA.test(org.schema_name)) return false;
+  const { rows } = await sql<{ prev: string }>`select coalesce(current_setting('app.org_id', true), '') as prev`.execute(trx);
+  const previous = rows[0]?.prev ?? '';
+  const switched = previous !== orgId;
+  if (switched) await sql`select set_config('app.org_id', ${orgId}, true)`.execute(trx);
+  let found: boolean;
+  try {
+    const { rows: erased } = await sql<{ one: number }>`
+      select 1 as one from ${sql.table(`${org.schema_name}.erased_person`)} e
+       where e.erased_user_id = ${userId}::uuid and e.deleted_at is null`.execute(trx);
+    found = erased.length > 0;
+  } catch (error) {
+    // After a database error the transaction is aborted and rolls back anyway; the original error is what matters.
+    if (switched) await sql`select set_config('app.org_id', ${previous}, true)`.execute(trx).catch(() => undefined);
+    throw error;
+  }
+  if (switched) await sql`select set_config('app.org_id', ${previous}, true)`.execute(trx);
+  return found;
+}
+
 /** What `notifyInvitedAccount` needs: the account, the inviting organisation and who invited. */
 export interface InvitedAccountNotice {
   userId: string;
@@ -130,7 +184,35 @@ export class InvitationService {
     private readonly auth: AuthService,
     private readonly responder: SignInResponder,
     private readonly mailer: AccountMailer,
+    private readonly anonymiser: AccountAnonymiser,
   ) {}
+
+  /**
+   * Milestone 3 H.13 (D.6.5): what an invitation does with an account found by the invited email address that is erased
+   * in the inviting organisation. The person rejoins with a fresh account and membership; the erased account, its
+   * removed membership, its pseudonym and every record that names it are never changed here. Answers:
+   * - false: the account is not erased in the organisation, and the ordinary invitation goes on;
+   * - true: the account is erased in the organisation and nothing keeps it any more (it was kept at the erasure for a
+   *   membership of another organisation that has ended since): it is anonymised now in `trx`, as step 5 of the erasure
+   *   would have done then (`AccountAnonymiser`, audited `user.anonymised`), so the email address is free and the caller
+   *   creates a fresh account with it;
+   * - otherwise 422 `invitation.erased_person` (`ERASED_PERSON_INVITATION`): the account still belongs to the person in
+   *   another organisation (a live or invited membership) or is a platform operator's, or it is anonymised already
+   *   (its `erased.invalid` address was given). An email address names one account (C.4) and sign-in finds the account
+   *   by it, so a fresh account with this address cannot exist next to the kept one; the person rejoins with a fresh
+   *   account under another email address.
+   */
+  async releaseErasedAccount(trx: Trx, orgId: string, userId: string, actor: InvitationActor): Promise<boolean> {
+    if (!(await erasedInOrganisation(trx, orgId, userId))) return false;
+    const anonymised = await this.anonymiser.anonymise(trx, userId, {
+      reason: 'Erased in this organisation and invited again; no other membership keeps the account (H.13)',
+      organizationId: orgId,
+      leavingOrgId: orgId,
+      actor,
+    });
+    if (!anonymised) throw erasedPersonInvitationRefused();
+    return true;
+  }
 
   /** The invitation link of a token. */
   invitationLink(token: string): string {
@@ -267,7 +349,8 @@ export class InvitationService {
    * (D-15 `LIC-USERS`). A new account, or one that was never activated (status `invited`), also gets an invitation;
    * an active account gets one only with `linkForActiveAccount` (F.6). Runs in the caller's transaction, which must
    * have platform scope or `app.org_id` of the organisation. A user that is already an active member is a 409
-   * `conflict`.
+   * `conflict`. An email address of a person erased in the organisation gives a fresh account or a 422 (H.13,
+   * `releaseErasedAccount`); the erased account's removed membership is never revived.
    */
   async inviteUser(trx: Trx, input: InviteUserInput): Promise<InvitedUser> {
     const email = input.email.trim();
@@ -279,7 +362,7 @@ export class InvitationService {
     const actorUserId = input.actor.userId;
 
     await this.infra.licence.assertCanAddUser(trx, org.id);
-    const existing = await trx
+    let existing = await trx
       .selectFrom('platform.app_user')
       .select(['id', 'handle', 'email', 'status'])
       .where(sql<string>`lower(email)`, '=', normaliseEmail(email))
@@ -287,6 +370,8 @@ export class InvitationService {
       .where('deleted_at', 'is', null)
       .forUpdate()
       .executeTakeFirst();
+    // H.13: an account erased in this organisation is anonymised (true, a fresh account follows) or refused (422).
+    if (existing && (await this.releaseErasedAccount(trx, org.id, existing.id, input.actor))) existing = undefined;
 
     let user: { id: string; handle: string; email: string };
     let newAccount = false;
