@@ -121,6 +121,7 @@ Decided by the product owner on 2026-10-31 and 2026-11-01 (Milestone 3, `docs/pl
 17. After sign-in a person lands on their role's home screen (M2-20, 2026-10-31).
 18. A disposal after a keeping period really deletes the record's content: its text and personal details are cleared, its audit entries are redacted under an attestation (the trail stays verifiable), and it is left out of exports; only its line in the disposal register stays (owner, 2026-11-02, after the ISO review of Milestone 3).
 19. Staging gets Milestone 3 in one release after the review fix packages (owner, 2026-11-02).
+20. After the security review (owner, 2026-11-02): an export still needs a second Tenant Admin only when one exists at the moment of the request (H.2 unchanged); staging may go without disposal receipts, which are built before the production go-live; on Open work totals a business role held by one person joins "Other roles" so no total points to one person; the provider forwards a person's data request to the customer on the day it arrives.
 
 ## Open follow-ups
 
