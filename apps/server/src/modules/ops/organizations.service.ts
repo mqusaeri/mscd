@@ -378,7 +378,7 @@ export class OpsOrganizationsService {
       { scope: actor.scope, orgId: created.id, userId: actor.userId, requestId: currentRequestId() },
     );
 
-    let sent = false;
+    let sent: boolean;
     if (invited.invitation) {
       sent = mail.ok
         ? await this.mailer.send({

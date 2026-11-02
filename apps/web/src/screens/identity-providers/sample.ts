@@ -86,7 +86,7 @@ export function createSampleAdapter(): IdpAdapter {
         return { ok: true, data: { ok: true, issuer: p.saml.idpIssuer, endpoints: { singleSignOn: p.saml.entryPoint, serviceProviderMetadata: `/api/v1/auth/saml/${p.slug}/metadata` }, message: null, at } };
       }
       const issuer = p.oidc?.issuer ?? '';
-      let host = '';
+      let host: string;
       try {
         host = new URL(issuer).hostname;
       } catch {

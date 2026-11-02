@@ -324,13 +324,13 @@ export class VaultStore {
    */
   async protection(version: StoredVersion): Promise<VersionProtection> {
     const target = { Bucket: this.bucket, Key: version.key, ...(version.versionId === 'null' ? {} : { VersionId: version.versionId }) };
-    let retainUntil: Date | null = null;
+    let retainUntil: Date | null;
     try {
       retainUntil = (await this.s3.send(new GetObjectRetentionCommand(target))).Retention?.RetainUntilDate ?? null;
     } catch {
       retainUntil = null;
     }
-    let legalHold = false;
+    let legalHold: boolean;
     try {
       legalHold = (await this.s3.send(new GetObjectLegalHoldCommand(target))).LegalHold?.Status === 'ON';
     } catch {

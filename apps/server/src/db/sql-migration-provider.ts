@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { sql, type Kysely, type Migration, type MigrationProvider } from 'kysely';
+import { sql, type Kysely } from 'kysely';
+import type { Migration, MigrationProvider } from 'kysely/migration';
 
 /** Migration file names: four digits, an underscore and a lower-case name (C.3), for example 0001_foundation.sql. */
 export const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;

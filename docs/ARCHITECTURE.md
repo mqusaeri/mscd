@@ -46,7 +46,7 @@ The repository holds a working front end in `app/`, built from the Claude Design
 
 | Area | Today | Target |
 |---|---|---|
-| Stack | React 18.3, Vite 6.4, plain JS and JSX | React 18, TypeScript, Vite |
+| Stack | React 19.3, Vite 8.3, plain JS and JSX | React 19, TypeScript, Vite |
 | Structure | One controller class (`src/MscdApp.jsx`) holds state, derivations and actions; `renderVals()` returns a flat view model | Route components with typed hooks per screen |
 | Views | 18 view components, including the root `AppView`, generated from `project/MSCD Mockup.dc.html` by `scripts/convert-template.mjs` | Typed components owned by the team after design sign-off |
 | Data | `src/MscdApp.jsx` defines 3 sample organisations. `src/data/mscd-data.js` holds 4 management systems (ISMS, QMS, BCMS, ABMS), people, 4 personas, EN and ID strings and derivation helpers | REST API through TanStack Query; demos run on a seeded server (section 14.1) |
@@ -82,7 +82,7 @@ Worth keeping as the product grows:
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Web UI | React 18, TypeScript, Vite | Continues the current code base; typed view models |
+| Web UI | React 19, TypeScript, Vite | Continues the current code base; typed view models |
 | Server state | TanStack Query | Caching, retries and optimistic updates for drill-down actions |
 | Routing | React Router | Deep links to every screen, filter and open record |
 | UI text | react-i18next with EN and ID catalogues; framework labels from the pack via the API | PRD 12 localisation; TS 3.3 label dictionary |

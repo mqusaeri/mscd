@@ -69,7 +69,7 @@ export async function registerRateLimitPlugin(app: NestFastifyApplication, confi
   const options: Record<string, unknown> = { global: false, enableDraftSpec: true, skipOnError: false };
   const bullmqUrl = config.profile.jobs.driver === 'bullmq' ? config.profile.jobs.bullmq.url : null;
   if (bullmqUrl) {
-    const redis = new Redis(bullmqUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false, lazyConnect: false });
+    const redis = new Redis(bullmqUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false, lazyConnect: false, protocol: 2 });
     redis.on('error', (error: Error) => logger.error(`Valkey rate limit store: ${error.message}`));
     options.redis = redis;
     options.nameSpace = 'mscd-rl:';

@@ -29,6 +29,20 @@ updates:
         update-types: [minor, patch]
       npm-major:
         update-types: [major]
+    # Majors left out on purpose (Milestone 3, package M3-M02). Remove a rule
+    # when its reason no longer holds.
+    ignore:
+      # The type definitions follow the Node.js major of the runtime: Node 22
+      # in CI and in the release images. Definitions of a newer major describe
+      # functions that Node 22 lacks. Move this rule with the runtime.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # TypeScript 7 ships the compiler as a native program, and its package no
+      # longer offers the compiler API that typescript-eslint loads for the
+      # lint. No typescript-eslint release supports it yet (8.72 accepts
+      # TypeScript below 6.1). TypeScript 6.0 is still proposed.
+      - dependency-name: typescript
+        versions: ['>=7.0.0']
 
   - package-ecosystem: github-actions
     directory: /

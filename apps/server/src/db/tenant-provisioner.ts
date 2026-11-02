@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { Migrator, sql, type Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
+import { Migrator } from 'kysely/migration';
 import { Agent, request, type Dispatcher } from 'undici';
 import type { MscdConfig } from '../config/mscd-config';
 import { createKysely } from './kysely';
@@ -108,7 +109,12 @@ export class TenantProvisioner {
 
   async create(input: CreateTenantInput): Promise<CreatedTenant> {
     const checked = checkCreateInput(input);
-    const migrator = createKysely<DB>({ connectionString: this.options.connectionString, max: 1, applicationName: 'mscd-tenant-create' });
+    const migrator = createKysely<DB>({
+      connectionString: this.options.connectionString,
+      max: 1,
+      applicationName: 'mscd-tenant-create',
+      transactionMigrationLock: true,
+    });
     try {
       await assertSlugFree(migrator, checked);
 
@@ -506,8 +512,8 @@ async function migrateTenantSchema(conn: Kysely<DB>, schema: string, root = MIGR
     provider: new SqlFileMigrationProvider(migrationsDir('tenant', root)),
     migrationTableSchema: schema,
     allowUnorderedMigrations: true,
-    // The caller's transaction holds every step of the provisioning (and the migration lock, which is
-    // transaction scoped on PostgreSQL).
+    // The caller's transaction holds every step of the provisioning and the migration lock, which `create` makes
+    // transaction scoped (`transactionMigrationLock` of createKysely).
     disableTransactions: true,
   });
   const { error, results = [] } = await migrator.migrateToLatest();

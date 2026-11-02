@@ -195,7 +195,7 @@ export class CollectedMetric {
   ) {}
 
   async get(): Promise<{ name: string; help: string; type: MetricKind; aggregator: string; values: MetricSample[] }> {
-    let values: MetricSample[] = [];
+    let values: MetricSample[];
     try {
       values = await this.read();
     } catch {

@@ -234,7 +234,7 @@ export async function saveComposeLogs(project, files, env, outputDir) {
 
 /** Prints the last log lines of every service that is not running and healthy (or a one-shot that failed). */
 export function showUnhealthy(project, files, env) {
-  let rows = [];
+  let rows;
   try {
     rows = capture('docker', composeArgs(project, files, 'ps', '-a', '--format', '{{.Service}}\t{{.State}}\t{{.Health}}\t{{.ExitCode}}'), env)
       .split('\n')

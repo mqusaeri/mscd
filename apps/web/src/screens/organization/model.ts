@@ -47,7 +47,7 @@ const FALLBACK_ZONES = [
 
 /** The IANA time zones of the browser, with `UTC` and the current value, sorted. */
 export function timeZones(current?: string | null): string[] {
-  let zones: string[] = [];
+  let zones: string[];
   try {
     const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
     zones = typeof intl.supportedValuesOf === 'function' ? intl.supportedValuesOf('timeZone') : [];

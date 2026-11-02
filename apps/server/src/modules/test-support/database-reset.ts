@@ -7,6 +7,12 @@
 // A reset without a write only deletes the minted sessions (`deleteSessions`). It keeps its administrator connection
 // to the api's database open between resets (M2-21: a new connection and its password exchange cost more than the
 // delete itself); the connection is closed before the database is dropped and when the api stops.
+//
+// Before the drop, the reset waits until no other session of the database runs a statement or holds a transaction
+// (M3-M02). The request gate lets a request go when its client goes away (Fastify's onRequestAbort), while its
+// handler can still be inside a transaction; since Vite 8, the preview server of the API suite passes a browser's
+// aborted request on to the api. `WITH (FORCE)` would end that session between two statements, and a pooled
+// connection that is checked out has no error listener, so the api process would stop.
 import pg from 'pg';
 
 /** A plain PostgreSQL identifier (the profile schema allows only these for `test.template_database`). */
@@ -19,6 +25,14 @@ export interface RecreateDatabaseOptions {
   database: string;
   /** The template it is created from. */
   template: string;
+  /** How long the drop waits for open transactions on the database (default `SETTLE_TIMEOUT_MS`). */
+  settleTimeoutMs?: number;
+}
+
+/** What `recreateDatabase` found. */
+export interface RecreateDatabaseResult {
+  /** Sessions of the database still inside a statement or a transaction when the wait ended (the drop ended them). */
+  busyAtDrop: number;
 }
 
 /** Name of the database a PostgreSQL URL names (its path). */
@@ -31,6 +45,31 @@ export function databaseOf(url: string): string {
 /** `CREATE DATABASE ... STRATEGY` exists from PostgreSQL 15 (`server_version_num` 150000). */
 const FILE_COPY_SINCE = 150000;
 
+/** How long a drop waits for the transactions still open on the database. */
+export const SETTLE_TIMEOUT_MS = 5_000;
+/** Pause between two looks at `pg_stat_activity` while waiting. */
+const SETTLE_POLL_MS = 20;
+
+/**
+ * Waits until no other client session of `database` runs a statement or holds a transaction, at most `timeoutMs`.
+ * Returns the number still busy at the end. Without the right to see other roles' sessions (`pg_read_all_stats`), their
+ * state reads as null and nothing is waited for.
+ */
+async function waitForOpenTransactions(client: pg.Client, database: string, timeoutMs: number): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await client.query<{ busy: number }>(
+      `select count(*)::int as busy from pg_stat_activity
+        where datname = $1 and pid <> pg_backend_pid() and backend_type = 'client backend'
+          and state in ('active', 'idle in transaction', 'idle in transaction (aborted)')`,
+      [database],
+    );
+    const busy = result.rows[0]?.busy ?? 0;
+    if (busy === 0 || Date.now() >= deadline) return busy;
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
+  }
+}
+
 /** A privilege of the template, as `aclexplode` lists it. */
 interface DatabaseGrant {
   grantee: string | null;
@@ -42,10 +81,11 @@ function quoteIdent(name: string): string {
 }
 
 /**
+ * Waits for the open transactions of the database (`waitForOpenTransactions`), then
  * `DROP DATABASE <database> WITH (FORCE)` (connections of other clients are ended) and
  * `CREATE DATABASE <database> TEMPLATE <template>`, then the database grants of the template.
  */
-export async function recreateDatabase(options: RecreateDatabaseOptions): Promise<void> {
+export async function recreateDatabase(options: RecreateDatabaseOptions): Promise<RecreateDatabaseResult> {
   const { database, template } = options;
   if (!PLAIN_NAME.test(database)) throw new Error(`The database name ${JSON.stringify(database)} is not a plain name`);
   if (!PLAIN_NAME.test(template)) throw new Error(`The template name ${JSON.stringify(template)} is not a plain name`);
@@ -74,6 +114,7 @@ export async function recreateDatabase(options: RecreateDatabaseOptions): Promis
           ).rows;
     const version = await client.query<{ server_version_num: string }>('show server_version_num');
     const fileCopy = Number(version.rows[0]?.server_version_num ?? 0) >= FILE_COPY_SINCE ? ' STRATEGY FILE_COPY' : '';
+    const busyAtDrop = await waitForOpenTransactions(client, database, options.settleTimeoutMs ?? SETTLE_TIMEOUT_MS);
     await client.query(`DROP DATABASE IF EXISTS ${quoteIdent(database)} WITH (FORCE)`);
     await client.query(`CREATE DATABASE ${quoteIdent(database)} TEMPLATE ${quoteIdent(template)}${fileCopy}`);
     if (grants !== null) {
@@ -85,6 +126,7 @@ export async function recreateDatabase(options: RecreateDatabaseOptions): Promis
         await client.query(`GRANT ${grant.privilege_type} ON DATABASE ${quoteIdent(database)} TO ${grantee}`);
       }
     }
+    return { busyAtDrop };
   } finally {
     await client.end().catch(() => undefined);
   }

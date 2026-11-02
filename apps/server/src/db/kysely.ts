@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { Kysely, PostgresDialect } from 'kysely';
+import { Kysely, PostgresAdapter, PostgresDialect, sql, type DialectAdapter } from 'kysely';
 import pg from 'pg';
 import type { MscdConfig } from '../config/mscd-config';
 import { GuardedPool, type PoolGuardMode } from './pool-guard';
@@ -18,6 +18,31 @@ export interface PoolOptions {
   options?: string;
   /** Called for errors of idle clients; without a handler such an error would end the process. */
   onError?: (error: Error) => void;
+}
+
+/** Advisory lock id of the Kysely migration lock on PostgreSQL (the value Kysely uses). */
+const MIGRATION_LOCK_ID = BigInt('3853314791062309107');
+
+/**
+ * PostgreSQL adapter whose migration lock is transaction scoped (`pg_advisory_xact_lock`, released by the commit or
+ * rollback of the caller's transaction). For a Migrator with `disableTransactions` inside a transaction of the caller
+ * (tenant provisioning, C.8). Kysely's own adapter takes a session lock and releases it with a query, which fails in
+ * a transaction that a failed migration aborted and hides the migration's error.
+ */
+class TransactionMigrationLockAdapter extends PostgresAdapter {
+  override async acquireMigrationLock(db: Kysely<unknown>): Promise<void> {
+    await sql`select pg_advisory_xact_lock(${sql.lit(MIGRATION_LOCK_ID)})`.execute(db);
+  }
+
+  override async releaseMigrationLock(): Promise<void> {
+    // Released when the caller's transaction ends.
+  }
+}
+
+class TransactionMigrationLockDialect extends PostgresDialect {
+  override createAdapter(): DialectAdapter {
+    return new TransactionMigrationLockAdapter();
+  }
 }
 
 const typeParsers = {
@@ -42,9 +67,13 @@ export function createPgPool(options: PoolOptions): pg.Pool {
   return pool;
 }
 
-/** A Kysely instance on its own `pg` pool. */
-export function createKysely<T = DB>(options: PoolOptions): Kysely<T> {
-  return new Kysely<T>({ dialect: new PostgresDialect({ pool: createPgPool(options) }) });
+/**
+ * A Kysely instance on its own `pg` pool. `transactionMigrationLock`: Migrators on this instance take the migration
+ * lock for the caller's transaction (only for Migrators with `disableTransactions` inside such a transaction).
+ */
+export function createKysely<T = DB>(options: PoolOptions & { transactionMigrationLock?: boolean }): Kysely<T> {
+  const Dialect = options.transactionMigrationLock ? TransactionMigrationLockDialect : PostgresDialect;
+  return new Kysely<T>({ dialect: new Dialect({ pool: createPgPool(options) }) });
 }
 
 export interface GuardedKysely<T> {

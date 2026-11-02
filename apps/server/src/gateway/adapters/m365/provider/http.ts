@@ -140,7 +140,8 @@ export class ProviderHttp {
     this.egress = options.egress;
     this.retry = { ...DEFAULT_RETRY_POLICY, ...options.retry };
     this.ownsDispatcher = options.dispatcher === undefined;
-    this.dispatcher = options.dispatcher ?? new EnvHttpProxyAgent({ connect: { timeout: 10_000 }, keepAliveTimeout: 30_000 });
+    // HTTP/1.1 as before undici 8, which offers HTTP/2 by default.
+    this.dispatcher = options.dispatcher ?? new EnvHttpProxyAgent({ connect: { timeout: 10_000 }, keepAliveTimeout: 30_000, allowH2: false });
     this.sleep = options.sleep ?? ((ms, signal) => sleepFor(ms, undefined, { signal }));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.now = options.now ?? Date.now;

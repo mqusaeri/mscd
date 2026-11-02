@@ -296,7 +296,7 @@ export class LicenceService implements OnModuleInit {
     const { timeZone, highWater, now, today } = await this.clockOf(trx, orgId, options.runLocalDate);
     const document = parseDocument(record.document);
 
-    let problem: string | null = null;
+    let problem: string | null;
     try {
       const verified = this.verifyDocument(record.document);
       problem = await this.bindingProblem(trx, verified, orgId);

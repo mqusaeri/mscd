@@ -82,10 +82,9 @@ export class OpsService {
       detail: telemetry.enabled && telemetry.otlp_endpoint ? `traces to ${new URL(telemetry.otlp_endpoint).origin}` : 'off',
     });
 
-    let orgs: ActiveOrganisation[] = [];
     let licences: OpsHealth['licences'] = [];
     try {
-      orgs = await this.collector.activeOrganisations();
+      const orgs: ActiveOrganisation[] = await this.collector.activeOrganisations();
       licences = (await this.collector.licenceStates(orgs))
         .filter((l): l is typeof l & { validUntil: string } => l.validUntil !== null)
         .map((l) => ({ org: l.org, state: l.state, validUntil: l.validUntil }));

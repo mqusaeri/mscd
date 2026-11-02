@@ -5,7 +5,7 @@
   "description": "MSCD shared contract: zod schemas, enums, API route table, authorisation matrix and OpenAPI generator",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22"
   },
   "exports": {
     ".": {
@@ -28,6 +28,6 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "vitest": "4.1.12"
+    "vitest": "5.0.5"
   }
 }

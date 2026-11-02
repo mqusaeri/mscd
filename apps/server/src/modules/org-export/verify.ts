@@ -103,7 +103,7 @@ export async function readAnchorKeyFile(file: string): Promise<{ keyId: string; 
     if (key.asymmetricKeyType !== 'ed25519') throw new Error('not an Ed25519 key');
     publicKeyPem = key.export({ type: 'spki', format: 'pem' }).toString();
   } catch (error) {
-    throw new Error(`${file} is no public Ed25519 anchor key: ${(error as Error).message}`);
+    throw new Error(`${file} is no public Ed25519 anchor key: ${(error as Error).message}`, { cause: error });
   }
   return { keyId: anchorKeyId(publicKeyPem), publicKeyPem };
 }

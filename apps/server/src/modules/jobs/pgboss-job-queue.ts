@@ -166,7 +166,9 @@ export class PgBossJobQueue implements JobQueue {
       await this.starting;
     } catch (error) {
       this.starting = undefined;
-      throw new Error(`The pg-boss job queue could not start (has migrate created the ${PGBOSS_SCHEMA} schema?): ${(error as Error).message}`);
+      throw new Error(`The pg-boss job queue could not start (has migrate created the ${PGBOSS_SCHEMA} schema?): ${(error as Error).message}`, {
+        cause: error,
+      });
     }
   }
 

@@ -1,6 +1,6 @@
 # MSCD web app
 
-Management System Compliance Dashboard by CyberLentera. React 18 + Vite. Workspace package `@mscd/web` of the MSCD repository.
+Management System Compliance Dashboard by CyberLentera. React 19 + Vite. Workspace package `@mscd/web` of the MSCD repository.
 
 The app runs fully in the browser on a fictional sample organisation (`src/data/mscd-data.js`), so it works without a backend.
 

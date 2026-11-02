@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import type { TestingModule } from '@nestjs/testing';
 import type { LightMyRequestResponse } from 'fastify';
 import { sql } from 'kysely';
+import { PinoLogger } from 'nestjs-pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
 import { totpAt } from '../../../src/modules/identity/totp';
@@ -189,12 +190,20 @@ describe('J.5 HTTP hardening of the api', () => {
 describe('J.5 log redaction of token-bearing requests (F.12)', () => {
   const db = useTestDatabase('demo');
   let full: FullApp;
+  let levelBefore: string | undefined;
 
   beforeAll(async () => {
     full = await createFullApp(db, { MSCD__OBSERVABILITY__LOG_LEVEL: 'info' });
+    // Since nestjs-pino 5.1 a process has one request logger, made by its first application. In a run of the whole
+    // file that is the application of the describe above, at the suite's level "silent". This application's level
+    // is set on that logger for the test through PinoLogger.root, which nestjs-pino offers for changes at run time,
+    // and restored afterwards.
+    levelBefore = PinoLogger.root.level;
+    PinoLogger.root.level = 'info';
   });
 
   afterAll(async () => {
+    if (levelBefore !== undefined) PinoLogger.root.level = levelBefore;
     await full?.close();
   });
 

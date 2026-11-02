@@ -62,7 +62,7 @@ export class ScreenClient {
   /** Every page of a `Page<T>` list (pages of `pageSize`). */
   async all<T>(url: string, pageSize = 200): Promise<{ items: T[]; total: number }> {
     const items: T[] = [];
-    let total = 0;
+    let total: number;
     for (let page = 1; ; page += 1) {
       const sep = url.includes('?') ? '&' : '?';
       const response = await this.get<{ items: T[]; total: number }>(`${url}${sep}page=${page}&pageSize=${pageSize}`);

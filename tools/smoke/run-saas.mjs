@@ -325,7 +325,7 @@ function probeSuccess(project, files, state, env) {
 
 async function waitForTargets(project, files, state, env, timeoutMs = 300_000) {
   const deadline = Date.now() + timeoutMs;
-  let last = null;
+  let last;
   for (;;) {
     try {
       last = prometheusTargets(project, files, state, env);
@@ -416,7 +416,7 @@ async function main() {
     if (code !== 0) throw new Error(`saas-stack.sh down failed (exit ${code}); remove what is left with "MSCD_SAAS_TEST_PROJECT=${project} MSCD_SAAS_TEST_DIR=${state} bash deploy/scripts/test/saas-stack.sh down"`);
   };
 
-  let result = 1;
+  let result;
   try {
     stackStarted = true;
     let started = Date.now();

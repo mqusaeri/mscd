@@ -52,7 +52,7 @@ export function loadSigningKey(input: SigningKeyInput): SigningKey {
     try {
       privateKey = createPrivateKey(input);
     } catch (error) {
-      throw new Error(`not a private key in PEM form (${(error as Error).message})`);
+      throw new Error(`not a private key in PEM form (${(error as Error).message})`, { cause: error });
     }
   } else {
     privateKey = input;
@@ -72,7 +72,7 @@ export function loadPublicKey(input: KeyObject | string | Buffer): KeyObject {
     try {
       key = createPublicKey(input);
     } catch (error) {
-      throw new Error(`not a public key in PEM form (${(error as Error).message})`);
+      throw new Error(`not a public key in PEM form (${(error as Error).message})`, { cause: error });
     }
   } else {
     key = input.type === 'private' ? createPublicKey(input) : input;

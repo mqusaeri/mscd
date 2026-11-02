@@ -249,7 +249,7 @@ describe('storage gateway with the Managed Vault (D.5, D-10)', () => {
     const rehash = await gatewayCall(base, '/v1/rehash', { tenant, repository: vault(), object: objectRef(result) });
     expect(rehash.json()).toMatchObject({ matches: false, detail: 'decryption_failed' });
     // The first chunks decrypt, so the answer has started: the gateway aborts it instead of finishing it.
-    let delivered = -1;
+    let delivered: number;
     try {
       const response = await request(`${base}/v1/stream`, {
         method: 'POST',

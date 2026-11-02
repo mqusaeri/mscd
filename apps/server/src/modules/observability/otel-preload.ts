@@ -6,7 +6,7 @@
 // `telemetry.enabled` is true, synchronously, so the instrumentations are in place before the server loads its
 // modules. Any problem is reported on stderr and the process starts without tracing: tracing never stops the
 // service.
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { getNodeAutoInstrumentations, type InstrumentationConfigMap } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { NodeSDK, resources } from '@opentelemetry/sdk-node';
 import { loadProfile } from '../../config/load-profile';
@@ -24,25 +24,34 @@ export function runModeOf(argv: readonly string[]): string | null {
 }
 
 /**
- * Starts the OpenTelemetry Node SDK with the automatic instrumentations. File system, DNS and net spans are left
- * out (noise, and file spans would name secret files); query values of the F.12 parameters are redacted.
+ * Settings of the automatic instrumentations. File system, DNS and net spans are left out (noise, and file spans
+ * would name secret files); query values of the F.12 parameters are redacted.
+ *
+ * The NestJS instrumentation is off as well: its release in auto-instrumentations-node 0.80.0 (0.68.0) patches
+ * `@nestjs/core` below 12 only and would skip NestJS 12 without a word (M3-M02). Traces keep the HTTP server span of
+ * each request and lack the NestJS request and handler spans. Turn it on again when a release supports the installed
+ * `@nestjs/core`; test/unit/observability/otel-preload.test.ts fails at that point as a reminder.
  */
+export function autoInstrumentationConfig(): InstrumentationConfigMap {
+  return {
+    '@opentelemetry/instrumentation-fs': { enabled: false },
+    '@opentelemetry/instrumentation-dns': { enabled: false },
+    '@opentelemetry/instrumentation-net': { enabled: false },
+    '@opentelemetry/instrumentation-nestjs-core': { enabled: false },
+    '@opentelemetry/instrumentation-http': {
+      redactedQueryParams: [...REDACTED_QUERY_PARAMETERS, 'sig', 'signature', 'X-Amz-Signature', 'X-Amz-Credential'],
+      redactedQueryParamsServer: [...REDACTED_QUERY_PARAMETERS],
+      ignoreIncomingRequestHook: (request) => QUIET_PATHS.has(pathOnly(request.url ?? '/')),
+    },
+  };
+}
+
+/** Starts the OpenTelemetry Node SDK with the automatic instrumentations of `autoInstrumentationConfig`. */
 export function startPreloadSdk(options: { endpoint: string; runMode: string }): NodeSDK {
   const sdk = new NodeSDK({
     resource: resources.resourceFromAttributes({ 'service.name': serviceName(options.runMode), 'service.version': VERSION }),
     traceExporter: new OTLPTraceExporter({ url: tracesUrl(options.endpoint) }),
-    instrumentations: [
-      getNodeAutoInstrumentations({
-        '@opentelemetry/instrumentation-fs': { enabled: false },
-        '@opentelemetry/instrumentation-dns': { enabled: false },
-        '@opentelemetry/instrumentation-net': { enabled: false },
-        '@opentelemetry/instrumentation-http': {
-          redactedQueryParams: [...REDACTED_QUERY_PARAMETERS, 'sig', 'signature', 'X-Amz-Signature', 'X-Amz-Credential'],
-          redactedQueryParamsServer: [...REDACTED_QUERY_PARAMETERS],
-          ignoreIncomingRequestHook: (request) => QUIET_PATHS.has(pathOnly(request.url ?? '/')),
-        },
-      }),
-    ],
+    instrumentations: [getNodeAutoInstrumentations(autoInstrumentationConfig())],
   });
   sdk.start();
   markPreloaded(sdk);

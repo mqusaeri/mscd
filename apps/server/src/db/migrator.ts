@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { Migrator, type Kysely, type MigrationResult } from 'kysely';
+import type { Kysely } from 'kysely';
+import { Migrator, type MigrationResult } from 'kysely/migration';
 import { createKysely } from './kysely';
 import { SqlFileMigrationProvider } from './sql-migration-provider';
 

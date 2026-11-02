@@ -238,7 +238,7 @@ async function main() {
     rmSync(stateDir, { recursive: true, force: true });
   };
 
-  let result = 1;
+  let result;
   try {
     stackStarted = true;
     const started = Date.now();

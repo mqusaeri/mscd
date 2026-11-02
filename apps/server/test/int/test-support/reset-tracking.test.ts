@@ -128,4 +128,32 @@ describe('the test reset recreates the database only after a write (M2-21)', () 
     expect((await new Browser(app).post(RESET, undefined)).statusCode).toBe(200);
     expect(await displayName(db)).toBe(seeded);
   });
+
+  it('a reset that recreates the database waits for a transaction still open on it (M3-M02)', async () => {
+    // A request whose client went away leaves the request gate at once, while its handler can still be inside a
+    // transaction: the drop waits until that transaction ends instead of ending its connection between statements.
+    expect((await new Browser(app).post('/api/v1/auth/login', { email: 'nobody@example.com', password: 'not the password' })).statusCode).toBeGreaterThanOrEqual(400);
+    expect(app.get(TestWriteTracker).changed).toBe(true);
+    const open = new pg.Client({ connectionString: db.urls.admin });
+    const connectionErrors: Error[] = [];
+    open.on('error', (error) => connectionErrors.push(error));
+    await open.connect();
+    try {
+      await open.query('begin');
+      await open.query(`select display_name from platform.app_user where handle = 'rina'`);
+      let answered = false;
+      const reset = new Browser(app).post(RESET, undefined).then((response) => {
+        answered = true;
+        return response;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(answered).toBe(false);
+      await open.query('commit');
+      expect(connectionErrors).toEqual([]);
+      expect((await reset).statusCode).toBe(200);
+      expect(await displayName(db)).toBe(seeded);
+    } finally {
+      await open.end().catch(() => undefined);
+    }
+  });
 });

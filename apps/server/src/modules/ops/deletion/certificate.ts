@@ -95,7 +95,7 @@ export function verifyCertificateText(text: string, trustedKeys: readonly Pick<T
   if (!match) return { ok: false, problem: 'bad-signature', certificate, keyId };
   const key = trustedKeys.find((k) => k.keyId === keyId);
   if (!key) return { ok: false, problem: 'unknown-key', certificate, keyId };
-  let valid = false;
+  let valid: boolean;
   try {
     valid = verify(null, Buffer.from(certificateSigningText(certificate), 'utf8'), createPublicKey(key.publicKeyPem), Buffer.from(match[1]!, 'base64'));
   } catch {

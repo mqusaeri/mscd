@@ -55,7 +55,7 @@ const DELAYED_SCORE_FACTOR = 0x1000;
 function startTimeOf(timestamp: string | null, opts: string | null, processedOn: string | null): number | null {
   const queuedAt = timestamp === null ? Number.NaN : Number(timestamp);
   if (!Number.isFinite(queuedAt)) return null;
-  let delay = 0;
+  let delay: number;
   try {
     delay = Number((JSON.parse(opts ?? '{}') as { delay?: unknown }).delay ?? 0);
   } catch {
@@ -106,6 +106,8 @@ export function redisConnection(url: string): ConnectionOptions {
     ...(dbIndex ? { db: Number(dbIndex) } : {}),
     ...(parsed.protocol === 'rediss:' ? { tls: {} } : {}),
     maxRetriesPerRequest: null,
+    // RESP2, the wire protocol of ioredis 5 (ioredis 6 defaults to RESP3).
+    protocol: 2,
   };
 }
 
@@ -222,7 +224,7 @@ export class BullMqJobQueue implements JobQueue {
    *   backoff.
    */
   private async oldestDueAt(queue: Queue, now: number): Promise<number | null> {
-    const client = await queue.client;
+    const client = await queue.getBackend().client;
     let oldest = Number.POSITIVE_INFINITY;
     const delayedKey = queue.keys.delayed;
     if (delayedKey) {
@@ -230,7 +232,8 @@ export class BullMqJobQueue implements JobQueue {
       const startAt = score === undefined ? Number.NaN : Math.floor(Number(score) / DELAYED_SCORE_FACTOR);
       if (startAt <= now) oldest = startAt;
     }
-    const ids = await queue.getRanges(['wait', 'paused', 'prioritized'], 0, DUE_SCAN_LIMIT - 1, true);
+    // BullMQ 6 keeps the jobs of a paused queue in the waiting list too.
+    const ids = await queue.getRanges(['wait', 'prioritized'], 0, DUE_SCAN_LIMIT - 1, true);
     const fields = await Promise.all(ids.map((id) => client.hmget(queue.toKey(id), 'timestamp', 'opts', 'processedOn')));
     for (const [timestamp, opts, processedOn] of fields) {
       const startAt = startTimeOf(timestamp, opts, processedOn);

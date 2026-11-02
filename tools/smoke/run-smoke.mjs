@@ -180,7 +180,7 @@ async function main() {
     await stackDown(project, env);
   };
 
-  let result = 1;
+  let result;
   try {
     stackStarted = true;
     const started = Date.now();

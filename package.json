@@ -8,7 +8,7 @@
     "tools/*"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22"
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
@@ -25,16 +25,27 @@
     "check:text": "node tools/scripts/check-text.mjs docs"
   },
   "devDependencies": {
-    "@eslint/js": "9.39.5",
+    "@eslint/js": "10.0.1",
     "@types/node": "^22.19.0",
-    "eslint": "9.39.5",
-    "globals": "16.5.0",
+    "eslint": "10.13.0",
+    "globals": "17.13.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.71.0"
+    "typescript-eslint": "8.72.0",
+    "vite": "8.3.4"
   },
   "overrides": {
-    "fastify": "5.12.6",
+    "archiver-utils": {
+      "glob": "14.0.3"
+    },
+    "exceljs": {
+      "unzipper": "0.12.5"
+    },
+    "fastify": "5.12.7",
+    "gcp-metadata": {
+      "gaxios": "^7.1.4"
+    },
+    "minimatch": "11.0.3",
     "uuid": "11.1.1",
-    "vite": "^6.4.4"
+    "vite": "8.3.4"
   }
 }

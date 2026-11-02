@@ -557,7 +557,10 @@ describe('brand panel markup', () => {
   });
 
   it('frames the page as before: brand panel, then the card in main, with the theme and language', () => {
-    const html = renderToStaticMarkup(<AuthLayout lang="id" theme="dark" facts={['v1.0.0']}><p>card</p></AuthLayout>);
+    const rendered = renderToStaticMarkup(<AuthLayout lang="id" theme="dark" facts={['v1.0.0']}><p>card</p></AuthLayout>);
+    // React 19's server renderer puts a preload hint for the logo image in front of the markup; the browser build
+    // renders with createRoot, which adds no such hint.
+    const html = rendered.replace(/^<link rel="preload" as="image" href="\/assets\/cyberlentera-logo\.png"\/>/, '');
     expect(html).toMatch(/^<div class="au-root" data-theme="dark" lang="id"><div class="au-brand">/);
     expect(html).toContain('<main class="au-main"><div class="au-card"><p>card</p></div></main>');
   });

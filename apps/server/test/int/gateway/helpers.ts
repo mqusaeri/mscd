@@ -10,7 +10,7 @@ import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { Logger } from 'nestjs-pino';
-import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { Agent, request, type Dispatcher } from 'undici';
 import { GatewayModule } from '../../../src/app/gateway.module';
 import { MscdConfig } from '../../../src/config/mscd-config';
@@ -49,6 +49,8 @@ export async function startSeaweed(): Promise<Seaweed> {
     .withCommand(['mini', '-dir=/data', '-s3.config=/etc/seaweedfs/s3.json', `-bucket=${VAULT_BUCKET}`])
     .withCopyContentToContainer([{ content: s3json, target: '/etc/seaweedfs/s3.json', mode: 0o644 }])
     .withExposedPorts(8333)
+    // Testcontainers 12 waits for an image health check by default; the readiness loop below needs only the port.
+    .withWaitStrategy(Wait.forListeningPorts())
     .withLabels({ 'mscd.test': 'true', 'mscd.test.expires': String(Date.now() + CONTAINER_LIFETIME_MS) });
   const prefix = process.env.MSCD_TEST_CONTAINER_PREFIX;
   if (prefix) container = container.withName(`${prefix}seaweedfs-${randomBytes(4).toString('hex')}`);
@@ -68,7 +70,7 @@ export async function startSeaweed(): Promise<Seaweed> {
     } catch (error) {
       if (Date.now() > deadline) {
         await started.stop();
-        throw new Error(`SeaweedFS did not become ready: ${(error as Error).message}`);
+        throw new Error(`SeaweedFS did not become ready: ${(error as Error).message}`, { cause: error });
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }

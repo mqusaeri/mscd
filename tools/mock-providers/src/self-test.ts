@@ -16,7 +16,7 @@ export async function runSelfTest(baseUrl: string, log: (line: string) => void =
   const call = async (method: string, path: string, init: { headers?: Record<string, string>; body?: string | Buffer } = {}) => {
     const response = await fetch(`${base}${path}`, { method, headers: init.headers, body: init.body });
     const text = await response.text();
-    let json: unknown = undefined;
+    let json: unknown;
     try {
       json = text ? JSON.parse(text) : undefined;
     } catch {

@@ -160,10 +160,9 @@ function hooked<P>(component: (props: P) => React.ReactNode) {
   return {
     /** Renders with `props` until the state settles, as React would after each state change. */
     render(props: P): React.ReactNode {
-      let tree: React.ReactNode = null;
       for (let round = 0; round < 10; round += 1) {
         dirty = false;
-        tree = renderOnce(props);
+        const tree = renderOnce(props);
         if (!dirty) return tree;
       }
       throw new Error('The component does not settle');

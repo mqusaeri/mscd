@@ -9,7 +9,7 @@ Owner: WP-34 (skeleton by WP-03, build plan B.4).
 | `observability.service.ts` | `ObservabilityMetrics` (creates the catalogue metrics that need no database and the derived ones), `HttpObservability` (Fastify hooks: `mscd_http_request_duration_seconds` by route pattern, method and status, server spans), `TelemetryService` (in-process tracing), `LogRingTap` (copies pino output into the ring buffer) |
 | `log-ring.ts` | `LOG_RING`: the last 1,000 log lines of the process as pino wrote them (already redacted, F.12), read by the diagnostics archive |
 | `telemetry.ts` | OTLP/HTTP tracer of HTTP requests (W3C trace context, path only, never query values) and helpers |
-| `otel-preload.ts` | Optional preload (`node --require dist/modules/observability/otel-preload.js dist/main.js <mode>`): the OpenTelemetry Node SDK with automatic instrumentation, started before the server loads its modules |
+| `otel-preload.ts` | Optional preload (`node --require dist/modules/observability/otel-preload.js dist/main.js <mode>`): the OpenTelemetry Node SDK with automatic instrumentation, started before the server loads its modules. The file system, DNS, net and NestJS instrumentations are off; the NestJS one supports `@nestjs/core` below 12 only, so traces hold the HTTP server span of each request without NestJS request and handler spans (M3-M02) |
 
 Where each ARCHITECTURE 12 metric comes from:
 

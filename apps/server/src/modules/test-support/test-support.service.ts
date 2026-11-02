@@ -22,7 +22,7 @@ import { LicenceService } from '../license/licence.service';
 import { PackInstallerDatabase } from '../packs/pack-installer.service';
 import { TenantResolver } from '../tenancy/tenant-resolver';
 import { TenantScope } from '../tenancy/tenant-scope';
-import { closeKeptConnections, databaseOf, deleteSessions, recreateDatabase } from './database-reset';
+import { closeKeptConnections, databaseOf, deleteSessions, recreateDatabase, SETTLE_TIMEOUT_MS } from './database-reset';
 import { TestRequestGate } from './request-gate';
 import { testEndpointsEnabled } from './test-mode';
 import { TestWriteTracker } from './write-tracker';
@@ -168,7 +168,10 @@ export class TestSupportService implements OnApplicationShutdown {
       // The pack installer pool opens again on its next use; the app pool is checked below.
       await this.optional(PackInstallerDatabase)?.onApplicationShutdown();
       try {
-        await recreateDatabase({ adminUrl, database, template });
+        const { busyAtDrop } = await recreateDatabase({ adminUrl, database, template });
+        if (busyAtDrop > 0) {
+          this.logger.warn(`Test reset dropped the database with ${busyAtDrop} session(s) still in a transaction after ${SETTLE_TIMEOUT_MS} ms`);
+        }
       } catch (error) {
         this.logger.error(`Test reset: the database could not be recreated: ${(error as Error).message}`);
         throw new DependencyUnavailableError('The database could not be recreated from the template', { cause: error });

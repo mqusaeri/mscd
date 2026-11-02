@@ -73,7 +73,7 @@ export async function withLock(name, fn, { waitMs = 15 * 60 * 1000, log = () => 
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      let age = 0;
+      let age;
       try {
         age = Date.now() - statSync(lock).mtimeMs;
       } catch {
@@ -83,7 +83,7 @@ export async function withLock(name, fn, { waitMs = 15 * 60 * 1000, log = () => 
         rmSync(lock, { recursive: true, force: true });
         continue;
       }
-      if (Date.now() > deadline) throw new Error(`The lock ${lock} is still held after ${waitMs / 1000} s`);
+      if (Date.now() > deadline) throw new Error(`The lock ${lock} is still held after ${waitMs / 1000} s`, { cause: error });
       if (!told) log(`waiting for ${name} (another run holds ${path.relative(ROOT, lock)})`);
       told = true;
       await new Promise((resolve) => setTimeout(resolve, 500));

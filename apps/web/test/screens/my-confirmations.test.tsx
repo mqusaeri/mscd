@@ -192,7 +192,11 @@ describe('my confirmation views', () => {
         const item = render(<OpenItem ctx={ctx} adapter={adapter} item={OPEN} onChanged={() => undefined} />, ctx, theme);
         for (const p of [TEXT.openDocument, TEXT.statement, TEXT.confirm, TEXT.notOpened, TEXT.openFirst]) expect(item, p[0]).toContain(t(p));
         expect(item).toContain(html(ctx.fill(TEXT.dueOn, { date: D.fmt('2026-10-13', lang) })));
-        expect(item).toMatch(/<input type="checkbox" name="statement-[^"]+" disabled=""/);
+        // React 19's server renderer writes `name` after the other attributes.
+        const statement = item.match(/<input\b[^>]* name="statement-[^"]+"[^>]*>/g) ?? [];
+        expect(statement).toHaveLength(1);
+        expect(statement[0]).toContain('type="checkbox"');
+        expect(statement[0]).toContain(' disabled=""');
         expect(item).toContain('data-confirmation="POL-01"');
         const late = render(<OpenItem ctx={ctx} adapter={adapter} item={{ ...OVERDUE, openedAt: '2026-09-25T03:00:00Z' }} onChanged={() => undefined} />, ctx, theme);
         expect(late).toContain('data-overdue="true"');

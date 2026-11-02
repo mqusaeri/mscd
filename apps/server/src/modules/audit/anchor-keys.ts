@@ -60,7 +60,7 @@ export function anchorPublicKeysOf(text: string, file: string): { keyId: string;
     try {
       key = createPublicKey(block[0]);
     } catch (error) {
-      throw new Error(`${file} holds a public key that cannot be read: ${(error as Error).message}`);
+      throw new Error(`${file} holds a public key that cannot be read: ${(error as Error).message}`, { cause: error });
     }
     if (key.asymmetricKeyType !== 'ed25519') throw new Error(`${file} holds a ${key.asymmetricKeyType ?? 'unknown'} key; anchor keys are Ed25519`);
     keys.push(named(key));

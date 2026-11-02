@@ -25,8 +25,8 @@ MSCD (Management System Compliance Dashboard) is a platform that helps an organi
 
 | Path | Content |
 |---|---|
-| `apps/web` | React 18 and Vite web app. Views in `src/views` are generated from the design template |
-| `apps/server` | NestJS 11 on Fastify. Run modes: api, worker, storage-gateway, migrate. Kysely on PostgreSQL 16 |
+| `apps/web` | React 19 and Vite web app. Views in `src/views` are generated from the design template |
+| `apps/server` | NestJS 12 on Fastify. Run modes: api, worker, storage-gateway, migrate. Kysely on PostgreSQL 16 |
 | `packages/shared` | zod API contract shared by web and server, OpenAPI generation |
 | `packages/pack-tools` | signing and checking of framework packs and licences |
 | `packs/sources` | framework pack sources per standard (clauses, controls, documents, activities) |

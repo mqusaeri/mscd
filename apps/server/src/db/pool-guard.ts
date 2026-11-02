@@ -64,8 +64,13 @@ export class GuardedPool implements PostgresPool {
 
   constructor(
     readonly pool: pg.Pool,
-    private readonly options: PoolGuardOptions,
+    private readonly guardOptions: PoolGuardOptions,
   ) {}
+
+  /** The connection options of the underlying pool, which Kysely's `PostgresPool` interface exposes. */
+  get options(): object {
+    return this.pool.options;
+  }
 
   async connect(): Promise<PostgresPoolClient> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -87,7 +92,7 @@ export class GuardedPool implements PostgresPool {
         }
         if (problem) {
           this.destroyed += 1;
-          this.options.onDirtyConnection(
+          this.guardOptions.onDirtyConnection(
             `Destroyed a pooled database connection with session-level settings (${problem}); a transaction-local setting leaked (F.10)`,
           );
           client.release(new Error(`pool guard: ${problem}`));
@@ -105,13 +110,13 @@ export class GuardedPool implements PostgresPool {
   }
 
   private shouldCheck(state: ClientState): boolean {
-    switch (this.options.mode) {
+    switch (this.guardOptions.mode) {
       case 'every':
         return true;
       case 'off':
         return false;
       case 'sampled':
-        return state.errored || this.checkouts % (this.options.sampleEvery ?? 100) === 0;
+        return state.errored || this.checkouts % (this.guardOptions.sampleEvery ?? 100) === 0;
     }
   }
 

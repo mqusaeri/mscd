@@ -6,7 +6,7 @@ How to set up the MSCD repository, run the web app and its tests, and build the 
 
 | Tool | Version | Used for |
 |---|---|---|
-| Node.js | 22.22 or later in the 22 line (`.nvmrc` holds `22.22.0`; every `package.json` says `"node": ">=22"`) | Everything below |
+| Node.js | 22.22 or later in the 22 line (`.nvmrc` holds `22.22.0`; every `package.json` says `"node": ">=22.22"`) | Everything below |
 | npm | 10 (ships with Node 22) | Workspaces and the single root `package-lock.json` |
 | Playwright Chromium | Build 1194, the build that `@playwright/test` 1.56.1 expects | The E2E suite |
 | Docker Engine with Buildx and Compose | Docker 23 or later for image builds; Docker 25 and Compose 2.24 or later for the developer stack | Images and the developer infrastructure stack |

@@ -159,7 +159,7 @@ function acquireLock() {
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     }
-    let age = 0;
+    let age;
     try {
       age = Date.now() - statSync(LOCK_FILE).mtimeMs;
     } catch {

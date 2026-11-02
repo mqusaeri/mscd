@@ -35,6 +35,15 @@ function textOf(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 }
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
+/**
+ * The attributes of the one `<input>` with this id. React 19's server renderer writes `name` and `value` after the
+ * other attributes, so the fields are checked attribute by attribute instead of in one order.
+ */
+function inputAttributes(html: string, id: string): Record<string, string> {
+  const tags = html.match(/<input\b[^>]*>/g)?.filter((tag) => tag.includes(` id="${id}"`)) ?? [];
+  expect(tags, `one input with the id ${id}`).toHaveLength(1);
+  return Object.fromEntries([...tags[0]!.matchAll(/ ([A-Za-z-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+}
 
 describe('brand panel', () => {
   it('shows the design structure: logo, chain, headline, three facts and the footer facts', () => {
@@ -65,8 +74,8 @@ describe('sign-in page /login', () => {
     const env = envFor();
     const html = render(LoginPage, { env });
     // A generic example address (Milestone 2 M2-S11); the demo persona's address only on a demo installation.
-    expect(html).toMatch(/<input id="au-email" name="email" class="au-input" type="email" autoComplete="username"[^>]*placeholder="name@company.com"[^>]*value=""/);
-    expect(html).toMatch(/<input id="au-password" name="password" class="au-input" type="password" autoComplete="current-password" placeholder="•{12}" value=""/);
+    expect(inputAttributes(html, 'au-email')).toMatchObject({ name: 'email', class: 'au-input', type: 'email', autoComplete: 'username', placeholder: 'name@company.com', value: '' });
+    expect(inputAttributes(html, 'au-password')).toMatchObject({ name: 'password', class: 'au-input', type: 'password', autoComplete: 'current-password', placeholder: '•'.repeat(12), value: '' });
     expect(html).toMatch(/<input type="checkbox" name="remember"\/>/);
     const text = textOf(html);
     for (const key of ['signInEyebrow', 'signInTitle', 'signInLead', 'workEmail', 'password', 'forgot', 'remember', 'continue', 'secondFactorNote', 'guestQuestion', 'guestLink'] as const) {
@@ -134,7 +143,15 @@ describe('sign-in page /login', () => {
 describe('second factor /login/mfa', () => {
   it('has a 6-digit one-time-code field that submits itself, Verify and the recovery code switch', () => {
     const html = render(MfaPage, { env: envFor() });
-    expect(html).toMatch(/<input id="au-code" name="code" class="au-input au-code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="\[0-9\]\{6\}" maxLength="6"/);
+    expect(inputAttributes(html, 'au-code')).toMatchObject({
+      name: 'code',
+      class: 'au-input au-code',
+      type: 'text',
+      inputMode: 'numeric',
+      autoComplete: 'one-time-code',
+      pattern: '[0-9]{6}',
+      maxLength: '6',
+    });
     const text = textOf(html);
     for (const key of ['mfaEyebrow', 'mfaTitle', 'mfaLead', 'codeLabel', 'verify', 'useRecovery', 'otherAccount'] as const) expect(text).toContain(li(TEXT[key], 'en'));
     expect(textOf(render(MfaPage, { env: envFor('id') }))).toContain('Gunakan kode pemulihan');
@@ -167,7 +184,7 @@ describe('enrolment /login/enrol', () => {
       const text = textOf(html);
       expect(text).toContain(li(TEXT.reenrolTitle, lang));
       expect(text).toContain(li(TEXT.enrolFactorLead, lang));
-      expect(html).toMatch(/id="au-proof-code" name="code"[^>]*autoComplete="one-time-code"/);
+      expect(inputAttributes(html, 'au-proof-code')).toMatchObject({ name: 'code', autoComplete: 'one-time-code' });
       expect(html).not.toContain('au-proof-password');
       expect(html).not.toContain('type="password"');
       for (const key of ['usePasswordProof', 'reenrolLead', 'enrolLead'] as const) expect(text).not.toContain(li(TEXT[key], lang));
@@ -280,7 +297,7 @@ describe('invitation /invite#token=', () => {
   it('asks an account that has a password for its current password only (WP-11: checked, never replaced)', () => {
     for (const lang of ['en', 'id'] as const) {
       const html = render(InvitePage, { env: envFor(lang), token: TOKEN, initialMode: 'existing' });
-      expect(html).toMatch(/id="au-current-password" name="password"[^>]*type="password" autoComplete="current-password"/);
+      expect(inputAttributes(html, 'au-current-password')).toMatchObject({ name: 'password', type: 'password', autoComplete: 'current-password' });
       expect((html.match(/type="password"/g) ?? []).length).toBe(1);
       expect(html).not.toContain('au-new-password');
       expect(html).not.toContain('au-repeat-password');
