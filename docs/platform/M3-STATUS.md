@@ -27,7 +27,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-10 Demo personas | 4 | Done | Wulan Hartono (Programme Owner), Ratna Kusumawati (Risk Owner), Gilang Saputra (Compliance Investigator) in the demo seed, sample build and Keycloak realm; `baseRole` maps them to manager or owner views; Milestone 3 routines seeded in RS Medika Nusantara; My Tasks links read confirmations to "Policies to confirm"; retention API tests of decide, approve, reject and File removed |
 | M3-11 Data lifecycle run and documents | 4 | Done | `npm run lifecycle -w @mscd/smoke` walks read confirmation, disposal, access review, My data, an access request and an erasure on screen (13 steps); every J.4 notification links to its screen; `records-of-processing.md`, `legal-inputs.md`, `operator.md`, `USER-FLOWS.md` and `ui-contract.md` describe what is built, with the honest backup end date |
 | M3-12 Hardening follow-ups | 4 | Done | Operator idempotency, on-premise anchor keys (`audit-anchor.pub` mounted into the api and worker), export in one snapshot, `kysely_migration` grant (platform/0009), `retention_review.retain_months` (tenant/0010), hourly scratch cleanup, findings Close with the version of its write |
-| M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
+| M3-M02 Major dependency upgrades | 5 | Running, alone (started 2026-11-02) | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
 
 ## Product owner decisions for Milestone 3
 
