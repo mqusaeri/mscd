@@ -239,7 +239,7 @@ function compareVersions(a, b) {
 }
 
 function cell(text) {
-  return String(text).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  return String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
 function fence(text) {

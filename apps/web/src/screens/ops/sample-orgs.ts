@@ -308,10 +308,13 @@ export function sampleNow(day: string | null): string {
   return Number.isNaN(local.getTime()) ? now.toISOString() : new Date(local.getTime() + now.getMilliseconds()).toISOString();
 }
 
-/** A new id in the shape of a uuid. */
+/** A new version 4 uuid; `randomUUID` is missing outside secure contexts, `getRandomValues` is not. */
 export function sampleId(): string {
-  const c = globalThis.crypto as Crypto | undefined;
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  const hex = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
-  return `${hex()}${hex()}-${hex()}-4${hex().slice(1)}-8${hex().slice(1)}-${hex()}${hex()}${hex()}`;
+  const c = globalThis.crypto;
+  if (typeof c.randomUUID === 'function') return c.randomUUID();
+  const b = c.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }

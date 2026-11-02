@@ -527,7 +527,7 @@ describe('requests from one person (Milestone 3 D.6)', () => {
       for (const row of tenantRows) {
         expect(row).toMatchObject({ source_ip: null, user_agent: null });
         expect(row.redacted_at).not.toBeNull();
-        expect(JSON.stringify(row)).not.toMatch(new RegExp(`staff14|Staff 14|${email.replace(/\./g, '\\.')}`));
+        expect(JSON.stringify(row)).not.toMatch(new RegExp(`staff14|Staff 14|${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
       }
       const platformAbout = await platformRows<{ action: string; entity_code: string | null; before_data: unknown; after_data: unknown; source_ip: string | null; user_agent: string | null }>(db, sql`
         select action, entity_code, before_data, after_data, host(source_ip) as source_ip, user_agent from platform.audit_log
