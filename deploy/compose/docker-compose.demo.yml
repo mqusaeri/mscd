@@ -251,6 +251,8 @@ secrets:
     file: ./config/demo-secrets/s3.secret
   audit-anchor.key:
     file: ./config/demo-secrets/audit-anchor.key
+  audit-anchor.pub:
+    file: ./config/demo-secrets/audit-anchor.pub
   smtp.password:
     file: ./config/demo-secrets/smtp.password
   ca.crt:

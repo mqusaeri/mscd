@@ -128,6 +128,8 @@ export interface RetentionReviewTable extends TenantColumns {
   file_action: 'vault_content_deleted' | 'owner_asked' | 'none' | null;
   file_removed_by: string | null;
   file_removed_at: Date | null;
+  /** Months of the retention period in force at the decision (and at the approval of a disposal); null before tenant/0010 (M3-12). */
+  retain_months: number | null;
 }
 
 /** `retention_hold`: a legal hold that keeps an item whatever its period says (D.8). */
@@ -246,7 +248,7 @@ export const TABLE_COLUMNS = tableColumns<TenantMilestone3Tables>()({
   retention_review: [
     'id', ...STANDARD, 'management_system_id', 'record_class', 'item_id', 'item_code', 'item_title', 'retention_ends_on', 'status', 'decision',
     'decided_by', 'decided_at', 'reason', 'keep_until', 'approved_by', 'approved_at', 'rejected_note', 'disposed_at', 'file_action',
-    'file_removed_by', 'file_removed_at',
+    'file_removed_by', 'file_removed_at', 'retain_months',
   ],
   retention_hold: [
     'id', ...STANDARD, 'management_system_id', 'record_class', 'item_id', 'reason', 'set_by', 'set_at', 'released_by', 'released_at',

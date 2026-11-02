@@ -8,7 +8,7 @@ asked through a task. Owner: M3-06.
 | File | Content |
 |---|---|
 | `retention.controller.ts` | The eleven routes of `packages/shared/src/api/retention.ts` |
-| `retention.service.ts` | Rules, reviews, decisions with RET-HOLD, RET-NOT-DUE, RET-CURRENT and SOD-SELF-APPROVE, register (with the period in force at each decision), holds |
+| `retention.service.ts` | Rules, reviews, decisions with RET-HOLD, RET-NOT-DUE, RET-CURRENT and SOD-SELF-APPROVE, register (with the period in force at each decision, stored in `retention_review.retain_months` since tenant/0010 (M3-12) and read from the audit entries for older decisions), holds |
 | `retention-items.ts` | The items of each record class: code, home system, period start, current flag, objects |
 | `retention-disposal.ts` | What an approved disposal does: vault delete, owner task, record marked deleted, `record.disposed`; after a failed approval, the objects already deleted marked disposed |
 | `retention-review.service.ts`, `retention-review.job.ts` | The daily job: `replaced_at` backfill, new reviews, the digest |

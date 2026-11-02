@@ -9,7 +9,9 @@
 // removed" completes it; an approval refused after part of an evidence pack's vault content was deleted marks that part
 // disposed and the next approval completes it; the register lists every decision with the period in force at the
 // decision, also after a rule change, and downloads as CSV. Every vault delete runs against the bucket of this test's
-// own SeaweedFS (R-20). Organisation `ndt`, system `qms` (rina and sari are its managers).
+// own SeaweedFS (R-20). Organisation `ndt`, system `qms` (rina and sari are its managers). Milestone 3 M3-12: the period
+// of each decision is stored in `retention_review.retain_months`; a review without it (decided before tenant/0010) is
+// shown with the period of its audit entries.
 import { createHash } from 'node:crypto';
 import type { CommandResult, Page, RetentionHoldItem, RetentionRegisterItem, RetentionReviewItem, RetentionRuleItem, UploadIntent, UploadResult } from '@mscd/shared';
 import { sql } from 'kysely';
@@ -630,6 +632,17 @@ describe('retention and disposal review (Milestone 3 D.8)', () => {
     const decided = await rowsOf<{ after_data: Record<string, unknown> }>(db, 'ndt', sql`select after_data from audit_trail where action in ('retention_review.decided', 'retention_review.approved')`);
     expect(decided.length).toBeGreaterThan(0);
     expect(decided.every((d) => typeof d.after_data.retainMonths === 'number')).toBe(true);
+    // The review row stores the same period (tenant/0010, M3-12), at the decision and again at the approval.
+    const stored = await rowsOf<{ item_code: string; retain_months: number | null }>(
+      db, 'ndt', sql`select item_code, retain_months from retention_review where status in ('kept', 'extended', 'disposed') and deleted_at is null`,
+    );
+    expect(stored.length).toBeGreaterThan(0);
+    expect(stored.every((r) => typeof r.retain_months === 'number')).toBe(true);
+    for (const row of stored) {
+      const listed = page.body.items.filter((r) => r.itemCode === row.item_code).map((r) => r.retainMonths);
+      expect(listed, row.item_code).toContain(row.retain_months);
+    }
+    expect(stored.find((r) => r.item_code === 'RET-DOC-2 v1.0')?.retain_months).toBe(3);
 
     const csv = await rina.get(url('/register?format=csv'));
     expect(csv.status).toBe(200);
@@ -651,6 +664,15 @@ describe('retention and disposal review (Milestone 3 D.8)', () => {
     expect(later.body.items.find((r) => r.itemCode === 'RET-DOC-2 v1.0')).toMatchObject({ retainMonths: 3 });
     const laterCsv = (await rina.get(url('/register?format=csv'))).raw.toString('utf8').trim().split(/\r\n/);
     expect(laterCsv.find((l) => l.startsWith('RET-DOC-2 v1.0,'))!.split(',')[3]).toBe('3');
+    // A review decided before tenant/0010 has no stored period: the register reads it from its audit entries. A stored
+    // period comes before the audit entries.
+    await inOrg(db, 'ndt', (trx) => sql`update retention_review set retain_months = null where item_code = 'RET-F-1'`.execute(trx));
+    await inOrg(db, 'ndt', (trx) => sql`update retention_review set retain_months = 7 where item_code = 'RET-F-3'`.execute(trx));
+    const mixed = await sari.get<Page<RetentionRegisterItem>>(url('/register?pageSize=200'));
+    expect(mixed.body.items.find((r) => r.itemCode === 'RET-F-1')).toMatchObject({ retainMonths: 3 });
+    expect(mixed.body.items.find((r) => r.itemCode === 'RET-F-3')).toMatchObject({ retainMonths: 7 });
+    const mixedCsv = (await rina.get(url('/register?format=csv'))).raw.toString('utf8').trim().split(/\r\n/);
+    expect(mixedCsv.find((l) => l.startsWith('RET-F-3,'))!.split(',')[3]).toBe('7');
     // Approvers read the register; a Domain Owner does not.
     expect((await bagus.get(url('/register'))).status).toBe(403);
     expect(await userId(db, 'rina')).toBe(rina.userId);

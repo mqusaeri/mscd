@@ -11,13 +11,24 @@
 // password tokens `privacy.token_retention_days` after use or expiry; read notifications
 // `privacy.notification_retention_days` after they were read, except those a `reminder` row refers to (the reminder is
 // the record that it was sent). The days come from the profile.
-import { Injectable, Logger } from '@nestjs/common';
+//
+// Milestone 3 M3-12: the expired idempotency keys of principals without an organisation (platform operators, kept
+// under `PLATFORM_IDEMPOTENCY_ORG`), and the working folders of organisation export builds that stopped (folders
+// `mscd-org-export-*` of the worker's temporary folder nobody touched for 24 hours, `removeStaleWorkDirs`), so their
+// scratch files do not wait for the next export. The folders are removed while this run holds the installation's
+// export build lock; when a build holds it, the run leaves them (that build removes them when it starts).
+import os from 'node:os';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { MscdConfig } from '../../config/mscd-config';
 import { JobHandler, type JobHandlerInstance } from '../../common/jobs/job-handler';
 import type { JobRun } from '../../common/jobs/job-queue';
 import { SYSTEM_USER_ID } from '../../common/tokens';
+import { DATABASE, type AppDatabase } from '../../db/database.module';
+import { withBuildLock } from '../org-export/build-lock';
+import { removeStaleWorkDirs } from '../org-export/org-export-build.job';
+import { PLATFORM_IDEMPOTENCY_ORG } from '../tenancy/idempotency-store';
 import { RateLimitBucketStore } from '../tenancy/rate-limit-store';
 import { TENANT_SCHEMA, TenantScope } from '../tenancy/tenant-scope';
 import { stepRunsFor, TenantCleanupRegistry } from './tenant-cleanup';
@@ -39,6 +50,11 @@ export interface CleanupResult {
   invitationsDeleted: number;
   passwordTokensDeleted: number;
   notificationsDeleted: number;
+  /**
+   * Milestone 3 M3-12: working folders of stopped organisation export builds removed from the temporary folder; null
+   * when a build held the installation's build lock (the folders wait for the next run).
+   */
+  staleExportWorkDirs: number | null;
   /** Records ended or changed by each registered tenant cleanup step, summed over the organisations. */
   tenantSteps: Record<string, number>;
   /** Organisations whose tenant cleanup failed (the others are still cleaned). */
@@ -56,6 +72,7 @@ export class CleanupExpiredJob implements JobHandlerInstance<'cleanup.expired'> 
     private readonly rateLimits: RateLimitBucketStore,
     private readonly tenantSteps: TenantCleanupRegistry,
     private readonly config: MscdConfig,
+    @Inject(DATABASE) private readonly db: AppDatabase,
   ) {}
 
   async handle(job: JobRun<'cleanup.expired'>): Promise<void> {
@@ -118,7 +135,11 @@ export class CleanupExpiredJob implements JobHandlerInstance<'cleanup.expired'> 
       { scope: 'job', requestId },
     );
 
-    let idempotencyKeys = 0;
+    // Keys of principals without an organisation (platform operators): their own scope, like each organisation's below.
+    let idempotencyKeys = await this.scope.withPlatform(
+      async (trx) => Number((await trx.deleteFrom('platform.idempotency_key').where('expires_at', '<=', now).executeTakeFirst()).numDeletedRows),
+      { scope: 'job', orgId: PLATFORM_IDEMPOTENCY_ORG, requestId },
+    );
     let uploadIntentsExpired = 0;
     let exportFilesExpired = 0;
     let notificationsDeleted = 0;
@@ -179,6 +200,7 @@ export class CleanupExpiredJob implements JobHandlerInstance<'cleanup.expired'> 
         this.logger.error({ orgId: org.id, error: (error as Error).message }, 'cleanup.expired failed for an organisation');
       }
     }
+    const staleExportWorkDirs = await this.removeStaleExportWork();
     return {
       rateLimitBuckets,
       idempotencyKeys,
@@ -192,8 +214,24 @@ export class CleanupExpiredJob implements JobHandlerInstance<'cleanup.expired'> 
       invitationsDeleted: platform.invitationsDeleted,
       passwordTokensDeleted: platform.passwordTokensDeleted,
       notificationsDeleted,
+      staleExportWorkDirs,
       tenantSteps,
       failedOrganisations,
     };
+  }
+
+  /**
+   * Removes the working folders of export builds that stopped, under the installation's build lock (M3-12). Returns
+   * the number removed, or null when a build holds the lock. Best effort: a failure is logged and never fails the run.
+   */
+  private async removeStaleExportWork(): Promise<number | null> {
+    try {
+      // eslint-disable-next-line no-restricted-syntax -- the pool only pins the connection of the session lock (build-lock.ts)
+      const run = await withBuildLock(this.db, () => removeStaleWorkDirs(os.tmpdir(), this.logger));
+      return run.locked ? run.value.length : null;
+    } catch (error) {
+      this.logger.warn(`cleanup.expired could not check the working folders of export builds: ${(error as Error).message}`);
+      return 0;
+    }
   }
 }

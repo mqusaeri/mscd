@@ -1,8 +1,15 @@
 // `cleanup.expired` (E.2): every kind of expired row, nothing that is still valid, and the same state after a
-// second run (J.8 idempotency).
+// second run (J.8 idempotency). Milestone 3 M3-12: the expired keys of platform operators (PLATFORM_IDEMPOTENCY_ORG) go
+// too, and the working folders of export builds that stopped more than 24 hours ago leave the temporary folder.
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm, utimes } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CleanupExpiredJob } from '../../../src/modules/jobs/cleanup-expired.job';
+import { WORK_DIR_PREFIX } from '../../../src/modules/org-export/org-export-build.job';
+import { PLATFORM_IDEMPOTENCY_ORG } from '../../../src/modules/tenancy/idempotency-store';
 import { useTestDatabase } from '../../setup/test-db';
 import { adminClient, createJobsApp, type AdminClient, type JobsApp } from './helpers';
 
@@ -14,8 +21,15 @@ describe('cleanup.expired (E.2)', () => {
   const db = useTestDatabase('demo');
   let app: JobsApp;
   let admin: AdminClient;
+  let staleWorkDir: string;
+  let freshWorkDir: string;
 
   beforeAll(async () => {
+    // Working folders of export builds: one that stopped two days ago, one of a build that runs now.
+    staleWorkDir = await mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}m3-12-stale-`));
+    freshWorkDir = await mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}m3-12-fresh-`));
+    const twoDaysAgo = new Date(Date.now() - 48 * 3_600_000);
+    await utimes(staleWorkDir, twoDaysAgo, twoDaysAgo);
     admin = await adminClient(db);
     app = await createJobsApp(db);
     const hash = () => randomBytes(32);
@@ -26,7 +40,9 @@ describe('cleanup.expired (E.2)', () => {
     await admin.query(`INSERT INTO platform.idempotency_key (organization_id, user_id, key, route, request_hash, created_at, expires_at) VALUES
       ($1, $3, 'old-tst', 'POST /x', repeat('a', 64), now() - interval '2 days', ${old}),
       ($2, $3, 'old-ndt', 'POST /x', repeat('a', 64), now() - interval '2 days', ${old}),
-      ($1, $3, 'new-tst', 'POST /x', repeat('a', 64), now(), ${later})`, [TST, NDT, SYSTEM]);
+      ($1, $3, 'new-tst', 'POST /x', repeat('a', 64), now(), ${later}),
+      ($4, $3, 'old-ops', 'POST /x', repeat('a', 64), now() - interval '2 days', ${old}),
+      ($4, $3, 'new-ops', 'POST /x', repeat('a', 64), now(), ${later})`, [TST, NDT, SYSTEM, PLATFORM_IDEMPOTENCY_ORG]);
     await admin.query(`INSERT INTO platform.auth_transaction (kind, organization_id, state_hash, browser_binding_hash, expires_at) VALUES
       ('guest_otp', $1, $2, $3, ${old}), ('guest_otp', $1, $4, $5, ${later})`, [TST, hash(), hash(), hash(), hash()]);
     const idp = await admin.query<{ id: string }>(`INSERT INTO platform.identity_provider (organization_id, slug, kind, display_name, saml_entry_point, saml_idp_certs)
@@ -57,6 +73,7 @@ describe('cleanup.expired (E.2)', () => {
   afterAll(async () => {
     await app?.close();
     await admin?.end();
+    for (const dir of [staleWorkDir, freshWorkDir]) if (dir) await rm(dir, { recursive: true, force: true });
   });
 
   const state = async () => {
@@ -77,7 +94,7 @@ describe('cleanup.expired (E.2)', () => {
     await app.run('cleanup.expired', { orgId: null, payload: {} });
     expect(await state()).toEqual({
       buckets: ['t:new'],
-      idempotency: ['new-tst'],
+      idempotency: ['new-ops', 'new-tst'],
       authTransactions: ['true'],
       saml: ['true'],
       outbox: ['false:false', 'true:true'],
@@ -86,12 +103,19 @@ describe('cleanup.expired (E.2)', () => {
       exportFiles: ['new.xlsx:false', 'old.xlsx:true'],
     });
     expect(app.queue.failed('cleanup.expired')).toEqual([]);
+    // The stopped build's folder is gone; the running build's folder stays.
+    expect(existsSync(staleWorkDir)).toBe(false);
+    expect(existsSync(freshWorkDir)).toBe(true);
   });
 
   it('is idempotent', async () => {
     const before = await state();
     const result = await app.moduleRef.get(CleanupExpiredJob).cleanup();
     expect(await state()).toEqual(before);
-    expect(result).toMatchObject({ idempotencyKeys: 0, authTransactions: 0, samlAssertions: 0, outboxRows: 0, sessionsRevoked: 0, uploadIntentsExpired: 0, exportFilesExpired: 0, failedOrganisations: [] });
+    expect(result).toMatchObject({
+      idempotencyKeys: 0, authTransactions: 0, samlAssertions: 0, outboxRows: 0, sessionsRevoked: 0, uploadIntentsExpired: 0, exportFilesExpired: 0,
+      staleExportWorkDirs: 0, failedOrganisations: [],
+    });
+    expect(existsSync(freshWorkDir)).toBe(true);
   });
 });

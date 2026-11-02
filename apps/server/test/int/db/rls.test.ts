@@ -262,7 +262,7 @@ describe('tenant isolation and privileges (J.5)', () => {
       }
     });
 
-    it('grant mscd_app exactly SELECT, INSERT and UPDATE (no UPDATE on append-only tables) and nothing on Kysely tables', async () => {
+    it('grant mscd_app exactly SELECT, INSERT and UPDATE (no UPDATE on append-only tables), SELECT on kysely_migration and nothing on its lock', async () => {
       const { rows } = await sql<{ relname: string; privs: string[] }>`
         select c.relname,
                array(select p from unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p
@@ -273,13 +273,14 @@ describe('tenant isolation and privileges (J.5)', () => {
       const appendOnly = new Set(['audit_trail', 'link_health_result', 'reminder']);
       const deletable = new Set(['notification', 'calendar_feed_token']);
       for (const row of rows) {
-        const expected = row.relname.startsWith('kysely_')
-          ? []
-          : appendOnly.has(row.relname)
+        // Milestone 3 platform/0009 (M3-12): the export reads the applied migrations from the schema; the lock stays closed.
+        const kysely = row.relname.startsWith('kysely_') ? (row.relname === 'kysely_migration' ? ['SELECT'] : []) : null;
+        const expected = kysely
+          ?? (appendOnly.has(row.relname)
             ? ['SELECT', 'INSERT']
             : deletable.has(row.relname)
               ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE']
-              : ['SELECT', 'INSERT', 'UPDATE'];
+              : ['SELECT', 'INSERT', 'UPDATE']);
         expect(row.privs, row.relname).toEqual(expected);
       }
       const usage = await sql<{ app: boolean; pack: boolean; publicUsage: boolean }>`

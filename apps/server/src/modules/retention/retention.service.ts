@@ -12,10 +12,11 @@
 // - Holds keep an item whatever its period says until released with a reason; an open review of a held item leaves
 //   the review list.
 // - The register lists the decided reviews (kept, extended, disposed) and downloads as formula-safe CSV (F.15). Its
-//   period is the one in force when the review was decided (or, for a disposal, approved): `retention_review` has no
-//   column for it (J.7), so `retention_review.decided` and `retention_review.approved` carry `retainMonths` in their
-//   after data and the register reads the latest of them; a later rule change does not rewrite the evidence. Reviews
-//   decided before that entry existed fall back to the rule in force today.
+//   period is the one in force when the review was decided (or, for a disposal, approved), kept in
+//   `retention_review.retain_months` (tenant/0010, M3-12) and in the after data of `retention_review.decided` and
+//   `retention_review.approved` (`retainMonths`); a later rule change does not rewrite the evidence. A review decided
+//   before the column existed has none: the register reads the latest of those audit entries, and falls back to the
+//   rule in force today for reviews decided before the entries carried the period.
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   CommandResult, Pair, RetentionDecide, RetentionHoldCreate, RetentionHoldItem, RetentionRecordClass, RetentionRegisterItem,
@@ -59,13 +60,18 @@ interface ReviewRow {
   file_action: RetentionReviewItem['fileAction'];
   file_removed_by: string | null;
   file_removed_at: Date | null;
+  /** The period stored at the decision or approval (tenant/0010); null for reviews decided before it. */
+  retain_months: number | null;
   decided_handle: string | null;
   decided_name: string | null;
   approved_handle: string | null;
   approved_name: string | null;
   on_hold: boolean;
   doc_type: string | null;
-  /** The period in force at the decision or approval (register only), from the audit entry; null when not recorded. */
+  /**
+   * The period in force at the decision or approval (register only): the stored column, else the latest audit entry
+   * that carries it; null when neither recorded it.
+   */
   decided_months: number | null;
   total: string;
 }
@@ -253,6 +259,8 @@ export class RetentionService {
           status = 'awaiting_approval';
           set = { keep_until: null };
         }
+        // The period in force at this decision, stored on the review and in its audit entry (the disposal register reads it).
+        const retainMonths = monthsFor(rules, review.record_class, review.doc_type ?? item?.docType);
         await trx
           .updateTable('retention_review')
           .set({
@@ -262,6 +270,7 @@ export class RetentionService {
             decided_by: actor,
             decided_at: now,
             reason: body.reason,
+            retain_months: retainMonths,
             approved_by: null,
             approved_at: null,
             rejected_note: null,
@@ -283,8 +292,7 @@ export class RetentionService {
             reason: body.reason,
             recordClass: review.record_class,
             itemId: review.item_id,
-            // The period in force at this decision, read back by the disposal register.
-            retainMonths: monthsFor(rules, review.record_class, review.doc_type ?? item?.docType),
+            retainMonths,
             ...(status === 'kept' ? { keepUntil: body.keepUntil } : {}),
             ...(status === 'extended' ? { retentionEndsOn: set.retention_ends_on, extendMonths: body.extendMonths } : {}),
           },
@@ -332,6 +340,8 @@ export class RetentionService {
       const rules = await this.ruleMap(trx, system.id);
       await this.assertDisposable(trx, review!, item, rules, today);
       const now = this.clock.now();
+      // The period in force when the disposal runs (the one RET-NOT-DUE checked), stored on the review and in its audit entry.
+      const retainMonths = monthsFor(rules, item.recordClass, item.docType);
       const result = await this.disposal.dispose(trx, {
         orgId: org.id,
         msId: system.id,
@@ -344,7 +354,10 @@ export class RetentionService {
       }, progress);
       await trx
         .updateTable('retention_review')
-        .set({ status: 'disposed', approved_by: actor, approved_at: now, disposed_at: now, file_action: result.fileAction, updated_at: now, updated_by: actor })
+        .set({
+          status: 'disposed', approved_by: actor, approved_at: now, disposed_at: now, file_action: result.fileAction, retain_months: retainMonths,
+          updated_at: now, updated_by: actor,
+        })
         .where('id', '=', review!.id)
         .execute();
       await this.audit.record(trx, {
@@ -358,8 +371,7 @@ export class RetentionService {
           status: 'disposed',
           recordClass: review!.record_class,
           itemId: review!.item_id,
-          // The period in force when the disposal ran (the one RET-NOT-DUE checked), read back by the disposal register.
-          retainMonths: monthsFor(rules, item.recordClass, item.docType),
+          retainMonths,
           fileAction: result.fileAction,
           ...(result.recordDeleted ? { recordDeleted: true } : {}),
           ...(result.ownerTaskId ? { ownerTaskId: result.ownerTaskId } : {}),
@@ -703,11 +715,11 @@ export class RetentionService {
              ${held} as on_hold,
              ${this.docTypeOfReview()} as doc_type,
              ${filter.order === 'decided'
-               ? sql`(select (a.after_data->>'retainMonths')::int from audit_trail a
+               ? sql`coalesce(r.retain_months::int, (select (a.after_data->>'retainMonths')::int from audit_trail a
                        where a.entity_type = 'retention_review' and a.entity_id = r.id
                          and a.action in ('retention_review.decided', 'retention_review.approved')
                          and a.after_data->>'retainMonths' is not null
-                       order by a.seq desc limit 1)`
+                       order by a.seq desc limit 1))`
                : sql`null::int`} as decided_months,
              count(*) over () as total
         from retention_review r

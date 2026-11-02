@@ -561,8 +561,8 @@ The chart `helm/mscd-<version>.tgz` runs web, api, worker and storage-gateway as
 
    | Secret | Files |
    |---|---|
-   | `mscd-api` | `db-app.url`, `platform.key`, `gateway.token` |
-   | `mscd-worker` | `db-app.url`, `platform.key`, `gateway.token`, `db-pack.url`, `audit-anchor.key` |
+   | `mscd-api` | `db-app.url`, `platform.key`, `gateway.token`, `audit-anchor.pub` |
+   | `mscd-worker` | `db-app.url`, `platform.key`, `gateway.token`, `db-pack.url`, `audit-anchor.key`, `audit-anchor.pub` |
    | `mscd-gateway` | `storage.key`, `s3.access`, `s3.secret`, `gateway.token` |
    | `mscd-migrate` | `db-migrator.url`, `db-pack.url` |
 
@@ -574,9 +574,10 @@ The chart `helm/mscd-<version>.tgz` runs web, api, worker and storage-gateway as
    openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' > gateway.token
    docker run --rm --network none -v "$PWD:/out" cyberlentera/mscd-server:<version> keys generate --out /out/keys
    cp keys/audit-anchor.key keys/audit-anchor.pub . && rm -rf keys
-   kubectl -n mscd create secret generic mscd-api --from-file=db-app.url --from-file=platform.key --from-file=gateway.token
+   kubectl -n mscd create secret generic mscd-api --from-file=db-app.url --from-file=platform.key --from-file=gateway.token \
+     --from-file=audit-anchor.pub
    kubectl -n mscd create secret generic mscd-worker --from-file=db-app.url --from-file=platform.key \
-     --from-file=gateway.token --from-file=db-pack.url --from-file=audit-anchor.key
+     --from-file=gateway.token --from-file=db-pack.url --from-file=audit-anchor.key --from-file=audit-anchor.pub
    kubectl -n mscd create secret generic mscd-gateway --from-file=storage.key --from-file=s3.access \
      --from-file=s3.secret --from-file=gateway.token
    kubectl -n mscd create secret generic mscd-migrate --from-file=db-migrator.url --from-file=db-pack.url
@@ -659,7 +660,7 @@ Upgrades: push the new images, then `helm upgrade mscd helm/mscd-<new version>.t
 | `gateway.token`, `gateway.token.previous` | Shared token of api, worker and storage gateway |
 | `db-*.url`, `postgres-admin.password`, `postgres-roles.env` | Database passwords |
 | `s3.access`, `s3.secret`, `s3.json` | Object storage key |
-| `audit-anchor.key`, `audit-anchor.pub` | Signs the audit trail anchors (worker only); the public key checks them |
+| `audit-anchor.key`, `audit-anchor.pub` | `audit-anchor.key` signs the audit trail anchors (worker only); `audit-anchor.pub` holds the public keys the api and the worker trust when they check them, this installation's key first and earlier keys below it |
 | `ca.crt`, `ca.key`, `gateway.*`, `api.*`, `worker.*` | Internal certificate authority and the certificates for the encrypted connection to the storage gateway |
 | `smtp.password` | SMTP password, when your relay needs one |
 
@@ -701,6 +702,15 @@ What this proves:
 - Together with the anchors kept outside the database, it also detects a rewrite by someone with full database rights. Such a person could recompute the chain, but cannot forge a signed anchor for the rewritten chain without `audit-anchor.key`, which only the worker holds. Compare the anchors in your log platform or in your downloaded files with the chain.
 
 To make the anchors useful, send the worker log to your log platform (section 16), keep object lock on the vault bucket when possible, and download the anchors regularly: in MSCD, the Management System Manager opens **Audit > Audit trail**, where "Chain and export" offers **Download anchors** (the file of signed lines), **Verify chain** (the chain check on demand, with the result of each chain) and **Export CSV** of the system's entries. Keep `secrets/audit-anchor.pub` with your audit records: it checks the anchor signatures.
+
+The chain checks (**Verify chain** and the nightly check of the worker) trust the anchor keys built into the release and every public key in `secrets/audit-anchor.pub`. To replace the anchor key, for example after it leaked:
+
+1. Make a new key pair: `sudo docker run --rm --network none -v "$PWD:/out" cyberlentera/mscd-server:<version> keys generate --out /out/keys`.
+2. Put the new private key in `secrets/audit-anchor.key`.
+3. Put the new public key first in `secrets/audit-anchor.pub` and keep every earlier public key below it, so the anchors signed before the change still verify.
+4. Restart the api and the worker: `sudo docker compose up -d api worker` in the installation folder. With Helm, update both Secrets (`audit-anchor.pub` in `mscd-api` and `mscd-worker`, or the value `secrets.values.auditAnchorPublicKey`) and restart the two Deployments.
+
+At start the api logs how many anchor keys of `audit-anchor.pub` it trusts. Keep a copy of every public key with your audit records for as long as you keep the exports and anchors it signed.
 
 ## 15. Backups, upgrades and rollback
 
@@ -769,6 +779,8 @@ What `upgrade.sh` does:
 5. Replaces the services and checks them through the published ports. If the new version does not become healthy, the previous version starts again automatically.
 
 Settings, secrets, certificates and data are kept. Users see a short interruption while the services are replaced.
+
+An organisation export (section 19) that is being built when the worker is replaced stops; the Tenant Admin requests it again after the upgrade.
 
 Options: `--dir DIR`, `--verify-key FILE`, `--skip-signature-check` (not recommended), `--skip-canary` (not recommended), `--timeout SECONDS` (default 600), `--yes`.
 

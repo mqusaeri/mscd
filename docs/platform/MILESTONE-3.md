@@ -1232,6 +1232,8 @@ CREATE TABLE retention_review (
   status varchar(20) NOT NULL CHECK (status IN ('open', 'kept', 'extended', 'awaiting_approval', 'disposed')),
   decision varchar(10) CHECK (decision IN ('keep', 'extend', 'dispose')),
   file_action varchar(25) CHECK (file_action IN ('vault_content_deleted', 'owner_asked', 'none')),
+  -- tenant/0010_milestone3_fix.sql (M3-12): the period of each decision; null for reviews decided before it.
+  retain_months smallint CHECK (retain_months BETWEEN 1 AND 1200),
 );
 CREATE TABLE retention_hold (
   record_class varchar(20) NOT NULL CHECK (record_class IN ('document_version', 'evidence_file', 'evidence_pack', 'audit_event', 'finding', 'corrective_action', 'management_review', 'competence_record')),

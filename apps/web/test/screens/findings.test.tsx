@@ -1,7 +1,9 @@
 // Findings and actions (MILESTONE-2 M2-14): routes against the shared table, the forms and permission helpers, the API
 // adapter over a fake fetch (paths, bodies, If-Match, Idempotency-Key, CSRF, refusals and field errors kept), the
 // sample adapter with BR-06, BR-07, BR-08 and BR-09 and its state per organisation, the open findings extension of
-// `req`, and the views in both languages and themes.
+// `req`, the views in both languages and themes, and (M3-12) the finding drawer's writes after "Save texts", driven
+// through its hooks without a DOM.
+import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_MATRIX, routeById } from '@mscd/shared';
@@ -18,11 +20,11 @@ import { adapterFor } from '../../src/screens/findings/adapter';
 import { createApiAdapter, eventsOfCycles, fromActionItem, fromFindingItem } from '../../src/screens/findings/api';
 import {
   actionErrors, actionPatch, assessBody, assessErrors, assessFormOf, closeNeedsNote, editFormOf, editPatch, emptyRaise, evidenceCodes, mayStep,
-  raiseBody, raiseErrors, stepIndex, verifyBlock,
+  raiseBody, raiseErrors, savedVersionOf, stepIndex, verifyBlock, withSavedVersion,
 } from '../../src/screens/findings/model';
-import type { FindingsAdapter, SelfRow } from '../../src/screens/findings/model';
+import type { FindingModel, FindingsAdapter, SelfRow } from '../../src/screens/findings/model';
 import { ActionDrawer, ActionsList } from '../../src/screens/findings/ActionsTab';
-import { FindingDrawer, FindingsList, clauseOf, filterFindings } from '../../src/screens/findings/FindingsTab';
+import { EditFindingDialog, FindingDrawer, FindingsList, MoveFindingDialog, clauseOf, filterFindings } from '../../src/screens/findings/FindingsTab';
 import { RaiseDialog } from '../../src/screens/findings/RaiseDialog';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/findings/routes';
 import { createSampleAdapter, resetSampleAudit } from '../../src/screens/findings/sample';
@@ -68,6 +70,130 @@ const SELF: SelfAssessmentItem = {
   requirementCode: '7.5', text: 'Controlled document used after its review date', status: 'gap', owner: 'bagus', targetFixAt: '2026-10-31', note: null, assessedAt: '2026-09-01', evidence: [], findingCode: null,
 };
 const page = <T,>(items: T[]) => ({ items, page: 1, pageSize: 200, total: items.length });
+
+// ---------------------------------------------------------------------------------------------------------------
+// A hook harness without a DOM (M3-12): the web unit tests run in Node, so a component is called as a function with a
+// stand-in for React's hook dispatcher. Its hooks keep their state between calls by call order, effects run after each
+// call when their dependencies change, and the returned element tree is searched for the handlers a click would run.
+// ---------------------------------------------------------------------------------------------------------------
+
+type Slot = { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void };
+type Dispatcher = Record<string, unknown>;
+
+/** React's current hook dispatcher (React 18 internals; React 19 renamed them). */
+const dispatcherRef: { get(): unknown; set(d: unknown): void } = (() => {
+  const internals = React as unknown as {
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?: { ReactCurrentDispatcher: { current: unknown } };
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H: unknown };
+  };
+  const r18 = internals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+  if (r18) return { get: () => r18.ReactCurrentDispatcher.current, set: (d) => { r18.ReactCurrentDispatcher.current = d; } };
+  const r19 = internals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE!;
+  return { get: () => r19.H, set: (d) => { r19.H = d; } };
+})();
+
+const sameDeps = (a: readonly unknown[] | undefined, b: readonly unknown[] | undefined) =>
+  !!a && !!b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+
+/** A function component with its hook state, rendered by calling it until no state changes. */
+function hooked<P>(component: (props: P) => React.ReactNode) {
+  const slots: Slot[] = [];
+  let dirty = false;
+  const renderOnce = (props: P): React.ReactNode => {
+    let index = 0;
+    const effects: (() => void)[] = [];
+    const effect = (fn: () => void | (() => void), deps?: readonly unknown[]) => {
+      const k = index++;
+      const prev = slots[k];
+      if (prev && deps && sameDeps(prev.deps, deps)) return;
+      slots[k] = { deps, cleanup: prev?.cleanup };
+      effects.push(() => {
+        slots[k]!.cleanup?.();
+        const cleanup = fn();
+        slots[k]!.cleanup = typeof cleanup === 'function' ? cleanup : undefined;
+      });
+    };
+    const memo = <T,>(make: () => T, deps: readonly unknown[]) => {
+      const k = index++;
+      const prev = slots[k];
+      if (prev && sameDeps(prev.deps, deps)) return prev.value as T;
+      const value = make();
+      slots[k] = { value, deps };
+      return value;
+    };
+    const dispatcher: Dispatcher = {
+      useState: (initial: unknown) => {
+        const k = index++;
+        if (!slots[k]) slots[k] = { value: typeof initial === 'function' ? (initial as () => unknown)() : initial };
+        const slot = slots[k]!;
+        const set = (next: unknown) => {
+          const value = typeof next === 'function' ? (next as (v: unknown) => unknown)(slot.value) : next;
+          if (!Object.is(value, slot.value)) {
+            slot.value = value;
+            dirty = true;
+          }
+        };
+        return [slot.value, set];
+      },
+      useRef: (initial: unknown) => {
+        const k = index++;
+        if (!slots[k]) slots[k] = { value: { current: initial } };
+        return slots[k]!.value;
+      },
+      useEffect: effect,
+      useLayoutEffect: effect,
+      useMemo: memo,
+      useCallback: (fn: unknown, deps: readonly unknown[]) => memo(() => fn, deps),
+      useContext: (context: { _currentValue: unknown }) => context._currentValue,
+    };
+    const before = dispatcherRef.get();
+    dispatcherRef.set(dispatcher);
+    let tree: React.ReactNode;
+    try {
+      tree = component(props);
+    } finally {
+      dispatcherRef.set(before);
+    }
+    for (const run of effects) run();
+    return tree;
+  };
+  return {
+    /** Renders with `props` until the state settles, as React would after each state change. */
+    render(props: P): React.ReactNode {
+      let tree: React.ReactNode = null;
+      for (let round = 0; round < 10; round += 1) {
+        dirty = false;
+        tree = renderOnce(props);
+        if (!dirty) return tree;
+      }
+      throw new Error('The component does not settle');
+    },
+  };
+}
+
+type Found = React.ReactElement<Record<string, unknown>>;
+
+/** Every element of a tree (props searched as well: children, footer and other element props), in order. */
+function elementsOf(node: unknown, out: Found[] = []): Found[] {
+  if (Array.isArray(node)) node.forEach((n) => elementsOf(n, out));
+  else if (React.isValidElement(node)) {
+    out.push(node as Found);
+    for (const value of Object.values((node as Found).props)) elementsOf(value, out);
+  }
+  return out;
+}
+
+/** The one element of a tree that matches. */
+function one(tree: React.ReactNode, match: (e: Found) => boolean, what: string): Found {
+  const found = elementsOf(tree).filter(match);
+  if (found.length !== 1) throw new Error(`${found.length} elements are ${what}`);
+  return found[0]!;
+}
+
+const button = (text: string) => (e: Found) => typeof e.props.onClick === 'function' && e.props.children === text;
+const field = (name: string) => (e: Found) => e.props.name === name && typeof e.props.onChange === 'function';
+/** Waits until the writes of a click have answered (`onChanged` called `times` times). */
+const answered = (onChanged: ReturnType<typeof vi.fn>, times: number) => vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(times));
 
 afterEach(() => resetSampleAudit());
 
@@ -235,6 +361,51 @@ describe('the API adapter', () => {
     expect(f.calls[2].headers['if-match']).toBe(REF.etag);
   });
 
+  it('closes right after "Save texts" with the version of the saved finding while the list still holds the earlier one (M3-12)', async () => {
+    const SAVED = 'W/"1790000000500"';
+    const findingPath = '/api/v1/ms/isms/findings/0c1d2e3f-4a5b-4c6d-8e7f-8a9b0c1d2e3f';
+    const f = fakeFetch({
+      [`PATCH ${findingPath}`]: json({ ok: true, changed: ['isms'], ref: { ...REF, etag: SAVED } }),
+      [`POST ${findingPath}/transitions`]: (req) => (req.headers['if-match'] === SAVED
+        ? json({ ok: true, changed: ['isms'], ref: { ...REF, etag: 'W/"1790000000600"' } })
+        : problem(412, 'precondition-failed')),
+    });
+    const adapter = createApiAdapter(new ApiClient({ fetch: f.fetch }), () => 'org-version');
+    const listed = fromFindingItem(FINDING);
+    const saved = await adapter.update(ms, listed, { rcaText: 'No approval step', systemicCheckText: 'Every register checked' });
+    expect(saved.ok).toBe(true);
+    const version = savedVersionOf(listed, saved.ok ? saved.data : { changed: [], warnings: [] });
+    expect(version).toEqual({ id: listed.id, before: REF.etag, etag: SAVED });
+    // The list has not been read again yet: the drawer's finding carries the saved version, so Close is not stale.
+    const closed = await adapter.move(ms, withSavedVersion(listed, version), { to: 'closed', note: 'Closed after the texts' });
+    expect(closed.ok).toBe(true);
+    expect(f.calls[1].headers['if-match']).toBe(SAVED);
+    // The version the list held before the save is what a quick Close sent before the fix: refused as stale.
+    const stale = await adapter.move(ms, listed, { to: 'closed' });
+    expect(!stale.ok && stale.error.status).toBe(412);
+  });
+
+  it('uses the saved version only while the list still holds the version from before the write', () => {
+    const listed = fromFindingItem(FINDING);
+    const version = { id: listed.id, before: REF.etag, etag: 'W/"2"' };
+    expect(withSavedVersion(listed, version).etag).toBe('W/"2"');
+    expect(withSavedVersion(listed, version)).toMatchObject({ id: listed.id, code: listed.code, status: listed.status, title: listed.title });
+    // The reloaded finding (any other version) is used as it is; so is another finding, and a drawer without a write.
+    expect(withSavedVersion({ ...listed, etag: 'W/"3"' }, version).etag).toBe('W/"3"');
+    expect(withSavedVersion({ ...listed, id: 'other' }, version).etag).toBe(REF.etag);
+    expect(withSavedVersion(listed, null)).toBe(listed);
+    // An answer without a new version of this finding (the sample build, another record) keeps nothing.
+    expect(savedVersionOf(listed, { ref: { id: listed.id, code: listed.code } })).toBeNull();
+    expect(savedVersionOf(listed, { ref: { id: 'other', code: 'X', etag: 'W/"9"' } })).toBeNull();
+    expect(savedVersionOf(listed, { ref: { id: listed.id, code: listed.code, etag: REF.etag } })).toBeNull();
+    expect(savedVersionOf(listed, {})).toBeNull();
+    // Two writes before the list is read again: the second starts from the saved version and the drawer keeps the newest.
+    const afterFirst = withSavedVersion(listed, version);
+    const second = savedVersionOf(listed, { ref: { id: listed.id, code: listed.code, etag: 'W/"4"' } });
+    expect(afterFirst.etag).toBe('W/"2"');
+    expect(withSavedVersion(listed, second).etag).toBe('W/"4"');
+  });
+
   it('corrective actions, the self-assessment, targets and events', async () => {
     const cycle: CertificationCycleItem = {
       id: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d', status: 'certified', cycleStart: '2025-03-14', cycleEnd: '2028-03-13', certificateNo: null, certifiedAt: null, certificateExpiresAt: null,
@@ -279,6 +450,103 @@ describe('the API adapter', () => {
     const events = await adapter.events(ms);
     expect(events.ok && events.data.map((e) => e.id)).toEqual(['e2', 'e1']);
     expect(eventsOfCycles([cycle, cycle])).toHaveLength(2);
+  });
+});
+
+describe('the finding drawer (M3-12)', () => {
+  const ms = 'isms';
+  const findingPath = '/api/v1/ms/isms/findings/0c1d2e3f-4a5b-4c6d-8e7f-8a9b0c1d2e3f';
+  const SAVED = 'W/"1790000000500"';
+  const CLOSED = 'W/"1790000000600"';
+
+  it('sends the version of "Save texts" with a Close clicked before the list is read again, and hands it to every dialog', async () => {
+    const f = fakeFetch({
+      [`PATCH ${findingPath}`]: json({ ok: true, changed: ['isms'], ref: { ...REF, etag: SAVED } }),
+      [`POST ${findingPath}/transitions`]: (req) => (req.headers['if-match'] === SAVED
+        ? json({ ok: true, changed: ['isms'], ref: { ...REF, etag: CLOSED } })
+        : problem(412, 'precondition-failed')),
+    });
+    const adapter = createApiAdapter(new ApiClient({ fetch: f.fetch }), () => 'org-drawer');
+    const ctx = ctxOf('en', { mode: 'api' });
+    const onChanged = vi.fn();
+    const listed: FindingModel = fromFindingItem(FINDING);
+    const drawer = hooked(FindingDrawer);
+    const props = (finding: FindingModel | null) => ({
+      ctx, ms, finding, adapter, targets: [], onClose: vi.fn(), onChanged, onCreateAction: vi.fn(), onOpenAction: vi.fn(),
+    }) as Parameters<typeof FindingDrawer>[0];
+    const dialogs = (tree: React.ReactNode) => ({
+      move: one(tree, (e) => e.type === MoveFindingDialog, 'the Close and Reopen dialog'),
+      edit: one(tree, (e) => e.type === EditFindingDialog, 'the Edit dialog'),
+    });
+
+    let tree = drawer.render(props(listed));
+    expect(dialogs(tree).move.props.finding).toBe(listed);
+    // Type the root cause and the systemic check, then "Save texts".
+    (one(tree, field('rcaText'), 'the root cause field').props.onChange as (v: string) => void)('No approval step');
+    tree = drawer.render(props(listed));
+    (one(tree, field('systemicCheckText'), 'the systemic check field').props.onChange as (v: string) => void)('Every register checked');
+    tree = drawer.render(props(listed));
+    (one(tree, button(TEXT.saveTexts[0]), 'the Save texts button').props.onClick as () => void)();
+    await answered(onChanged, 1);
+    expect(f.calls[0]).toMatchObject({ method: 'PATCH', body: { rcaText: 'No approval step', systemicCheckText: 'Every register checked' } });
+    expect(f.calls[0].headers['if-match']).toBe(REF.etag);
+
+    // The list has not been read again: the drawer and both dialogs hold the saved version.
+    tree = drawer.render(props(listed));
+    expect(dialogs(tree).move.props.finding).toMatchObject({ id: listed.id, etag: SAVED });
+    expect(dialogs(tree).edit.props.finding).toMatchObject({ id: listed.id, etag: SAVED });
+    // "Close finding" right away: the dialog opens with that version, and its Close sends it.
+    (one(tree, button(TEXT.closeFinding[0]), 'the Close finding button of the footer').props.onClick as () => void)();
+    tree = drawer.render(props(listed));
+    const moveProps = dialogs(tree).move.props as Parameters<typeof MoveFindingDialog>[0];
+    expect(moveProps.mode).toBe('close');
+    const dialog = hooked(MoveFindingDialog);
+    let dialogTree = dialog.render(moveProps);
+    (one(dialogTree, field('note'), 'the note field').props.onChange as (v: string) => void)('Closed after the texts');
+    dialogTree = dialog.render(moveProps);
+    (one(dialogTree, (e) => e.props.variant === 'primary' && typeof e.props.onClick === 'function', 'the Close button of the dialog').props.onClick as () => void)();
+    await answered(onChanged, 2);
+    expect(f.calls[1]).toMatchObject({ method: 'POST', body: { to: 'closed', note: 'Closed after the texts' } });
+    expect(f.calls[1].headers['if-match']).toBe(SAVED);
+    expect(onChanged.mock.calls[1]![0]).toMatchObject({ ref: { id: listed.id, etag: CLOSED } });
+
+    // The drawer keeps the newest version of its writes until the reloaded finding arrives, then uses that one.
+    tree = drawer.render(props(listed));
+    expect(dialogs(tree).move.props.finding).toMatchObject({ etag: CLOSED });
+    const reloaded: FindingModel = { ...listed, status: 'closed', etag: 'W/"1790000000700"' };
+    tree = drawer.render(props(reloaded));
+    expect(dialogs(tree).move.props.finding).toBe(reloaded);
+  });
+
+  it('forgets the saved version when it shows another finding, and keeps none for an answer without a version (the sample build)', async () => {
+    const f = fakeFetch({ [`PATCH ${findingPath}`]: [json({ ok: true, changed: ['isms'], ref: { ...REF, etag: SAVED } }), json({ ok: true, changed: ['isms'], ref: { id: REF.id, code: REF.code } })] });
+    const adapter = createApiAdapter(new ApiClient({ fetch: f.fetch }), () => 'org-drawer-switch');
+    const ctx = ctxOf('en', { mode: 'api' });
+    const onChanged = vi.fn();
+    const listed: FindingModel = fromFindingItem(FINDING);
+    const other: FindingModel = { ...listed, id: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', code: 'IA-2026-02' };
+    const drawer = hooked(FindingDrawer);
+    const props = (finding: FindingModel | null) => ({
+      ctx, ms, finding, adapter, targets: [], onClose: vi.fn(), onChanged, onCreateAction: vi.fn(), onOpenAction: vi.fn(),
+    }) as Parameters<typeof FindingDrawer>[0];
+    const moveFinding = (tree: React.ReactNode) => one(tree, (e) => e.type === MoveFindingDialog, 'the Close and Reopen dialog').props.finding as FindingModel;
+    const saveText = async (finding: FindingModel, text: string, times: number) => {
+      let tree = drawer.render(props(finding));
+      (one(tree, field('rcaText'), 'the root cause field').props.onChange as (v: string) => void)(text);
+      tree = drawer.render(props(finding));
+      (one(tree, button(TEXT.saveTexts[0]), 'the Save texts button').props.onClick as () => void)();
+      await answered(onChanged, times);
+    };
+
+    await saveText(listed, 'First cause', 1);
+    expect(moveFinding(drawer.render(props(listed))).etag).toBe(SAVED);
+    // Another finding: nothing of the first one's write is kept, also when the first one comes back unchanged.
+    expect(moveFinding(drawer.render(props(other)))).toBe(other);
+    expect(moveFinding(drawer.render(props(listed)))).toBe(listed);
+    // An answer that names no new version leaves the finding as the list holds it.
+    await saveText(listed, 'Second cause', 2);
+    expect(f.calls).toHaveLength(2);
+    expect(moveFinding(drawer.render(props(listed)))).toBe(listed);
   });
 });
 

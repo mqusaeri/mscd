@@ -242,6 +242,9 @@ services:
       # Account emails (invitations, password reset, one-time codes) are sent
       # by the api itself; the file is empty when the relay has no login.
       - smtp.password
+      # Public anchor keys the chain check of the Audit trail screen trusts:
+      # this installation's key first, earlier keys below it (M3-12).
+      - audit-anchor.pub
     # The mscd network carries web, database and gateway traffic; egress reaches
     # the identity providers (OIDC, SAML metadata) of the organisation.
     networks:
@@ -286,6 +289,7 @@ services:
       - platform.key
       - gateway.token
       - audit-anchor.key
+      - audit-anchor.pub
       - smtp.password
       - ca.crt
       - source: worker.crt
@@ -443,6 +447,8 @@ secrets:
     file: ${MSCD_SECRETS_DIR:-./secrets}/s3.secret
   audit-anchor.key:
     file: ${MSCD_SECRETS_DIR:-./secrets}/audit-anchor.key
+  audit-anchor.pub:
+    file: ${MSCD_SECRETS_DIR:-./secrets}/audit-anchor.pub
   smtp.password:
     file: ${MSCD_SECRETS_DIR:-./secrets}/smtp.password
   ca.crt:

@@ -3,6 +3,10 @@
 // tests; release builds skip it).
 //
 // The key is claimed before the handler runs, with the request hash over organisation, method, path and JSON body.
+// Keys are scoped by organisation and user; a principal without an organisation (a platform operator in the console)
+// keeps its keys by user under `PLATFORM_IDEMPOTENCY_ORG` (M2-19 follow-up 8, M3-12), so a retried operator command
+// replays like any other. The stored answer never holds a one-time link (`idempotentBodyToStore`, M3-12): a replay of
+// an answer that carried one answers without it and says how to get a new link.
 // Routes with a streamed body (multipart, raw bytes) are claimed by the handler instead, once it has a digest of the
 // content (`StreamedIdempotency` in route-state.ts), because the hash must cover the body.
 import { createHash } from 'node:crypto';
@@ -11,7 +15,10 @@ import { canonicalJson, type RouteDef } from '@mscd/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { catchError, from, mergeMap, of, throwError, type Observable } from 'rxjs';
 import { MscdConfig } from '../config/mscd-config';
-import { IDEMPOTENCY_LEASE_SECONDS, IdempotencyStore, type IdempotencyClaim, type IdempotencyScope } from '../modules/tenancy/idempotency-store';
+import {
+  IDEMPOTENCY_LEASE_SECONDS, IdempotencyStore, PLATFORM_IDEMPOTENCY_ORG, type IdempotencyClaim, type IdempotencyScope,
+} from '../modules/tenancy/idempotency-store';
+import { idempotentBodyToStore } from '../modules/tenancy/idempotency-secrets';
 import { ConflictError, InternalError, ValidationError } from './problems';
 import { zodFieldErrors } from './problem-filter';
 import { hasStreamedBody, type RouteState } from './route-state';
@@ -26,8 +33,9 @@ const NO_JSON_STATUS = new Set([204, 302]);
 const CONTENT_DIGEST_MAX = 200;
 
 /**
- * `request_hash` of D.1: SHA-256 over the organisation id, method, path and body. For a route with a streamed body,
- * `body` is `{contentDigest}` with the digest the handler computed over the content.
+ * `request_hash` of D.1: SHA-256 over the organisation id (`PLATFORM_IDEMPOTENCY_ORG` for a principal without one),
+ * method, path and body. For a route with a streamed body, `body` is `{contentDigest}` with the digest the handler
+ * computed over the content.
  */
 export function idempotencyRequestHash(orgId: string, method: string, path: string, body: unknown): string {
   const payload = canonicalJson([orgId, method.toUpperCase(), path, body === undefined ? null : body]);
@@ -174,13 +182,25 @@ export class ApiRouteInterceptor implements NestInterceptor {
     return body ?? undefined;
   }
 
-  /** Stores the response of a claimed key. A failure is logged; the key becomes free again when its lease ends. */
+  /**
+   * Stores the response of a claimed key, without its one-time links (`idempotentBodyToStore`); the client gets the
+   * answer unchanged. A link the route's entry does not list is stored with its token replaced and logged as an error,
+   * so the route gets an entry. A failure to store is logged; the key becomes free again when its lease ends.
+   */
   private async complete(store: IdempotencyStore, idem: IdempotencyScope, def: RouteDef, body: unknown): Promise<unknown> {
-    await store.complete(idem, def.status ?? 200, body).catch((error: unknown) => {
+    try {
+      const stored = idempotentBodyToStore(def.id, body);
+      if (stored.unlisted.length > 0) {
+        this.logger.error(
+          `${def.id} answered with a one-time link in ${stored.unlisted.join(', ')}, which ONE_TIME_SECRET_MEMBERS does not list; its token was left out of the stored response`,
+        );
+      }
+      await store.complete(idem, def.status ?? 200, stored.body);
+    } catch (error) {
       this.logger.error(
         `Could not store the idempotent response of ${def.id}: ${(error as Error).message}; the key is in progress until its lease of ${IDEMPOTENCY_LEASE_SECONDS} seconds ends`,
       );
-    });
+    }
     return body;
   }
 
@@ -197,7 +217,10 @@ export class ApiRouteInterceptor implements NestInterceptor {
     );
   }
 
-  /** The key scope when the route accepts `Idempotency-Key` and the request sends one; null otherwise. */
+  /**
+   * The key scope when the route accepts `Idempotency-Key` and the request sends one; null otherwise (and for a request
+   * without a signed-in user). A principal without an organisation is scoped by user under `PLATFORM_IDEMPOTENCY_ORG`.
+   */
   private idempotencyScope(def: RouteDef, request: FastifyRequest): IdempotencyScope | null {
     if (!def.idempotent) return null;
     const header = request.headers['idempotency-key'];
@@ -207,8 +230,8 @@ export class ApiRouteInterceptor implements NestInterceptor {
       throw new ValidationError([{ path: 'headers.idempotency-key', message: 'Must be 1 to 100 visible ASCII characters' }]);
     }
     const principal = request.mscd?.principal;
-    if (!principal?.org) return null;
-    return { orgId: principal.org.id, userId: principal.user.id, key };
+    if (!principal) return null;
+    return { orgId: principal.org?.id ?? PLATFORM_IDEMPOTENCY_ORG, userId: principal.user.id, key };
   }
 
   /** Development builds: the response body must match `def.response`; a mismatch is a 500 and logged. */

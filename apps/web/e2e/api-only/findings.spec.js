@@ -82,18 +82,14 @@ test.describe('Findings and actions against the api @api-only', () => {
     await drawer(page).locator('textarea[name="rcaText"]').fill('The risk procedure has no approval step for risk owners');
     await button(drawer(page), 'Save texts').click();
     await expectToast(page, 'Root cause and systemic check saved');
-    // The drawer reads the saved finding (and its version) again after the toast; Close uses that version (M2-21: on a
-    // busy machine a click before the read ended met a stale version).
-    await pageSettled(page);
+    // Close right after "Save texts" uses the version of that write (M3-12), so no wait for the reload here.
     await tryClose(page);
     await expect(dialog(page)).toContainText('A major finding cannot be closed without a systemic check.');
     await page.keyboard.press('Escape');
     await drawer(page).locator('textarea[name="systemicCheckText"]').fill('Checked the risk registers of every system');
     await button(drawer(page), 'Save texts').click();
     await expectToast(page, 'Root cause and systemic check saved');
-    // The drawer reads the saved finding (and its version) again after the toast; Close uses that version (M2-21: on a
-    // busy machine a click before the read ended met a stale version).
-    await pageSettled(page);
+    // Close right after "Save texts" uses the version of that write (M3-12), so no wait for the reload here.
     await tryClose(page);
     await expect(dialog(page)).toContainText('The finding needs a closed and effective corrective action');
     await expect(dialog(page)).toContainText('BR-08');

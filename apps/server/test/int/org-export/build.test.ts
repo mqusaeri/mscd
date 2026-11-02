@@ -6,7 +6,10 @@
 // are absent; a person listed in erased_person appears only under the pseudonym; another organisation's data is
 // absent; `export verify` recomputes every audit hash from the canonical texts (an attested redaction included) and
 // fails on a changed byte; the final export of the offboarding period has no expiry and goes to every Tenant Admin;
-// and the expiry of `cleanup.expired` removes the vault content of the parts and of a 7-day export file.
+// and the expiry of `cleanup.expired` removes the vault content of the parts and of a 7-day export file. Milestone 3
+// M3-12: the manifest names the migrations from the schema, and the build reads every table, the platform rows, the
+// audit trail and the anchors in one held snapshot, so rows written while it runs are in none of its files, while each
+// dataset is read in a short transaction of its own, so no table stays locked while a part is closed.
 import { createPrivateKey, createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -16,14 +19,17 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { InMemoryJobQueue } from '../../../src/common/jobs/in-memory-job-queue';
 import { JOB_QUEUE } from '../../../src/common/jobs/job-queue';
-import { AUDIT_WRITER, type AuditWriter } from '../../../src/common/tokens';
+import { AUDIT_WRITER, type AuditWriter, type Trx } from '../../../src/common/tokens';
 import { compiledAnchorKeys, signAnchor } from '../../../src/modules/audit/anchors';
 import { CleanupExpiredJob } from '../../../src/modules/jobs/cleanup-expired.job';
+import { MIN_PART_BYTES } from '../../../src/modules/org-export/archive/archive-writer';
 import { BUILD_BUSY_RETRY_SECONDS, BUILD_LOCK_CLASS, BUILD_LOCK_KEY } from '../../../src/modules/org-export/build-lock';
+import { OrgExportBuilder, SNAPSHOT_IDLE_SECONDS } from '../../../src/modules/org-export/builder';
 import { ExportExpiry, STALE_BUILD_ERROR, STALE_BUILD_HOURS } from '../../../src/modules/org-export/expiry';
 import type { ExportManifest } from '../../../src/modules/org-export/manifest';
 import { verifyExportFolder } from '../../../src/modules/org-export/verify';
-import { TenantScope } from '../../../src/modules/tenancy/tenant-scope';
+import { TenantResolver } from '../../../src/modules/tenancy/tenant-resolver';
+import { HeldSnapshot, TenantScope, type TenantContext, type TenantTransactionOptions } from '../../../src/modules/tenancy/tenant-scope';
 import { useTestDatabase } from '../../setup/test-db';
 import { demoSession, rowsIn, userIdOf, type Client, type FullApp } from '../contract/harness';
 import { inScope } from '../db/helpers';
@@ -239,8 +245,10 @@ describe('organisation export build (D.4)', () => {
     // Every entry of the manifest is in the parts with its hash.
     for (const entry of manifest.entries) expect(sha256(entries.get(entry.path)!), entry.path).toBe(entry.sha256);
     expect(manifest.tenantMigrations).toContain('0009_milestone3');
-    // The application role may not read the schema's migration table, so the list is the build's and says so.
-    expect(manifest.tenantMigrationsSource).toBe('build');
+    // The application role reads the schema's migration table (platform/0009_milestone3_fix.sql, M3-12), so the list is
+    // the schema's own and says so.
+    expect(manifest.tenantMigrationsSource).toBe('schema');
+    expect(manifest.tenantMigrations).toContain('0010_milestone3_fix');
     expect(manifest.frameworkPacks.length).toBeGreaterThan(0);
     expect(manifest.excluded.map((e) => e.item)).toEqual(expect.arrayContaining(['platform.app_user.password_hash', 'platform.tenant_key', 'storage_credential.sealed_blob', 'platform.session.id_hash']));
     const readme = entries.get('README.txt')!.toString('utf8');
@@ -514,5 +522,80 @@ describe('organisation export build (D.4)', () => {
     // Once the other build has finished, the export builds.
     const built = await buildExport(full, 'tst', id, PART_BYTES);
     expect(built.status, built.error).toBe('ready');
+  });
+
+  it('reads the whole organisation in one held snapshot, one short transaction per dataset: rows committed while the build runs are in none of its files, and no table stays locked while a part is closed (M3-12)', async () => {
+    const builder = full.get<OrgExportBuilder>(OrgExportBuilder);
+    // The builder's own TenantScope: `TenantScope` as a token can also name the import module's scope (imports.module.ts).
+    const scope = (builder as unknown as { scope: TenantScope }).scope;
+    expect(scope).toBeInstanceOf(TenantScope);
+    const audit = full.get<AuditWriter>(AUDIT_WRITER);
+    const org = (await full.get<TenantResolver>(TenantResolver).resolveById(ORG_IDS.tst))!;
+    const systemContext = { orgId: ORG_IDS.tst, schema: 'org_tst', userId: '00000000-0000-0000-0000-000000000001' };
+    const originalHold = scope.holdSnapshot.bind(scope) as <T>(fn: (held: HeldSnapshot) => Promise<T>, options?: { idleTimeoutSeconds?: number }) => Promise<T>;
+    const originalWith = scope.withTenant.bind(scope) as <T>(ctx: TenantContext, fn: (trx: Trx) => Promise<T>, options?: TenantTransactionOptions) => Promise<T>;
+    const holds: ({ idleTimeoutSeconds?: number } | null)[] = [];
+    const reads: (TenantTransactionOptions | null)[] = [];
+    const seen: { held: HeldSnapshot | null } = { held: null };
+    // Right after the holder exported its snapshot, a register row and an audit entry are committed by other
+    // transactions; none of the build's reads may see them.
+    const holdSpy = vi.spyOn(scope, 'holdSnapshot').mockImplementation((async (fn: (h: HeldSnapshot) => Promise<unknown>, opts?: { idleTimeoutSeconds?: number }) => {
+      holds.push(opts ?? null);
+      return originalHold(async (h) => {
+        seen.held = h;
+        await rowsIn(db, 'tst', sql`insert into interested_party (code, title) values ('IP-M312-SNAP', 'Written while the export runs')`);
+        await originalWith(systemContext, (other) => audit.record(other, { action: 'register.updated', actor: { userId: systemContext.userId, kind: 'system' }, entityType: 'interested_party', entityCode: 'IP-M312-SNAP' }));
+        return fn(h);
+      }, opts);
+    }) as never);
+    const withSpy = vi.spyOn(scope, 'withTenant').mockImplementation((async (ctx: TenantContext, fn: (trx: Trx) => Promise<unknown>, opts?: TenantTransactionOptions) => {
+      reads.push(opts ?? null);
+      return originalWith(ctx, fn, opts);
+    }) as never);
+    // Each part closed while the snapshot is held: the locks other sessions hold on tables of the organisation schema.
+    const locksAtParts: number[] = [];
+    const tenantTableLocks = async () => {
+      const { rows } = await sql<{ n: string }>`
+        select count(*)::text as n from pg_locks l
+        join pg_class c on c.oid = l.relation join pg_namespace n on n.oid = c.relnamespace
+        where l.locktype = 'relation' and l.database = (select oid from pg_database where datname = current_database())
+          and l.pid <> pg_backend_pid() and n.nspname = 'org_tst'`.execute(db.migrator);
+      return Number(rows[0]!.n);
+    };
+    const dir = await mkdtemp(path.join(work, 'snapshot-'));
+    let result: Awaited<ReturnType<OrgExportBuilder['build']>>;
+    try {
+      result = await builder.build({
+        org, exportId: randomUUID(), requestedVia: 'cli', requestedBy: null, approvedBy: null, isFinal: false, workDir: dir, partBytes: 2 * MIN_PART_BYTES, // small parts close during the database part (the manifest still fits in one)
+        now: new Date(), localDate: '2026-11-01',
+        onPart: async () => {
+          if (seen.held && !seen.held.isEnded) locksAtParts.push(await tenantTableLocks());
+        },
+      });
+    } finally {
+      holdSpy.mockRestore();
+      withSpy.mockRestore();
+    }
+    // One held snapshot with the long idle limit, and every read of the build in a transaction of that snapshot.
+    expect(holds).toEqual([{ idleTimeoutSeconds: SNAPSHOT_IDLE_SECONDS }]);
+    expect(seen.held).toBeInstanceOf(HeldSnapshot);
+    expect(seen.held!.isEnded).toBe(true);
+    expect(reads.length).toBeGreaterThan(result.manifest.counts.tables);
+    expect(reads.every((o) => o?.snapshot === seen.held)).toBe(true);
+    // Parts were closed while the snapshot was held, and no table of the organisation was locked meanwhile: an upgrade
+    // migration that alters a table never waits for the uploads of an export.
+    expect(locksAtParts.length).toBeGreaterThan(0);
+    expect(locksAtParts.every((n) => n === 0)).toBe(true);
+
+    const files = await unpackParts(result.parts.map((p) => p.path));
+    expect(files.get('data/tenant/interested_party.jsonl')!.toString('utf8')).not.toContain('IP-M312-SNAP');
+    expect(files.get('audit/audit_trail.jsonl')!.toString('utf8')).not.toContain('IP-M312-SNAP');
+    // Both rows exist: the counts of the export are those of the instant the snapshot was taken.
+    const [party] = await rowsIn<{ n: string }>(db, 'tst', sql`select count(*)::text as n from interested_party`);
+    const [trail] = await rowsIn<{ n: string; probe: string }>(db, 'tst', sql`select count(*)::text as n, count(*) filter (where entity_code = 'IP-M312-SNAP')::text as probe from audit_trail`);
+    expect(trail!.probe).toBe('1');
+    expect(result.manifest.entries.find((e) => e.path === 'data/tenant/interested_party.jsonl')?.rows).toBe(Number(party!.n) - 1);
+    expect(result.manifest.audit.rows).toBe(Number(trail!.n) - 1);
+    expect(result.manifest.tenantMigrationsSource).toBe('schema');
   });
 });

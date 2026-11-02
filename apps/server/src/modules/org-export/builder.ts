@@ -4,6 +4,19 @@
 // organisation never enters it; the one platform-scope read (sessions) is filtered by the organisation id. Used by the
 // worker job `org-export.build` (parts go to the vault) and by `mscd-server export organization` (parts stay in a
 // folder). The caller checks the free space of the working folder first (`checkFreeSpace`).
+//
+// One snapshot (M3-12): every database read of the build (the plan with the file list, every table, the platform rows,
+// the audit trail, the anchors and the list of external files) reads one snapshot that `TenantScope.holdSnapshot` holds
+// for the build, so the export shows the organisation as it was at one instant: a record written while the build runs
+// is in none of the files, and every reference between the files holds. Each dataset is read in a short REPEATABLE
+// READ, READ ONLY tenant transaction of its own that imports that snapshot (`withTenant` with `snapshot: held`), and its
+// spools go into the archive after that transaction ends, as before M3-12: a table stays locked only while it is read,
+// so an upgrade migration that alters a table (they run while the old services keep running) waits for one table's
+// read at most, never for the whole database part of an export. A table rewritten or emptied after the snapshot fails
+// the build (`SnapshotTableRewrittenError`) instead of exporting it without rows. The holder reads no table; between
+// two reads the build closes parts (an upload to the vault in the worker), so the holder allows
+// `SNAPSHOT_IDLE_SECONDS` of idle time between two reads instead of the role's 60 seconds. The content of the Managed
+// Vault files is streamed from the gateway after the snapshot is released (vault objects never change once written).
 import { createPublicKey } from 'node:crypto';
 import { statfs } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,7 +33,7 @@ import { AUDIT_ANCHOR_KEYS, tenantChainName, type AnchorKeys } from '../audit/ch
 import { loadAnchorSigningKey } from '../jobs/audit-verify-chain.job';
 import { GatewayProblemError } from '../storage/gateway-client';
 import { StorageGatewayContext } from '../storage/gateway-context';
-import { TenantScope, systemContextOf } from '../tenancy/tenant-scope';
+import { TenantScope, systemContextOf, type HeldSnapshot } from '../tenancy/tenant-scope';
 import { ArchiveWriter, type ArchivePart, type WrittenEntry } from './archive/archive-writer';
 import { anchorFiles, dumpAuditTrail } from './audit-data';
 import { useUtc, writeDataset } from './datasets';
@@ -146,6 +159,12 @@ export function safeFileName(name: string | null): string {
   const cut = [...cleaned].slice(0, 200).join('').trim();
   return cut === '' || cut === '.' || cut === '..' ? 'file' : cut;
 }
+
+/**
+ * Idle time the transaction that holds a build's snapshot allows between two reads: closing a part (up to
+ * `lifecycle.export_part_bytes`, 2 GiB by default) includes its upload to the vault in the worker job.
+ */
+export const SNAPSHOT_IDLE_SECONDS = 3600;
 
 export interface BuildRequest {
   org: TenantInfo;
@@ -280,7 +299,6 @@ export class OrgExportBuilder {
   async build(request: BuildRequest): Promise<BuildResult> {
     const { org } = request;
     const context = systemContextOf(org, request.requestId);
-    const plan = await this.scope.withTenant(context, (trx) => this.plan(trx, org));
     const baseName = `mscd-export-${org.slug}-${request.localDate}`;
     const writer = new ArchiveWriter({ dir: request.workDir, baseName, partBytes: request.partBytes, mtime: request.now, onPart: request.onPart });
     const entries: ManifestEntry[] = [];
@@ -288,15 +306,26 @@ export class OrgExportBuilder {
     let spoolCount = 0;
     const spool = (suffix: string) => new Spool(path.join(request.workDir, `spool-${(spoolCount += 1)}.${suffix}`));
 
-    /** Writes one dataset pair (CSV and JSON Lines) through spools into the archive. */
-    const dataset = async (base: string, kind: 'table' | 'platform' | 'audit', write: (trx: Trx, csv: Spool, jsonl: Spool) => Promise<number>) => {
+    /** Runs `read` in a short tenant transaction of its own that reads the build's held snapshot. */
+    const inSnapshot = <T>(held: HeldSnapshot, read: (trx: Trx) => Promise<T>) =>
+      this.scope.withTenant(
+        context,
+        async (trx) => {
+          await useUtc(trx);
+          return read(trx);
+        },
+        { snapshot: held },
+      );
+
+    /**
+     * Writes one dataset pair (CSV and JSON Lines) through spools into the archive: `write` fills the spools in its
+     * snapshot transaction, and the spools go into the archive after it ends (the table lock is not held meanwhile).
+     */
+    const dataset = async (base: string, kind: 'table' | 'platform' | 'audit', write: (csv: Spool, jsonl: Spool) => Promise<number>) => {
       const csv = spool('csv');
       const jsonl = spool('jsonl');
       try {
-        const rows = await this.scope.withTenant(context, async (trx) => {
-          await useUtc(trx);
-          return write(trx, csv, jsonl);
-        });
+        const rows = await write(csv, jsonl);
         await csv.close();
         await jsonl.close();
         entries.push(manifestEntry(await writer.add(`${base}.csv`, csv.size, csv.read()), kind, { rows }));
@@ -315,31 +344,40 @@ export class OrgExportBuilder {
       );
       entries.push(manifestEntry(await writer.addBuffer('README.txt', readme), 'readme'));
 
-      let tableCount = 0;
-      let rowCount = 0;
-      for (const table of plan.tables) {
-        if (!exportedAsData(table.name)) continue;
-        tableCount += 1;
-        rowCount += await dataset(`data/tenant/${table.name}`, 'table', (trx, csv, jsonl) =>
-          dumpTenantTable(trx, table, csv, jsonl, { skipStorageObjects: plan.skip }),
-        );
-      }
-      for (const set of PLATFORM_DATASETS) {
-        rowCount += await dataset(`data/platform/${set.name}`, 'platform', (trx, csv, jsonl) =>
-          inDatasetScope(trx, set, () => writeDataset(trx, set.query(plan.people), set.columns, csv, jsonl, set.transform?.(plan.people))),
-        );
-      }
-
-      const auditRows = await dataset('audit/audit_trail', 'audit', (trx, csv, jsonl) => dumpAuditTrail(trx, csv, jsonl));
       const chain = tenantChainName(org.schema);
       const anchorKeys = this.exportAnchorKeys(request);
-      const anchors = await this.scope.withTenant(context, (trx) => anchorFiles(trx, chain, anchorKeys.keys, anchorKeys.installationKeyId));
-      entries.push(manifestEntry(await writer.addBuffer('audit/anchors.jsonl', anchors.anchors), 'anchors', { rows: anchors.count }));
-      entries.push(manifestEntry(await writer.addBuffer('audit/audit-anchor.pub', anchors.publicKey), 'key'));
-      entries.push(manifestEntry(await writer.addBuffer('audit/anchor-keys.json', anchors.keys), 'key'));
+      // Every database read of one held snapshot, each dataset in a short transaction (see the head of this file).
+      const read = await this.scope.holdSnapshot(
+        async (held) => {
+          const plan = await inSnapshot(held, (trx) => this.plan(trx, org));
+          let tableCount = 0;
+          let rowCount = 0;
+          for (const table of plan.tables) {
+            if (!exportedAsData(table.name)) continue;
+            tableCount += 1;
+            rowCount += await dataset(`data/tenant/${table.name}`, 'table', (csv, jsonl) =>
+              inSnapshot(held, (trx) => dumpTenantTable(trx, table, csv, jsonl, { skipStorageObjects: plan.skip })),
+            );
+          }
+          for (const set of PLATFORM_DATASETS) {
+            rowCount += await dataset(`data/platform/${set.name}`, 'platform', (csv, jsonl) =>
+              inSnapshot(held, (trx) =>
+                inDatasetScope(trx, set, () => writeDataset(trx, set.query(plan.people), set.columns, csv, jsonl, set.transform?.(plan.people))),
+              ),
+            );
+          }
+          const auditRows = await dataset('audit/audit_trail', 'audit', (csv, jsonl) => inSnapshot(held, (trx) => dumpAuditTrail(trx, csv, jsonl)));
+          const anchors = await inSnapshot(held, (trx) => anchorFiles(trx, chain, anchorKeys.keys, anchorKeys.installationKeyId));
+          entries.push(manifestEntry(await writer.addBuffer('audit/anchors.jsonl', anchors.anchors), 'anchors', { rows: anchors.count }));
+          entries.push(manifestEntry(await writer.addBuffer('audit/audit-anchor.pub', anchors.publicKey), 'key'));
+          entries.push(manifestEntry(await writer.addBuffer('audit/anchor-keys.json', anchors.keys), 'key'));
+          const externalFiles = await this.externalFiles((reader) => inSnapshot(held, reader), writer, entries, spool);
+          return { plan, tableCount, rowCount, auditRows, anchors, externalFiles };
+        },
+        { idleTimeoutSeconds: SNAPSHOT_IDLE_SECONDS },
+      );
+      const { plan, tableCount, rowCount, auditRows, anchors, externalFiles } = read;
       const anchorKeyIds = anchors.keyIds;
-
-      const externalFiles = await this.externalFiles(context, writer, entries, spool);
 
       let fileCount = 0;
       let fileBytes = 0;
@@ -404,7 +442,7 @@ export class OrgExportBuilder {
     }
   }
 
-  /** Reads what the build needs before writing (one tenant transaction). */
+  /** Reads what the build needs before writing (in one transaction of the build's snapshot). */
   private async plan(trx: Trx, org: TenantInfo): Promise<Plan> {
     const tables = await tenantTables(trx);
     const skip = await ownExportObjects(trx, org.id);
@@ -439,9 +477,12 @@ export class OrgExportBuilder {
     };
   }
 
-  /** `files/external-files.csv`: the files kept in the customer's Microsoft 365 or Google Drive repositories. */
+  /**
+   * `files/external-files.csv`: the files kept in the customer's Microsoft 365 or Google Drive repositories, read by
+   * `inSnapshot` (a transaction of the build's snapshot); the spool goes into the archive after it ends.
+   */
   private async externalFiles(
-    context: ReturnType<typeof systemContextOf>,
+    inSnapshot: <T>(read: (trx: Trx) => Promise<T>) => Promise<T>,
     writer: ArchiveWriter,
     entries: ManifestEntry[],
     spool: (suffix: string) => Spool,
@@ -453,17 +494,14 @@ export class OrgExportBuilder {
     const csv = spool('csv');
     const jsonl = spool('jsonl');
     try {
-      const rows = await this.scope.withTenant(context, async (trx) => {
-        await useUtc(trx);
-        const query = sql`select row_to_json(x)::text as j from (
-            select so.id as object_id, r.adapter, r.slug as repository, r.name as repository_name, so.folder_path, so.display_name as name,
-                   so.external_item_id, so.external_version_id, so.version_label, so.hash_algorithm, so.hash_value, so.link_status,
-                   so.link_status_since, so.last_verified_at, so.web_url, so.deleted_at
-            from storage_object so join storage_repository r on r.id = so.storage_repository_id
-            where r.adapter <> 'managed_vault'
-            order by r.slug, so.folder_path, so.display_name, so.id) x`;
-        return writeDataset(trx, query, columns, csv, jsonl);
-      });
+      const query = sql`select row_to_json(x)::text as j from (
+          select so.id as object_id, r.adapter, r.slug as repository, r.name as repository_name, so.folder_path, so.display_name as name,
+                 so.external_item_id, so.external_version_id, so.version_label, so.hash_algorithm, so.hash_value, so.link_status,
+                 so.link_status_since, so.last_verified_at, so.web_url, so.deleted_at
+          from storage_object so join storage_repository r on r.id = so.storage_repository_id
+          where r.adapter <> 'managed_vault'
+          order by r.slug, so.folder_path, so.display_name, so.id) x`;
+      const rows = await inSnapshot((trx) => writeDataset(trx, query, columns, csv, jsonl));
       await csv.close();
       entries.push(manifestEntry(await writer.add('files/external-files.csv', csv.size, csv.read()), 'file-list', { rows }));
       return rows;

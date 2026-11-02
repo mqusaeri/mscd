@@ -1,7 +1,8 @@
 // The Findings tab of "Findings and actions" (MILESTONE-2 M2-14): the finding register with its filters, the finding
 // drawer (facts, root cause and systemic check, the moves of C.13 with the BR-06, BR-07 and BR-08 messages) and its
-// Edit, Close and Reopen dialogs.
-import { useEffect, useMemo, useState } from 'react';
+// Edit, Close and Reopen dialogs. Every write of the drawer sends the version of the finding's last write in it until
+// the reloaded finding arrives (`withSavedVersion`, M3-12), so a quick Close after "Save texts" is never refused as stale.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MsId } from '../../data/types';
 import { useMutation } from '../api';
 import type { HostContext } from '../types';
@@ -12,8 +13,9 @@ import type { Column } from '../ui';
 import { Illustration } from '../../illustrations';
 import {
   CLASSIFICATIONS, CLASSIFICATION_TEXT, SOURCE_TEXT, byUrgency, closeNeedsNote, editErrors, editFormOf, editPatch, mayCreateAction, mayManageFinding,
+  savedVersionOf, withSavedVersion,
 } from './model';
-import type { EditForm, FindingModel, FindingsAdapter, TargetOption } from './model';
+import type { EditForm, FindingModel, FindingsAdapter, SavedVersion, TargetOption } from './model';
 import { ActionStatusBadge, ClassBadge, DrawerFoot, FindingStatusBadge, FormError } from './parts';
 import type { Outcome } from './shared';
 import { asApiResult, day, filled, outcomeText, peopleOf, personName } from './shared';
@@ -112,7 +114,19 @@ export interface FindingDrawerProps {
 
 type Dialog = 'edit' | 'close' | 'reopen' | null;
 
-export function FindingDrawer({ ctx, ms, finding, adapter, targets, onClose, onChanged, onCreateAction, onOpenAction }: FindingDrawerProps) {
+export function FindingDrawer({ ctx, ms, finding: listed, adapter, targets, onClose, onChanged, onCreateAction, onOpenAction }: FindingDrawerProps) {
+  // The version of the last write in this drawer, used until the reloaded finding carries another one (M3-12).
+  const [saved, setSaved] = useState<SavedVersion | null>(null);
+  const listedRef = useRef(listed);
+  listedRef.current = listed;
+  useEffect(() => setSaved(null), [listed?.id]);
+  const finding = listed ? withSavedVersion(listed, saved) : null;
+  const changed = (outcome: Outcome, message: string) => {
+    const latest = listedRef.current;
+    const next = latest ? savedVersionOf(latest, outcome) : null;
+    if (next) setSaved(next);
+    onChanged(outcome, message);
+  };
   const [dialog, setDialog] = useState<Dialog>(null);
   const [rca, setRca] = useState('');
   const [systemic, setSystemic] = useState('');
@@ -138,7 +152,7 @@ export function FindingDrawer({ ctx, ms, finding, adapter, targets, onClose, onC
       return;
     }
     ctx.track(texts.submit(patch)).then((res) => {
-      if (res.ok) onChanged(res.data, outcomeText(ctx, res.data, TEXT.textsSaved));
+      if (res.ok) changed(res.data, outcomeText(ctx, res.data, TEXT.textsSaved));
     }, () => undefined);
   };
   const startWork = () => {
@@ -146,7 +160,7 @@ export function FindingDrawer({ ctx, ms, finding, adapter, targets, onClose, onC
     ctx.track(start.submit(undefined)).then((res) => {
       if (!res.ok) return;
       setStartedFrom(from);
-      onChanged(res.data, outcomeText(ctx, res.data, ctx.fill(TEXT.started, { code: finding.code })));
+      changed(res.data, outcomeText(ctx, res.data, ctx.fill(TEXT.started, { code: finding.code })));
     }, () => undefined);
   };
   const footer = manage ? (
@@ -206,8 +220,8 @@ export function FindingDrawer({ ctx, ms, finding, adapter, targets, onClose, onC
           </div>
         </Card>
       </Drawer>
-      <EditFindingDialog ctx={ctx} ms={ms} open={dialog === 'edit'} finding={finding} adapter={adapter} targets={targets} onClose={() => setDialog(null)} onSaved={(o) => { setDialog(null); onChanged(o, outcomeText(ctx, o, ctx.fill(TEXT.saved, { code: finding.code }))); }} />
-      <MoveFindingDialog ctx={ctx} ms={ms} mode={dialog === 'close' || dialog === 'reopen' ? dialog : null} finding={finding} adapter={adapter} onClose={() => setDialog(null)} onMoved={(o, text) => { setDialog(null); onChanged(o, text); }} />
+      <EditFindingDialog ctx={ctx} ms={ms} open={dialog === 'edit'} finding={finding} adapter={adapter} targets={targets} onClose={() => setDialog(null)} onSaved={(o) => { setDialog(null); changed(o, outcomeText(ctx, o, ctx.fill(TEXT.saved, { code: finding.code }))); }} />
+      <MoveFindingDialog ctx={ctx} ms={ms} mode={dialog === 'close' || dialog === 'reopen' ? dialog : null} finding={finding} adapter={adapter} onClose={() => setDialog(null)} onMoved={(o, text) => { setDialog(null); changed(o, text); }} />
     </>
   );
 }

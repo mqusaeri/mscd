@@ -26,7 +26,7 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 | M3-09 Export and deletion screens | 3 | Done | Screen "Organisation export" (request, approve or reject, parts and manifest with SHA-256, read-only banner); operator console columns "Read-only until" and "Deletion on", drawer tabs Export and Deletion (schedule, change date, cancel, retry, steps and checks, certificate), status moves of J.8 |
 | M3-10 Demo personas | 4 | Done | Wulan Hartono (Programme Owner), Ratna Kusumawati (Risk Owner), Gilang Saputra (Compliance Investigator) in the demo seed, sample build and Keycloak realm; `baseRole` maps them to manager or owner views; Milestone 3 routines seeded in RS Medika Nusantara; My Tasks links read confirmations to "Policies to confirm"; retention API tests of decide, approve, reject and File removed |
 | M3-11 Data lifecycle run and documents | 4 | Running | Started 2026-11-01 |
-| M3-12 Hardening follow-ups | 4 | Running | Added 2026-11-01 for the free slot: operator idempotency, on-premise anchor key, export snapshot, migration grant, `retain_months`, scratch cleanup, findings Close |
+| M3-12 Hardening follow-ups | 4 | Done | Operator idempotency, on-premise anchor keys (`audit-anchor.pub` mounted into the api and worker), export in one snapshot, `kysely_migration` grant (platform/0009), `retention_review.retain_months` (tenant/0010), hourly scratch cleanup, findings Close with the version of its write |
 | M3-M02 Major dependency upgrades | 5 | Waiting, alone | Also upgrades `glob` and `minimatch` if that has not happened by then (`osv-scanner.toml` accepts them until 2026-11-14) |
 
 ## Product owner decisions for Milestone 3
@@ -38,15 +38,8 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 
 ## Open items for later packages
 
+- From M3-12: an organisation export build holds three database connections at once (build lock, snapshot, one read); `database.pool_max` below 3 makes a build wait. Refuse a build early with a clear message below 3, or raise the profile minimum, and name the minimum in INSTALL-ONPREM.
 - From M3-10 (demo only): the persona menu of `bsd` and `rmn` offers the Compliance Investigator, who has no role there; either `me-assembler.ts` lists only personas with a business role (and `Me.personas` carries the display name, a contract change), or Gilang Saputra joins `ndt` only (member counts 88). Also sample-mode tests of `canVerify` and `canSeePeople` for the three new roles, and `baseRole` in `screens/findings/shared.ts` line 146 once M3-12 is committed.
 - For M3-11: the `errors` list of `me.acknowledgements.open` may add 422 (`no_file`, `file_not_readable`).
-- Optional, for a later owner of `jobs/cleanup-expired.job.ts`: call `removeStaleWorkDirs` on every hourly `cleanup.expired` run, so a stopped export build's scratch files do not wait for the next export.
-- From M3-02: a REPEATABLE READ read-only option of `withTenant` (owner of `modules/tenancy/**`) so the export reads every table in one snapshot.
-- From M3-02: `GRANT SELECT` on each tenant schema's `kysely_migration` to `mscd_app` in `platform.apply_tenant_grants` (a later platform migration); the manifest then names the migrations from the schema.
-- From M3-02: keep retired anchor keys in `TRUSTED_KEYS` (D-16) for as long as exports signed with them are kept; the in-app anchor checks (`AuditChainVerifier`, `audit.verify-chain`) still trust only the compiled keys, so on-premise they reject the installation's own anchor key (owner of `modules/audit/**`, next to the M2-S05 K.9 item).
 - For M3-11: `KIND_SCREENS` entries for `organization_export_requested` and `organization_export_ready` (screen `org-export`).
-- For the orchestrator: `host.test.tsx` needs the "tasks" sidebar group of the M3-05 follow-up (`my-confirmations`) when it is committed; the M3-07 entry is in.
-
-
-- From M3-06: a `retain_months` column on `retention_review` in a correction migration (R-14), so the disposal register stores the period of each decision in a column; today it reads it from the audit entries `retention_review.decided` and `retention_review.approved`.
 - For M3-11: map the notification kinds `retention_review_due` and `disposal_approval_pending` to the screen `retention` (tabs due and approval) in `KIND_SCREENS`.

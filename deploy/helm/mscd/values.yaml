@@ -138,6 +138,11 @@ secrets:
     storageKey: ""
     gatewayToken: ""
     auditAnchorKey: ""
+    # Public anchor keys in PEM (audit-anchor.pub), the key of auditAnchorKey
+    # first and earlier keys below it. The api's chain check of the Audit trail
+    # screen trusts them (M3-12); without it the api trusts only the release
+    # keys. Make it with: openssl pkey -in audit-anchor.key -pubout
+    auditAnchorPublicKey: ""
     s3AccessKey: ""
     s3SecretKey: ""
     smtpPassword: ""

@@ -350,6 +350,36 @@ export function editPatch(form: EditForm, f: FindingModel): FindingPatchBody | n
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * The version a write in the finding drawer answered with (M2-21 follow-up, M3-12): the drawer reads the finding again
+ * after each write, and until that read ends it still holds the version from before. `before` is that version, `etag`
+ * the one the write answered with.
+ */
+export interface SavedVersion {
+  id: string;
+  before: string | null;
+  etag: string;
+}
+
+/**
+ * The saved version of a write's answer for `finding` (the finding as the drawer got it from the list), or null when
+ * the answer names no new version of it (the sample build sends none).
+ */
+export function savedVersionOf(finding: Pick<FindingModel, 'id' | 'etag'>, outcome: Pick<Outcome, 'ref'>): SavedVersion | null {
+  const etag = outcome.ref && outcome.ref.id === finding.id ? outcome.ref.etag : undefined;
+  return etag && etag !== finding.etag ? { id: finding.id, before: finding.etag, etag } : null;
+}
+
+/**
+ * `finding` with the version of its last write in the drawer while the list still holds the version from before, so
+ * Close, Reopen, Edit, Start work and Save texts right after a write send the saved version, never a stale one. Once the
+ * reloaded finding carries another version, it is used as it is.
+ */
+export function withSavedVersion<F extends Pick<FindingModel, 'id' | 'etag'>>(finding: F, saved: SavedVersion | null): F {
+  if (!saved || saved.id !== finding.id || finding.etag !== saved.before) return finding;
+  return { ...finding, etag: saved.etag };
+}
+
 export function editErrors(form: EditForm): FormErrors<keyof EditForm> {
   const out: FormErrors<keyof EditForm> = {};
   if (!filled(form.title)) out.title = TEXT.required;

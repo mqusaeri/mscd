@@ -8,6 +8,15 @@
 // (a repeat gets 409 with `Retry-After`). When the lease has passed, the process that claimed the key is assumed
 // gone (it died, or storing the response failed), and the same request may claim the key again and run. The
 // command may then have run before: the lease trades that rare repeat for never blocking a key for 24 hours.
+//
+// Principals without an organisation (the platform operator in the console, M2-19 follow-up 8, M3-12) keep their keys
+// under `PLATFORM_IDEMPOTENCY_ORG`, the nil id that no organisation has: the row is still bound to the user (the key is
+// organisation, user and key), the RLS policy compares `organization_id` with the same id set as `app.org_id`, and an
+// organisation's keys never meet them. `cleanup.expired` deletes their expired rows with the organisations' rows.
+//
+// The stored response never holds a one-time link (M3-12): the interceptor passes the answer through
+// `idempotentBodyToStore` (idempotency-secrets.ts) before `complete`, because the platform keeps only hashes of its
+// one-time tokens and a link in this table would undo that for 24 hours.
 import { Inject, Injectable } from '@nestjs/common';
 import { sql, type Transaction } from 'kysely';
 import { DATABASE, type AppDatabase } from '../../db/database.module';
@@ -21,7 +30,14 @@ export const IDEMPOTENCY_TTL_HOURS = 24;
  */
 export const IDEMPOTENCY_LEASE_SECONDS = 300;
 
+/**
+ * `organization_id` of the keys of a principal without an organisation (a platform operator): the nil UUID, which no
+ * organisation has (`NO_ORGANISATION` of the authorisation module uses the same id for transactions bound to none).
+ */
+export const PLATFORM_IDEMPOTENCY_ORG = '00000000-0000-0000-0000-000000000000';
+
 export interface IdempotencyScope {
+  /** The principal's organisation, or `PLATFORM_IDEMPOTENCY_ORG` for a principal without one. */
   orgId: string;
   userId: string;
   key: string;
@@ -105,7 +121,7 @@ export class IdempotencyStore {
     });
   }
 
-  /** Stores the response of a claimed key. */
+  /** Stores the response of a claimed key: the answer as `idempotentBodyToStore` gives it, without one-time links. */
   async complete(scope: IdempotencyScope, status: number, body: unknown): Promise<void> {
     await this.inOrg(scope, (trx) =>
       trx
