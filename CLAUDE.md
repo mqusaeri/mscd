@@ -119,6 +119,8 @@ Decided by the product owner on 2026-10-31 and 2026-11-01 (Milestone 3, `docs/pl
 15. Milestone 3 covers section 2 of `docs/ROADMAP.md` plus a maintenance track; every default of H.1 to H.12 is accepted (deletion 30 days after archiving, never below 7; export approved by a second Tenant Admin, downloadable 7 days; personal data requests due in 3 x 24 hours, lawyer confirms; erasure keeps records under a pseudonym; read confirmation within 14 days; retention 36 months by default with two-person disposal; access review every 3 months; no second approval for an erasure).
 16. H.13: a person erased in an organisation and later invited again rejoins with a fresh account; records from before the erasure keep the pseudonym. While the erased account still belongs to the person in another organisation, the same email address is refused and the person rejoins with another address; an account kept at the erasure whose other membership has ended since is anonymised at the new invitation, and the same address works (owner, 2026-11-02).
 17. After sign-in a person lands on their role's home screen (M2-20, 2026-10-31).
+18. A disposal after a keeping period really deletes the record's content: its text and personal details are cleared, its audit entries are redacted under an attestation (the trail stays verifiable), and it is left out of exports; only its line in the disposal register stays (owner, 2026-11-02, after the ISO review of Milestone 3).
+19. Staging gets Milestone 3 in one release after the review fix packages (owner, 2026-11-02).
 
 ## Open follow-ups
 
