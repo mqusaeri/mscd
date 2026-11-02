@@ -1,6 +1,6 @@
 # MSCD SaaS: owner pack and operations documents
 
-This folder holds what the owner and the operators need to run MSCD as a multi-tenant SaaS service: the go-live checklist, the owner's inputs, the facts for the lawyer, the records of processing, the incident plan and the penetration test scope, and the operating guides of the SaaS service: releases, the Compose stack, server bootstrap, deploys, backups, monitoring, customer organisations, plans and sign-in. The plan behind it is section K of the [Milestone 2 plan](../platform/MILESTONE-2.md#k-saas-production-track).
+This folder holds what the owner and the operators need to run MSCD as a multi-tenant SaaS service: the go-live checklist, the owner's inputs, the facts for the lawyer, the records of processing, the incident plan and the penetration test scope, and the operating guides of the SaaS service: releases, the Compose stack, server bootstrap, deploys, backups, monitoring, customer organisations, plans and sign-in. The plan behind it is section K of the [Milestone 2 plan](../platform/MILESTONE-2.md#k-saas-production-track); the end of a contract, requests from one person and the retention periods come from the [Milestone 3 plan](../platform/MILESTONE-3.md).
 
 Every legal point in these documents is general information. Each one needs the advice of a lawyer qualified in Indonesian law before go-live.
 
@@ -13,8 +13,11 @@ Every legal point in these documents is general information. Each one needs the 
 | Brief the lawyer (privacy notice, DPA, terms, DPO, PSE, data location) | [legal-inputs.md](legal-inputs.md), then [records-of-processing.md](records-of-processing.md) |
 | Book the penetration test | [pentest-scope.md](pentest-scope.md) |
 | Handle a security incident or a personal data breach | [incident-response.md](incident-response.md) |
-| Answer a person who asks to see, correct or delete their data | [Requests from data subjects](records-of-processing.md#requests-from-data-subjects) |
+| Answer a person who asks to see, correct or delete their data | [Requests from data subjects](records-of-processing.md#requests-from-data-subjects): the customer answers on screen, the provider forwards |
 | Onboard, suspend or offboard a customer organisation | [operator.md](operator.md) |
+| End a contract: final export, deletion date, deletion certificate | [Offboarding at the end of a contract](operator.md#offboarding-at-the-end-of-a-contract) |
+| Tell a customer how long its data stays in the backups after a deletion | [The backups, in honest words](operator.md#the-backups-in-honest-words) and [Deleted organisations and the backups](backup-restore.md#deleted-organisations-and-the-backups) |
+| Check a deletion certificate | `mscd-server tenant verify-certificate <file>` ([operator.md](operator.md#offboarding-at-the-end-of-a-contract), step 7) |
 | Change a customer's plan or a limit | [entitlements.md](entitlements.md) |
 
 ## Documents in this folder
@@ -23,8 +26,8 @@ Every legal point in these documents is general information. Each one needs the 
 |---|---|---|
 | [go-live-checklist.md](go-live-checklist.md) | One table per area (security, operations, UU PDP, legal documents) with who, evidence and status per item, the recorded decisions and the sign-off | M2-S04; status and evidence updated by M2-S13 |
 | [owner-inputs.md](owner-inputs.md) | What the owner buys and sets up, every GitHub secret and variable with the command that sets it, and the owner's decisions with their defaults | M2-S04 |
-| [legal-inputs.md](legal-inputs.md) | Facts for the lawyer: data per activity, cookies, recipients, locations, retention, security measures, what is not built yet, and the questions to answer | M2-S04 |
-| [records-of-processing.md](records-of-processing.md) | One record per processing activity, the retention periods, and the manual procedure for requests from data subjects. Draft for the lawyer's review | M2-S04 |
+| [legal-inputs.md](legal-inputs.md) | Facts for the lawyer: data per activity, cookies, recipients, locations, retention with the backup statement, security measures, the end of a contract and what is not built yet, and the questions to answer | M2-S04; Milestone 3 facts by M3-11 |
+| [records-of-processing.md](records-of-processing.md) | One record per processing activity, the retention periods, how requests from people are answered on screen and the provider's forwarding log. Draft for the lawyer's review | M2-S04; draft 2 by M3-11 |
 | [incident-response.md](incident-response.md) | Roles, severity levels, the steps, how to find the affected organisations and people, notice templates in Indonesian and English, the incident log and an exercise script. Draft for legal review | M2-S04 |
 | [pentest-scope.md](pentest-scope.md) | The staging target, test accounts per role in two organisations, the areas in and out of scope, and the rules of engagement | M2-S04 |
 
@@ -36,9 +39,9 @@ The operating guides of the SaaS service:
 | [stack.md](stack.md) | The SaaS Compose stack: what runs, how a request travels, certificates and HSTS, request limits, logs, the marketing site and the local test stack | M2-S02 |
 | [bootstrap.md](bootstrap.md) | Preparing a new Ubuntu server: what to buy, the DNS records, the bootstrap run from GitHub Actions and what to do afterwards | M2-S03 |
 | [deploy.md](deploy.md) | Deploys through `deploy-prod.yml`, the automatic rollback, rollback by hand and the deploy rehearsal | M2-S05 |
-| [backup-restore.md](backup-restore.md) | The nightly off-site backup, the weekly restore test and a full restore onto a new server | M2-S07 |
+| [backup-restore.md](backup-restore.md) | The nightly off-site backup, the weekly restore test, a full restore onto a new server, and deleted organisations in the backups (`restore.sh --reapply-deletions`) | M2-S07; deletions by M3-03 |
 | [monitoring.md](monitoring.md) | What runs, where alerts go, what each alert means and the first action, and the outside heartbeat and uptime checks | M2-S08 |
-| [operator.md](operator.md) | The first operator account, onboarding and offboarding a customer, the organisation statuses and every operator command | M2-S09 |
+| [operator.md](operator.md) | The first operator account, onboarding a customer, the organisation statuses, offboarding with the final export, the deletion and its certificate, and every operator command | M2-S09; end of contract by M3-11 |
 | [entitlements.md](entitlements.md) | The plan presets, how to see and change a customer's plan, and what users see at each limit | M2-S10 |
 | [sign-in.md](sign-in.md) | The one sign-in page, email domain verification with a DNS TXT record, and the privacy and terms links | M2-S11 |
 
@@ -71,5 +74,5 @@ The checker prints a summary per area and one line per problem, with the line nu
 ## Rules for these documents
 
 - Plain English, no em dash and no centre dot (`npm run check:text` checks the `docs` folder).
-- No secret, password, key or personal data in this folder: the repository is public. The incident contact list, the names of the platform operators, the incident log and the request log live in the provider's protected storage. The one exception is the owner's name in the sign-off table of the go-live checklist.
+- No secret, password, key or personal data in this folder: the repository is public. The incident contact list, the names of the platform operators, the incident log, the forwarding log of requests and the deletion certificates live in the provider's protected storage. The one exception is the owner's name in the sign-off table of the go-live checklist.
 - AI agents never hold production or staging secrets, never connect to those servers and never approve a protected GitHub environment (rule S-1 of the plan).

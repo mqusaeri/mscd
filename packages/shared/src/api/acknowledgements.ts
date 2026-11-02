@@ -177,8 +177,8 @@ export const meAcknowledgementsRoute = defineRoute({
 });
 export const meAcknowledgementsOpenRoute = defineRoute({
   ...self, id: 'me.acknowledgements.open', method: 'POST', path: '/api/v1/me/acknowledgements/:id/open',
-  summary: 'A short-lived address of the version\'s file for a person in the audience; records opened_at (audited acknowledgement.opened and file.opened)',
-  params: IdParams, response: ObjectOpenResponse, errors: [404, 409],
+  summary: 'A short-lived address of the version\'s file for a person in the audience; records opened_at (audited acknowledgement.opened and file.opened; 422 when the version has no file, no_file, or its file can no longer be opened, file_not_readable)',
+  params: IdParams, response: ObjectOpenResponse, errors: [404, 409, 422],
 });
 export const meAcknowledgementsConfirmRoute = defineRoute({
   ...self, id: 'me.acknowledgements.confirm', method: 'POST', path: '/api/v1/me/acknowledgements/:id/confirm',

@@ -3,7 +3,7 @@
 // the bell and the panel items in both languages and themes, when the bell reads the count (only while the person is
 // active, so it never keeps an unattended session alive), the top bar rule and the sample adapter.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { routeById } from '@mscd/shared';
+import { NOTIFICATION_KINDS, routeById } from '@mscd/shared';
 import type { Notification } from '@mscd/shared';
 import { ApiClient } from '../../src/data/api/ApiClient';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/notifications/routes';
@@ -15,6 +15,7 @@ import type { NotificationModel } from '../../src/screens/notifications/model';
 import { createSampleAdapter, resetSampleNotifications, sampleNotifications } from '../../src/screens/notifications/sample';
 import { NotificationBell, countLabel, refreshAfter } from '../../src/screens/notifications/Bell';
 import { NotificationItem, openableLink, readTurns } from '../../src/screens/notifications/Panel';
+import { hostById } from '../../src/screens/host';
 import { topbarItems } from '../../src/screens/notifications/actions';
 import { TEXT } from '../../src/screens/notifications/text';
 import type { Lang } from '../../src/screens/types';
@@ -117,6 +118,89 @@ describe('links from a notification to its record', () => {
     const n: NotificationModel = { ...fromWire(WIRE), ref: null, kind: 'licence_state', ms: null };
     expect(openableLink(ctxOf({ mode: 'api', org: ['license.read'] }), n)).toMatchObject({ screen: 'license' });
     expect(openableLink(ctxOf({ mode: 'api', org: [] }), n)).toBeNull();
+  });
+});
+
+describe('links of the Milestone 3 notification kinds (J.4)', () => {
+  /** The J.4 kinds, in the order of the shared list: each opens the screen where its work is done. */
+  const M3_KINDS = NOTIFICATION_KINDS.slice(NOTIFICATION_KINDS.indexOf('organization_export_requested'));
+  const ms = () => sampleD().MS[0].id;
+  const note = (kind: string, over: Partial<NotificationModel> = {}): NotificationModel => ({ ...fromWire(WIRE), kind, ms: null, ref: null, ...over });
+
+  it('lists the twelve kinds of J.4', () => {
+    expect(M3_KINDS).toEqual([
+      'organization_export_requested', 'organization_export_ready', 'organization_lifecycle', 'privacy_request_received', 'privacy_request_due',
+      'privacy_check_requested', 'acknowledgement_requested', 'acknowledgement_overdue', 'retention_review_due', 'disposal_approval_pending',
+      'access_review_due', 'access_review_overdue',
+    ]);
+  });
+
+  it('every kind opens a host screen that exists, with or without the record its server names', () => {
+    const refs: Record<string, NotificationModel['ref']> = {
+      organization_export_requested: { entityType: 'organization_export', id: 'e1', code: 'EXP-1' },
+      organization_export_ready: { entityType: 'organization_export', id: 'e1', code: 'EXP-1' },
+      privacy_request_received: { entityType: 'privacy_request', id: 'p1', code: 'PR-2026-001' },
+      privacy_request_due: { entityType: 'privacy_request', id: 'p1', code: 'PR-2026-001' },
+      privacy_check_requested: { entityType: 'privacy_check', id: 'c1', code: 'PR-2026-001' },
+      acknowledgement_requested: { entityType: 'document', id: 'd1', code: 'ISMS-POL-001' },
+      acknowledgement_overdue: { entityType: 'acknowledgement_request', id: 'a1', code: 'ISMS-POL-001' },
+      access_review_due: { entityType: 'access_review', id: 'r1', code: 'AR-2026-01' },
+      access_review_overdue: { entityType: 'access_review', id: 'r1', code: 'AR-2026-01' },
+    };
+    for (const kind of M3_KINDS) {
+      for (const ref of [null, refs[kind] ?? null]) {
+        const link = linkOf(ctxOf(), note(kind, { ref }));
+        expect(link, kind).not.toBeNull();
+        expect(hostById(link!.screen), `${kind} opens ${link!.screen}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('the organisation export and the end of the contract open Organisation export', () => {
+    for (const kind of ['organization_export_requested', 'organization_export_ready', 'organization_lifecycle']) {
+      expect(linkOf(ctxOf(), note(kind, { ref: { entityType: 'organization_export', id: 'e1', code: 'EXP-1' } })), kind).toEqual({ screen: 'org-export', extra: {} });
+    }
+  });
+
+  it('requests from one person open the register, and the system check opens the checks of its system', () => {
+    expect(linkOf(ctxOf(), note('privacy_request_received'))).toEqual({ screen: 'privacy-requests', extra: {} });
+    expect(linkOf(ctxOf(), note('privacy_request_due'))).toEqual({ screen: 'privacy-requests', extra: {} });
+    expect(linkOf(ctxOf(), note('privacy_check_requested', { ms: ms(), ref: { entityType: 'privacy_check', id: 'c1', code: 'PR-2026-001' } }))).toEqual({ screen: 'privacy-checks', extra: { ms: ms() } });
+  });
+
+  it('a policy to confirm opens Policies to confirm in its system, not the document', () => {
+    const doc = sampleD().bundles[ms()].docs[0];
+    const key = `${ms()}:doc:${doc.id}`;
+    const ctx = ctxOf({ D: { ...sampleD(), refs: { [key]: { id: 'doc-uuid' } } } as never });
+    const ref = { entityType: 'document', id: 'doc-uuid', code: doc.id };
+    expect(linkOf(ctx, note('acknowledgement_requested', { ms: ms(), ref }))).toEqual({ screen: 'my-confirmations', extra: { ms: ms() } });
+    // Another kind about the same document still opens the document.
+    expect(linkOf(ctx, note('document_new_version', { ms: ms(), ref }))).toMatchObject({ screen: 'docs', extra: { sel: key } });
+    expect(linkOf(ctxOf(), note('acknowledgement_overdue', { ms: ms(), ref: { entityType: 'acknowledgement_request', id: 'a1', code: doc.id } }))).toEqual({ screen: 'acknowledgements', extra: { ms: ms() } });
+  });
+
+  it('retention notices open Retention and disposal on the tab of their work', () => {
+    expect(linkOf(ctxOf(), note('retention_review_due', { ms: ms() }))).toEqual({ screen: 'retention', extra: { ms: ms(), params: { tab: 'due' } } });
+    expect(linkOf(ctxOf(), note('disposal_approval_pending', { ms: ms() }))).toEqual({ screen: 'retention', extra: { ms: ms(), params: { tab: 'approval' } } });
+  });
+
+  it('an access review notice opens the organisation review, or the review of the system it names', () => {
+    const ref = { entityType: 'access_review', id: 'r1', code: 'AR-2026-01' };
+    for (const kind of ['access_review_due', 'access_review_overdue']) {
+      expect(linkOf(ctxOf(), note(kind, { ref })), kind).toEqual({ screen: 'access-reviews', extra: {} });
+      expect(linkOf(ctxOf(), note(kind, { ref, ms: ms() })), kind).toEqual({ screen: 'access-review', extra: { ms: ms() } });
+      // A system the snapshot does not hold: the organisation review.
+      expect(linkOf(ctxOf(), note(kind, { ref, ms: 'other' })), kind).toEqual({ screen: 'access-reviews', extra: {} });
+    }
+  });
+
+  it('a person without the screen\'s permission gets no link', () => {
+    const n = note('disposal_approval_pending', { ms: ms() });
+    expect(openableLink(ctxOf({ mode: 'api', ms: { [ms()]: ['ms.read', 'retention.approve'] } }), n)).toMatchObject({ screen: 'retention' });
+    expect(openableLink(ctxOf({ mode: 'api', ms: { [ms()]: ['ms.read'] } }), n)).toBeNull();
+    const exp = note('organization_export_ready');
+    expect(openableLink(ctxOf({ mode: 'api', org: ['org.export.manage'] }), exp)).toMatchObject({ screen: 'org-export' });
+    expect(openableLink(ctxOf({ mode: 'api', org: [] }), exp)).toBeNull();
   });
 });
 

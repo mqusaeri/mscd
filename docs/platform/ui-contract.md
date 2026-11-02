@@ -15,6 +15,7 @@
 3. [User actions and mutations](#3-user-actions-and-mutations)
 4. [DataSource interface](#4-datasource-interface)
 5. [Contract gaps and decisions](#5-contract-gaps-and-decisions)
+6. [Milestone 3 screens](#6-milestone-3-screens)
 
 ## 0. Conventions
 
@@ -717,7 +718,7 @@ Every screen has an address (Milestone 2 M2-20). The address names the place, so
 | Screen | The screen id: one of the 14 built-in ids or a host screen id of the registry (`/controls`, `/registers`, `/ops`) | Always |
 | `ms` | Slug of the selected management system | When the organisation has a system for the person |
 | `org` | Slug of the organisation | When the person belongs to several organisations |
-| `tab` | Id of the tab of a host screen with tabs: `findings` (`findings`, `actions`, `self`), `registers` (the register kind), `routing` (`rules`, `files`) and `auditor-access` (`grants`, `packs`), and `ops` (its sections, for example `/ops?tab=orgs`) | When a tab was chosen or the screen was opened with `params.tab` |
+| `tab` | Id of the tab of a host screen with tabs: `findings` (`findings`, `actions`, `self`), `registers` (the register kind), `routing` (`rules`, `files`) and `auditor-access` (`grants`, `packs`), and `ops` (its sections, for example `/ops?tab=orgs`); since Milestone 3 also `retention` (`rules`, `due`, `approval`, `holds`, `register`) and `pending-totals` (`system`, `all`) | When a tab was chosen or the screen was opened with `params.tab` |
 | `persona` | Sample persona other than the manager | Sample build only |
 
 | Build | Form | Example |
@@ -958,3 +959,46 @@ My Tasks across all four systems: `rina` 3, `bagus` 31, `maya` 1, `hendra` 3.
 | 5.17 | Requirement chain due dates, activity owners and dates, and stage record counts are fabricated | Store a due date on the pending action of each record; store activity owners and dates; count records per stage |
 | 5.18 | Overrides are not scoped by organisation in the sample | No effect on the API, which is tenant scoped |
 | 5.19 | The tasks greeting uses the browser clock while dates use `today` | Use the organisation time zone for both |
+
+## 6. Milestone 3 screens
+
+Milestone 3 (`docs/platform/MILESTONE-3.md`, sections C and D) adds host screens only: hand-written React in `apps/web/src/screens/<id>/`, each with a sample adapter and an API adapter, English and Indonesian text, an address through 3.8, and its routes named in its own `routes.ts`, which the screen's unit test compares with the route table of `@mscd/shared`. No generated view and no field of the snapshot changed. The table names, for each screen, where it shows, who may open it (the permission of `meta.json` in API builds, the roles in the sample build) and the routes that feed it. Routes are the route ids of `packages/shared/src/api` (J.1 of the plan).
+
+### 6.1 Screens and the routes that feed them
+
+| Screen id and label | Sidebar group, scope | Opened with | Address and tabs | Routes | Package |
+|---|---|---|---|---|---|
+| `pending-totals`, Open work totals | Audit (no sidebar entry), per system | `audit.pending.aggregate` (Top Management, Management System Manager, Programme Owner) | `/pending-totals?ms=isms&tab=all`; tabs `system`, `all`; page actions "Open work totals" on Chain stages (`chain`) and on the system Overview (`m1overview`), in API builds only (C.1), so the sample build opens it by its address | `readmodel.audit.pending` with `aggregate=unit`: totals per stage and role, no names (product decision 2) | M3-08 |
+| `my-confirmations`, Policies to confirm | Tasks (next to My Tasks), per system | `ms.read` (every business role) | `/my-confirmations?ms=isms` | `me.acknowledgements`, `me.acknowledgements.open` (a short-lived address of the version's file; 404, 409, and 422 `no_file` or `file_not_readable`), `me.acknowledgements.confirm` | M3-05 |
+| `acknowledgements`, Policy read confirmations | Implementation, per system | `acknowledgement.manage`, `audit.pending.all` or `audit.pending.aggregate` | `/acknowledgements?ms=isms`; page action "Ask for confirmation" | `acknowledgement-requests.list`, `.get`, `.create`, `.remind`, `.close` (files the register as evidence), `.export`; `documents.update` for the read confirmation setting of a document | M3-05 |
+| `retention`, Retention and disposal | Implementation, per system | `retention.manage` or `retention.approve` | `/retention?ms=isms&tab=approval`; tabs `rules`, `due`, `approval`, `holds`, `register` | `retention.rules.list`, `.rules.put`, `retention.reviews.list`, `.decide`, `.approve`, `.reject`, `.file-removed`, `retention.holds.list`, `.create`, `.release`, `retention.register` (CSV) | M3-06 |
+| `access-reviews`, Access reviews | Administration, organisation | `access_review.manage` (Tenant Admin) | `/access-reviews` | `access-reviews.settings.get`, `.settings.put` (`If-Match`), `access-reviews.list`, `.get`, `.create` ("Start review now"), `.decide`, `.apply`, `.complete`, `.cancel`, `.report` (CSV) | M3-07 |
+| `access-review`, Access review of this system | Audit, per system | `access_review.decide` (Management System Manager, Programme Owner) | `/access-review?ms=isms` | `access-reviews.ms.list`, `.ms.get` (with the proposed A.5.18 evidence item), `.ms.decide`, `.ms.apply` (guest grants), `.ms.sign-off` | M3-07 |
+| `privacy-requests`, Personal data requests | Administration, organisation | `privacy_request.manage` (Tenant Admin) | `/privacy-requests`; page action "Record request" | `privacy-requests.list`, `.get`, `.create`, `.update`, `.rectify`, `.restrict`, `.erase`, `.close`; `exports.person.create` and `exports.get` for the copy of the data; `admin.users.list` for the person picker | M3-04 |
+| `privacy-checks`, Personal data checks | Tasks, per system | `privacy_request.assist` (the primary Management System Manager) | `/privacy-checks?ms=isms` | `privacy-checks.list`, `.mentions`, `.done` | M3-04 |
+| `org-export`, Organisation export | Administration, organisation | `org.export.manage` (Tenant Admin) | `/org-export`; page action "Export all data" | `exports.organization.list`, `.get`, `.create`, `.decide` (the second Tenant Admin), `.download` (one part), `.manifest`; `admin.organization.get` for the read-only period | M3-09 |
+
+Changed screens:
+
+| Screen | What Milestone 3 adds | Routes | Package |
+|---|---|---|---|
+| `account`, My account | Section "My data": "Download my data" (a JSON copy, as for an access request), the person's requests and "Ask the organisation" | `exports.me.create`, `exports.get`, `me.privacy-requests.list`, `me.privacy-requests.create` | M3-04 |
+| `ops`, Operator console | Columns "Read-only until" and "Deletion on"; drawer tabs Export ("Start export"; status, size and download count, never the content) and Deletion ("Change date", "Schedule deletion", "Cancel deletion", "Retry", the steps and checks, "Download certificate"); the status moves of J.8 ("Reopen for export") | `ops.exports.list`, `ops.exports.create`, `ops.deletion.get`, `.schedule`, `.cancel`, `.retry`, `.certificate`, `ops.organizations.status`, `ops.jobs.run` | M3-09 |
+| Document register, detail of a document (extension of kind `doc`) | Section "Read confirmation" with its setting and the latest version's count; the retention period of earlier versions and their disposal reviews and holds | `documents.update`, `acknowledgement-requests.list`, `retention.rules.list`, `retention.reviews.list`, `retention.holds.list` | M3-05, M3-06 |
+| Evidence freshness, detail of an evidence item (extension of kind `ev`) | The retention period of earlier files, their disposal reviews and holds | `retention.rules.list`, `retention.reviews.list`, `retention.holds.list` | M3-06 |
+| Host layer (every screen) | Banner of the open confirmations of the session person ("Policies to confirm"), and the read-only banner of an organisation in `offboarding` for Tenant Admins with the end date and a link to Organisation export | the routes of `my-confirmations` and `admin.organization.get` | M3-05, M3-09 |
+
+### 6.2 Notifications
+
+The bell (Milestone 2) opens the screen where a notification's work is done. `KIND_SCREENS` of `apps/web/src/screens/notifications/model.ts` maps the kinds of J.4; a kind marked "first" wins over the screen of the record the notification names. "Open" is offered only when the session may open that screen (`openableLink`).
+
+| Kind | Opens | Note |
+|---|---|---|
+| `organization_export_requested`, `organization_export_ready`, `organization_lifecycle` | `org-export` | |
+| `privacy_request_received`, `privacy_request_due` | `privacy-requests` | |
+| `privacy_check_requested` | `privacy-checks` of the notification's system | |
+| `acknowledgement_requested` | `my-confirmations` of the notification's system | first: the record named is the document, while the person confirms in Policies to confirm |
+| `acknowledgement_overdue` | `acknowledgements` | |
+| `retention_review_due` | `retention`, tab `due` | |
+| `disposal_approval_pending` | `retention`, tab `approval` | |
+| `access_review_due`, `access_review_overdue` | `access-review` when the notification names a system of the snapshot, else `access-reviews` | |

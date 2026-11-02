@@ -14,16 +14,24 @@
 // 4. Runs "saas-ops.sh create-operator" locally, as ops-cli.yml runs it on a server (--input-stdin --public): the
 //    allow-list script of M2-S09 against a view of this stack as an install folder. The set-password email goes to
 //    Mailpit.
-// 5. Runs tests/saas.spec.mjs with Playwright (saas.config.mjs): every step in the browser.
+// 5. Runs tests/saas.spec.mjs with Playwright (saas.config.mjs): every step in the browser. With --lifecycle it runs
+//    tests/data-lifecycle.spec.mjs instead (lifecycle.config.mjs, MILESTONE-3 M3-11): the data lifecycle of a customer
+//    organisation from its first policy to its verified deletion. The run overlay then also sets the lifecycle periods
+//    of Milestone 3 D.3 to 0 days on the api and the worker (MSCD__LIFECYCLE__OFFBOARDING_DAYS, _DELETION_GRACE_DAYS,
+//    _DELETION_MIN_GRACE_DAYS), which a server accepts only with MSCD_SAAS_TEST=1 (also set there; never in saas.yaml):
+//    the read-only period ends at once and a deletion is due as soon as the organisation is archived.
 // 6. With --with-ops: every Prometheus target is up (Prometheus API inside its container), and the HTTPS probe of the
 //    public URL succeeds.
 // 7. Removes everything (saas-stack.sh down): on success, on failure and on Ctrl-C.
 //
 // The stack publishes 127.0.0.1:18080, 18443 and 18025 like the other Compose test stacks, so run it under the host
-// lock (R-05): flock /tmp/mscd-stack.lock npm run saas -w @mscd/smoke [-- --with-ops]
+// lock (R-05): flock /tmp/mscd-stack.lock npm run saas -w @mscd/smoke [-- --with-ops], and the lifecycle run with
+// flock /tmp/mscd-stack.lock npm run lifecycle -w @mscd/smoke
 //
 // Usage: npm run saas -w @mscd/smoke [-- --with-ops]
+//        npm run lifecycle -w @mscd/smoke
 //        node tools/smoke/run-saas.mjs [options] [-- <Playwright arguments>]
+//   --lifecycle         run the data lifecycle (tests/data-lifecycle.spec.mjs) with the lifecycle periods at 0 days
 //   --with-ops          also start the monitoring overlay and check that every Prometheus target is up
 //   --build-ca <file>   CA certificate of a TLS-inspecting proxy for the image builds (default: $MSCD_BUILD_CA)
 //   --keep              leave the stack running after the run (same as SMOKE_KEEP=1; remove it with --down)
@@ -45,7 +53,7 @@
 //                              Alpine mirrors)
 //   MSCD_BUILD_CA              CA certificate of a TLS-inspecting proxy for the image builds
 //   SAAS_OUTPUT_DIR            folder for the logs, the Playwright report and traces (default
-//                              tools/smoke/test-results/saas)
+//                              tools/smoke/test-results/saas, or tools/smoke/test-results/lifecycle with --lifecycle)
 //   SMOKE_KEEP=1               leave the stack running after the run
 //
 // Exit codes: 0 every step passed, 1 the stack, a check or a step failed, 2 wrong usage or a missing requirement.
@@ -82,6 +90,7 @@ function parseCommandLine(argv) {
   const { values } = parseArgs({
     args: own,
     options: {
+      lifecycle: { type: 'boolean', default: false },
       'with-ops': { type: 'boolean', default: false },
       'build-ca': { type: 'string' },
       keep: { type: 'boolean', default: false },
@@ -204,20 +213,37 @@ modules:
   };
 }
 
+/**
+ * The lifecycle periods of Milestone 3 D.3 at 0 days, which the server accepts only with MSCD_SAAS_TEST=1 (test stacks
+ * only; saas.yaml keeps the defaults): the environment lines of the api and the worker in the lifecycle run.
+ */
+export const LIFECYCLE_ENV = {
+  MSCD_SAAS_TEST: '1',
+  MSCD__LIFECYCLE__OFFBOARDING_DAYS: '0',
+  MSCD__LIFECYCLE__DELETION_GRACE_DAYS: '0',
+  MSCD__LIFECYCLE__DELETION_MIN_GRACE_DAYS: '0',
+};
+
 /** The run overlay: provider mocks with their DNS responder, the resolvers of api and worker, Mailpit's API port. */
-function runOverlay({ mockImage, mockAddress, mailpitPort, opsOverlay }) {
+function runOverlay({ mockImage, mockAddress, mailpitPort, opsOverlay, lifecycle }) {
   const resolvers = `"[${mockAddress}:5353]"`;
+  const environment = [
+    `      MSCD__NETWORK__DNS_RESOLVERS: ${resolvers}`,
+    ...(lifecycle ? Object.entries(LIFECYCLE_ENV).map(([name, value]) => `      ${name}: "${value}"`) : []),
+  ].join('\n');
   return `# Additions of tools/smoke/run-saas.mjs (test only, never for a server; deleted by saas-stack.sh down).
 #   - mock-providers: the provider mocks, whose DNS responder (UDP 5353, fixed address) stands in for the customer's
 #     DNS when the operator verifies an email domain; the api and the worker ask only it (network.dns_resolvers).
-#   - mailpit: its API on 127.0.0.1, where the run reads the emails the people receive.
+#   - mailpit: its API on 127.0.0.1, where the run reads the emails the people receive.${lifecycle ? `
+#   - the lifecycle run (--lifecycle): the lifecycle periods at 0 days on the api and the worker, which the server
+#     accepts only with MSCD_SAAS_TEST=1 (Milestone 3 D.3). Never on a server.` : ''}
 services:
   api:
     environment:
-      MSCD__NETWORK__DNS_RESOLVERS: ${resolvers}
+${environment}
   worker:
     environment:
-      MSCD__NETWORK__DNS_RESOLVERS: ${resolvers}
+${environment}
 
   mock-providers:
     image: ${mockImage}
@@ -327,6 +353,8 @@ async function main() {
     return 0;
   }
   const withOps = options['with-ops'];
+  const lifecycle = options.lifecycle;
+  const label = lifecycle ? 'lifecycle' : 'saas';
 
   const env = { ...process.env };
   for (const name of ['COMPOSE_FILE', 'COMPOSE_PROJECT_NAME', 'COMPOSE_PROFILES', 'COMPOSE_ENV_FILES']) delete env[name];
@@ -365,10 +393,10 @@ async function main() {
     if (!(await portFree(port))) throw new UsageError(`port ${port} (${name}) on 127.0.0.1 is already in use; stop what listens there or set ${name}`);
   }
 
-  const outputDir = env.SAAS_OUTPUT_DIR ? userPath(env.SAAS_OUTPUT_DIR) : path.join(HERE, 'test-results', 'saas');
+  const outputDir = env.SAAS_OUTPUT_DIR ? userPath(env.SAAS_OUTPUT_DIR) : path.join(HERE, 'test-results', label);
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
-  log(`Docker ${versions.docker}, Compose ${versions.compose}; project ${project}, state ${state}, IPv6 range of edge ${env.MSCD_EDGE_SUBNET6}${withOps ? ', with the monitoring overlay' : ''}; output in ${outputDir}`);
+  log(`Docker ${versions.docker}, Compose ${versions.compose}; project ${project}, state ${state}, IPv6 range of edge ${env.MSCD_EDGE_SUBNET6}${withOps ? ', with the monitoring overlay' : ''}${lifecycle ? ', the data lifecycle run' : ''}; output in ${outputDir}`);
 
   const keep = options.keep || env.SMOKE_KEEP === '1' || env.SMOKE_KEEP === 'true';
   let stackStarted = false;
@@ -436,7 +464,7 @@ async function main() {
       opsOverlay = ops.overlay;
     }
     const overlay = path.join(state, 'compose.run.yml');
-    writeFileSync(overlay, runOverlay({ mockImage, mockAddress, mailpitPort, opsOverlay }), { mode: 0o644 });
+    writeFileSync(overlay, runOverlay({ mockImage, mockAddress, mailpitPort, opsOverlay, lifecycle }), { mode: 0o644 });
     files = [
       path.join(COMPOSE_DIR, 'docker-compose.yml'),
       path.join(COMPOSE_DIR, 'docker-compose.saas.yml'),
@@ -448,7 +476,7 @@ async function main() {
     started = Date.now();
     const upLog = path.join(outputDir, 'up.log');
     writeFileSync(upLog, '');
-    log(`starting the provider mocks${withOps ? ' and the monitoring overlay' : ''}; api and worker get the mock DNS and the legal links (log: ${path.relative(ROOT, upLog)})`);
+    log(`starting the provider mocks${withOps ? ' and the monitoring overlay' : ''}; api and worker get the mock DNS and the legal links${lifecycle ? ' and the lifecycle periods at 0 days (MSCD_SAAS_TEST=1)' : ''} (log: ${path.relative(ROOT, upLog)})`);
     // In phases, so the web container keeps its fixed addresses: a container Compose creates while web is being
     // recreated could otherwise take web's address on mscd from Docker's free addresses.
     const phases = [
@@ -488,13 +516,14 @@ async function main() {
       operator: OPERATOR,
       legal: LEGAL,
       ops: withOps,
+      lifecycle,
     };
     const statePath = path.join(state, 'run-state.json');
     writeFileSync(statePath, `${JSON.stringify(runState, null, 2)}\n`, { mode: 0o600 });
 
     const require = createRequire(import.meta.url);
     const playwright = require.resolve('@playwright/test/cli');
-    result = await run(process.execPath, [playwright, 'test', '--config', path.join(HERE, 'saas.config.mjs'), ...options.playwrightArgs], {
+    result = await run(process.execPath, [playwright, 'test', '--config', path.join(HERE, lifecycle ? 'lifecycle.config.mjs' : 'saas.config.mjs'), ...options.playwrightArgs], {
       env: { ...env, SAAS_RUN_STATE: statePath, SAAS_OUTPUT_DIR: outputDir },
       cwd: HERE,
     });
@@ -524,9 +553,9 @@ async function main() {
       writeFileSync(file, '');
       await run('docker', [...composeBase(project, files, state), 'ps', '-a'], { env, logFile: file });
       await run('docker', [...composeBase(project, files, state), 'logs', '--no-color', '--timestamps'], { env, logFile: file });
-      log(`the SaaS run failed; report in ${path.join(outputDir, 'report')}, service logs in ${file}`);
+      log(`the ${lifecycle ? 'lifecycle' : 'SaaS'} run failed; report in ${path.join(outputDir, 'report')}, service logs in ${file}`);
     } else {
-      log(`every step of the SaaS run passed${withOps ? ', and every Prometheus target is up' : ''}`);
+      log(`every step of the ${lifecycle ? 'lifecycle' : 'SaaS'} run passed${withOps ? ', and every Prometheus target is up' : ''}`);
     }
   } finally {
     await cleanup();

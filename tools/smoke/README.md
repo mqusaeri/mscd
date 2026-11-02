@@ -189,3 +189,64 @@ Run it alone. On the build host of Milestone 2 the run (release image builds, th
 | `SMOKE_KEEP` | unset | `1` is the same as `--keep` |
 
 `--keep` leaves the stack running at `https://localhost:18443/` (Caddy's root certificate is `<state folder>/caddy-root.crt`); `--down` removes it with the same project and state folder (`MSCD_SAAS_TEST_PROJECT=... MSCD_SAAS_TEST_DIR=... node tools/smoke/run-saas.mjs --down`). The throwaway keys stay in the state folder and are deleted with it; nothing signed and no key is written into the repository.
+
+# Data lifecycle run
+
+`npm run lifecycle -w @mscd/smoke` runs the data lifecycle run of MILESTONE-3 M3-11: the life of a customer organisation's data on the SaaS test stack, from its first policy to its verified deletion, every step on screen with one browser session per person. It is `run-saas.mjs --lifecycle`: the same stack, checks and clean-up as the SaaS end-to-end run, then `tests/data-lifecycle.spec.mjs` with `lifecycle.config.mjs` instead of `tests/saas.spec.mjs`. It publishes the same ports, so it takes the host lock (R-05) and runs alone, never next to another Compose stack:
+
+```bash
+flock /tmp/mscd-stack.lock npm run lifecycle -w @mscd/smoke
+```
+
+On the build host of Milestone 3 the steps took about 3 minutes and the whole run about 8 minutes with the image builds and the stack.
+
+## What it does differently
+
+1. **The run overlay.** With `--lifecycle` the overlay of the run (`<state folder>/compose.run.yml`, never `saas.yaml` or a server, Milestone 3 D.3) adds these lines to the api and the worker (`LIFECYCLE_ENV` of `run-saas.mjs`):
+
+   | Variable | Value | Effect |
+   |---|---|---|
+   | `MSCD_SAAS_TEST` | `1` | the server accepts the lifecycle periods below 7 days only with this value |
+   | `MSCD__LIFECYCLE__OFFBOARDING_DAYS` | `0` | the read-only period of an organisation in offboarding ends at once |
+   | `MSCD__LIFECYCLE__DELETION_GRACE_DAYS` | `0` | a deletion is due as soon as the organisation is archived |
+   | `MSCD__LIFECYCLE__DELETION_MIN_GRACE_DAYS` | `0` | the operator may set the deletion date to today |
+
+2. **The people.** `lib/lifecycle-data.mjs` builds on the people of the SaaS run (`lib/saas-data.mjs`): Alpha with Ayu (Tenant Admin and primary Management System Manager), Dimas (Tenant Admin and second manager), Eka (Domain Owner, later also a member of Beta) and Fajar (Domain Owner who leaves); Beta with its administrator. Every person and address is invented (R-19).
+3. **The shared browser library.** `lib/browser.mjs` holds what both runs share: one browser session per person, sign-in with password and authenticator, `expectReadableText` on every screen a person sees for the first time and `expectOverlayReadable` on dialogs, and the watch that fails a step on any page error, console error, 5xx answer or 4xx answer the step does not expect.
+4. **The output folder** is `tools/smoke/test-results/lifecycle` unless `SAAS_OUTPUT_DIR` names another.
+
+## The steps
+
+| Step | On screen |
+|---|---|
+| Operator | sets a password from the emailed link and enrols an authenticator |
+| Organisations | the operator creates Alpha and Beta; their first administrators accept the invitations |
+| Alpha's team | Ayu invites a second Tenant Admin and two members, who join |
+| Roles and evidence | the ISMS gets two Management System Managers (each grant to an administrator approved by the other Tenant Admin), two Domain Owners and the evidence items of A.5.1 and A.5.18 |
+| Beta | Beta's administrator creates the QMS; Eka of Alpha accepts the invitation banner and gets a role there |
+| Read confirmation | POL-01 needs confirmation, Dimas approves its first version, Eka and Fajar open and confirm it, and Ayu closes the request and files the register as a new file of the A.5.1 evidence item |
+| Retention | a competence record that lapsed 60 days ago; Ayu sets 1 month for "Lapsed competence records"; the daily review opens it; Ayu proposes disposal (her own Approve stays disabled) and Dimas approves it; the disposal register shows it |
+| Access review | Ayu starts it, Dimas decides Ayu's own access, both Tenant Admins decide the organisation part, Ayu applies the revocation of the leaver's role, signs the ISMS off into the A.5.18 evidence item, completes the review and downloads the report CSV |
+| My data | Eka downloads "My data" in My account |
+| Requests from one person | Eka's access request is answered with a copy of her data after the system check of the ISMS; the leaver Fajar is erased after the system check, and the people list no longer holds his email address |
+| Offboarding | the operator moves Alpha to offboarding; the operator console shows the read-only end date and Organisation export shows the same date in its read-only note, both checked against `offboardingEndsAt` of the operator's route; Ayu downloads every part of the final export and the manifest, and the run checks each SHA-256 against the screen and against the manifest (name, size, fingerprint) |
+| Deletion | the operator runs `org.lifecycle` from the console's Jobs tab and Alpha is archived; the operator sets the deletion date to today in the Deletion tab, and the "Deletion on" column shows the day of `scheduledFor`; `org.lifecycle` runs again and the purge completes; the certificate downloads, names the final export, passes `mscd-server tenant verify-certificate --json` in the stack's `cli` container and reaches both Tenant Admins by email |
+| After the deletion | discovery answers Alpha's slug as it answers a slug that never existed; Ayu's anonymised account cannot sign in; Beta keeps working, and Eka signs in to Beta, her only organisation now |
+
+## Timing and other choices
+
+- **Away from minute 20.** The hourly schedule of `org.lifecycle` runs at minute 20 UTC. With the periods at 0 days it would archive Alpha before the final export is downloaded. Before the offboarding step the run waits until the next scheduled run is at least 15 minutes away (at most about 18 minutes, added to that step's time limit), so the operator's own runs from the console make each move.
+- **The daily retention review is queued from the worker container.** `retention.review` runs at 03:15 local time and is not among the jobs an operator may start (`OPS_RUNNABLE_JOBS`), so the retention step sends that same job to the queue from the worker container with the server's own queue driver. Every other step uses the screens.
+- **The browsers use the time zone Asia/Jakarta,** Alpha's time zone and the installation's default. The deletion date form takes its earliest day from the installation's local date and builds the instant in the browser's time zone; the screens show local days, so the run compares them with the server's instants in that time zone.
+- **"Alpha's sign-in shows no organisation"** is checked where the app decides it: the organisation discovery of the sign-in page, and the email and password of Alpha's anonymised Tenant Admin.
+
+## Running it
+
+The variables of the SaaS end-to-end run apply (`MSCD_SAAS_TEST_PROJECT`, `MSCD_SAAS_TEST_DIR`, the ports, `MSCD_SAAS_TEST_SCAN`, `MSCD_BUILD_CA`, `SAAS_OUTPUT_DIR`, `SMOKE_KEEP`), and so do `--keep` and `--down`. A run started with `--keep` leaves a stack whose purge cannot be undone; remove it with `--down` as soon as you have looked at it.
+
+The state folder of this run and of the SaaS end-to-end run holds the throwaway release keys, and `saas-keys.sh` refuses a key folder inside a git work tree or a `.git` folder (R-11). On a host with a `.git` folder in `/tmp` itself, the default `/tmp/mscd-saas-run` fails before any test with "is inside a git work tree"; set `MSCD_SAAS_TEST_DIR` to a folder under `/var/tmp`, for example:
+
+```bash
+MSCD_SAAS_TEST_PROJECT=m3-11-saas MSCD_SAAS_TEST_DIR=/var/tmp/m3-11/saas-stack \
+  flock /tmp/mscd-stack.lock npm run lifecycle -w @mscd/smoke
+```

@@ -1,12 +1,12 @@
 # Running customer organisations
 
-This guide is for the platform operator of the MSCD SaaS service. It explains how to create the first operator account, how to onboard a customer step by step, what each organisation status means for the customer's users, how to offboard a customer at the end of a contract, how to help a person with their account and how to add and remove operators, and every operator command. It belongs to work package M2-S09 of the [Milestone 2 plan](../platform/MILESTONE-2.md#m2-s09-operator-commands-and-organisation-lifecycle); the section [Accounts and platform operators](#accounts-and-platform-operators) belongs to [M2-19](../platform/MILESTONE-2.md#m2-19-operator-accounts).
+This guide is for the platform operator of the MSCD SaaS service. It explains how to create the first operator account, how to onboard a customer step by step, what each organisation status means for the customer's users, how to offboard a customer at the end of a contract with its final export, its deletion and the deletion certificate, how to help a person with their account and how to add and remove operators, and every operator command. It belongs to work package M2-S09 of the [Milestone 2 plan](../platform/MILESTONE-2.md#m2-s09-operator-commands-and-organisation-lifecycle); the section [Accounts and platform operators](#accounts-and-platform-operators) belongs to [M2-19](../platform/MILESTONE-2.md#m2-19-operator-accounts), and the end of a contract to M3-02, M3-03 and M3-09 of the [Milestone 3 plan](../platform/MILESTONE-3.md#d5-end-of-contract-and-verified-deletion).
 
 ## Where the operator works
 
 | Tool | Use it for | Who can use it |
 |---|---|---|
-| Operator console in the web app | Everyday work: create organisations, change their status, set plans, verify email domains, help people with their accounts, add and remove operators | A signed-in platform operator (password and authenticator app) |
+| Operator console in the web app | Everyday work: create organisations, change their status, set plans, verify email domains, help people with their accounts, add and remove operators, start an export for a customer, move or cancel a deletion, download deletion certificates, run allow-listed jobs | A signed-in platform operator (password and authenticator app) |
 | Workflow `ops-cli.yml` on GitHub | The first platform operator, and a fallback when the console cannot be used | The owner approves each run in the GitHub environment |
 | `saas-ops.sh` on the server | The same commands as the workflow, for someone with SSH access to the server | Named accounts on the server |
 | `mscd-server` commands in the `cli` container | Behind both of the above; on-premise installations use them directly | The server's operators |
@@ -73,20 +73,22 @@ In one step MSCD then:
 
 ## What each status means
 
-An organisation always has one of four statuses. The customer's Tenant Admins get an email each time you change it, with the new status, what it means and the reason you gave.
+An organisation always has one of five statuses. The customer's Tenant Admins get an email each time it changes, with the new status, what it means, the reason, and for `offboarding` and `archived` the end of the read-only period and the deletion date.
 
 | Status | What the customer's users can do | Sessions | Data | Daily jobs and emails |
 |---|---|---|---|---|
 | `active` | Everything their roles allow | Kept | Kept | Run |
 | `suspended` | Nothing in this organisation: every page and action of it is refused. People who belong to other organisations keep working there | Every session in this organisation ends at once | Kept, nothing is deleted | Stop (no reminders, checks or digests) |
-| `offboarding` | Sign in, read and export. Nothing can be changed | Kept | Kept | Stop, except the emails of finished exports |
-| `archived` | Nothing: the organisation no longer appears for them | Every session in this organisation ends at once | Kept until it is deleted as the contract says | Stop |
+| `offboarding` | Sign in, read and export, including the final export. Nothing can be changed | Kept | Kept | Stop, except the emails of exports and the reminders of the end of the read-only period |
+| `archived` | Nothing: the organisation no longer appears for them | Every session in this organisation ends at once | Kept until its deletion date | Stop, except the deletion reminders by email |
+| `deleted` | Nothing: the organisation is gone | None | Deleted for good, apart from what the deletion certificate lists | None |
 
 In plain words:
 
 - **Suspended** is a pause. Use it for an unpaid invoice or while a security incident is looked into. Making the organisation active again restores everything as it was.
-- **Offboarding** is the read-only period at the end of a contract. The customer takes out what it needs to keep.
-- **Archived** closes the organisation for good. There is no way back to active.
+- **Offboarding** is the read-only period at the end of a contract (30 days by default). The customer takes out its final export.
+- **Archived** closes the organisation. Its deletion is scheduled (30 days later by default). While the deletion is scheduled you can reopen it for export for 7 days; there is no way back to active.
+- **Deleted** is final. MSCD removed the organisation's data and issued a signed deletion certificate. Its name and slug stay in the list so the slug is never reused.
 
 ### Allowed moves
 
@@ -94,12 +96,13 @@ In plain words:
 |---|---|
 | `active` | `suspended`, `offboarding` |
 | `suspended` | `active`, `offboarding` |
-| `offboarding` | `active`, `archived` |
-| `archived` | none (final) |
+| `offboarding` | `active`, `archived` (the hourly job `org.lifecycle` does it at the end of the read-only period; you can do it earlier) |
+| `archived` | `offboarding` ("Reopen for export", only while the deletion is scheduled: 7 read-only days, the deletion is cancelled); `deleted` (only the purge, on its date) |
+| `deleted` | none (final) |
 
 Every move needs a reason of 3 to 500 characters. The reason goes into the status history, the audit trail and the email to the Tenant Admins, so write it for the customer to read and name no person, for example "Invoice of September unpaid after two reminders".
 
-A move to `offboarding` or `archived` also needs the slug typed again as a confirmation (`confirm` in the workflow, `confirmSlug` in the route). A wrong or missing confirmation changes nothing.
+A move to `offboarding` or `archived` also needs the slug typed again as a confirmation (`confirm` in the workflow, `confirmSlug` in the route). A wrong or missing confirmation changes nothing. Nobody can move an organisation to `deleted` by hand.
 
 ### Change the status
 
@@ -114,15 +117,32 @@ The output says how many sessions ended and how many Tenant Admins were emailed.
 
 ## Offboarding at the end of a contract
 
-The default read-only period is 30 days (decision D-S5). Agree the dates with the customer and keep to the DPA.
+The dates come from the SaaS profile (Milestone 3 D.3 and section H): 30 days read-only (`lifecycle.offboarding_days`, decision D-S5), then 30 days until the deletion (`lifecycle.deletion_grace_days`), which you may shorten when the customer asks in writing, but never to less than 7 days after the organisation was archived (`lifecycle.deletion_min_grace_days`). A server refuses to start with a value below 7 for any of the three, unless it is a test stack. Agree the dates with the customer and keep to the DPA. The organisation drawer of the operator console (Organisations, "Manage") has a tab for each part: Status, Export and Deletion; the list shows the columns "Read-only until" and "Deletion on".
 
-1. **On the last day of the contract:** move the organisation to `offboarding` with the slug as confirmation. The Tenant Admins get the email that the organisation is read-only.
-2. **During the read-only period:** the customer exports what it needs. Each management system has its exports (register exports, evidence packs and the audit trail). A full export of the whole organisation in open formats is not built yet ([plan K.8](../platform/MILESTONE-2.md#k8-not-in-this-track)); agree with the customer which exports it needs before the period starts.
+### Step by step
+
+1. **On the last day of the contract:** in the Status tab choose "Start offboarding", give the reason and type the slug (or run `tenant-set-status` with `status=offboarding`). The organisation is read-only until the date the drawer shows. MSCD queues the **final export** of the whole organisation at once (no second approval: the contract has ended), and the Tenant Admins get the email that the organisation is read-only, with the date.
+2. **During the read-only period:** a Tenant Admin downloads the final export in the app: Administration, "Organisation export". It is a set of `.tar.gz` parts holding every table as CSV and JSON Lines, the audit trail with its signed anchors and every Managed Vault file, with a `manifest.json` that lists the size and SHA-256 of every part and entry. The screen shows each SHA-256 and how to check a part with `sha256sum` or PowerShell `Get-FileHash`. The final export stays downloadable until the organisation is archived; the Tenant Admins can also request a new one. In the Export tab you see its status, size and download count, and you can "Start export" with a reason when the customer asks; you never download an export, because operators do not read customer data. The Tenant Admins are reminded 7 days and 1 day before the end, in the app and by email.
 3. **If the customer renews during the period:** move the organisation back to `active` and set the new plan ([entitlements.md](entitlements.md)).
-4. **After 30 days:** move the organisation to `archived` with the slug as confirmation. Every session in it ends, and its users no longer see it.
-5. **Deletion:** the verified purge of an archived organisation is not built yet (plan K.8). Until it is, the data stays in the database and in the backups for their retention periods ([records-of-processing.md](records-of-processing.md#retention-periods)). Record what you promised the customer.
+4. **At the end of the read-only period:** the hourly job `org.lifecycle` (minute 20 UTC) archives the organisation by itself. Every session in it ends, the deletion is scheduled 30 days later, and the Tenant Admins get an email with the deletion date. You can archive earlier with "Archive" in the Status tab, for example when the customer confirms in writing that it has its export.
+5. **During the grace period:** the Deletion tab shows the date and who set it. "Change date" moves it (the form refuses a date before the minimum), "Cancel deletion" stops it (the organisation stays archived until you schedule it again with "Schedule deletion"), and "Reopen for export" in the Status tab gives the customer 7 more read-only days and a new final export when it forgot to download one; that cancels the deletion, and the end of those 7 days archives the organisation again with a new date. The Tenant Admins get an email 7 days and 1 day before it.
+6. **On the deletion date:** `org.lifecycle` starts the purge (`org.purge`) in the worker. It ends access (sessions, invitations, calendar feeds, guest grants), anonymises the accounts that belong to no other organisation, deletes every vault object of the organisation and its data key, drops its database schema and its rows in the platform tables, redacts the personal values in the platform audit entries about it, sets the status `deleted` and checks that nothing is left. Each step and check shows in the Deletion tab. Accounts the person still uses in another organisation keep everything except this membership. Files in the customer's own Microsoft 365 or Google Drive are never touched: they belong to the customer.
+7. **The certificate:** at the end of the purge MSCD signs a deletion certificate with the audit anchor key of the service and emails it to the Tenant Admins captured at scheduling and to every platform operator. You can also download it in the Deletion tab ("Download certificate") or with `mscd-server tenant deletion show --org <slug> --certificate <file>`. Give it to the customer. It lists the dates, the final export (or "no export taken"), the count of each step, the result of each check, what remains and why, and the end date of the backups (below). Anyone can check it offline:
 
-Requests from people about their own data (to see, correct or delete it) follow the manual procedure in [records-of-processing.md](records-of-processing.md#requests-from-data-subjects). If the end of a contract comes with a security incident or a data breach, follow [incident-response.md](incident-response.md) first.
+   ```bash
+   cd /opt/mscd/deploy/compose && sudo docker compose run --rm -T -v /opt/mscd/backup/certificates:/run/certs:ro cli \
+     tenant verify-certificate /run/certs/<file>.json
+   ```
+
+   `mscd-server tenant verify-certificate <file>` checks the signature against the trusted anchor keys of the release and prints the organisation, the certificate id and the result; `--json` prints it as JSON. **Keep every certificate** in the operators' mailbox: a restore from an older backup needs it (step 9).
+8. **If the purge fails:** the deletion shows `failed` with the step and the error, and every operator gets an email. Fix the cause (for example the storage gateway or the database was down), then choose "Retry" in the Deletion tab or run `tenant deletion run --org <slug>`; the purge continues from the failed step, because every step is idempotent. Nobody can start a purge before its date.
+9. **After a restore from a backup older than a deletion:** the deleted organisation comes back with the restored data. Before every restore, collect the certificates from the operators' mailbox into one folder on the server and run the restore with `restore.sh --reapply-deletions <folder>`, which runs `mscd-server tenant purge --reapply <certificate> --confirm <slug>` for each one. After a restore without the folder, run that command by hand for each certificate. The full procedure is in [backup-restore.md](backup-restore.md#deleted-organisations-and-the-backups).
+
+### The backups, in honest words
+
+The deletion does not reach into the backups at once. The certificate says so and states the date by which the last backup copy is gone: the deletion date plus `lifecycle.backup_copies_end_days` (780 days by default, about 26 months). That default assumes the off-site bucket keeps old versions with versioning and a lifecycle rule of 400 days, as [backup-restore.md](backup-restore.md#setting-up) recommends. The owner confirms the real bucket settings before the first deletion and the value is changed to match them; never tell a customer that its data left the backups at once.
+
+Requests from people about their own data (to see, correct or delete it) are answered by the customer's Tenant Admins in the app; when such a request reaches you, forward it as [records-of-processing.md](records-of-processing.md#requests-from-data-subjects) describes. If the end of a contract comes with a security incident or a data breach, follow [incident-response.md](incident-response.md) first.
 
 ## Accounts and platform operators
 
@@ -227,8 +247,14 @@ It accepts only the ten commands above, with the options of the matching `mscd-s
 | `mscd-server admin create-user --org <slug> --email <email> [--name <name>] [--tenant-admin]` | none |
 | `mscd-server license entitlements show` and `set` | `GET` and `PUT /api/v1/ops/organizations/<slug>/entitlements` |
 | `mscd-server diagnostics --out <file>` (or `--out -` for standard output) | `POST /api/v1/ops/diagnostics` |
+| `mscd-server tenant deletion show --org <slug> [--certificate <file>] [--json]` | `GET /api/v1/ops/organizations/<slug>/deletion` and `.../deletion/certificate` |
+| `mscd-server tenant deletion schedule --org <slug> --date <instant> --reason <text> --confirm <slug>` | `POST /api/v1/ops/organizations/<slug>/deletion` ("Change date", "Schedule deletion") |
+| `mscd-server tenant deletion cancel --org <slug> --reason <text>` | `POST /api/v1/ops/organizations/<slug>/deletion/cancel` ("Cancel deletion") |
+| `mscd-server tenant deletion run --org <slug> [--timeout <seconds>] [--no-wait]` | "Retry" (`POST .../deletion/retry`) for a failed purge; also starts a purge that is due now and waits for the worker, never one before its date |
+| `mscd-server tenant purge --reapply <certificate> --confirm <slug>` | none: re-applies a certified deletion after a restore ([backup-restore.md](backup-restore.md#deleted-organisations-and-the-backups)) |
+| `mscd-server tenant verify-certificate <file> [--json]` | none: checks a deletion certificate offline |
 
-`tenant onboard` and `tenant set-status` work only on a SaaS installation with many organisations (`tenancy.mode multi`); on an installation with one organisation they refuse with the message that it runs one organisation. `tenant list` and `tenant show` work on both.
+`tenant onboard`, `tenant set-status` and the `tenant deletion` and `tenant purge` commands work only on a SaaS installation with many organisations (`tenancy.mode multi`); on an installation with one organisation they refuse with the message that it runs one organisation. `tenant list`, `tenant show` and `tenant verify-certificate` work on both. The deletion commands are not part of `saas-ops.sh` and the workflow: a named server account runs them in the `cli` container, for example `cd /opt/mscd/deploy/compose && sudo docker compose run --rm cli tenant deletion show --org <slug>`.
 
 ### Diagnostics
 
@@ -252,3 +278,7 @@ Through the workflow, the archive is written on the server to `/opt/mscd/diagnos
 | "has no second factor set up" | Nothing to reset: the person sets up an authenticator at the next sign-in |
 | "allow sign-in only through their identity provider" | The organisations of the account use single sign-on; a password would not work. The person signs in through the company's provider |
 | "is not on the server" (workflow) | The running release does not have `saas-ops.sh` yet. Deploy a newer release with `deploy-prod.yml` |
+| "only an archived organisation has a deletion date" or "only an archived organisation can be purged" | A deletion is scheduled and run only for an archived organisation. Move it to `archived` first (Status tab) |
+| "nobody starts a purge before its date" | The deletion date has not come yet; "Retry" and `tenant deletion run` refuse to start a purge earlier. Move the date with "Change date" if the customer asked in writing |
+| "cannot be earlier than" or "is in the past; choose now or later" | The date is earlier than archiving plus `lifecycle.deletion_min_grace_days` (7 days), or in the past. Choose a later date |
+| "The certificate names organisation ..." | `--confirm` names another organisation than the certificate. Check the certificate file and the slug |
