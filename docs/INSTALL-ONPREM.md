@@ -222,6 +222,8 @@ Keep the extracted bundle directory. `install.sh` and `upgrade.sh` run from it.
 | `--http-redirect on/off` | on | Redirect HTTP to HTTPS |
 | `--hsts on/off` | off | Send Strict-Transport-Security (only with a trusted certificate) |
 | `--external-fonts on/off` | off | Allow the optional Google Fonts |
+| `--subnet CIDR` | `172.31.250.0/24`; with `--yes`, the first free range up to `172.31.254.0/24` when it is in use | Internal network range of the containers: a private IPv4 range of /24 or larger that nothing on the server uses (section 4.3) |
+| `--web-address IP` | The tenth address of the range, such as `172.31.250.10` | Fixed address of the web container in that range. The api trusts the client address only from it. |
 | `--org-slug SLUG` | Asked; `default` with `--yes` | Short name of your organisation. It cannot change later. |
 | `--org-name NAME` | Asked; "Default organisation" with `--yes` and no `--org-slug` | Display name of your organisation. It can change later in the app. |
 | `--admin-email EMAIL` | | Invite this person as the first administrator and print the one-time invitation link |
@@ -238,6 +240,8 @@ Keep the extracted bundle directory. `install.sh` and `upgrade.sh` run from it.
 To change a setting later, run `sudo ./install.sh` again from the bundle directory with the new option, for example `--smtp-host mail.acme.co.id`. Every other setting is kept.
 
 **Compose project name.** The installation is the Docker Compose project `mscd`, unless the variable `COMPOSE_PROJECT_NAME` names another project when you run `install.sh` for the first time (for example `sudo env COMPOSE_PROJECT_NAME=mscd-test ./install.sh`). The installer saves the name in `.env` as `COMPOSE_PROJECT_NAME`. `upgrade.sh`, `uninstall.sh`, a new run of `install.sh` and `docker compose` in the install directory read it from there, so you never set the variable again. When the variable is set to another name, the scripts stop with a message and change nothing.
+
+**Internal network.** The containers talk to each other on an internal Docker network, by default `172.31.250.0/24`. Before it writes anything, the installer checks the range against the other Docker networks, the routes (a VPN, for example) and the addresses of the server. When the default range is in use, `--yes` takes the first free range from `172.31.250.0/24` to `172.31.254.0/24` and prints it; without `--yes` the installer says what is in the way and asks. A range you give with `--subnet` that is in use stops the installer with a message that names what is in the way. The installer saves the range and the web container's address in `.env` as `MSCD_SUBNET` and `MSCD_WEB_ADDRESS`, and `upgrade.sh` keeps them. A new range must be private and /24 or larger. An installation keeps the range it already runs on, also a smaller or public range that was written into `.env` by hand before this check existed; the scripts then print a warning and go on. To move an existing installation to another range, run `sudo ./install.sh --yes --subnet 172.31.252.0/24` from the bundle of the installed version: the services stop, the network is made again on the new range and the services start, with the data kept. The installer of a version older than this option has no `--subnet`: upgrade first, then run the command from the new bundle. When `MSCD_SUBNET` or `MSCD_WEB_ADDRESS` is set in the shell to another value than the option or the saved one, the scripts stop and change nothing.
 
 ### 4.3 What the installer sets up
 
@@ -272,11 +276,11 @@ The services use three Docker networks:
 
 | Network | Purpose |
 |---|---|
-| `mscd` (internal, `172.31.250.0/24`) | Traffic between the services. It has no route out. The web container has the fixed address `172.31.250.10`, and the api trusts the client address only from it. |
+| `mscd` (internal, `172.31.250.0/24` unless the installer chose another range, section 4.2) | Traffic between the services. It has no route out. The web container has a fixed address, the tenth of the range (`172.31.250.10`), and the api trusts the client address only from it. |
 | `edge` | The published ports of `web` |
 | `egress` | Outbound connections of `api`, `worker`, `storage-gateway`, `migrate` and `cli`: your identity provider, SMTP relay, file repositories and, when you use them, your own PostgreSQL and S3 storage |
 
-PostgreSQL, SeaweedFS and Valkey are only on the internal network and cannot connect anywhere. If `172.31.250.0/24` is already used on your network, set `MSCD_SUBNET` and `MSCD_WEB_ADDRESS` in `.env` before the first start (both must change together).
+PostgreSQL, SeaweedFS and Valkey are only on the internal network and cannot connect anywhere. The range of the internal network and the web container's address are in `.env` as `MSCD_SUBNET` and `MSCD_WEB_ADDRESS`. Change them with `install.sh --subnet` and `--web-address` (section 4.2), which check the new range before they change anything.
 
 ### 4.4 TLS certificate
 
@@ -802,7 +806,7 @@ What `upgrade.sh` does:
 4. Runs the database changes of the new version while the old version keeps running. If they fail, nothing else changes, the old version keeps running and the log of `migrate` is shown.
 5. Replaces the services and checks them through the published ports. If the new version does not become healthy, the previous version starts again automatically.
 
-Settings, secrets, certificates and data are kept. Users see a short interruption while the services are replaced.
+Settings, secrets, certificates and data are kept. The internal network range and the web container's address saved in `.env` stay as they are, also a range smaller than /24 or outside the private ranges (`upgrade.sh` prints a warning). When `MSCD_SUBNET` or `MSCD_WEB_ADDRESS` is set in the shell to another value, `upgrade.sh` stops and changes nothing. Users see a short interruption while the services are replaced.
 
 An organisation export (section 19) that is being built when the worker is replaced stops; the Tenant Admin requests it again after the upgrade.
 
@@ -880,6 +884,9 @@ A Platform Operator account (set up with `admin create-operator`, section 16) se
 | `FAIL Bundle signature does not match` | The bundle was not made by CyberLentera, or the wrong key was used | Do not install. Contact CyberLentera support. |
 | `ERROR Give the display name of your organisation with --org-name` | `--yes` with `--org-slug` but without `--org-name` | Add `--org-name`, or leave out both to get the organisation `default` (section 4.1) |
 | `FAIL The installation in /opt/mscd uses the Compose project <name> (saved in /opt/mscd/.env), but COMPOSE_PROJECT_NAME is set to <other>` | The variable `COMPOSE_PROJECT_NAME` is set in the shell, for example from an earlier test | Run the script without it (`unset COMPOSE_PROJECT_NAME`). The scripts read the project name from `.env`. |
+| `FAIL The internal range <range> (from --subnet) is in use on this host: <what>`, or `FAIL The default internal range 172.31.250.0/24 is in use on this host (...), and so are the other ranges the installer tries` | Another Docker network, a route (for example a VPN) or an address of the server uses the range | Choose a free private range of /24 or larger with `--subnet`; the `Fix:` line names one |
+| `FAIL The installation in /opt/mscd uses the internal range <range> (saved in /opt/mscd/.env), but MSCD_SUBNET is set to <other>` | The variable `MSCD_SUBNET` (or `MSCD_WEB_ADDRESS`) is set in the shell | Run the script without it (`unset MSCD_SUBNET MSCD_WEB_ADDRESS`). To move MSCD to another range, run `sudo ./install.sh --yes --subnet <range>` from the bundle of the installed version. |
+| `WARN The internal range <range> is smaller than /24. MSCD keeps it, because this installation already has it` (or `is not a private range`) | The range was written into `.env` by hand before the installer checked ranges | Nothing has to change: MSCD keeps working on it. To move to a private range of /24 or larger, run the `./install.sh --yes --subnet <range>` command the line names, from the bundle it names |
 | `FAIL The database volume mscd_pgdata of an earlier installation exists, but its passwords are gone` | The `secrets` folder was deleted, but the data was kept | Restore `secrets` from your backup. Only for a fresh start: `sudo docker volume rm mscd_pgdata mscd_s3data` (this deletes all data). |
 | `migrate` shows `exited (1)` | A database change or pack installation failed | Read `sudo docker compose logs migrate`. Fix the cause (for example the database connection) and run `sudo ./install.sh --yes` again. |
 | api not healthy; the log says it cannot connect to the database | Wrong address or password in `secrets/db-app.url`, or a firewall blocks your own PostgreSQL | Check the address, and that the server reaches the database port |
@@ -893,7 +900,7 @@ A Platform Operator account (set up with `admin create-operator`, section 16) se
 | Background jobs stop running and the health view shows `job-outbox` as degraded | The Valkey queue was unreachable for a long time | Fix Valkey, then: `sudo docker compose exec postgres psql -U postgres -d mscd -c "UPDATE platform.job_outbox SET attempts = 0, run_at = now() WHERE dispatched_at IS NULL AND attempts >= 12"` |
 | `The new settings did not work and were not kept` | MSCD did not start with the new settings | MSCD runs again with the previous settings. Fix the problem shown and run the installer again. |
 | `upgrade.sh` ends with `Upgrade failed and was rolled back` | The new version failed its health check | The previous version is running. Send the printed log lines to CyberLentera support. |
-| Some internal networks cannot reach the server after Docker was installed | Docker's networks overlap an internal subnet | Set `default-address-pools` in `/etc/docker/daemon.json` and `MSCD_SUBNET` in `.env` to unused ranges, then restart Docker |
+| Some internal networks cannot reach the server after Docker was installed | Docker's networks overlap an internal subnet | Set `default-address-pools` in `/etc/docker/daemon.json` to unused ranges and restart Docker. Move MSCD itself with `sudo ./install.sh --yes --subnet <free range>` from the bundle of the installed version. |
 | `curl` on the server returns a proxy error | `HTTPS_PROXY` is set in the shell | Add `--noproxy '*'` to the `curl` command |
 | Browser warns about the certificate | Self-signed certificate | Install a certificate from your CA (section 4.4) |
 
