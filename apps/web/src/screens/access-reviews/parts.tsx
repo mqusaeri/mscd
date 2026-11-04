@@ -1,7 +1,8 @@
 // Shared parts of Access reviews and Access review of this system (MILESTONE-3 M3-07, D.9): loading from the adapter
 // into state, the loading and error lines of a card, a person with a date, who granted an item (with the requester and
 // approver of a business role), the table of review items with selection and its per-row actions, the decision form for one item or a selection, the "Mark as applied" and "Not applied"
-// forms, and the warning of items that only their own subject could decide.
+// forms, the confirmation before a revocation runs ("Revoke now", M3-14, texts D1), and the warning of items that only
+// their own subject could decide.
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { ApiError } from '../../data/api/ApiClient';
@@ -312,6 +313,59 @@ export function ApplyNoteDialog({ ctx, row, kind, run, onClose, onDone }: {
         <Textarea name={kind === 'not_applied' ? 'reason' : 'note'} rows={3} maxLength={500} value={text} onChange={(v) => { setText(v); setError(null); }} />
       </Field>
       {typeof error === 'string' ? <div className="mx-error" role="alert">{error}</div> : null}
+    </Modal>
+  );
+}
+
+/** What the revoke dialog says happens, per kind of access (M3-14, texts D1 and ISO review o5). */
+export function revokeText(row: Pick<ItemRow, 'kind'>): TextPair {
+  switch (row.kind) {
+    case 'membership': return TEXT.revokeMembership;
+    case 'linked_sign_in': return TEXT.revokeLinked;
+    case 'auditor_access': return TEXT.revokeGuest;
+    default: return TEXT.revokeRole;
+  }
+}
+
+/**
+ * The confirmation before a decided revocation is applied (M3-14, texts D1): what happens for the kind of access, and
+ * "Revoke now". The call runs only from the dialog's button; "Cancel" calls nothing.
+ */
+export function RevokeDialog({ ctx, row, run, onClose, onDone }: {
+  ctx: HostContext;
+  row: ItemRow;
+  run(): Promise<Result<Outcome>>;
+  onClose(): void;
+  onDone(outcome: Outcome): void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const name = row.subject.displayName;
+  const submit = () => {
+    setBusy(true);
+    setError(null);
+    void ctx.track(settled(run())).then((res) => {
+      setBusy(false);
+      if (!res.ok) setError(errorText(ctx, res.error));
+      else onDone(res.data);
+    });
+  };
+  return (
+    <Modal
+      open
+      title={ctx.fill(TEXT.revokeTitle, { access: accessText(row, ctx.li), name })}
+      onClose={onClose}
+      layer={ctx.layer()}
+      footer={(
+        <>
+          <Button onClick={onClose}>{ctx.li(UI_TEXT.cancel)}</Button>
+          <Button variant="danger" busy={busy} onClick={submit}>{ctx.li(TEXT.apply)}</Button>
+        </>
+      )}
+    >
+      <p className="mx-small" style={{ marginTop: 0 }} data-revoke-kind={row.kind}>{ctx.fill(revokeText(row), { name })}</p>
+      {row.decisionNote ? <p className="mx-small">{ctx.fill(TEXT.decisionWas, { note: row.decisionNote })}</p> : null}
+      {error ? <div className="mx-error" role="alert">{error}</div> : null}
     </Modal>
   );
 }

@@ -11,6 +11,8 @@
 .mx-ack-code{font-family:var(--ffm);font-weight:600;color:var(--tx)}
 .mx-ack-title{font-size:12px;color:var(--tx2);overflow-wrap:anywhere}
 .mx-ack-num{font-variant-numeric:tabular-nums}
+.mx-ack-status{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.mx-ack-reason{font-size:12px;line-height:1.4;color:var(--tx2);overflow-wrap:anywhere}
 .mx-ack-overdue{font-weight:600;color:var(--bad);font-variant-numeric:tabular-nums}
 .mx-ack-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .mx-ack-roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 12px}

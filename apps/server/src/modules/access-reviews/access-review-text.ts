@@ -1,7 +1,10 @@
 // Texts of the periodic access review (Milestone 3 D.9, J.4, M3-07) in English and Indonesian: the notices
 // `access_review_due` and `access_review_overdue`, the title of the stored task of a system part (C.3: it names the
 // screen that completes it), the refusals the routes give besides the platform rules, the warning REVIEW-SINGLE-ADMIN,
-// the refusal of "Complete" for a system nobody may review, and the columns of the report CSV.
+// the refusal of "Complete" for a system nobody may review or without an evidence item for the organisation part, the
+// answers of the sign-off and the completion, and the columns of the report CSV and of its summary. The Indonesian
+// sign-off words are "sahkan", "disahkan" and "pengesahan" (M3-14, ISO review o12): the step approves a part of the
+// review; it is not a signature in the legal sense.
 import type { Messages, Pair } from '@mscd/shared';
 import { fmtDay } from '../../common/dates';
 import { ruleMessages } from '../rules';
@@ -28,7 +31,7 @@ export function openedNoticeForSystem(reviewNo: string, code: string, dueOn: str
     title: [`Access review ${reviewNo}: review the access in ${code}`, `Tinjauan akses ${reviewNo}: tinjau akses di ${code}`],
     body: [
       `Check each business role and guest auditor access of ${code} by ${fmtDay(dueOn)} in Access review of this system, then sign it off.`,
-      `Periksa setiap peran bisnis dan akses auditor tamu di ${code} paling lambat ${fmtDay(dueOn, 'id')} di Tinjauan akses sistem ini, lalu tanda tangani.`,
+      `Periksa setiap peran bisnis dan akses auditor tamu di ${code} paling lambat ${fmtDay(dueOn, 'id')} di Tinjauan akses sistem ini, lalu sahkan.`,
     ],
   };
 }
@@ -40,7 +43,7 @@ export function dueSoonNotice(reviewNo: string, dueOn: string, code: string | nu
     title: [`Access review ${reviewNo} is due on ${fmtDay(dueOn)}`, `Tinjauan akses ${reviewNo} jatuh tempo pada ${fmtDay(dueOn, 'id')}`],
     body: [
       `Finish reviewing ${where[0]}: decide every item and sign off or complete the review.`,
-      `Selesaikan peninjauan ${where[1]}: putuskan setiap item dan tanda tangani atau selesaikan tinjauan.`,
+      `Selesaikan peninjauan ${where[1]}: putuskan setiap item dan sahkan atau selesaikan tinjauan.`,
     ],
   };
 }
@@ -52,7 +55,7 @@ export function overdueNotice(reviewNo: string, dueOn: string, code: string | nu
     title: [`Access review ${reviewNo} is overdue`, `Tinjauan akses ${reviewNo} terlambat`],
     body: [
       `It was due on ${fmtDay(dueOn)}. Finish reviewing ${where[0]} so the review can be completed and filed as evidence.`,
-      `Tinjauan ini jatuh tempo pada ${fmtDay(dueOn, 'id')}. Selesaikan peninjauan ${where[1]} agar tinjauan dapat diselesaikan dan diarsipkan sebagai bukti.`,
+      `Tinjauan ini jatuh tempo pada ${fmtDay(dueOn, 'id')}. Selesaikan peninjauan ${where[1]} agar tinjauan dapat diselesaikan dan disimpan sebagai bukti.`,
     ],
   };
 }
@@ -78,8 +81,8 @@ export function singleReviewerWarning(input: { organisation: boolean; systems: r
     id.push(base.id);
   }
   for (const code of input.systems) {
-    en.push(`In ${code} only one person holds the right to review access, so nobody else reviewed their own access there. Add a second Management System Manager or a Programme Owner for the next review.`);
-    id.push(`Di ${code} hanya satu orang yang memegang hak untuk meninjau akses, sehingga tidak ada orang lain yang meninjau akses miliknya di sana. Tambahkan Management System Manager kedua atau Pemilik Program untuk tinjauan berikutnya.`);
+    en.push(`In ${code}, only one person can review this access, so nobody else checked that person's own access. Add a second reviewer before the next review.`);
+    id.push(`Di ${code}, hanya satu orang yang dapat meninjau akses ini, sehingga akses milik orang itu sendiri tidak diperiksa orang lain. Tambahkan peninjau kedua sebelum tinjauan berikutnya.`);
   }
   if (input.names.length) {
     en.push(`Not reviewed by a second person: ${input.names.join(', ')}.`);
@@ -108,7 +111,7 @@ export const REFUSALS = {
   notOpen: { en: 'The access review is no longer open.', id: 'Tinjauan akses ini tidak lagi terbuka.' },
   partSignedOff: {
     en: 'This part of the review is signed off; its decisions can no longer change.',
-    id: 'Bagian tinjauan ini sudah ditandatangani; keputusannya tidak dapat diubah lagi.',
+    id: 'Bagian tinjauan ini sudah disahkan; keputusannya tidak dapat diubah lagi.',
   },
   applied: {
     en: 'The decision on this item has been applied or explained already; it can no longer change.',
@@ -116,7 +119,7 @@ export const REFUSALS = {
   },
   undecided: {
     en: 'Every item must be decided before this part is signed off.',
-    id: 'Setiap item harus diputuskan sebelum bagian ini ditandatangani.',
+    id: 'Setiap item harus diputuskan sebelum bagian ini disahkan.',
   },
   notRevoke: { en: 'Only an item decided "revoke" is applied this way.', id: 'Hanya item dengan keputusan "cabut" yang diterapkan dengan cara ini.' },
   nothingToApply: {
@@ -142,13 +145,43 @@ export const REFUSALS = {
 export const APPLIED_MESSAGES: Readonly<Record<string, Pair>> = {
   'role.revoked': ['Role revoked', 'Peran dicabut'],
   'membership.admin_role_removed': ['Admin role removed', 'Peran admin dihapus'],
-  'membership.disabled': ['Membership disabled; the person was signed out of this organisation', 'Keanggotaan dinonaktifkan; orang tersebut telah dikeluarkan dari organisasi ini'],
+  'membership.disabled': ['Membership disabled; the person was signed out of this organisation', 'Keanggotaan dinonaktifkan; sesi orang tersebut di organisasi ini telah diakhiri'],
   'identity.unlinked': ['Linked sign-in removed', 'Masuk tertaut dihapus'],
-  'auditor_access.revoked': ['Guest access revoked; the auditor was signed out', 'Akses tamu dicabut; auditor telah dikeluarkan'],
+  'auditor_access.revoked': ['Guest access revoked; the auditor was signed out', 'Akses tamu dicabut; sesi auditor telah diakhiri'],
   already_removed: ['The access was removed already; recorded as applied', 'Akses sudah dihapus; dicatat sebagai diterapkan'],
   marked_applied: ['Marked as applied', 'Ditandai sudah diterapkan'],
   not_applied: ['Recorded as not applied', 'Dicatat sebagai tidak diterapkan'],
 };
+
+/** 422 of "Complete" without an evidence item for the organisation part (M3-14, ISO review m1). */
+export const EVIDENCE_REQUIRED = {
+  key: 'access_reviews.evidence_required',
+  en: 'Choose the evidence item for the organisation part of the review: its memberships, admin roles and linked company sign-in are filed there with the summary of the review.',
+  id: 'Pilih item bukti untuk bagian organisasi dari tinjauan: keanggotaan, peran admin, dan masuk perusahaan tertautnya disimpan di sana beserta ringkasan tinjauan.',
+} as const;
+
+/** The answer of a system part's sign-off, naming the evidence item that receives its rows at completion. */
+export function signedOffMessage(code: string, evidenceCode: string | null): Pair {
+  return evidenceCode
+    ? [`${code} signed off; its rows are filed to ${evidenceCode} when the review completes`, `${code} disahkan; barisnya disimpan sebagai bukti di ${evidenceCode} saat tinjauan selesai`]
+    : [`${code} signed off`, `${code} disahkan`];
+}
+
+/** The answer of "Complete": the organisation part's evidence item and how many systems' rows were filed (M3-14). */
+export function completedMessage(reviewNo: string, organisationEvidence: string, systems: number): Pair {
+  return systems > 0
+    ? [
+      `Access review ${reviewNo} completed; the organisation part was filed to ${organisationEvidence}, and the rows of ${systems} system(s) were filed as evidence`,
+      `Tinjauan akses ${reviewNo} selesai; bagian organisasi disimpan sebagai bukti di ${organisationEvidence}, dan baris dari ${systems} sistem disimpan sebagai bukti`,
+    ]
+    : [
+      `Access review ${reviewNo} completed; the organisation part was filed to ${organisationEvidence}`,
+      `Tinjauan akses ${reviewNo} selesai; bagian organisasi disimpan sebagai bukti di ${organisationEvidence}`,
+    ];
+}
+
+/** The columns of the summary that follows the organisation part's rows in its evidence file (M3-14). */
+export const SUMMARY_COLUMNS = ['summary', 'value'] as const;
 
 /** The columns of the report CSV (formula-neutralised, F.15). */
 export const REPORT_COLUMNS = [

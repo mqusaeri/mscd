@@ -591,18 +591,29 @@ export function pendingPerPerson(d: ScreenData, filter: PendingFilter): PendingP
 /**
  * `aggregate=unit`: open and overdue counts per stage and business role, without names (Top Management). A holder
  * counts under the first of their roles in `BUSINESS_ROLES` order; unassigned items and holders without a role in
- * the system count under `null`.
+ * the system count under `null`. Each row of a role also gives `holders`, how many people of the system count under
+ * that role (whether they hold open work or not), so the screen can join a role with one holder (or none left) into
+ * "Other roles", which names no role (M3-14, product decision 2). Only the handles in `active` (an active membership
+ * and an active account) count as holders; without it every holder in `rolesByHandle` does.
  */
-export function pendingAggregate(d: ScreenData, filter: PendingFilter, rolesByHandle: ReadonlyMap<string, readonly BusinessRole[]>): PendingAggregate[] {
+export function pendingAggregate(
+  d: ScreenData, filter: PendingFilter, rolesByHandle: ReadonlyMap<string, readonly BusinessRole[]>, active?: ReadonlySet<string>,
+): PendingAggregate[] {
   const roleOf = (handle: string): BusinessRole | null => {
     const roles = rolesByHandle.get(handle) ?? [];
     return BUSINESS_ROLES.find((r) => roles.includes(r)) ?? null;
   };
+  const holders = new Map<BusinessRole, number>();
+  for (const handle of rolesByHandle.keys()) {
+    if (active && !active.has(handle)) continue;
+    const role = roleOf(handle);
+    if (role !== null) holders.set(role, (holders.get(role) ?? 0) + 1);
+  }
   const counts = new Map<string, PendingAggregate>();
   for (const i of pendingItems(d, filter)) {
     const role = i.h === NONE ? null : roleOf(i.h);
     const key = `${i.stage}|${role ?? ''}`;
-    const row = counts.get(key) ?? { stage: i.stage, role, open: 0, overdue: 0 };
+    const row = counts.get(key) ?? (role === null ? { stage: i.stage, role, open: 0, overdue: 0 } : { stage: i.stage, role, open: 0, overdue: 0, holders: holders.get(role) ?? 0 });
     row.open += 1;
     if (i.st !== 'pending') row.overdue += 1;
     counts.set(key, row);

@@ -2,7 +2,8 @@ import { test, expect, ui, go, openApp, expectReadableText, expectNoHorizontalOv
 
 // Open work totals against the api (MILESTONE-3 M3-08, D.10). hendra is Top Management in every system of PT Nusantara
 // Digital Teknologi (`audit.pending.aggregate`, F.6): he opens the screen from Chain stages and the Overview, and the
-// totals, the stage by role table and "All my systems" equal the answers of `GET /ms/{ms}/audit/pending?aggregate=unit`.
+// totals, the stage by role table and "All my systems" equal the answers of `GET /ms/{ms}/audit/pending?aggregate=unit`;
+// a role held by one person in the system (`holders` 1, or 0 when its only holder left) joins "Other roles" (M3-14).
 // No member's name appears on the screen (product decision 2). bagus, a Domain Owner, holds no such right: neither page
 // action shows, the address does not open the screen and the api refuses the counts.
 const body = (page) => page.locator('main [data-screen="pending-totals"]');
@@ -19,7 +20,8 @@ async function aggregate(page, ms) {
   expect(res.status(), `aggregate=unit of ${ms}`).toBe(200);
   const rows = await res.json();
   expect(Array.isArray(rows)).toBe(true);
-  for (const row of rows) expect(Object.keys(row).sort()).toEqual(['open', 'overdue', 'role', 'stage']);
+  // No holder, name or due date; a row of a role gives the number of its holders (M3-14).
+  for (const row of rows) expect(Object.keys(row).sort()).toEqual(row.role === null ? ['open', 'overdue', 'role', 'stage'] : ['holders', 'open', 'overdue', 'role', 'stage']);
   return rows;
 }
 const sum = (rows) => rows.reduce((s, r) => ({ open: s.open + r.open, overdue: s.overdue + r.overdue }), { open: 0, overdue: 0 });
@@ -46,15 +48,21 @@ async function expectTotalsOf(page, rows) {
   const total = sum(rows);
   await expect(stats(page)).toHaveAttribute('data-total-open', String(total.open));
   await expect(stats(page)).toHaveAttribute('data-total-overdue', String(total.overdue));
-  const roles = [...new Set(rows.map((r) => r.role ?? 'none'))];
+  // The column of a row: "Other roles" for a role with at most one holder (M3-14), "No role or unassigned" without a role.
+  const column = (r) => (r.role === null ? 'none' : r.holders <= 1 ? 'other' : r.role);
+  const roles = [...new Set(rows.map(column))];
   // A column per role that holds open work, then "All roles".
   await expect(matrix(page).locator('thead th')).toHaveCount(roles.length + 2);
-  for (const r of rows) {
-    const where = cell(page, r.stage, r.role ?? 'none');
-    await expect(where, `${r.stage} ${r.role}`).toHaveAttribute('data-open', String(r.open));
-    await expect(where, `${r.stage} ${r.role}`).toHaveAttribute('data-overdue', String(r.overdue));
-    await expect(where).toContainText(String(r.open));
+  for (const key of roles) {
+    for (const stage of new Set(rows.filter((r) => column(r) === key).map((r) => r.stage))) {
+      const of = sum(rows.filter((r) => column(r) === key && r.stage === stage));
+      const where = cell(page, stage, key);
+      await expect(where, `${stage} ${key}`).toHaveAttribute('data-open', String(of.open));
+      await expect(where, `${stage} ${key}`).toHaveAttribute('data-overdue', String(of.overdue));
+      await expect(where).toContainText(String(of.open));
+    }
   }
+  for (const r of rows.filter((x) => x.role !== null && x.holders <= 1)) await expect(matrix(page).locator(`thead th[data-role="${r.role}"]`)).toHaveCount(0);
   for (const stage of new Set(rows.map((r) => r.stage))) {
     const of = sum(rows.filter((r) => r.stage === stage));
     await expect(cell(page, stage, 'all'), stage).toHaveAttribute('data-open', String(of.open));

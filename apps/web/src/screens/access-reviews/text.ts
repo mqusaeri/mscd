@@ -1,10 +1,12 @@
 // Texts of Access reviews and of the shared parts of Access review of this system (MILESTONE-3 M3-07, D.9), as
-// [English, Indonesian] pairs. Terminology as product decision 10: "Management System Manager" in both languages.
+// [English, Indonesian] pairs. Terminology as product decision 10: "Management System Manager" in both languages. The
+// Indonesian sign-off words are "sahkan", "disahkan" and "pengesahan" (M3-14, ISO review o12): the step approves a part
+// of the review; it is not a signature in the legal sense.
 export const TEXT = {
   title: ['Access reviews', 'Tinjauan akses'],
   teraWhat: [
-    'The periodic review of who can reach what in MSCD. ISO/IEC 27001 control A.5.18 (access rights) asks that access rights are reviewed at regular intervals and removed when no longer needed; a completed review is the dated record the auditor asks for.',
-    'Tinjauan berkala atas siapa yang dapat menjangkau apa di MSCD. Kontrol ISO/IEC 27001 A.5.18 (hak akses) meminta hak akses ditinjau secara berkala dan dicabut bila tidak diperlukan lagi; tinjauan yang selesai adalah catatan bertanggal yang diminta auditor.',
+    'The periodic review of who can access what in MSCD. ISO/IEC 27001 control A.5.18 (access rights) asks that access rights are reviewed and removed when no longer needed, and the ISO/IEC 27002 guidance for it says the review happens at regular intervals; a completed review is the dated record the auditor asks for.',
+    'Tinjauan berkala atas siapa yang dapat mengakses apa di MSCD. Kontrol ISO/IEC 27001 A.5.18 (hak akses) meminta hak akses ditinjau dan dicabut bila tidak diperlukan lagi, dan panduan ISO/IEC 27002 untuk kontrol itu menyebut tinjauan dilakukan secara berkala; tinjauan yang selesai adalah rekaman bertanggal yang diminta auditor.',
   ],
   teraHow1: [
     'A review opens on the schedule (every 3 months by default) or with "Start review now". It takes a snapshot of every membership, admin role, linked company sign-in, business role and guest auditor grant.',
@@ -12,11 +14,11 @@ export const TEXT = {
   ],
   teraHow2: [
     'Tenant Admins decide on the organisation items; the Management System Managers and Programme Owners of each system decide on its items and sign it off. Nobody decides on their own access.',
-    'Tenant Admin memutuskan item organisasi; Management System Manager dan Pemilik Program setiap sistem memutuskan item sistemnya lalu menandatanganinya. Tidak ada yang memutuskan akses miliknya sendiri.',
+    'Tenant Admin memutuskan item organisasi; Management System Manager dan Pemilik Program setiap sistem memutuskan item sistemnya lalu mengesahkannya. Tidak ada yang memutuskan akses miliknya sendiri.',
   ],
   teraHow3: [
-    'Apply each decided revocation, or record why it is not applied, then complete the review. The report is kept and each system\'s rows are filed as evidence.',
-    'Terapkan setiap pencabutan yang diputuskan, atau catat alasan tidak diterapkan, lalu selesaikan tinjauan. Laporan disimpan dan baris setiap sistem diarsipkan sebagai bukti.',
+    'Apply each decided revocation, or record why it is not applied, then complete the review and choose the evidence item for the organisation part. Each part of the report is filed as evidence.',
+    'Terapkan setiap pencabutan yang diputuskan, atau catat alasan tidak diterapkan, lalu selesaikan tinjauan dan pilih item bukti untuk bagian organisasi. Setiap bagian laporan disimpan sebagai bukti.',
   ],
 
   // Item kinds, decisions, states
@@ -35,7 +37,7 @@ export const TEXT = {
   stCompleted: ['Completed', 'Selesai'],
   stCancelled: ['Cancelled', 'Dibatalkan'],
   psOpen: ['Open', 'Terbuka'],
-  psSignedOff: ['Signed off', 'Ditandatangani'],
+  psSignedOff: ['Signed off', 'Disahkan'],
   f1: ['Every month', 'Setiap bulan'],
   f3: ['Every 3 months', 'Setiap 3 bulan'],
   f6: ['Every 6 months', 'Setiap 6 bulan'],
@@ -64,7 +66,7 @@ export const TEXT = {
   openReview: ['Open review', 'Buka tinjauan'],
   startNow: ['Start review now', 'Mulai tinjauan sekarang'],
   started: ['Access review started', 'Tinjauan akses dimulai'],
-  bySchedule: ['by the schedule', 'oleh jadwal'],
+  bySchedule: ['on schedule', 'sesuai jadwal'],
   allTitle: ['All reviews', 'Semua tinjauan'],
   allSub: ['Open a review to see its items, decisions and report.', 'Buka tinjauan untuk melihat item, keputusan, dan laporannya.'],
   noReviews: ['No review yet.', 'Belum ada tinjauan.'],
@@ -74,10 +76,10 @@ export const TEXT = {
   colDue: ['Due', 'Jatuh tempo'],
   colProgress: ['Progress', 'Kemajuan'],
   colCompleted: ['Completed', 'Selesai'],
-  progressShort: ['{decided} of {items} items decided, {signed} of {parts} parts signed off', '{decided} dari {items} item diputuskan, {signed} dari {parts} bagian ditandatangani'],
+  progressShort: ['{decided} of {items} items decided, {signed} of {parts} parts signed off', '{decided} dari {items} item diputuskan, {signed} dari {parts} bagian disahkan'],
   progressText: [
     '{decided} of {items} items decided; {signed} of {parts} parts signed off; {applied} of {revocations} revocations or changes applied or explained',
-    '{decided} dari {items} item diputuskan; {signed} dari {parts} bagian ditandatangani; {applied} dari {revocations} pencabutan atau perubahan diterapkan atau dijelaskan',
+    '{decided} dari {items} item diputuskan; {signed} dari {parts} bagian disahkan; {applied} dari {revocations} pencabutan atau perubahan diterapkan atau dijelaskan',
   ],
 
   // Schedule
@@ -103,13 +105,34 @@ export const TEXT = {
   downloadReport: ['Download report', 'Unduh laporan'],
   complete: ['Complete', 'Selesaikan'],
   completed: ['Access review completed', 'Tinjauan akses selesai'],
+  completeTitle: ['Complete access review {no}', 'Selesaikan tinjauan akses {no}'],
+  completeSub: [
+    'The organisation part is signed off by you. Each system\'s part of the review report is filed to the evidence item named at its sign-off, and the organisation part to the item you choose here.',
+    'Bagian organisasi disahkan oleh Anda. Bagian laporan tinjauan untuk setiap sistem disimpan sebagai bukti di item bukti yang dipilih saat pengesahannya, dan bagian organisasi di item yang Anda pilih di sini.',
+  ],
+  completeEvidence: ['Evidence item for the organisation part', 'Item bukti untuk bagian organisasi'],
+  completeEvidenceHint: [
+    'Everyone who can read this evidence item sees the organisation part: memberships, admin roles and linked company sign-in. For ISO/IEC 27001 the item of control A.5.18 is proposed.',
+    'Semua orang yang dapat membaca item bukti ini melihat bagian organisasi: keanggotaan, peran admin, dan masuk perusahaan tertaut. Untuk ISO/IEC 27001, item kontrol A.5.18 diusulkan.',
+  ],
+  completeNoEvidence: [
+    'No management system has an evidence item yet. Add one in a system\'s Evidence register, then complete the review.',
+    'Belum ada sistem manajemen yang memiliki item bukti. Tambahkan satu di register Bukti suatu sistem, lalu selesaikan tinjauan.',
+  ],
+  completeCodesOnly: [
+    'Items of systems where you hold no role that reads them show their code only, except the evidence of access control (A.5.15, A.5.18 and A.8.2).',
+    'Item dari sistem tempat Anda tidak memiliki peran yang dapat membacanya hanya ditampilkan kodenya, kecuali bukti kontrol akses (A.5.15, A.5.18, dan A.8.2).',
+  ],
+  titleHidden: ['Title not shown', 'Judul tidak ditampilkan'],
+  chooseCompleteEvidence: ['Choose the evidence item for the organisation part.', 'Pilih item bukti untuk bagian organisasi.'],
+  orgFiledTo: ['Organisation part filed to {code}', 'Bagian organisasi disimpan sebagai bukti di {code}'],
   completeWaits: ['Not everything is done yet; see the list below.', 'Belum semuanya selesai; lihat daftar di bawah.'],
   cancelReview: ['Cancel review', 'Batalkan tinjauan'],
   cancelTitle: ['Cancel access review {no}', 'Batalkan tinjauan akses {no}'],
   cancelSub: ['The decisions made so far stay in the record. Say why the review is cancelled.', 'Keputusan yang sudah dibuat tetap tercatat. Sebutkan alasan tinjauan dibatalkan.'],
   cancelled: ['Access review cancelled', 'Tinjauan akses dibatalkan'],
   cancelReason: ['Cancelled because', 'Dibatalkan karena'],
-  waitSystems: ['Not signed off yet: {systems}', 'Belum ditandatangani: {systems}'],
+  waitSystems: ['Not signed off yet: {systems}', 'Belum disahkan: {systems}'],
   waitOrgItems: ['{n} organisation item(s) to decide', '{n} item organisasi belum diputuskan'],
   waitApplications: ['{n} revocation(s) or change(s) to apply or explain', '{n} pencabutan atau perubahan belum diterapkan atau dijelaskan'],
   waitNoReviewer: [
@@ -119,20 +142,20 @@ export const TEXT = {
   noReviewerTitle: ['Nobody can review some systems', 'Beberapa sistem tidak dapat ditinjau siapa pun'],
   noReviewerText: [
     'No active Management System Manager or Programme Owner holds the right to review {systems}, so that part cannot be signed off and the review cannot be completed. Assign one on People and roles, or cancel the review.',
-    'Tidak ada Management System Manager atau Pemilik Program aktif yang memegang hak untuk meninjau {systems}, sehingga bagian itu tidak dapat ditandatangani dan tinjauan tidak dapat diselesaikan. Tetapkan salah satunya di Orang dan peran, atau batalkan tinjauan.',
+    'Tidak ada Management System Manager atau Pemilik Program aktif yang memegang hak untuk meninjau {systems}, sehingga bagian itu tidak dapat disahkan dan tinjauan tidak dapat diselesaikan. Tetapkan salah satunya di Orang dan peran, atau batalkan tinjauan.',
   ],
   noReviewerBadge: ['No reviewer', 'Tidak ada peninjau'],
   partsTitle: ['Systems', 'Sistem'],
-  partsSub: ['Each system is reviewed and signed off by its Management System Managers and Programme Owners.', 'Setiap sistem ditinjau dan ditandatangani oleh Management System Manager dan Pemilik Program sistem tersebut.'],
+  partsSub: ['Each system is reviewed and signed off by its Management System Managers and Programme Owners.', 'Setiap sistem ditinjau dan disahkan oleh Management System Manager dan Pemilik Program sistem tersebut.'],
   noSystems: ['No system was in force when the review opened.', 'Tidak ada sistem yang berlaku saat tinjauan dibuka.'],
   colSystem: ['System', 'Sistem'],
   colDecided: ['Decided', 'Diputuskan'],
-  colSignedOff: ['Signed off', 'Ditandatangani'],
+  colSignedOff: ['Signed off', 'Disahkan'],
   colEvidence: ['Evidence', 'Bukti'],
   decidedOf: ['{n} of {total}', '{n} dari {total}'],
   secondCount: ['{n} need a second reviewer', '{n} memerlukan peninjau kedua'],
-  filedAt: ['Filed {at}', 'Diarsipkan {at}'],
-  filedOnCompletion: ['Filed when the review completes', 'Diarsipkan saat tinjauan selesai'],
+  filedAt: ['Filed as evidence {at}', 'Disimpan sebagai bukti {at}'],
+  filedOnCompletion: ['Filed as evidence when the review completes', 'Disimpan sebagai bukti saat tinjauan selesai'],
   noEvidence: ['No evidence item named', 'Tidak ada item bukti yang dipilih'],
   applyTitle: ['Revocations and changes to apply', 'Pencabutan dan perubahan yang perlu diterapkan'],
   applySub: [
@@ -140,7 +163,18 @@ export const TEXT = {
     'Terapkan pencabutan di sini, tandai perubahan sudah diterapkan setelah dibuat di Orang dan peran, atau catat alasan tidak diterapkan.',
   ],
   nothingToApplyNow: ['Nothing waits to be applied.', 'Tidak ada yang menunggu untuk diterapkan.'],
-  apply: ['Apply', 'Terapkan'],
+  apply: ['Revoke now', 'Cabut sekarang'],
+  revokeTitle: ['Revoke {access} of {name}?', 'Cabut {access} milik {name}?'],
+  revokeMembership: [
+    '{name} can no longer open this organisation and is signed out now. Their records stay. Their business roles stay and apply again if the membership is enabled again. To give access back, a Tenant Admin changes it on People and roles.',
+    '{name} tidak dapat lagi membuka organisasi ini dan sesinya diakhiri sekarang. Rekamannya tetap ada. Peran bisnisnya tetap ada dan berlaku lagi jika keanggotaan diaktifkan kembali. Untuk mengembalikan akses, Tenant Admin mengubahnya di Orang dan peran.',
+  ],
+  revokeRole: ['The role ends now. To give it back, grant it again on People and roles.', 'Peran berakhir sekarang. Untuk mengembalikannya, berikan lagi di Orang dan peran.'],
+  revokeLinked: [
+    'The link between this person and the company sign-in is removed, and their sessions signed in through it end now.',
+    'Tautan antara orang ini dan masuk perusahaan dihapus, dan sesinya yang masuk melalui tautan itu diakhiri sekarang.',
+  ],
+  revokeGuest: ['The auditor is signed out now and can no longer sign in with this grant.', 'Sesi auditor diakhiri sekarang dan auditor tidak dapat lagi masuk dengan akses ini.'],
   applied: ['Recorded', 'Dicatat'],
   markApplied: ['Mark as applied', 'Tandai sudah diterapkan'],
   notApplied: ['Not applied', 'Tidak diterapkan'],
@@ -189,8 +223,8 @@ export const TEXT = {
   explainedBy: ['recorded by {name}', 'dicatat oleh {name}'],
   secondReviewerTitle: ['Nobody else could review some access', 'Sebagian akses tidak dapat ditinjau orang lain'],
   singleAdmin: [
-    'Only one person holds the right to review this access, so nobody else reviewed their own access. Add a second reviewer for the next review. Not reviewed by a second person:',
-    'Hanya satu orang yang memegang hak untuk meninjau akses ini, sehingga tidak ada orang lain yang meninjau akses miliknya. Tambahkan peninjau kedua untuk tinjauan berikutnya. Tidak ditinjau oleh orang kedua:',
+    'Only one person can review this access, so nobody else checked that person\'s own access. Add a second reviewer before the next review. Not reviewed by a second person:',
+    'Hanya satu orang yang dapat meninjau akses ini, sehingga akses milik orang itu sendiri tidak diperiksa orang lain. Tambahkan peninjau kedua sebelum tinjauan berikutnya. Tidak ditinjau oleh orang kedua:',
   ],
   decideOneTitle: ['Decide on the access of {name}', 'Putuskan akses milik {name}'],
   decideManyTitle: ['Decide on {n} item(s)', 'Putuskan {n} item'],
@@ -220,8 +254,11 @@ export const TEXT = {
 
   // What holds up a step, refusals (sample build)
   blockNotOpen: ['The review is no longer open.', 'Tinjauan ini tidak lagi terbuka.'],
-  blockSignedOff: ['This part is signed off already.', 'Bagian ini sudah ditandatangani.'],
-  blockUndecided: ['Decide every item first (an item only its own person could decide may stay).', 'Putuskan setiap item terlebih dahulu (item yang hanya dapat diputuskan oleh orangnya sendiri boleh tetap).'],
+  blockSignedOff: ['This part is signed off already.', 'Bagian ini sudah disahkan.'],
+  blockUndecided: [
+    'Decide every item first. Only items about the access of the system\'s only reviewer may stay open, because nobody else can decide them.',
+    'Putuskan setiap item terlebih dahulu. Hanya item tentang akses satu-satunya peninjau yang boleh tetap terbuka, karena tidak ada orang lain yang dapat memutuskannya.',
+  ],
   cannotComplete: ['The review cannot be completed yet:', 'Tinjauan belum dapat diselesaikan:'],
   openExists: ['An access review is already open. Complete or cancel it before you start another one.', 'Tinjauan akses sudah dibuka. Selesaikan atau batalkan sebelum memulai yang lain.'],
   notFound: ['This item no longer exists.', 'Item ini sudah tidak ada.'],
@@ -239,8 +276,11 @@ export const TEXT = {
   recordedNotApplied: ['Recorded as not applied', 'Dicatat sebagai tidak diterapkan'],
   okRole: ['Role revoked', 'Peran dicabut'],
   okAdminRole: ['Admin role removed', 'Peran admin dihapus'],
-  okMembership: ['Membership disabled; the person was signed out of this organisation', 'Keanggotaan dinonaktifkan; orang tersebut telah dikeluarkan dari organisasi ini'],
+  okMembership: ['Membership disabled; the person was signed out of this organisation', 'Keanggotaan dinonaktifkan; sesi orang tersebut di organisasi ini telah diakhiri'],
   okLinked: ['Linked sign-in removed', 'Masuk tertaut dihapus'],
-  okGuest: ['Guest access revoked; the auditor was signed out', 'Akses tamu dicabut; auditor telah dikeluarkan'],
-  changedMeanwhile: ['The schedule was changed meanwhile. Close the form and open it again.', 'Jadwal diubah sementara itu. Tutup formulir lalu buka kembali.'],
+  okGuest: ['Guest access revoked; the auditor was signed out', 'Akses tamu dicabut; sesi auditor telah diakhiri'],
+  changedMeanwhile: [
+    'Someone else changed the schedule while this form was open. Close the form and open it again.',
+    'Jadwal telah diubah orang lain saat formulir ini terbuka. Tutup formulir lalu buka kembali.',
+  ],
 } as const satisfies Record<string, readonly [string, string]>;

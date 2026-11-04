@@ -2,7 +2,10 @@
 // (api.ts in API builds, sample.ts in the sample build, chosen by the build in adapter.ts): the confirmation requests of
 // a system with their totals, one request with the person list where the permission allows (product decisions 2 and
 // 3), a request by hand, reminders, close and file as evidence, the register as CSV, and the read confirmation
-// settings of a document. Types only from @mscd/shared (R-17).
+// settings of a document. Types only from @mscd/shared (R-17). M3-14: each person has the day they were added and their
+// own due date (newcomers join an open request), the excusal reasons stored by the server show in English and
+// Indonesian, and the close dialog proposes the evidence item of the policy and warns about another policy's register;
+// the register of a later request of a version also lists the confirmations of the earlier ones.
 import type { AcknowledgementRole, AcknowledgementScope } from '@mscd/shared';
 import type { ApiError } from '../../data/api/ApiClient';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
@@ -75,6 +78,10 @@ export interface PersonRow {
   reminderCount: number;
   excusedReason: string | null;
   overdue: boolean;
+  /** The day the person was added to the request (its start, or the day a newcomer joined, M3-14). */
+  addedOn: string;
+  /** The person's own due date: `addedOn` plus the request's period. */
+  dueOn: string;
 }
 
 /** A request with its person list; `people` is absent without `audit.pending.all`. */
@@ -168,6 +175,30 @@ export function audienceText(ctx: Pick<HostContext, 'li' | 'fill'>, scope: Ackno
   return ctx.li(scope === 'organisation' ? TEXT.scopeOrganisation : TEXT.scopeSystemRoles);
 }
 
+/**
+ * The excusal reasons the server stores (`acknowledgement.excused_reason`, in English: the acknowledgement module and
+ * the erasure of the privacy module) with their English and Indonesian texts (M3-14, texts B4). The stored values stay
+ * as they are; "Replaced by version {v}" carries the version.
+ */
+export const EXCUSED_REASONS: Readonly<Record<string, TextPair>> = {
+  'Membership of the organisation ended': ['Membership of the organisation ended', 'Keanggotaan di organisasi telah berakhir'],
+  'No longer holds a role that is asked to confirm': ['No longer holds a role that is asked to confirm', 'Tidak lagi memegang peran yang diminta mengonfirmasi'],
+  'The document is restricted to its owner, Management System Managers and Programme Owners': [
+    'The document is restricted to its owner, Management System Managers and Programme Owners',
+    'Dokumen dibatasi untuk pemiliknya, Management System Manager, dan Pemilik Program',
+  ],
+  'The person was erased at their request': ['The person was erased at their request', 'Data pribadi orang tersebut dihapus atas permintaannya'],
+};
+
+/** The texts of a stored excusal reason; an unknown reason shows as stored, in both languages. */
+export function excusedReasonText(reason: string): TextPair {
+  const known = EXCUSED_REASONS[reason];
+  if (known) return known;
+  const replaced = /^Replaced by version (.+)$/.exec(reason);
+  if (replaced) return [`Replaced by version ${replaced[1]}`, `Diganti oleh versi ${replaced[1]}`];
+  return [reason, reason];
+}
+
 /** The tone and label of a person's status (overdue for a pending person past the due date). */
 export function personStatus(p: Pick<PersonRow, 'status' | 'overdue'>): { tone: Tone; label: TextPair } {
   if (p.status === 'confirmed') return { tone: 'ok', label: TEXT.personConfirmed };
@@ -200,6 +231,48 @@ export function approvedDocuments(D: ControllerData | null, ms: MsId): { code: s
     .filter((d) => d.st === 'approved' && d.ver && d.ver !== '-')
     .map((d) => ({ code: d.id, title: d.title, version: d.ver }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+
+/**
+ * The evidence item proposed when a request of document `code` closes (M3-14, ISO review m3): the item the newest
+ * earlier request of the same document was filed to, so each policy keeps its own item; null without one.
+ */
+export function proposedEvidenceId(rows: readonly RequestRow[], code: string, exceptId: string): string | null {
+  return requestsOf(rows, code).find((r) => r.id !== exceptId && r.evidenceId)?.evidenceId ?? null;
+}
+
+/**
+ * The code of another document whose register was filed to the evidence item `evidenceId`, from the request list of
+ * the system (newest first); null when the item holds no other document's register (M3-14, ISO review m3).
+ */
+export function otherRegisterOf(rows: readonly RequestRow[], evidenceId: string | null, code: string): string | null {
+  if (!evidenceId) return null;
+  const hit = [...rows]
+    .filter((r) => r.evidenceId === evidenceId && r.document.code !== code)
+    .sort((a, b) => (b.closedAt ?? b.createdAt).localeCompare(a.closedAt ?? a.createdAt))[0];
+  return hit ? hit.document.code : null;
+}
+
+/**
+ * How many people confirmed the version of `row` in earlier requests of the system's list (the same version, opened
+ * before it). The register of `row` lists them too, so its file holds every confirmation of the version (M3-14); 0
+ * without such a request. A person confirms a version once: a later request of it never asks them again.
+ */
+export function earlierConfirmedOf(rows: readonly RequestRow[], row: RequestRow): number {
+  return rows
+    .filter((r) => r.id !== row.id && r.version.id === row.version.id && r.createdAt < row.createdAt)
+    .reduce((n, r) => n + r.totals.confirmed, 0);
+}
+
+/**
+ * Whether "Ask the people who have not confirmed" fits a closed request (M3-14): the manager may ask, someone of the
+ * request did not confirm, its version is still the document's current approved version, and the document has no open
+ * request.
+ */
+export function mayAskAgain(rows: readonly RequestRow[], row: RequestRow, approved: readonly { code: string; version: string }[]): boolean {
+  if (row.status !== 'closed' || row.totals.confirmed >= row.totals.audience) return false;
+  if (!approved.some((d) => d.code === row.document.code && d.version === row.version.label)) return false;
+  return !rows.some((r) => r.document.code === row.document.code && r.status === 'open');
 }
 
 /** The evidence items of a system, for "Close and file as evidence". */

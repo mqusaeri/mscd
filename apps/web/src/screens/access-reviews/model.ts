@@ -2,7 +2,9 @@
 // (api.ts in API builds, sample.ts in the sample build), chosen by the build in adapter.ts (C.6). Shared by Access
 // reviews (`access-reviews`, the Tenant Admins) and Access review of this system (`access-review`, the Management
 // System Managers and Programme Owners of a system): item kinds, decisions and states with their texts, who may do
-// what, the checks of the forms, and what still holds up a sign-off or the completion.
+// what, the checks of the forms, and what still holds up a sign-off or the completion. M3-14: "Complete" names the
+// evidence item that receives the organisation part of the report (`CompleteChoice`), chosen from the evidence items of
+// every system (`ReviewDetail.evidenceOptions`), with the A.5.18 item of the first ISO/IEC 27001 system proposed.
 import type { ApiError, ApiResult } from '../../data/api/ApiClient';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { MsId } from '../../data/types';
@@ -123,7 +125,28 @@ export interface PartRow {
 
 export interface PartDetail extends PartRow {
   rows: ItemRow[];
-  suggestedEvidence: { id: string; code: string } | null;
+  /**
+   * The proposed evidence item: for a system part the A.5.18 item of the sign-off; for the organisation part the A.5.18
+   * item of the first ISO/IEC 27001 system, with that system (`ms`), proposed at "Complete" (M3-14).
+   */
+  suggestedEvidence: { id: string; code: string; ms?: MsId } | null;
+}
+
+/**
+ * An evidence item that can receive the organisation part at "Complete" (M3-14). `title` is null where the caller may
+ * not read it: an item of a system where they hold no role that reads it, unless it is evidence of access control.
+ */
+export interface CompleteEvidenceOption {
+  ms: MsId;
+  id: string;
+  code: string;
+  title: string | null;
+}
+
+/** The body of "Complete": the system and the evidence item of the organisation part (M3-14). */
+export interface CompleteChoice {
+  ms: MsId;
+  evidenceId: string;
 }
 
 export interface WarningRow {
@@ -136,6 +159,20 @@ export interface ReviewDetail extends ReviewRow {
   parts: PartRow[];
   pendingApplications: ItemRow[];
   warnings: WarningRow[];
+  /** While the review is open: the evidence items "Complete" can file the organisation part to (M3-14). */
+  evidenceOptions?: CompleteEvidenceOption[];
+}
+
+/** The key of an evidence item in the picker of "Complete": the system code and the item code, as `ISMS EV-0518`. */
+export function completeOptionKey(o: Pick<CompleteEvidenceOption, 'ms' | 'code'>): string {
+  return `${o.ms.toUpperCase()} ${o.code}`;
+}
+
+/** The option of "Complete" proposed first: the A.5.18 item of the organisation part when it is offered. */
+export function proposedCompleteOption(review: Pick<ReviewDetail, 'organisationPart' | 'evidenceOptions'>): CompleteEvidenceOption | null {
+  const s = review.organisationPart.suggestedEvidence;
+  if (!s) return null;
+  return (review.evidenceOptions ?? []).find((o) => o.id === s.id && (!s.ms || o.ms === s.ms)) ?? null;
 }
 
 export interface SettingsBody {
@@ -175,7 +212,8 @@ export interface AccessReviewsAdapter {
   get(id: string): Promise<Result<ReviewDetail>>;
   decide(id: string, itemId: string, body: DecideBody): Promise<Result<Outcome>>;
   apply(id: string, itemId: string, body: ApplyBody): Promise<Result<Outcome>>;
-  complete(id: string): Promise<Result<Outcome>>;
+  /** Completes the review, filing the organisation part to the chosen evidence item (M3-14). */
+  complete(id: string, choice: CompleteChoice): Promise<Result<Outcome>>;
   cancel(id: string, reason: string): Promise<Result<Outcome>>;
   report(review: Pick<ReviewRow, 'id' | 'reviewNo'>): Promise<Result<Download>>;
   msList(ms: MsId): Promise<Result<PartRow[]>>;

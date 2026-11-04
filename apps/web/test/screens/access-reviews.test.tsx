@@ -3,13 +3,16 @@
 // over a fake fetch (settings with If-Match, reviews, decisions, applying, completion, cancel, the report link, the
 // system routes and the evidence of the snapshot), the sample adapter (the open review, REVIEW-OWN-ACCESS, a second
 // reviewer, applying, completion refused while something waits and then completed, one open review at a time, the
-// report CSV), and the pages and dialogs in both languages and themes.
+// report CSV), and the pages and dialogs in both languages and themes. M3-14: "Complete" names the evidence item of the
+// organisation part (proposed: the A.5.18 item of the first ISO/IEC 27001 system) and is refused without one; a
+// revocation runs only from the "Revoke now" dialog, which says what happens per kind of access; the sign-off words.
+import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
 import type { AccessReviewDetail, AccessReviewItemView, AccessReviewPartDetail, AccessReviewSettings, AccessReviewSummary } from '@mscd/shared';
 import { ApiClient } from '../../src/data/api/ApiClient';
-import type { ControllerData } from '../../src/data/types';
+import type { ControllerData, MsId } from '../../src/data/types';
 import * as SAMPLE from '../../src/data/mscd-data.js';
 import { makeDates } from '../../src/data/dates.js';
 import { createSampleDataSource } from '../../src/data/SampleDataSource.js';
@@ -17,11 +20,13 @@ import { createApiAdapter, reportHref } from '../../src/screens/access-reviews/a
 import screen from '../../src/screens/access-reviews/index';
 import meta from '../../src/screens/access-reviews/meta.json';
 import {
-  DECISION_TEXT, FREQUENCIES, FREQUENCY_TEXT, ITEM_KINDS, KIND_TEXT, accessText, appliedText, completionBlocks, decisionBody, decisionErrors, formatDay, mayApplyOrg,
-  mayDecide, mayManage, mayRevokeGuest, myHandle, noReviewerParts, noteError, settingsBody, settingsErrors, signOffBlock, waitsForApplication,
+  DECISION_TEXT, FREQUENCIES, FREQUENCY_TEXT, ITEM_KINDS, KIND_TEXT, accessText, appliedText, completeOptionKey, completionBlocks, decisionBody, decisionErrors, formatDay,
+  mayApplyOrg, mayDecide, mayManage, mayRevokeGuest, myHandle, noReviewerParts, noteError, proposedCompleteOption, settingsBody, settingsErrors, signOffBlock,
+  waitsForApplication,
 } from '../../src/screens/access-reviews/model';
-import type { ItemRow, ReviewDetail } from '../../src/screens/access-reviews/model';
-import { ApplyNoteDialog, DecisionDialog, ItemsTable } from '../../src/screens/access-reviews/parts';
+import type { ItemRow, Outcome, Result, ReviewDetail } from '../../src/screens/access-reviews/model';
+import { ApplyNoteDialog, DecisionDialog, ItemsTable, RevokeDialog, revokeText } from '../../src/screens/access-reviews/parts';
+import { CompleteDialog } from '../../src/screens/access-reviews/review';
 import { ROUTES, ROUTE_IDS, pathOf } from '../../src/screens/access-reviews/routes';
 import { createSampleAdapter, resetSampleAccessReviews } from '../../src/screens/access-reviews/sample';
 import { SettingsDialog } from '../../src/screens/access-reviews/settings';
@@ -69,6 +74,57 @@ const DETAIL: AccessReviewDetail = {
   parts: [PART], pendingApplications: [ITEM], warnings: [{ rule: 'REVIEW-SINGLE-ADMIN', messages: { en: 'Only one reviewer', id: 'Hanya satu peninjau' } }],
 };
 const SETTINGS: AccessReviewSettings = { frequencyMonths: 3, nextDueOn: '2026-12-29', daysToComplete: 14, etag: 'W/"1793350800000"' };
+const EV_ID = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
+
+// ---------------------------------------------------------------------------------------------------------------
+// One call of a dialog without a DOM (as the M3-12 harness of findings.test.tsx): the web unit tests run in Node, so the
+// component is called as a function with a stand-in for React's hook dispatcher, and the returned element tree is
+// searched for the handlers a click would run.
+// ---------------------------------------------------------------------------------------------------------------
+
+type Found = React.ReactElement<Record<string, unknown>>;
+
+const dispatcherRef: { get(): unknown; set(d: unknown): void } = (() => {
+  const r19 = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  return { get: () => r19.H, set: (d) => { r19.H = d; } };
+})();
+
+/** Calls a function component once with hook stand-ins (state keeps its first value) and returns its element tree. */
+function callOnce<P>(component: (props: P) => React.ReactNode, props: P): React.ReactNode {
+  const dispatcher = {
+    useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => undefined],
+    useRef: (initial: unknown) => ({ current: initial }),
+    useEffect: () => undefined,
+    useLayoutEffect: () => undefined,
+    useMemo: (make: () => unknown) => make(),
+    useCallback: (fn: unknown) => fn,
+    useContext: (context: { _currentValue: unknown }) => context._currentValue,
+  };
+  const before = dispatcherRef.get();
+  dispatcherRef.set(dispatcher);
+  try {
+    return component(props);
+  } finally {
+    dispatcherRef.set(before);
+  }
+}
+
+/** Every element of a tree (props searched as well: children, footer and other element props). */
+function elementsOf(node: unknown, out: Found[] = []): Found[] {
+  if (Array.isArray(node)) node.forEach((n) => elementsOf(n, out));
+  else if (React.isValidElement(node)) {
+    out.push(node as Found);
+    for (const value of Object.values((node as Found).props)) elementsOf(value, out);
+  }
+  return out;
+}
+
+/** The button of a tree whose text is `text` (the children of the Button element). */
+function buttonOf(tree: React.ReactNode, text: string): Found {
+  const found = elementsOf(tree).filter((e) => typeof e.props.onClick === 'function' && e.props.children === text);
+  if (found.length !== 1) throw new Error(`${found.length} buttons read "${text}"`);
+  return found[0]!;
+}
 
 afterEach(() => {
   resetSampleAccessReviews();
@@ -218,8 +274,10 @@ describe('API adapter', () => {
     expect(calls[4]!.body).toEqual({ decision: 'keep' });
     const applied = await adapter.apply(ID, ITEM_ID, { action: 'apply' });
     expect(applied.ok && applied.data).toMatchObject({ message: ['Applied', 'Diterapkan'], changed: ['isms'], data: { appliedAction: 'role.revoked' } });
-    const done = await adapter.complete(ID);
+    const done = await adapter.complete(ID, { ms: 'isms', evidenceId: EV_ID });
     expect(done.ok && done.data.warnings).toEqual([{ rule: 'REVIEW-SINGLE-ADMIN', messages: { en: 'One reviewer', id: 'Satu peninjau' } }]);
+    // "Complete" sends the system and the evidence item of the organisation part (M3-14).
+    expect(calls.at(-1)).toMatchObject({ method: 'POST', body: { ms: 'isms', evidenceId: EV_ID } });
     expect((await adapter.cancel(ID, 'Started by mistake')).ok).toBe(true);
     expect(calls.at(-1)!.body).toEqual({ reason: 'Started by mistake' });
     const report = await adapter.report({ id: ID, reviewNo: 'AR-2026-02' });
@@ -235,7 +293,7 @@ describe('API adapter', () => {
       [`GET /api/v1/ms/isms/access-reviews/${ID}`]: json(part),
       [`POST /api/v1/ms/isms/access-reviews/${ID}/items/${ITEM_ID}/decision`]: json({ ok: true, changed: ['isms'] }),
       [`POST /api/v1/ms/isms/access-reviews/${ID}/items/${ITEM_ID}/apply`]: json({ ok: true, changed: ['isms'], data: { appliedAction: 'auditor_access.revoked' } }),
-      [`POST /api/v1/ms/isms/access-reviews/${ID}/sign-off`]: json({ ok: true, changed: ['isms'], message: ['ISMS signed off', 'ISMS ditandatangani'] }),
+      [`POST /api/v1/ms/isms/access-reviews/${ID}/sign-off`]: json({ ok: true, changed: ['isms'], message: ['ISMS signed off', 'ISMS disahkan'] }),
     }, () => d);
     const parts = await adapter.msList('isms');
     expect(parts.ok && parts.data[0]).toMatchObject({ reviewNo: 'AR-2026-02', status: 'open' });
@@ -245,11 +303,28 @@ describe('API adapter', () => {
     expect(calls[2]!.body).toEqual({ decision: 'change', note: 'End on 30 Nov' });
     expect((await adapter.msApply('isms', ID, ITEM_ID, { action: 'apply' })).ok).toBe(true);
     const signed = await adapter.signOff('isms', ID, '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e');
-    expect(signed.ok && signed.data.message).toEqual(['ISMS signed off', 'ISMS ditandatangani']);
+    expect(signed.ok && signed.data.message).toEqual(['ISMS signed off', 'ISMS disahkan']);
     expect(calls[4]!.body).toEqual({ evidenceId: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e' });
     await adapter.signOff('isms', ID, null);
     expect(calls[5]!.body).toEqual({});
     expect(adapter.evidence('isms').map((e) => e.code)).toEqual(['EV-0100', 'EV-0115']);
+  });
+
+  it('reads the evidence items of "Complete" and the proposed A.5.18 item of the organisation part (M3-14)', async () => {
+    const option = { ms: 'isms', id: EV_ID, code: 'EV-0115', title: 'Quarterly access rights review' };
+    const { adapter } = setup({
+      [`GET /api/v1/admin/access-reviews/${ID}`]: json({
+        ...DETAIL, organisationPart: { ...DETAIL.organisationPart, suggestedEvidence: { id: EV_ID, code: 'EV-0115', ms: 'isms' } },
+        evidenceOptions: [{ ms: 'qms', id: '3b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EQ-0100', title: 'Quality records' }, option],
+      }),
+    });
+    const got = await adapter.get(ID);
+    if (!got.ok) throw new Error('no detail');
+    expect(got.data.organisationPart.suggestedEvidence).toEqual({ id: EV_ID, code: 'EV-0115', ms: 'isms' });
+    expect(got.data.evidenceOptions).toHaveLength(2);
+    expect(proposedCompleteOption(got.data)).toEqual(option);
+    expect(completeOptionKey(option)).toBe('ISMS EV-0115');
+    expect(proposedCompleteOption({ ...got.data, organisationPart: { ...got.data.organisationPart, suggestedEvidence: null } })).toBeNull();
   });
 });
 
@@ -305,7 +380,13 @@ describe('sample adapter', () => {
   it('completes only when nothing waits, then refuses a second open review only while one is open', async () => {
     const a = adapter();
     const open = ((await a.list()) as { ok: true; data: { id: string }[] }).data[0]!.id;
-    const early = await a.complete(open);
+    const opened = (await a.get(open)) as { ok: true; data: ReviewDetail };
+    // The organisation part proposes the A.5.18 item of the ISMS (the first ISO/IEC 27001 system), from every system's items.
+    const proposed = proposedCompleteOption(opened.data)!;
+    expect(proposed).toMatchObject({ ms: 'isms' });
+    expect(new Set((opened.data.evidenceOptions ?? []).map((o) => o.ms)).size).toBe(D.MS.length);
+    const choice = { ms: proposed.ms, evidenceId: proposed.id };
+    const early = await a.complete(open, choice);
     expect(early.ok ? null : early.error.message[0]).toMatch(/^The review cannot be completed yet: Not signed off yet/);
     const detail = (await a.get(open)) as { ok: true; data: ReviewDetail };
     for (const row of detail.data.organisationPart.rows) if (!row.ownAccess && row.decision === null) expect((await a.decide(open, row.id, { decision: 'keep' })).ok).toBe(true);
@@ -321,8 +402,16 @@ describe('sample adapter', () => {
       expect((await a.signOff(p.ms!, open, null)).ok, p.ms!).toBe(true);
     }
     expect((await a.create('k')).ok).toBe(false);
-    const done = await a.complete(open);
-    expect(done.ok).toBe(true);
+    // Without an evidence item for the organisation part the completion is refused (M3-14).
+    const without = await a.complete(open, { ms: 'isms', evidenceId: '' });
+    expect(without.ok ? null : without.error).toMatchObject({ status: 422, messageKey: 'access_reviews.evidence_required' });
+    const done = await a.complete(open, choice);
+    expect(done.ok && done.data.message?.[0]).toMatch(new RegExp(`the organisation part was filed to ${proposed.code}`));
+    expect(done.ok && done.data.message?.[1]).toContain('disimpan sebagai bukti');
+    const completed = (await a.get(open)) as { ok: true; data: ReviewDetail };
+    expect(completed.data.organisationPart).toMatchObject({ status: 'signed_off', evidenceCode: proposed.code });
+    expect(completed.data.organisationPart.evidenceFiledAt).not.toBeNull();
+    expect(completed.data.evidenceOptions).toBeUndefined();
     const report = await a.report({ id: open, reviewNo: 'x' });
     expect(report.ok && report.data.fileName).toMatch(/^access-review-AR-\d{4}-03\.csv$/);
     const started = await a.create('k');
@@ -337,6 +426,105 @@ describe('sample adapter', () => {
     const saved = await a.putSettings({ frequencyMonths: 6, nextDueOn: '2099-01-01', daysToComplete: 21 }, s.data.etag);
     expect(saved.ok && saved.data).toMatchObject({ frequencyMonths: 6, daysToComplete: 21 });
     expect((await a.putSettings({ frequencyMonths: 6, nextDueOn: '2099-01-01', daysToComplete: 21 }, s.data.etag)).ok).toBe(false);
+  });
+});
+
+describe('the revoke dialog (M3-14, texts D1)', () => {
+  const ok: Result<Outcome> = { ok: true, data: { message: null, warnings: [], changed: [], data: null } };
+  const base = { ...(ITEM as ItemRow) };
+
+  it('says what happens for each kind of access, and the call runs only from "Revoke now"', async () => {
+    const texts = {
+      membership: TEXT.revokeMembership, admin_role: TEXT.revokeRole, business_role: TEXT.revokeRole, linked_sign_in: TEXT.revokeLinked, auditor_access: TEXT.revokeGuest,
+    } as const;
+    for (const kind of ITEM_KINDS) {
+      expect(revokeText({ kind }), kind).toBe(texts[kind]);
+      for (const lang of ['en', 'id'] as const) {
+        const ctx = ctxOf(lang);
+        const row = { ...base, kind, role: kind === 'membership' ? 'active' : kind === 'admin_role' ? 'tenant_admin' : base.role };
+        const html = render(<RevokeDialog ctx={ctx} row={row} run={async () => ok} onClose={() => undefined} onDone={() => undefined} />, ctx);
+        expect(html, kind).toContain(ctx.fill(TEXT.revokeTitle, { access: accessText(row, ctx.li), name: 'Bagus Prasetyo' }).replace(/'/g, '&#x27;'));
+        expect(html, kind).toContain(ctx.fill(texts[kind], { name: 'Bagus Prasetyo' }).replace(/'/g, '&#x27;'));
+        expect(html, kind).toContain(`data-revoke-kind="${kind}"`);
+        expect(html, kind).toContain(ctx.li(TEXT.apply));
+        expect(html).not.toMatch(FORBIDDEN);
+      }
+    }
+    // Cancel calls nothing; "Revoke now" runs the call once.
+    const ctx = ctxOf('en');
+    const run = vi.fn(async () => ok);
+    const onClose = vi.fn();
+    const onDone = vi.fn();
+    const tree = callOnce(RevokeDialog, { ctx, row: { ...base, kind: 'membership', role: 'active' }, run, onClose, onDone });
+    (buttonOf(tree, 'Cancel').props.onClick as () => void)();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    (buttonOf(tree, 'Revoke now').props.onClick as () => void)();
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith(ok.ok ? ok.data : null));
+  });
+
+  it('uses "Revoke now" and the Indonesian sign-off words of the reviews (texts D1 to D8, ISO o12)', () => {
+    expect(TEXT.apply).toEqual(['Revoke now', 'Cabut sekarang']);
+    expect(TEXT.markApplied[0]).toBe('Mark as applied');
+    expect(TEXT.psSignedOff[1]).toBe('Disahkan');
+    expect(TEXT.bySchedule).toEqual(['on schedule', 'sesuai jadwal']);
+    expect(TEXT.filedAt).toEqual(['Filed as evidence {at}', 'Disimpan sebagai bukti {at}']);
+    expect(TEXT.okMembership[1]).toBe('Keanggotaan dinonaktifkan; sesi orang tersebut di organisasi ini telah diakhiri');
+    expect(TEXT.okGuest[1]).toBe('Akses tamu dicabut; sesi auditor telah diakhiri');
+    expect(TEXT.teraWhat[0]).toContain('who can access what');
+    expect(TEXT.teraWhat[0]).toContain('ISO/IEC 27002');
+    expect(JSON.stringify(TEXT)).not.toMatch(/[Tt]anda ?tangan|dikeluarkan|[Dd]iarsipkan/);
+  });
+});
+
+describe('the Complete dialog (M3-14, ISO review m1)', () => {
+  it('proposes the A.5.18 item, sends the chosen item, and says when no system has an evidence item', async () => {
+    const a = createSampleAdapter(() => D, () => 'ndt', () => 'rina');
+    const open = ((await a.list()) as { ok: true; data: { id: string }[] }).data[0]!.id;
+    const review = ((await a.get(open)) as { ok: true; data: ReviewDetail }).data;
+    const proposed = proposedCompleteOption(review)!;
+    for (const lang of ['en', 'id'] as const) {
+      for (const theme of ['light', 'dark'] as const) {
+        const ctx = ctxOf(lang);
+        const html = render(<CompleteDialog ctx={ctx} review={review} onClose={() => undefined} onDone={() => undefined} />, ctx, theme);
+        for (const p of [TEXT.completeEvidence, TEXT.complete]) expect(html, p[0]).toContain(ctx.li(p));
+        expect(html).toContain(ctx.fill(TEXT.completeTitle, { no: review.reviewNo }));
+        expect(html).toMatch(new RegExp(`aria-selected="true"[^>]*>(<span>)?<span class="mx-mono"[^>]*>${completeOptionKey(proposed)}<`));
+        expect(html).not.toMatch(FORBIDDEN);
+        const none = render(<CompleteDialog ctx={ctx} review={{ ...review, evidenceOptions: [] }} onClose={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(none).toContain(ctx.li(TEXT.completeNoEvidence).replace(/'/g, '&#x27;'));
+        // rina manages every system, so every item shows its title.
+        expect(html).not.toContain(ctx.li(TEXT.completeCodesOnly));
+      }
+    }
+  });
+
+  it('lists the items of systems the person cannot read by code only, except the evidence of access control', async () => {
+    // A Tenant Admin without a business role (finding of the M3-14 check: titles are business data).
+    const a = createSampleAdapter(() => D, () => 'ndt', () => 'tenant.admin');
+    const open = ((await a.list()) as { ok: true; data: { id: string }[] }).data[0]!.id;
+    const review = ((await a.get(open)) as { ok: true; data: ReviewDetail }).data;
+    const options = review.evidenceOptions ?? [];
+    const controlOf = (o: { ms: string; code: string }) => D.bundles?.[o.ms as MsId]?.evs.find((e) => e.code === o.code)?.ctrl ?? '';
+    expect(options.some((o) => o.title === null)).toBe(true);
+    expect(options.filter((o) => o.title !== null).map(controlOf).every((c) => ['A.5.15', 'A.5.18', 'A.8.2'].includes(c))).toBe(true);
+    expect(options.filter((o) => o.title === null).map(controlOf).some((c) => ['A.5.15', 'A.5.18', 'A.8.2'].includes(c))).toBe(false);
+    const proposed = proposedCompleteOption(review)!;
+    expect(proposed.title).not.toBeNull();
+    const hidden = options.find((o) => o.title === null)!;
+    const titleOf = (o: { ms: string; code: string }) => D.bundles?.[o.ms as MsId]?.evs.find((e) => e.code === o.code)?.title ?? '';
+    for (const lang of ['en', 'id'] as const) {
+      for (const theme of ['light', 'dark'] as const) {
+        const ctx = ctxOf(lang);
+        const html = render(<CompleteDialog ctx={ctx} review={review} onClose={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(html).toContain(ctx.li(TEXT.completeCodesOnly));
+        expect(html).toContain(ctx.li(TEXT.titleHidden));
+        expect(html).toContain(`>${completeOptionKey(hidden)}<`);
+        expect(html).toContain(titleOf(proposed));
+        expect(html).not.toMatch(FORBIDDEN);
+      }
+    }
   });
 });
 

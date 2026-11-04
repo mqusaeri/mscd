@@ -11,8 +11,8 @@ export const TEXT = {
     'Baca total sistem yang dipilih di bagian atas: item terbuka, item yang terlambat atau hilang, dan item yang masih tepat waktu.',
   ],
   teraHow2: [
-    'The table splits the open items by chain stage and by the business role of the person who holds them. Unassigned items, and holders without a role in the system, count under "No role or unassigned".',
-    'Tabel membagi item terbuka per tahap rantai dan per peran bisnis orang yang memegangnya. Item yang belum ditugaskan, dan pemegang tanpa peran di sistem ini, dihitung pada "Tanpa peran atau belum ditugaskan".',
+    'The table splits the open items by chain stage and by the business role of the person who holds them. Roles held by only one person in the system are counted together under "Other roles" and are not named. Unassigned items, and holders without a role in the system, count under "No role or unassigned".',
+    'Tabel membagi item terbuka per tahap rantai dan per peran bisnis orang yang memegangnya. Peran yang hanya dipegang satu orang di sistem ini dihitung bersama pada "Peran lainnya", tanpa nama perannya. Item yang belum ditugaskan, dan pemegang tanpa peran di sistem ini, dihitung pada "Tanpa peran atau belum ditugaskan".',
   ],
   teraHow3: [
     'Open "All my systems" to compare every system where you see these totals, then choose "Show table" to read the table of one system.',
@@ -48,6 +48,11 @@ export const TEXT = {
   colAllRoles: ['All roles', 'Semua peran'],
   rowAllStages: ['All stages', 'Semua tahap'],
   noRole: ['No role or unassigned', 'Tanpa peran atau belum ditugaskan'],
+  otherRoles: ['Other roles', 'Peran lainnya'],
+  otherRolesNote: [
+    'Roles held by only one person in this system are counted together under "Other roles" and are not named.',
+    'Peran yang hanya dipegang satu orang di sistem ini dihitung bersama pada "Peran lainnya", tanpa nama perannya.',
+  ],
   overdueCount: ['{n} overdue', '{n} terlambat'],
 
   emptyTitle: ['No open work in {system}', 'Tidak ada pekerjaan terbuka di {system}'],
@@ -78,8 +83,8 @@ export const TEXT = {
     'Total beberapa sistem tidak dapat dimuat, sehingga jumlahnya hanya mencakup sistem lainnya.',
   ],
   noSystems: [
-    'You do not see the open work totals of any management system.',
-    'Anda tidak melihat total pekerjaan terbuka dari sistem manajemen mana pun.',
+    'You have no access to the open work totals of any management system.',
+    'Anda tidak memiliki akses ke total pekerjaan terbuka sistem manajemen mana pun.',
   ],
 
   loadFailed: ['The open work totals could not be loaded.', 'Total pekerjaan terbuka tidak dapat dimuat.'],

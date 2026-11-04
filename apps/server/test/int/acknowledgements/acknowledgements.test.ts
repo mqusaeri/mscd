@@ -27,6 +27,9 @@ import {
 const REQUESTS = (ms: string) => `/api/v1/ms/${ms}/acknowledgement-requests`;
 const DOC = (ms: string, id: string) => `/api/v1/ms/${ms}/documents/${id}`;
 const SETTINGS = { required: true, scope: 'system_roles', roles: null, dueDays: 14 } as const;
+/** The header of the register CSV (M3-14, ISO review o1 and o2). */
+const REGISTER_HEADER = 'Document,Title,Version,Version approved on,Version SHA-256,User name,Name,Roles,Request opened on,Added on,Due date,Status,'
+  + 'Opened at (link issued by MSCD),Confirmed at,Statement confirmed,Reminders,Overdue,Excused reason';
 
 describe('read confirmation of policies (Milestone 3 D.7)', () => {
   const db = useTestDatabase('demo');
@@ -230,7 +233,7 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect(full.status).toBe(200);
       expect(AcknowledgementRequestDetail.safeParse(full.body).success).toBe(true);
       const bagusLine = full.body.people!.find((p) => p.person.handle === 'bagus');
-      expect(bagusLine).toMatchObject({ person: { displayName: 'Bagus Prasetyo' }, status: 'confirmed', openedAt: expect.any(String), confirmedAt: expect.any(String), overdue: false });
+      expect(bagusLine).toMatchObject({ person: { displayName: 'Bagus Prasetyo' }, status: 'confirmed', openedAt: expect.any(String), confirmedAt: expect.any(String), overdue: false, dueOn: '2026-10-13' });
       const totals = await hendra.get<AcknowledgementRequestDetail>(`${REQUESTS('isms')}/${pol14Request}`);
       expect(totals.status).toBe(200);
       expect(totals.body.people).toBeUndefined();
@@ -264,8 +267,13 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect(String(csv.headers['content-type'])).toContain('text/csv');
       expect(String(csv.headers['content-disposition'])).toContain('read-confirmations-POL-14-v2.0-2026-09-29.csv');
       const lines = csv.text.trim().split(/\r\n/);
-      expect(lines[0]).toBe('Document,Title,Version,Due date,User name,Name,Status,Opened at,Confirmed at,Reminders,Overdue,Excused reason');
-      expect(lines.find((l) => l.includes(',bagus,'))).toMatch(/^POL-14,.+,2\.0,2026-10-13,bagus,Bagus Prasetyo,confirmed,\d{4}-.+,\d{4}-.+,0,no,$/);
+      expect(lines[0]).toBe(REGISTER_HEADER);
+      // The version's approval date and fingerprint, the person's roles in the document's systems, the day the request
+      // opened, the day they were added, their own due date and the statement they confirmed (M3-14).
+      expect(lines.find((l) => l.includes(',bagus,'))).toMatch(
+        /^POL-14,.+,2\.0,(\d{4}-\d{2}-\d{2})?,[^,]*,bagus,Bagus Prasetyo,"?ISMS: [^"]*Domain Owner[^"]*"?,\d{4}-\d{2}-\d{2},\d{4}-\d{2}-\d{2},2026-10-13,confirmed,\d{4}-[^,]+,\d{4}-[^,]+,I have read and understood this document,0,no,$/,
+      );
+      expect(lines.filter((l) => l.includes(',pending,')).every((l) => !l.includes('I have read and understood this document'))).toBe(true);
       expect(lines).toHaveLength((await expectedAudience(db, 'ndt', ['isms'])).length + 1);
       expect((await hendra.get(`${REQUESTS('isms')}/${pol14Request}/export`)).status).toBe(403);
     });
@@ -420,7 +428,7 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect(after!.storage_object_id).not.toBe(evidence!.storage_object_id);
       const content = await rina.get(`/api/v1/storage/objects/${after!.storage_object_id}/content?ms=qms`);
       expect(content.status).toBe(200);
-      expect(content.text.split(/\r\n/)[0]).toBe('Document,Title,Version,Due date,User name,Name,Status,Opened at,Confirmed at,Reminders,Overdue,Excused reason');
+      expect(content.text.split(/\r\n/)[0]).toBe(REGISTER_HEADER);
       expect(content.text).toContain('QM-01');
       const [request] = await rowsOf<{ status: string; evidence_id: string }>(db, 'ndt', sql`select status, evidence_id from acknowledgement_request where id = ${qmRequest}`);
       expect(request).toEqual({ status: 'closed', evidence_id: evidence!.id });
@@ -448,6 +456,43 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       const again = await hendra.post<ObjectOpenResponse>(`/api/v1/me/acknowledgements/${hendraDone!.id}/open`);
       expect(again.status, again.text).toBe(200);
       expect((await hendra.get(again.body.url)).status).toBe(200);
+    });
+
+    it('asks again the people who did not confirm, and files a register that also lists the earlier confirmations of the version (M3-14)', async () => {
+      const qm01 = await documentOf(db, 'ndt', 'QM-01');
+      const [first] = await rowsOf<{ evidence_id: string; opened_on: string }>(db, 'ndt', sql`
+        select evidence_id, (timezone('Asia/Jakarta', created_at))::date::text as opened_on from acknowledgement_request where id = ${qmRequest}`);
+      const earlier = await peopleOfRequest(db, 'ndt', qmRequest);
+      const confirmed = earlier.filter((p) => p.status === 'confirmed').map((p) => p.handle);
+      expect(confirmed).toContain('hendra');
+      // "Ask the people who have not confirmed": a new request of the same version asks only the others.
+      const again = await rina.post(REQUESTS('qms'), { documentId: qm01.id });
+      expect(again.status, again.text).toBe(201);
+      const reAsk = again.body.data.id as string;
+      const asked = (await peopleOfRequest(db, 'ndt', reAsk)).map((p) => p.handle);
+      expect(asked.length).toBeGreaterThan(0);
+      for (const handle of confirmed) expect(asked).not.toContain(handle);
+      // The person list of the new request shows only its own people.
+      const detail = (await rina.get<AcknowledgementRequestDetail>(`${REQUESTS('qms')}/${reAsk}`)).body;
+      expect(detail.people!.map((p) => p.person.handle).sort()).toEqual([...asked].sort());
+
+      // Filed to the same evidence item, the new current file holds every confirmation of the version: the people of
+      // the new request and the people who confirmed in the first one, with the day that request opened.
+      const closed = await rina.post(`${REQUESTS('qms')}/${reAsk}/close`, { evidenceId: first!.evidence_id });
+      expect(closed.status, closed.text).toBe(200);
+      const [evidence] = await rowsOf<{ storage_object_id: string }>(db, 'ndt', sql`select storage_object_id from evidence where id = ${first!.evidence_id}`);
+      expect(evidence!.storage_object_id).toBe(closed.body.data.storageObjectId);
+      const content = await rina.get(`/api/v1/storage/objects/${evidence!.storage_object_id}/content?ms=qms`);
+      expect(content.status).toBe(200);
+      const lines = content.text.trim().split(/\r\n/);
+      expect(lines[0]).toBe(REGISTER_HEADER);
+      expect(lines).toHaveLength(1 + asked.length + confirmed.length);
+      const hendraLine = lines.find((l) => l.includes(',hendra,'));
+      expect(hendraLine).toMatch(new RegExp(`^QM-01,.+,5\\.1,.*,hendra,[^,]+,.*,${first!.opened_on},\\d{4}-\\d{2}-\\d{2},\\d{4}-\\d{2}-\\d{2},confirmed,[^,]*,\\d{4}-[^,]+,I have read and understood this document,`));
+      for (const handle of asked) expect(lines.filter((l) => l.includes(`,${handle},`))).toHaveLength(1);
+      // The register of the first request keeps its own people only.
+      const firstCsv = await rina.get(`${REQUESTS('qms')}/${qmRequest}/export`);
+      expect(firstCsv.text.trim().split(/\r\n/)).toHaveLength(1 + earlier.length);
     });
 
     it('refuses an evidence item of another system without closing the request', async () => {
@@ -619,7 +664,9 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       expect(after.find((p) => p.handle === 'yusuf')).toMatchObject({
         status: 'excused', excused_reason: 'The document is restricted to its owner, Management System Managers and Programme Owners',
       });
-      expect(after.filter((p) => p.status === 'pending').map((p) => p.handle)).toEqual(allowed.filter((h) => h !== 'yusuf'));
+      // andi, the new owner who holds a QMS role, now falls in the audience: the same run adds him (M3-14).
+      expect(run!.added).toBeGreaterThanOrEqual(1);
+      expect(after.filter((p) => p.status === 'pending').map((p) => p.handle)).toEqual([...allowed.filter((h) => h !== 'yusuf'), 'andi'].sort());
     });
   });
 
@@ -648,8 +695,9 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
       const domainOwners = await expectedAudience(db, 'ndt', ['isms'], ['domain_owner']);
       expect((await peopleOfRequest(db, 'ndt', id)).map((p) => p.handle)).toEqual(domainOwners);
       expect(domainOwners).toEqual(expect.arrayContaining(['bagus', 'dewi', 'fajar']));
-      // Started 7 days ago, due in 7 days: the early reminder is due today.
+      // Started 7 days ago, due in 7 days: the early reminder is due today (the rows were added with the request).
       await rowsOf(db, 'ndt', sql`update acknowledgement_request set created_at = '2026-09-22T03:00:00Z', due_on = '2026-10-06' where id = ${id} returning id`);
+      await rowsOf(db, 'ndt', sql`update acknowledgement set created_at = '2026-09-22T03:00:00Z' where acknowledgement_request_id = ${id} returning id`);
       const first = await job.run(ORG_IDS.ndt, undefined, TODAY);
       expect(first!.reminded).toBeGreaterThanOrEqual(domainOwners.length);
       expect((await peopleOfRequest(db, 'ndt', id)).every((p) => p.reminder_count === 1)).toBe(true);
@@ -685,6 +733,12 @@ describe('read confirmation of policies (Milestone 3 D.7)', () => {
         await inScope(db.migrator, { platformScope: true }, (trx) =>
           sql`update platform.org_membership set status = 'active' where user_id = ${fajar} and organization_id = ${ORG_IDS.ndt}`.execute(trx));
       }
+
+      // fajar's membership is active again: the next run asks him again in this request, from the day he came back with
+      // his own due date (M3-14). For the overdue check below he counts as added at the start.
+      await job.run(ORG_IDS.ndt, undefined, TODAY);
+      expect((await peopleOfRequest(db, 'ndt', id)).find((p) => p.handle === 'fajar')).toMatchObject({ status: 'pending', excused_reason: null, reminder_count: 0 });
+      await rowsOf(db, 'ndt', sql`update acknowledgement set created_at = '2026-09-22T03:00:00Z' where acknowledgement_request_id = ${id} returning id`);
 
       // Overdue: the system's Management System Managers get one digest notice per request.
       await rowsOf(db, 'ndt', sql`update acknowledgement_request set due_on = '2026-09-20' where id = ${id} returning id`);

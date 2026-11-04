@@ -22,7 +22,7 @@ import { extraPageActions, hasOpenConfirmations, layerItems } from '../../src/sc
 import { hostExtraActions, hostNav } from '../../src/screens/host';
 import { TEXT } from '../../src/screens/my-confirmations/text';
 import { createSampleAdapter as createRegisterAdapter } from '../../src/screens/acknowledgements/sample';
-import { resetSampleAcknowledgements } from '../../src/screens/acknowledgements/sample-store';
+import { resetSampleAcknowledgements, sampleState } from '../../src/screens/acknowledgements/sample-store';
 import { HostCtx } from '../../src/screens/ui';
 import type { HostContext, Lang } from '../../src/screens/types';
 import type { ControllerData } from '../../src/data/types';
@@ -116,20 +116,34 @@ describe('my confirmation sample adapter', () => {
     expect(openOf(start.data)).toEqual([]);
     expect(doneOf(start.data).map((c) => c.document.code)).toEqual(expect.arrayContaining(['POL-01']));
     const register = createRegisterAdapter({ getD: () => D, org: () => 'ndt' });
-    expect(await register.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 })).toMatchObject({ ok: true });
+    // POL-14's managers confirmed its current version in the seeded closed request, so they are not asked again (M3-14).
+    expect(await register.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 })).toMatchObject({ ok: false, error: { status: 422, messageKey: 'acknowledgements.everyone_confirmed' } });
+    expect(await register.ask('isms', { documentId: 'STD-05', scope: 'roles', roles: ['ms_manager'], dueDays: 7 })).toMatchObject({ ok: true });
     const after = await mine.mine();
     const open = after.ok ? openOf(after.data) : [];
-    expect(open.map((c) => [c.document.code, c.versionLabel, c.dueOn])).toEqual([['POL-14', '1.0', '2026-10-06']]);
+    expect(open.map((c) => [c.document.code, c.versionLabel, c.dueOn])).toEqual([['STD-05', '1.1', '2026-10-06']]);
     const id = open[0]!.id;
     expect(await mine.confirm(id)).toEqual({
       ok: false,
-      error: { status: 422, slug: 'business-rule', rule: 'ACK-OPEN-FIRST', messageKey: 'rule.ACK-OPEN-FIRST', message: [ACK_OPEN_FIRST[0].replace('{document}', 'POL-14'), ACK_OPEN_FIRST[1].replace('{document}', 'POL-14')] },
+      error: { status: 422, slug: 'business-rule', rule: 'ACK-OPEN-FIRST', messageKey: 'rule.ACK-OPEN-FIRST', message: [ACK_OPEN_FIRST[0].replace('{document}', 'STD-05'), ACK_OPEN_FIRST[1].replace('{document}', 'STD-05')] },
     });
     expect(await mine.open(id)).toEqual({ ok: true, data: { url: null } });
-    expect(await mine.confirm(id)).toMatchObject({ ok: true, data: { message: ['You confirmed POL-14 version 1.0', 'Anda telah mengonfirmasi POL-14 versi 1.0'] } });
+    expect(await mine.confirm(id)).toMatchObject({ ok: true, data: { message: ['You confirmed STD-05 version 1.1', 'Anda telah mengonfirmasi STD-05 versi 1.1'] } });
     expect(await mine.confirm(id)).toMatchObject({ ok: false, error: { messageKey: 'acknowledgements.confirmed' } });
     // Another persona's row is not theirs.
     expect(await createSampleAdapter(scope('bagus')).open(id)).toMatchObject({ ok: false, error: { status: 404 } });
+  });
+
+  it('gives a person who joined an open request their own due date (M3-14)', async () => {
+    const state = sampleState(D, 'ndt');
+    const open = state.requests.find((r) => r.status === 'open')!;
+    const newcomer = open.people.find((p) => p.addedOn !== open.createdAt.slice(0, 10))!;
+    const theirs = await createSampleAdapter(scope(newcomer.handle)).mine();
+    if (!theirs.ok) throw new Error('mine failed');
+    const item = theirs.data.find((c) => c.requestId === open.id)!;
+    // Added three days after the start: three days more than the request's due date.
+    expect(item.dueOn).toBe(new Date(Date.parse(`${open.dueOn}T00:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10));
+    expect(item.status).toBe('pending');
   });
 
   it('the build chooses the sample adapter; a deferred adapter retries a failed module load', async () => {
@@ -146,7 +160,7 @@ describe('the store and the banner', () => {
   it('loads the list of the session person and shows the banner until it is put off', async () => {
     const ctx = ctxOf('en');
     expect(keyOf(ctx)).toBe('rina:ndt');
-    await createRegisterAdapter({ getD: () => D, org: () => 'ndt' }).ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await createRegisterAdapter({ getD: () => D, org: () => 'ndt' }).ask('isms', { documentId: 'STD-06', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
     await loadConfirmations(ctx);
     expect(confirmationsState()).toMatchObject({ key: 'rina:ndt', loading: false, error: null });
     expect(confirmationsState().items!.filter((c) => c.status === 'pending')).toHaveLength(1);
@@ -171,7 +185,7 @@ describe('the store and the banner', () => {
   for (const lang of ['en', 'id'] as Lang[]) {
     it(`the banner of several confirmations in ${lang}`, async () => {
       const register = createRegisterAdapter({ getD: () => D, org: () => 'ndt' });
-      await register.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+      await register.ask('isms', { documentId: 'STD-06', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
       await register.ask('isms', { documentId: 'STD-05', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
       const ctx = ctxOf(lang);
       await loadConfirmations(ctx);
@@ -220,6 +234,12 @@ describe('my confirmation views', () => {
     }
   });
 
+  it('names the 6 months of the done list and the due date in the words of the text review (M3-14: texts A6, B6)', () => {
+    expect(TEXT.doneSub).toEqual(['Your confirmations of the last 6 months', 'Konfirmasi Anda dalam 6 bulan terakhir']);
+    expect(TEXT.bannerOverdue[1]).toBe('{n} melewati tanggal jatuh tempo.');
+    expect(JSON.stringify(TEXT)).not.toMatch(/[Tt]enggat/);
+  });
+
   it('is in the My Tasks group of the sidebar for every business role (ms.read), after My Tasks', () => {
     expect(screen).toMatchObject({ id: 'my-confirmations', path: '/my-confirmations', group: 'tasks', order: 20, scope: 'ms', perm: 'ms.read', roles: ['manager', 'owner', 'auditor', 'top', 'sponsor', 'riskowner', 'investigator'] });
     expect(screen.nav).not.toBe(false);
@@ -237,7 +257,7 @@ describe('the sidebar entry and the link from My Tasks (C.2, C.5)', () => {
     const before = hostNav(tasksGroup, ctx, 'owner').find((g) => g.id === 'tasks')!;
     expect(before.items.map((i) => [i.id, i.n ?? 0])).toEqual([['mytasks', 0], ['my-confirmations', 0]]);
     const register = createRegisterAdapter({ getD: () => D, org: () => 'ndt' });
-    await register.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await register.ask('isms', { documentId: 'STD-06', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
     await register.ask('isms', { documentId: 'STD-05', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
     await loadConfirmations(ctx);
     expect(openConfirmationCount(ctx)).toBe(2);
@@ -262,7 +282,7 @@ describe('the sidebar entry and the link from My Tasks (C.2, C.5)', () => {
     const ctx = ctxOf('en', { screen: 'mytasks' });
     expect(hasOpenConfirmations(ctx)).toBe(false);
     expect(hostExtraActions('mytasks', ctx)).toEqual([]);
-    await createRegisterAdapter({ getD: () => D, org: () => 'ndt' }).ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    await createRegisterAdapter({ getD: () => D, org: () => 'ndt' }).ask('isms', { documentId: 'STD-06', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
     await loadConfirmations(ctx);
     expect(hasOpenConfirmations(ctx)).toBe(true);
     const [action] = hostExtraActions('mytasks', ctx);

@@ -5,9 +5,9 @@ import {
 // Access review of this system in the sample build (MILESTONE-3 M3-07, D.9), as rina, the only Management System
 // Manager of the ISMS: the ISMS part of the open review with its business roles and the guest auditor, rina's own role
 // that needs a second reviewer, a decision refused nowhere because her own row has no action, the guest grant decided
-// "revoke" and revoked with "Revoke guest access", "Sign off" disabled while items wait and then signed off with the
-// A.5.18 evidence item proposed, an earlier review chosen read-only, and the Indonesian screen. @sample-only: the API
-// project covers the screen in e2e/api-only/access-review.spec.js.
+// "revoke" and revoked with "Revoke guest access" and "Revoke now" in its dialog (M3-14), "Sign off" disabled while
+// items wait and then signed off with the A.5.18 evidence item proposed, an earlier review chosen read-only, and the
+// Indonesian screen with "Sahkan". @sample-only: the API project covers the screen in e2e/api-only/access-review.spec.js.
 const meta = metaById('access-review');
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -51,7 +51,16 @@ test.describe('Access review of this system @sample-only', () => {
     await dialog(page).locator('textarea[name="note"]').fill('The certification audit ended');
     await button(dialog(page), 'Save decision').click();
     await expectToast(page, 'Decision saved for 1 item(s)');
+    // The revocation asks first (M3-14): Cancel changes nothing, "Revoke now" revokes.
     await button(guest, 'Revoke guest access').click();
+    await expect(dialog(page)).toContainText('Revoke External Auditor of Eko Santoso?');
+    await expect(dialog(page)).toContainText('The auditor is signed out now and can no longer sign in with this grant.');
+    await inBothThemes(page, () => expectOverlayReadable(page));
+    await button(dialog(page), 'Cancel').click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(guest).not.toContainText('Applied');
+    await button(guest, 'Revoke guest access').click();
+    await button(dialog(page), 'Revoke now').click();
     await expectToast(page, 'Guest access revoked; the auditor was signed out');
     await expect(guest).toContainText('Applied');
 
@@ -89,6 +98,7 @@ test.describe('Access review of this system @sample-only', () => {
     await openScreen(page, meta, 'lang=id');
     await expect(page.locator('main h1')).toHaveText('Tinjauan akses sistem ini');
     await expect(card(page, '^Peran bisnis dan auditor tamu')).toContainText('Memerlukan peninjau kedua');
+    await expect(button(card(page, /^ISMS dalam tinjauan akses AR-\d{4}-03/), 'Sahkan')).toBeVisible();
     await expectReadableText(page, 4.5);
   });
 });

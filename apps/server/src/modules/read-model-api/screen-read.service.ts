@@ -113,7 +113,11 @@ export class ScreenReadService {
     const filter = { stage: query.stage, overdueOnly: query.overdue_only };
     if (query.aggregate === 'unit') {
       await this.require(principal, ms, 'audit.pending.aggregate', 'Pending counts per unit need audit.pending.aggregate');
-      return this.screen(principal, ms, lang, async (trx, d) => pendingAggregate(d, filter, await this.rolesByHandle(trx, d.system.id)));
+      const org = this.orgOf(principal);
+      return this.screen(principal, ms, lang, async (trx, d) => {
+        const roles = await this.rolesByHandle(trx, d.system.id);
+        return pendingAggregate(d, filter, roles, await this.activeHolders(trx, org.id, [...roles.keys()]));
+      });
     }
     if (query.owner) {
       if (query.owner !== principal.user.handle) {
@@ -240,6 +244,21 @@ export class ScreenReadService {
         and (r.valid_until is null or r.valid_until > ${this.clock.now()})
       group by u.handle`.execute(trx);
     return new Map(rows.map((r) => [r.handle, r.roles]));
+  }
+
+  /**
+   * The handles among `handles` with an active membership in the organisation and an active account: the people the
+   * pending aggregate counts as holders of a role (M3-14). A disabled member keeps their business roles (D.9) but no
+   * longer counts as a holder, so a role held by one active person and one leaver joins "Other roles".
+   */
+  private async activeHolders(trx: Trx, orgId: string, handles: readonly string[]): Promise<Set<string>> {
+    if (handles.length === 0) return new Set();
+    const { rows } = await sql<{ handle: string }>`
+      select u.handle
+      from platform.app_user u
+      join platform.org_membership m on m.user_id = u.id and m.organization_id = ${orgId}::uuid and m.deleted_at is null and m.status = 'active'
+      where u.handle = any(${[...handles]}::text[]) and u.deleted_at is null and u.status = 'active'`.execute(trx);
+    return new Set(rows.map((r) => r.handle));
   }
 
   /** Evidence ids by applicability entry of the system (`evidence_target`). */

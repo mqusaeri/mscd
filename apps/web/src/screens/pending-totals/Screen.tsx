@@ -1,6 +1,7 @@
 // Open work totals (MILESTONE-3 M3-08, D.10): how much work is open and overdue along the chain of a management
 // system, per chain stage and per business role, for Top Management, the Programme Owner and the Management System
-// Manager (`audit.pending.aggregate`). The page shows counts only: no name, holder or due date (product decision 2).
+// Manager (`audit.pending.aggregate`). The page shows counts only: no name, holder or due date (product decision 2). A
+// role held by one person in the system has no column of its own: it counts under "Other roles" (M3-14).
 //
 // Tab "This system": the totals of the selected system and the stage by role table, or the `all-done` scene when
 // nothing is open. Tab "All my systems": one row per system where the session holds the permission, from one call per
@@ -190,6 +191,7 @@ export function SystemView({ ctx, ms, rows }: { ctx: HostContext; ms: MsId; rows
       <SummaryCard ctx={ctx} ms={ms} total={total} lines={lines} />
       <Card title={TEXT.matrixTitle} sub={TEXT.matrixSub} flush>
         <StageRoleTable ctx={ctx} rows={rows} lines={lines} />
+        {roleColumns(rows).includes('other') ? <p className="mx-pt-note" style={{ padding: '10px 12px' }} data-other-note="">{ctx.li(TEXT.otherRolesNote)}</p> : null}
       </Card>
     </>
   );

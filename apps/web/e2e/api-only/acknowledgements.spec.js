@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import {
   test, expect, ui, go, openApp, openRow, listRow, switchMs, expectToast, expectOverlayReadable, expectReadableText, drawerAction,
 } from '../helpers.js';
@@ -11,7 +12,9 @@ import {
 // sees the totals only (product decision 2). hendra has no file rights in the QMS: he reaches "Policies to confirm" from
 // the sidebar, opens the version through his read confirmation (an address for him and that version only) and
 // confirms it. rina closes the request into the evidence item EQ-0136 (clause 7.3, awareness), which then holds a new
-// file. Every dialog is readable in both themes.
+// file, and asks the people who have not confirmed in a new request of the same version, which skips bagus and hendra
+// (M3-14). The person list shows the day each person was added and their own due date, and the register CSV has the
+// columns of M3-14. Every dialog is readable in both themes.
 const panel = (page) => ui.drawer(page).locator('[data-docs-edit]');
 const panelButton = (page, name) => panel(page).locator('button', { hasText: new RegExp(`^${name}$`) });
 const dialog = (page) => ui.modal(page).last();
@@ -185,6 +188,13 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await expect(ui.drawer(page)).toContainText(`QM-01 version ${version}`);
     await expect(ui.drawer(page).locator('[data-stat="confirmed"] [data-value]')).toHaveAttribute('data-value', '1');
     await expect(ui.drawer(page).locator('tbody tr', { hasText: 'Bagus Prasetyo' })).toContainText('Confirmed');
+    // Each person's day of joining the request and own due date (M3-14): everyone joined at the start, so each due date
+    // is the request's.
+    await expect(ui.drawer(page).locator('thead')).toContainText('Added on');
+    const bagusRow = ui.drawer(page).locator('tbody tr', { hasText: 'Bagus Prasetyo' });
+    await expect(bagusRow.locator('[data-added]')).toHaveAttribute('data-added', /^\d{4}-\d{2}-\d{2}$/);
+    await expect(bagusRow.locator('[data-due="2026-10-13"]')).toBeVisible();
+    await expect(ui.drawer(page).locator('[data-opened-note]')).toContainText('MSCD cannot see when the person read it');
     await inBothThemes(page, () => expectOverlayReadable(page));
     await page.keyboard.press('Escape');
     await expect(ui.drawer(page)).toHaveCount(0);
@@ -255,13 +265,50 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await dialog(page).locator('input[type="search"]').fill('EQ-0136');
     await dialog(page).locator('[role="option"]', { hasText: 'EQ-0136' }).click();
     await inBothThemes(page, () => expectOverlayReadable(page));
+    const firstClose = page.waitForResponse((r) => r.request().method() === 'POST' && /\/acknowledgement-requests\/[^/]+\/close$/.test(new URL(r.url()).pathname));
     await button(dialog(page), 'Close and file').click();
     await expectToast(page, 'Request closed. The register is filed as a new file of EQ-0136.');
+    const firstFile = (await (await firstClose).json()).data.storageObjectId;
+    expect(firstFile).toEqual(expect.any(String));
     await expect(ui.drawer(page)).toContainText('This request is closed. Reminders stopped.');
     await expect(ui.drawer(page)).toContainText('EQ-0136');
     await expect(button(ui.drawer(page), 'Remind')).toHaveCount(0);
     const after = (await snapshotOf(page, baseURL, 'qms')).evidence('EQ-0136');
     expect(after.hash).not.toBe(evidenceBefore.hash);
+
+    // "Ask the people who have not confirmed" (M3-14): a new request of the same version without bagus and hendra.
+    await button(ui.drawer(page), 'Ask the people who have not confirmed').click();
+    await expect(dialog(page)).toContainText('People who already confirmed this version are not asked again.');
+    await expect(dialog(page).locator('select[name="document"]')).toHaveValue('QM-01');
+    await button(dialog(page), 'Send the request').click();
+    const rest = audience - 2;
+    await expectToast(page, `Asked ${rest === 1 ? '1 person' : `${rest} people`} to confirm QM-01 version ${version}`);
+    const again = listOf(await apiGet(page, baseURL, '/api/v1/ms/qms/acknowledgement-requests')).find((r) => r.document.code === 'QM-01' && r.status === 'open');
+    expect(again.totals).toMatchObject({ audience: rest, confirmed: 0, pending: rest });
+    const people = (await apiGet(page, baseURL, `/api/v1/ms/qms/acknowledgement-requests/${again.id}`)).people.map((p) => p.person.handle);
+    expect(people).not.toContain('bagus');
+    expect(people).not.toContain('hendra');
+
+    // Its register also lists the two confirmations of the first request (M3-14): the drawer and the close dialog say
+    // so, and closing it into the proposed evidence item files a register with every confirmation of the version.
+    await requestRow(page, 'QM-01').click();
+    await expect(ui.drawer(page).locator('[data-earlier-note]')).toContainText(`confirmations of version ${version} from earlier requests (2)`);
+    const download = page.waitForEvent('download');
+    await button(ui.drawer(page), 'Export CSV').click();
+    const csv = await readFile(await (await download).path(), 'utf8');
+    expect(csv).toMatch(/,bagus,[^\r\n]*,confirmed,/);
+    expect(csv).toMatch(/,hendra,[^\r\n]*,confirmed,/);
+    expect(csv.trim().split(/\r?\n/)).toHaveLength(1 + rest + 2);
+    await button(ui.drawer(page), 'Close and file as evidence').click();
+    await expect(dialog(page).locator('[data-earlier-note]')).toContainText('from earlier requests (2)');
+    const secondClose = page.waitForResponse((r) => r.request().method() === 'POST' && /\/acknowledgement-requests\/[^/]+\/close$/.test(new URL(r.url()).pathname));
+    await button(dialog(page), 'Close and file').click();
+    await expectToast(page, 'Request closed. The register is filed as a new file of EQ-0136.');
+    // A new current file of the item. Without reminders and on the same day it has the same bytes as the first
+    // register: the same people, with bagus and hendra confirmed, so the hash of the item may stay as it was.
+    const secondFile = (await (await secondClose).json()).data.storageObjectId;
+    expect(secondFile).toEqual(expect.any(String));
+    expect(secondFile).not.toBe(firstFile);
   });
 
   test('"Ask for confirmation" sends the current version of an approved policy to the chosen roles, readable in both themes', async ({ page, baseURL }) => {
@@ -288,7 +335,12 @@ test.describe('Policy read confirmations against the api @api-only', () => {
     await expect(ui.drawer(page).locator('[data-person="hendra"]')).toHaveText('Hendra Wijaya');
     const download = page.waitForEvent('download');
     await button(ui.drawer(page), 'Export CSV').click();
-    expect((await download).suggestedFilename()).toBe('read-confirmations-POL-01-v4.0-2026-09-29.csv');
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('read-confirmations-POL-01-v4.0-2026-09-29.csv');
+    // The register columns of M3-14 (ISO review o1, o2): version approval date and SHA-256, roles, added on, statement.
+    const csv = (await readFile(await file.path(), 'utf8')).replace(/^\uFEFF/, '');
+    expect(csv.split(/\r?\n/)[0]).toBe('Document,Title,Version,Version approved on,Version SHA-256,User name,Name,Roles,Request opened on,Added on,Due date,Status,Opened at (link issued by MSCD),Confirmed at,Statement confirmed,Reminders,Overdue,Excused reason');
+    expect(csv).toMatch(/,hendra,Hendra Wijaya,"?ISMS: [^\r\n]*Top Management/);
     await inBothThemes(page, () => expectOverlayReadable(page));
   });
 });

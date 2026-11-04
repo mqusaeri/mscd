@@ -8,6 +8,14 @@
 // and the CSV only `audit.pending.all` (Management System Manager, Programme Owner). Top Management sees totals only;
 // Internal Auditors see neither and read the filed register as evidence. Restricted documents stay hidden from callers
 // who may not see them in the system (scope policy, F.7).
+//
+// M3-14: each person has their own due date (`personDueSql`: the day they were added plus the request's period), which
+// the overdue totals, the person list and the CSV use. The CSV also names the version's approval date and SHA-256
+// fingerprint, each person's business roles in the document's systems at the export, the day they were added and the
+// statement of a confirmed row; "Opened at" is when MSCD issued the link to the file. The register of a request (the CSV
+// and the file filed as evidence) also lists the people who confirmed the same version in an earlier request, with the
+// day that request opened, so the newest register of a version holds every confirmation of it ("Ask the people who
+// have not confirmed" asks only the others, and an evidence pack copies only the current file of an evidence item).
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   AcknowledgementPerson, AcknowledgementRequestClose, AcknowledgementRequestCreate, AcknowledgementRequestDetail, AcknowledgementRequestItem,
@@ -26,9 +34,9 @@ import {
 import { ScopePolicyService, type ScopeContext } from '../authz/scope-policy';
 import { FileCommandsService } from '../files/file-commands.service';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
-import { REFUSALS, REGISTER_COLUMNS, requestedNotice } from './acknowledgement-text';
+import { REFUSALS, REGISTER_COLUMNS, ROLE_NAMES, STATEMENT, requestedNotice } from './acknowledgement-text';
 import {
-  AcknowledgementService, closeTasks, conflict, documentRef, refusal, requestRef, requestVisibleIn, settingsOfRow,
+  AcknowledgementService, addedOnSql, closeTasks, conflict, documentRef, personDueSql, refusal, requestRef, requestVisibleIn, settingsOfRow,
 } from './acknowledgement.service';
 
 /** A request row with its document, version and totals. */
@@ -40,8 +48,13 @@ interface RequestRow {
   doc_code: string;
   title: string;
   classification: string;
+  is_org_wide: boolean;
   version_id: string;
   version_label: string;
+  /** The approval date of the version (`document_version.approved_at`). */
+  version_approved_on: string | null;
+  /** The SHA-256 fingerprint of the version's file, when its stored hash is one. */
+  version_sha256: string | null;
   status: 'open' | 'closed';
   audience_scope: AcknowledgementScope;
   audience_roles: AcknowledgementRole[] | null;
@@ -68,6 +81,11 @@ interface PersonRow {
   confirmed_at: Date | null;
   reminder_count: number;
   excused_reason: string | null;
+  /** The day the person was added (`addedOnSql`) and their own due date (`personDueSql`). */
+  added_on: string;
+  due_on: string;
+  /** The day the request of this row opened, in the organisation's time zone (an earlier request for an earlier confirmation). */
+  request_opened_on: string;
 }
 
 const iso = (value: Date | string | null): string | null => (value === null ? null : new Date(value).toISOString());
@@ -120,7 +138,7 @@ export class AcknowledgementRequestsService {
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const scope = await this.policy.scopeContext(trx, principal, ms);
-      const rows = await this.requestRows(trx, system.id, this.clock.todayIn(org.timeZone), null);
+      const rows = await this.requestRows(trx, system.id, this.clock.todayIn(org.timeZone), org.timeZone, null);
       return rows.filter((r) => this.policy.documentVisible(scope, r.doc_code)).map(requestItem);
     });
   }
@@ -186,11 +204,11 @@ export class AcknowledgementRequestsService {
     const withPeople = (await this.evaluator.evaluate(principal, 'audit.pending.all', { scope: 'ms', ms })) === 'full';
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const today = this.clock.todayIn(org.timeZone);
-      const row = await this.visibleRequest(trx, principal, ms, id, today);
+      const row = await this.visibleRequest(trx, principal, ms, id, today, org.timeZone);
       const item = requestItem(row);
       if (!withPeople) return item;
-      const people = await peopleOf(trx, id);
-      return { ...item, people: people.map((p) => personItem(p, row, today)) };
+      const people = await peopleOf(trx, id, org.timeZone);
+      return { ...item, people: people.map((p) => personItem(p, today)) };
     });
   }
 
@@ -203,12 +221,12 @@ export class AcknowledgementRequestsService {
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const today = this.clock.todayIn(org.timeZone);
-      const row = await this.visibleRequest(trx, principal, ms, id, today, { forUpdate: true });
+      const row = await this.visibleRequest(trx, principal, ms, id, today, org.timeZone, { forUpdate: true });
       if (row.status !== 'open') throw conflict(REFUSALS.requestClosed);
       if (row.last_reminded_at && localDate(new Date(row.last_reminded_at), org.timeZone) === localDate(this.clock.now(), org.timeZone)) {
         throw conflict(REFUSALS.remindedToday);
       }
-      const reminded = await remindPending(trx, this.notifications, row, actor);
+      const reminded = await remindPending(trx, this.notifications, row, actor, org.timeZone);
       if (reminded === 0) throw conflict(REFUSALS.nothingPending);
       await trx.updateTable('acknowledgement_request').set({ last_reminded_at: sql<Date>`now()`, updated_by: actor }).where('id', '=', id).execute();
       await this.audit.record(trx, {
@@ -241,14 +259,14 @@ export class AcknowledgementRequestsService {
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const today = this.clock.todayIn(org.timeZone);
-      const row = await this.visibleRequest(trx, principal, ms, id, today, { forUpdate: true });
+      const row = await this.visibleRequest(trx, principal, ms, id, today, org.timeZone, { forUpdate: true });
       if (row.status !== 'open') throw conflict(REFUSALS.requestClosed);
       const system = await this.records.resolveMs(trx, ms);
       const changed = new Set<string>([ms]);
       let filed: { evidenceCode: string; storageObjectId: string; versionLabel: string | null; warnings: CommandResult['warnings'] } | null = null;
       if (body.evidenceId) {
-        const people = await peopleOf(trx, id);
-        const csv = registerCsv(row, people, today);
+        const people = await peopleOf(trx, id, org.timeZone, { earlierConfirmations: true });
+        const csv = registerCsv(row, people, today, await rolesOfPeople(trx, row, people.map((p) => p.user_id)));
         const fileName = registerFileName(row, today);
         const result = await this.files.fileGeneratedEvidence(trx, { userId: actor, kind: 'user' }, {
           msId: system.id,
@@ -312,10 +330,11 @@ export class AcknowledgementRequestsService {
     const org = orgOf(principal);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const today = this.clock.todayIn(org.timeZone);
-      const row = await this.visibleRequest(trx, principal, ms, id, today);
-      const people = await peopleOf(trx, id);
+      const row = await this.visibleRequest(trx, principal, ms, id, today, org.timeZone);
+      const people = await peopleOf(trx, id, org.timeZone, { earlierConfirmations: true });
       const system = await this.records.resolveMs(trx, ms);
-      return { csv: registerCsv(row, people, today), fileName: registerFileName(row, today), msId: system.id, code: row.doc_code };
+      const roles = await rolesOfPeople(trx, row, people.map((p) => p.user_id));
+      return { csv: registerCsv(row, people, today, roles), fileName: registerFileName(row, today), msId: system.id, code: row.doc_code };
     });
   }
 
@@ -341,38 +360,46 @@ export class AcknowledgementRequestsService {
   }
 
   /** The request `id` as the system `ms` shows it, with its totals; 404 when it does not show there. */
-  private async visibleRequest(trx: Trx, principal: Principal, ms: string, id: string, today: string, options: { forUpdate?: boolean } = {}): Promise<RequestRow> {
+  private async visibleRequest(
+    trx: Trx, principal: Principal, ms: string, id: string, today: string, timeZone: string, options: { forUpdate?: boolean } = {},
+  ): Promise<RequestRow> {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundError();
     const system = await this.records.resolveMs(trx, ms);
     if (options.forUpdate) {
       await sql`select id from acknowledgement_request where id = ${id}::uuid and deleted_at is null for update`.execute(trx);
     }
-    const [row] = await this.requestRows(trx, system.id, today, id);
+    const [row] = await this.requestRows(trx, system.id, today, timeZone, id);
     if (!row) throw new NotFoundError();
     const scope: ScopeContext = await this.policy.scopeContext(trx, principal, ms);
     if (!this.policy.documentVisible(scope, row.doc_code)) throw new NotFoundError();
     return row;
   }
 
-  /** The requests that show in a system (or one of them), open first, newest first, with their totals. */
-  private async requestRows(trx: Trx, msId: string, today: string, id: string | null): Promise<RequestRow[]> {
+  /**
+   * The requests that show in a system (or one of them), open first, newest first, with their totals; overdue counts the
+   * pending people past their own due date (M3-14).
+   */
+  private async requestRows(trx: Trx, msId: string, today: string, timeZone: string, id: string | null): Promise<RequestRow[]> {
     const { rows } = await sql<RequestRow>`
-      select r.id, m.slug as ms, r.management_system_id, d.id as document_id, d.doc_code, d.title, d.classification,
-             v.id as version_id, v.version_label, r.status, r.audience_scope, r.audience_roles, r.due_on, r.created_at,
+      select r.id, m.slug as ms, r.management_system_id, d.id as document_id, d.doc_code, d.title, d.classification, d.is_org_wide,
+             v.id as version_id, v.version_label, v.approved_at::text as version_approved_on,
+             (case when o.hash_algorithm = 'sha256' then o.hash_value end) as version_sha256,
+             r.status, r.audience_scope, r.audience_roles, r.due_on, r.created_at,
              r.last_reminded_at, r.closed_at, r.evidence_id,
              count(a.id)::int as audience,
              count(a.id) filter (where a.status = 'confirmed')::int as confirmed,
              count(a.id) filter (where a.status = 'pending')::int as pending,
-             count(a.id) filter (where a.status = 'pending' and r.due_on < ${today}::date)::int as overdue,
+             count(a.id) filter (where a.status = 'pending' and ${personDueSql(timeZone)} < ${today}::date)::int as overdue,
              count(a.id) filter (where a.status = 'excused')::int as excused
         from acknowledgement_request r
         join management_system m on m.id = r.management_system_id
         join document d on d.id = r.document_id and d.deleted_at is null
         join document_version v on v.id = r.document_version_id
+        left join storage_object o on o.id = v.storage_object_id
         left join acknowledgement a on a.acknowledgement_request_id = r.id and a.deleted_at is null
        where r.deleted_at is null and ${requestVisibleIn(msId)}
          and (${id}::uuid is null or r.id = ${id}::uuid)
-       group by r.id, m.slug, d.id, v.id
+       group by r.id, m.slug, d.id, v.id, o.id
        order by (r.status = 'open') desc, r.created_at desc, r.id
        limit 500`.execute(trx);
     return rows;
@@ -385,19 +412,47 @@ export function orgOf(principal: Principal): TenantInfo {
   return principal.org;
 }
 
-/** The people of a request, by name (a person erased in this organisation by the pseudonym, Milestone 3 D.6.5). */
-export async function peopleOf(trx: Trx, requestId: string): Promise<PersonRow[]> {
+/**
+ * The people of a request, by name (a person erased in this organisation by the pseudonym, Milestone 3 D.6.5), with the
+ * day each was added, their own due date and the day their request opened, in the organisation's time zone (M3-14).
+ * With `earlierConfirmations` (the register: the CSV and the file filed as evidence) also the people who confirmed the
+ * same version in an earlier request and have no row in this one, each with their confirmed row of that request (the
+ * first confirmation when there are several), so the register of the newest request of a version is complete.
+ */
+export async function peopleOf(
+  trx: Trx, requestId: string, timeZone: string, options: { earlierConfirmations?: boolean } = {},
+): Promise<PersonRow[]> {
+  const columns = sql`a.id, a.user_id, ${shownHandle('u', 'e')} as handle, ${shownName('u', 'e')} as display_name, a.status, a.opened_at,
+           a.confirmed_at, a.reminder_count, a.excused_reason, ${addedOnSql(timeZone)}::text as added_on,
+           ${personDueSql(timeZone)}::text as due_on, (timezone(${timeZone}, r.created_at))::date::text as request_opened_on`;
   const { rows } = await sql<PersonRow>`
-    select a.id, a.user_id, ${shownHandle('u', 'e')} as handle, ${shownName('u', 'e')} as display_name, a.status, a.opened_at, a.confirmed_at,
-           a.reminder_count, a.excused_reason
-      from acknowledgement a join platform.app_user u on u.id = a.user_id
-      ${erasedJoin('e', 'a.user_id')}
-     where a.acknowledgement_request_id = ${requestId}::uuid and a.deleted_at is null
-     order by case a.status when 'pending' then 0 when 'confirmed' then 1 else 2 end, ${shownName('u', 'e')}, ${shownHandle('u', 'e')}`.execute(trx);
+    select p.id, p.user_id, p.handle, p.display_name, p.status, p.opened_at, p.confirmed_at, p.reminder_count, p.excused_reason,
+           p.added_on, p.due_on, p.request_opened_on
+      from (
+        select ${columns}
+          from acknowledgement a
+          join acknowledgement_request r on r.id = a.acknowledgement_request_id
+          join platform.app_user u on u.id = a.user_id
+          ${erasedJoin('e', 'a.user_id')}
+         where a.acknowledgement_request_id = ${requestId}::uuid and a.deleted_at is null
+        union all
+        (select distinct on (a.user_id) ${columns}
+           from acknowledgement_request t
+           join acknowledgement_request r on r.document_version_id = t.document_version_id and r.id <> t.id
+            and r.created_at < t.created_at and r.deleted_at is null
+           join acknowledgement a on a.acknowledgement_request_id = r.id and a.status = 'confirmed' and a.deleted_at is null
+           join platform.app_user u on u.id = a.user_id
+           ${erasedJoin('e', 'a.user_id')}
+          where ${options.earlierConfirmations === true}::boolean and t.id = ${requestId}::uuid
+            and not exists (select 1 from acknowledgement s where s.acknowledgement_request_id = t.id and s.user_id = a.user_id
+                              and s.deleted_at is null)
+          order by a.user_id, a.confirmed_at, a.id)
+      ) p
+     order by case p.status when 'pending' then 0 when 'confirmed' then 1 else 2 end, p.display_name, p.handle`.execute(trx);
   return rows;
 }
 
-function personItem(p: PersonRow, request: Pick<RequestRow, 'due_on'>, today: string): AcknowledgementPerson {
+function personItem(p: PersonRow, today: string): AcknowledgementPerson {
   return {
     person: { handle: p.handle, displayName: p.display_name },
     status: p.status,
@@ -405,24 +460,67 @@ function personItem(p: PersonRow, request: Pick<RequestRow, 'due_on'>, today: st
     confirmedAt: iso(p.confirmed_at),
     reminderCount: Number(p.reminder_count),
     excusedReason: p.excused_reason,
-    overdue: p.status === 'pending' && request.due_on < today,
+    overdue: p.status === 'pending' && p.due_on < today,
+    addedOn: p.added_on,
+    dueOn: p.due_on,
   };
 }
 
-/** The confirmation register as formula-safe CSV (F.15): one row per person of the request. */
-export function registerCsv(request: Pick<RequestRow, 'doc_code' | 'title' | 'version_label' | 'due_on'>, people: readonly PersonRow[], today: string): string {
+/**
+ * The business roles each person holds now in the document's systems (every system for an organisation-wide document),
+ * as `ISMS: Domain Owner, Risk Owner; QMS: Domain Owner` for the "Roles" column of the register CSV (M3-14).
+ */
+export async function rolesOfPeople(trx: Trx, request: Pick<RequestRow, 'document_id' | 'is_org_wide'>, userIds: readonly string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map();
+  const { rows } = await sql<{ user_id: string; code: string; roles: string[] }>`
+    select r.user_id, m.code, array_agg(distinct r.role) as roles
+      from user_ms_role r
+      join management_system m on m.id = r.management_system_id and m.deleted_at is null
+     where r.user_id = any(${[...userIds]}::uuid[]) and r.deleted_at is null and r.approval_status = 'active'
+       and (r.valid_until is null or r.valid_until > now())
+       and (${request.is_org_wide}::boolean
+            or exists (select 1 from entity_ms_link l where l.entity_type = 'document' and l.entity_id = ${request.document_id}::uuid
+                         and l.management_system_id = m.id and l.deleted_at is null))
+     group by r.user_id, m.code, m.position
+     order by r.user_id, m.position, m.code`.execute(trx);
+  const order = Object.keys(ROLE_NAMES);
+  const parts = new Map<string, string[]>();
+  for (const row of rows) {
+    const names = [...row.roles].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((role) => ROLE_NAMES[role] ?? role);
+    parts.set(row.user_id, [...(parts.get(row.user_id) ?? []), `${row.code}: ${names.join(', ')}`]);
+  }
+  return new Map([...parts].map(([user, list]) => [user, list.join('; ')]));
+}
+
+/**
+ * The confirmation register as formula-safe CSV (F.15): one row per person of the request (and per earlier
+ * confirmation of the version, `peopleOf` with `earlierConfirmations`), with the columns of `REGISTER_COLUMNS` (M3-14);
+ * `roles` maps a person's user id to their business roles in the document's systems.
+ */
+export function registerCsv(
+  request: Pick<RequestRow, 'doc_code' | 'title' | 'version_label' | 'version_approved_on' | 'version_sha256'>,
+  people: readonly PersonRow[],
+  today: string,
+  roles: ReadonlyMap<string, string> = new Map(),
+): string {
   const rows = people.map((p) => [
     request.doc_code,
     request.title,
     request.version_label,
-    request.due_on,
+    request.version_approved_on,
+    request.version_sha256,
     p.handle,
     p.display_name,
+    roles.get(p.user_id) ?? '',
+    p.request_opened_on,
+    p.added_on,
+    p.due_on,
     p.status,
     iso(p.opened_at),
     iso(p.confirmed_at),
+    p.status === 'confirmed' ? STATEMENT : '',
     Number(p.reminder_count),
-    p.status === 'pending' && request.due_on < today ? 'yes' : 'no',
+    p.status === 'pending' && p.due_on < today ? 'yes' : 'no',
     p.excused_reason,
   ]);
   return toSafeCsv(rows, REGISTER_COLUMNS);
@@ -447,14 +545,16 @@ async function evidenceSystemSlugs(trx: Trx, evidenceId: string): Promise<string
 }
 
 /**
- * Sends `acknowledgement_requested` again to every pending person of an open request and counts the reminder on each
- * row (`reminded_at`, `reminder_count`). Returns how many were reminded.
+ * Sends `acknowledgement_requested` again to every pending person of an open request (or the people `userIds`) and
+ * counts the reminder on each row (`reminded_at`, `reminder_count`). Each notice names the person's own due date
+ * (M3-14). Returns how many were reminded.
  */
 export async function remindPending(
   trx: Trx,
   notifications: NotificationWriter,
   request: Pick<RequestRow, 'id' | 'document_id' | 'doc_code' | 'title' | 'version_label' | 'due_on' | 'management_system_id'>,
   actorId: string,
+  timeZone: string,
   userIds?: readonly string[],
 ): Promise<number> {
   let query = trx
@@ -468,10 +568,12 @@ export async function remindPending(
     query = query.where('user_id', 'in', [...userIds]);
   }
   const reminded = await query.returning(['id', 'user_id']).execute();
-  const notice = requestedNotice({ code: request.doc_code, title: request.title, version: request.version_label }, request.due_on, true);
+  const facts = { code: request.doc_code, title: request.title, version: request.version_label };
   const ref = documentRef(request.document_id, request.doc_code);
   const systems = await taskSystems(trx, reminded.map((r) => r.id));
+  const dues = await personDues(trx, reminded.map((r) => r.id), timeZone);
   for (const row of reminded) {
+    const notice = requestedNotice(facts, dues.get(row.id) ?? request.due_on, true);
     await notifications.create(trx, {
       recipientUserId: row.user_id,
       kind: 'acknowledgement_requested',
@@ -483,6 +585,16 @@ export async function remindPending(
     });
   }
   return reminded.length;
+}
+
+/** The own due date of each acknowledgement row (`personDueSql`), by id (M3-14). */
+export async function personDues(trx: Trx, acknowledgementIds: readonly string[], timeZone: string): Promise<Map<string, string>> {
+  if (acknowledgementIds.length === 0) return new Map();
+  const { rows } = await sql<{ id: string; due_on: string }>`
+    select a.id, ${personDueSql(timeZone)}::text as due_on
+      from acknowledgement a join acknowledgement_request r on r.id = a.acknowledgement_request_id
+     where a.id = any(${[...acknowledgementIds]}::uuid[])`.execute(trx);
+  return new Map(rows.map((r) => [r.id, r.due_on]));
 }
 
 /** The system of each person's task (the system they hold a role in), by acknowledgement id. */

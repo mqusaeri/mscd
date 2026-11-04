@@ -2,12 +2,17 @@
 // (sample-store.ts) with the rules the api applies: a request needs an approved document with a version and an audience,
 // one open request per version (the request of an earlier version closes), reminders at most once a day and only while
 // someone is pending, closing once, the register CSV with the columns of the api, and the settings of a document kept
-// in this tab. Loaded only by the sample build (adapter.ts), so the api build holds none of it.
+// in this tab. M3-14: each person's own due date, a new request skips the people who confirmed the same version in an
+// earlier one, and the register CSV has the columns of the api (approval date, roles, the day the request opened, added
+// on, statement) and lists the earlier confirmations of the version too. Loaded only by the sample build (adapter.ts),
+// so the api build holds none of it.
 import type { ControllerData, MsId } from '../../data/types';
+import { BUSINESS_ROLE_LABELS } from '../roles';
+import { sampleMembers } from '../users/sample';
 import type { AcknowledgementsAdapter, Download, Outcome, RequestDetail, RequestRow, Result, Settings } from './model';
 import { DEFAULT_SETTINGS, refusal, settingsBody } from './model';
-import type { SampleRequest } from './sample-store';
-import { addDays, documentSystems, nextId, sampleAudience, sampleState, sampleToday, totalsOf, visibleIn } from './sample-store';
+import type { SamplePerson, SampleRequest } from './sample-store';
+import { addDays, documentSystems, nextId, personDue, sampleAudience, sampleState, sampleToday, totalsOf, visibleIn } from './sample-store';
 import { TEXT } from './text';
 
 export interface SampleScope {
@@ -15,10 +20,14 @@ export interface SampleScope {
   org(): string | null;
 }
 
-/** The columns of the register CSV, as the api writes them. */
+/** The columns of the register CSV, as the api writes them (M3-14). */
 export const REGISTER_COLUMNS = [
-  'Document', 'Title', 'Version', 'Due date', 'User name', 'Name', 'Status', 'Opened at', 'Confirmed at', 'Reminders', 'Overdue', 'Excused reason',
+  'Document', 'Title', 'Version', 'Version approved on', 'Version SHA-256', 'User name', 'Name', 'Roles', 'Request opened on', 'Added on',
+  'Due date', 'Status', 'Opened at (link issued by MSCD)', 'Confirmed at', 'Statement confirmed', 'Reminders', 'Overdue', 'Excused reason',
 ] as const;
+
+/** The statement a person confirms, written on each confirmed row of the register. */
+export const STATEMENT = 'I have read and understood this document';
 
 const notFound = () => refusal(404, ['Record not found', 'Rekaman tidak ditemukan'], { slug: 'not-found' });
 const conflict = (key: string, message: readonly [string, string]) => refusal(409, message, { slug: 'conflict', messageKey: key });
@@ -32,14 +41,64 @@ export function csvCell(value: string | number | null): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-/** The register of a request as CSV, the rows of the api. */
-export function registerCsv(D: ControllerData | null, request: SampleRequest, today: string): string {
+/**
+ * The business roles each member holds in the systems of a request, as the api writes them in the "Roles" column:
+ * `ISMS: Domain Owner, Risk Owner; QMS: Domain Owner`.
+ */
+export function sampleRoles(D: ControllerData | null, systems: readonly MsId[]): Map<string, string> {
+  const order = Object.keys(BUSINESS_ROLE_LABELS);
+  const out = new Map<string, string>();
+  for (const member of sampleMembers(D).members) {
+    const parts: string[] = [];
+    for (const m of D?.MS ?? []) {
+      if (!systems.includes(m.id)) continue;
+      const roles = [...new Set(member.roles.filter((r) => r.ms === m.id && r.approvalStatus === 'active').map((r) => r.role))]
+        .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      if (roles.length) parts.push(`${m.short}: ${roles.map((r) => BUSINESS_ROLE_LABELS[r as keyof typeof BUSINESS_ROLE_LABELS]?.[0] ?? r).join(', ')}`);
+    }
+    if (parts.length) out.set(member.handle, parts.join('; '));
+  }
+  return out;
+}
+
+/**
+ * The people who confirmed the version of `request` in an earlier request of `requests` (one before it in the store) and
+ * have no row in it, each with the request they confirmed in, as the api's register lists them (M3-14).
+ */
+export function earlierConfirmations(request: SampleRequest, requests: readonly SampleRequest[]): { request: SampleRequest; person: SamplePerson }[] {
+  const at = requests.indexOf(request);
+  const before = at >= 0 ? requests.slice(0, at) : requests.filter((r) => r.createdAt < request.createdAt);
+  const own = new Set(request.people.map((p) => p.handle));
+  const out: { request: SampleRequest; person: SamplePerson }[] = [];
+  for (const r of before) {
+    if (r.version.id !== request.version.id) continue;
+    for (const p of r.people) {
+      if (p.status !== 'confirmed' || own.has(p.handle)) continue;
+      own.add(p.handle);
+      out.push({ request: r, person: p });
+    }
+  }
+  return out;
+}
+
+/**
+ * The register of a request as CSV, the rows of the api: the people of the request and, with the store's `requests`,
+ * the people who confirmed the same version in an earlier request, with the day that request opened (M3-14).
+ */
+export function registerCsv(D: ControllerData | null, request: SampleRequest, today: string, requests: readonly SampleRequest[] = []): string {
   const name = (h: string) => D?.PEOPLE?.[h]?.[0] ?? h;
+  const doc = (D?.bundles?.[request.ms]?.docs ?? []).find((d) => d.id === request.document.code);
+  const roles = sampleRoles(D, request.systems);
+  const order = { pending: 0, confirmed: 1, excused: 2 } as const;
+  const rows = [...request.people.map((person) => ({ request, person })), ...earlierConfirmations(request, requests)]
+    .sort((a, b) => order[a.person.status] - order[b.person.status] || name(a.person.handle).localeCompare(name(b.person.handle)));
   const lines = [REGISTER_COLUMNS.join(',')];
-  for (const p of request.people) {
+  for (const { request: r, person: p } of rows) {
+    const due = personDue(r, p);
     lines.push([
-      request.document.code, request.document.title, request.version.label, request.dueOn, p.handle, name(p.handle), p.status, p.openedAt, p.confirmedAt,
-      p.reminderCount, p.status === 'pending' && request.dueOn < today ? 'yes' : 'no', p.excusedReason,
+      request.document.code, request.document.title, request.version.label, doc?.appr || null, null, p.handle, name(p.handle), roles.get(p.handle) ?? '',
+      r.createdAt.slice(0, 10), p.addedOn, due, p.status, p.openedAt, p.confirmedAt, p.status === 'confirmed' ? STATEMENT : '', p.reminderCount,
+      p.status === 'pending' && due < today ? 'yes' : 'no', p.excusedReason,
     ].map(csvCell).join(','));
   }
   return `${lines.join('\r\n')}\r\n`;
@@ -78,7 +137,9 @@ export function createSampleAdapter(scope: SampleScope): AcknowledgementsAdapter
           confirmedAt: p.confirmedAt,
           reminderCount: p.reminderCount,
           excusedReason: p.excusedReason,
-          overdue: p.status === 'pending' && r.dueOn < today(),
+          overdue: p.status === 'pending' && personDue(r, p) < today(),
+          addedOn: p.addedOn,
+          dueOn: personDue(r, p),
         }));
       const detail: RequestDetail = { ...present(r), people };
       return { ok: true, data: detail };
@@ -97,9 +158,17 @@ export function createSampleAdapter(scope: SampleScope): AcknowledgementsAdapter
         return conflict('acknowledgements.open_request', ['This version already has an open confirmation request.', 'Versi ini sudah memiliki permintaan konfirmasi yang terbuka.']);
       }
       const systems = documentSystems(D, doc.id);
-      const audience = sampleAudience(D, systems, input.scope, input.scope === 'roles' ? input.roles : null, ms);
+      const everyone = sampleAudience(D, systems, input.scope, input.scope === 'roles' ? input.roles : null, ms);
+      // People who confirmed this version in an earlier request are not asked again (M3-14).
+      const confirmed = new Set(s.requests.filter((r) => r.version.id === versionId).flatMap((r) => r.people.filter((p) => p.status === 'confirmed').map((p) => p.handle)));
+      const audience = everyone.filter((p) => !confirmed.has(p.handle));
       if (!audience.length) {
-        return rule('acknowledgements.no_audience', ['Nobody holds a role that is asked to confirm this document. Choose another audience.', 'Tidak ada yang memegang peran yang diminta mengonfirmasi dokumen ini. Pilih audiens lain.']);
+        return everyone.length
+          ? rule('acknowledgements.everyone_confirmed', [
+            'Everyone this request would ask has confirmed this version already. People who confirmed a version are not asked again.',
+            'Semua orang yang akan diminta oleh permintaan ini sudah mengonfirmasi versi ini. Orang yang sudah mengonfirmasi suatu versi tidak diminta lagi.',
+          ])
+          : rule('acknowledgements.no_audience', ['Nobody holds a role that is asked to confirm this document. Choose another audience.', 'Tidak ada yang memegang peran yang diminta mengonfirmasi dokumen ini. Pilih audiens lain.']);
       }
       const now = `${today()}T03:00:00Z`;
       for (const earlier of s.requests.filter((r) => r.document.code === doc.id && r.status === 'open')) {
@@ -115,6 +184,7 @@ export function createSampleAdapter(scope: SampleScope): AcknowledgementsAdapter
         createdAt: now, lastRemindedAt: null, closedAt: null, evidenceId: null, evidenceCode: null,
         people: audience.map((p) => ({
           id: nextId(s, 'ack'), handle: p.handle, ms: p.ms, status: 'pending', openedAt: null, confirmedAt: null, remindedAt: null, reminderCount: 0, excusedReason: null,
+          addedOn: today(),
         })),
       };
       s.requests.push(request);
@@ -165,7 +235,7 @@ export function createSampleAdapter(scope: SampleScope): AcknowledgementsAdapter
     async exportCsv(ms, row) {
       const r = find(ms, row.id);
       if (!r) return notFound();
-      const csv = registerCsv(scope.getD(), r, today());
+      const csv = registerCsv(scope.getD(), r, today(), state().requests);
       const fileName = `read-confirmations-${r.document.code}-v${r.version.label}-${today()}.csv`;
       if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
         return { ok: true, data: { href: `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`, fileName } };

@@ -13,22 +13,33 @@
 //   part proposes the evidence item whose targets include control A.5.18 (access rights).
 // - Completion when every system part is signed off, every organisation item decided (same exception) and every
 //   revocation or change applied or explained: the organisation part is signed off by the completer, the report CSV is
-//   stored in the organisation's Managed Vault and each system's rows are filed as a new file of the evidence item named
-//   at its sign-off (`FileCommandsService.fileGeneratedEvidence`, in this transaction). A failed filing refuses the
-//   completion with its problem, so nothing is filed half; it can be completed again once the repository takes files.
+//   stored in the organisation's Managed Vault when it has one, and each part of the report is filed as evidence
+//   (`FileCommandsService.fileGeneratedEvidence`, in this transaction): each system's rows in the evidence item named at
+//   its sign-off, and the organisation part's rows (memberships, admin roles, linked company sign-in) with the summary
+//   and the warnings of the whole review in the evidence item of the body (M3-14, ISO review m1; 422
+//   `access_reviews.evidence_required` without one). Parts that name the same evidence item go into one file, so no
+//   part pushes another out of the item's current file. A failed filing refuses the completion with its problem, so
+//   nothing is filed half; it can be completed again once the repository takes files.
+// - The review detail proposes, for "Complete", the A.5.18 evidence item of the first ISO/IEC 27001 system and lists
+//   the evidence items the organisation part can be filed to, since a Tenant Admin may hold no role in any system. A
+//   Tenant Admin holds no `ms.read`, and record titles are business data: an item's title is listed only where the
+//   caller may read it (`ms.read` in its system, the own scope for the items they own) or when the item is evidence of
+//   access control (A.5.15, A.5.18, A.8.2); every other item is listed by code only.
 import { Readable } from 'node:stream';
 import { Inject, Injectable } from '@nestjs/common';
 import type {
-  AccessReviewCancel, AccessReviewDecide, AccessReviewDetail, AccessReviewPartDetail, AccessReviewPartSummary, AccessReviewSettings,
-  AccessReviewSettingsPut, AccessReviewSignOff, AccessReviewSummary, CommandResult, Pair, PutResult, Warning,
+  AccessReviewCancel, AccessReviewComplete, AccessReviewDecide, AccessReviewDetail, AccessReviewEvidenceOption, AccessReviewPartDetail,
+  AccessReviewPartSummary, AccessReviewSettings, AccessReviewSettingsPut, AccessReviewSignOff, AccessReviewSummary, CommandResult, PutResult,
+  Warning,
 } from '@mscd/shared';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
 import { assertIfMatch, etagOf } from '../../common/etag';
-import { BusinessRuleError, ConflictError, NotFoundError, ValidationError } from '../../common/problems';
+import { BusinessRuleError, ConflictError, NotFoundError, ProblemError, ValidationError } from '../../common/problems';
 import { toSafeCsv } from '../../common/spreadsheet-safe';
 import {
-  AUDIT_WRITER, GATEWAY_CLIENT, RECORD_RESOLVER, type AuditWriter, type GatewayClient, type Principal, type RecordResolver, type TenantInfo, type Trx,
+  AUDIT_WRITER, GATEWAY_CLIENT, PERMISSION_EVALUATOR, RECORD_RESOLVER, type AuditWriter, type GatewayClient, type PermissionDecision,
+  type PermissionEvaluator, type Principal, type RecordResolver, type TenantInfo, type Trx,
 } from '../../common/tokens';
 import { FileCommandsService } from '../files/file-commands.service';
 import { commandResult, orgOf } from '../registers/command-support';
@@ -40,10 +51,40 @@ import {
   reviewersOf, subjectOf, type ItemRow, type PartRow, type ReviewRow, type ReviewSummaryData, type Reviewers,
 } from './access-review-data';
 import { AccessReviewOpenService, DEFAULT_DAYS_TO_COMPLETE, DEFAULT_FREQUENCY_MONTHS, type SettingsRow } from './access-review-open.service';
-import { REFUSALS, REPORT_COLUMNS, noReviewerText, singleReviewerWarning } from './access-review-text';
+import {
+  EVIDENCE_REQUIRED, REFUSALS, REPORT_COLUMNS, SUMMARY_COLUMNS, completedMessage, noReviewerText, signedOffMessage, singleReviewerWarning,
+} from './access-review-text';
 
 /** The control whose evidence the sign-off of a system on ISO/IEC 27001 proposes (A.5.18 access rights). */
 export const ACCESS_RIGHTS_CONTROL = 'A.5.18';
+
+/** At most this many evidence items are offered for the organisation part (M3-14). */
+export const EVIDENCE_OPTIONS_LIMIT = 2000;
+
+/**
+ * The access control controls of ISO/IEC 27001:2022 (A.5.15 access control, A.5.18 access rights, A.8.2 privileged
+ * access rights): "Complete" lists the evidence items of these controls with their title for every Tenant Admin, since
+ * the access review is their evidence (M3-14).
+ */
+export const ACCESS_CONTROL_CONTROLS: readonly string[] = ['A.5.15', ACCESS_RIGHTS_CONTROL, 'A.8.2'];
+
+/** How the caller reads each system, by slug: `ms.read` in full or for their own records; absent where they read nothing. */
+type ReadableSystems = ReadonlyMap<string, Exclude<PermissionDecision, null>>;
+
+/** 422 `business-rule` `access_reviews.evidence_required`: "Complete" names no evidence item for the organisation part. */
+function evidenceRequired(): ProblemError {
+  return new ProblemError('business-rule', { messageKey: EVIDENCE_REQUIRED.key, messages: { en: EVIDENCE_REQUIRED.en, id: EVIDENCE_REQUIRED.id }, detail: EVIDENCE_REQUIRED.en });
+}
+
+/** The parts of a review filed into one evidence item at completion. */
+interface FilingGroup {
+  evidenceId: string;
+  evidenceCode: string;
+  /** The system the file is filed through (the evidence item belongs to it). */
+  msId: string;
+  organisation: boolean;
+  systems: PartRow[];
+}
 
 const iso = (d: Date | string | null): string | null => (d === null ? null : new Date(d).toISOString());
 
@@ -82,6 +123,7 @@ export class AccessReviewsService {
     @Inject(GATEWAY_CLIENT) private readonly gateway: GatewayClient,
     @Inject(RECORD_RESOLVER) private readonly records: RecordResolver,
     @Inject(AUDIT_WRITER) private readonly audit: AuditWriter,
+    @Inject(PERMISSION_EVALUATOR) private readonly evaluator: PermissionEvaluator,
   ) {}
 
   // -------------------------------------------------------------------------------------------------------------
@@ -152,6 +194,7 @@ export class AccessReviewsService {
 
   async get(principal: Principal, id: string): Promise<AccessReviewDetail> {
     const org = orgOf(principal);
+    const readable = await this.readableSystems(principal);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const review = await reviewRow(trx, id);
       const parts = await partRows(trx, { reviewIds: [id] });
@@ -161,18 +204,20 @@ export class AccessReviewsService {
       const orgPart = parts.find((p) => p.management_system_id === null);
       if (!orgPart) throw new NotFoundError('No such access review');
       const caller = principal.user.id;
+      const open = review.status === 'open';
       return {
         ...reviewSummary(review, progress.get(id)),
         organisationPart: {
           ...partSummary(orgPart, items, reviewers),
           rows: items.filter((i) => i.access_review_part_id === orgPart.id).map((i) => itemView(i, caller, reviewers)),
-          suggestedEvidence: null,
+          suggestedEvidence: open ? await this.organisationSuggestion(trx) : null,
         },
         parts: parts.filter((p) => p.management_system_id !== null).map((p) => partSummary(p, items, reviewers)),
         pendingApplications: items
           .filter((i) => (i.decision === 'revoke' || i.decision === 'change') && i.applied_at === null && i.not_applied_reason === null)
           .map((i) => itemView(i, caller, reviewers)),
         warnings: this.warningsOf(review, items, reviewers),
+        ...(open ? { evidenceOptions: await this.evidenceOptions(trx, readable, caller) } : {}),
       };
     });
   }
@@ -213,7 +258,7 @@ export class AccessReviewsService {
     });
   }
 
-  async complete(principal: Principal, id: string): Promise<CommandResult> {
+  async complete(principal: Principal, id: string, body: AccessReviewComplete): Promise<CommandResult> {
     const org = orgOf(principal);
     const actor = principal.user.id;
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
@@ -223,48 +268,70 @@ export class AccessReviewsService {
       const items = await itemRows(trx, { reviewId: id });
       const reviewers = await reviewersOf(trx, org.id);
       this.assertCompletable(parts, items, reviewers);
+      // The evidence item of the organisation part (M3-14): an evidence item of the named system (404 otherwise).
+      if (!body.ms || !body.evidenceId) throw evidenceRequired();
+      const chosen = await this.records.resolve(trx, body.ms, 'evidence', body.evidenceId);
+      const orgEvidence = { msId: chosen.ms.id, ms: chosen.ms.slug, id: chosen.id, code: String(chosen.row.evidence_code ?? '') };
 
       const now = this.clock.now();
       const orgPart = parts.find((p) => p.management_system_id === null)!;
-      await sql`update access_review_part set status = 'signed_off', signed_off_by = ${actor}, signed_off_at = ${now}, updated_at = now(), updated_by = ${actor}
-                 where id = ${orgPart.id} and status = 'open'`.execute(trx);
+      await sql`update access_review_part set status = 'signed_off', signed_off_by = ${actor}, signed_off_at = ${now}, evidence_id = ${orgEvidence.id},
+                 updated_at = now(), updated_by = ${actor} where id = ${orgPart.id} and status = 'open'`.execute(trx);
 
       // The report in the Managed Vault (null when the organisation has none; the report route still answers).
       const today = this.clock.todayIn(org.timeZone);
       const report = this.reportCsv(review, items, reviewers);
       const reportObjectId = await this.storeReport(trx, org, review, report, actor);
 
-      // Each system's rows as a new file of the evidence item named at its sign-off.
-      const filed: { ms: string; evidenceCode: string; storageObjectId: string }[] = [];
-      for (const part of parts) {
-        if (part.management_system_id === null || !part.evidence_id) continue;
-        const rows = items.filter((i) => i.access_review_part_id === part.id);
-        const result = await this.files.fileGeneratedEvidence(trx, { userId: actor, kind: 'user' }, {
-          msId: part.management_system_id,
-          evidenceId: part.evidence_id,
-          fileName: `access-review-${review.review_no}-${part.ms}-${today}.csv`,
-          mimeType: 'text/csv',
-          bytes: Buffer.from(this.reportCsv(review, rows, reviewers), 'utf8'),
-        });
-        await sql`update access_review_part set evidence_filed_at = ${now}, updated_at = now(), updated_by = ${actor} where id = ${part.id}`.execute(trx);
-        filed.push({ ms: part.ms!, evidenceCode: part.evidence_code ?? '', storageObjectId: result.storageObjectId });
-      }
-
       const warnings = this.warningsOf(review, items, reviewers);
       const counted = (d: string) => items.filter((i) => i.decision === d).length;
+      const counts = {
+        items: items.length,
+        kept: counted('keep'),
+        changed: counted('change'),
+        revoked: counted('revoke'),
+        applied: items.filter((i) => i.applied_at !== null).length,
+        notApplied: items.filter((i) => i.not_applied_reason !== null).length,
+        needsSecondReviewer: items.filter((i) => needsSecondReviewer(i, reviewers)).length,
+      };
+
+      // Each part of the report as a new file of its evidence item; parts that name the same item share one file.
+      const groups = new Map<string, FilingGroup>();
+      for (const part of parts) {
+        if (part.management_system_id === null || !part.evidence_id) continue;
+        const group = groups.get(part.evidence_id) ?? { evidenceId: part.evidence_id, evidenceCode: part.evidence_code ?? '', msId: part.management_system_id, organisation: false, systems: [] };
+        group.systems.push(part);
+        groups.set(part.evidence_id, group);
+      }
+      const shared = groups.get(orgEvidence.id);
+      if (shared) Object.assign(shared, { organisation: true, msId: orgEvidence.msId });
+      else groups.set(orgEvidence.id, { evidenceId: orgEvidence.id, evidenceCode: orgEvidence.code, msId: orgEvidence.msId, organisation: true, systems: [] });
+
+      const summaryCsv = this.summaryCsv(review, {
+        counts, warnings, parts, groups: [...groups.values()], completedAt: now, completedBy: principal.user, reportStored: reportObjectId !== null,
+      });
+      const filed: { ms: string; evidenceCode: string; storageObjectId: string }[] = [];
+      let organisation: { ms: string; evidenceCode: string; storageObjectId: string } | null = null;
+      for (const group of groups.values()) {
+        const partIds = new Set([...group.systems.map((p) => p.id), ...(group.organisation ? [orgPart.id] : [])]);
+        const rows = items.filter((i) => partIds.has(i.access_review_part_id));
+        const csv = this.reportCsv(review, rows, reviewers) + (group.organisation ? `\r\n${summaryCsv}` : '');
+        const names = [...(group.organisation ? ['organisation'] : []), ...group.systems.map((p) => p.ms ?? '')];
+        const result = await this.files.fileGeneratedEvidence(trx, { userId: actor, kind: 'user' }, {
+          msId: group.msId,
+          evidenceId: group.evidenceId,
+          fileName: `access-review-${review.review_no}-${names.join('-')}-${today}.csv`,
+          mimeType: 'text/csv',
+          bytes: Buffer.from(csv, 'utf8'),
+        });
+        await sql`update access_review_part set evidence_filed_at = ${now}, updated_at = now(), updated_by = ${actor} where id = any(${[...partIds]}::uuid[])`.execute(trx);
+        for (const part of group.systems) filed.push({ ms: part.ms!, evidenceCode: group.evidenceCode, storageObjectId: result.storageObjectId });
+        if (group.organisation) organisation = { ms: orgEvidence.ms, evidenceCode: orgEvidence.code, storageObjectId: result.storageObjectId };
+      }
+
       const summary: ReviewSummaryData = {
         ...(review.summary ?? {}),
-        completed: {
-          items: items.length,
-          kept: counted('keep'),
-          changed: counted('change'),
-          revoked: counted('revoke'),
-          applied: items.filter((i) => i.applied_at !== null).length,
-          notApplied: items.filter((i) => i.not_applied_reason !== null).length,
-          needsSecondReviewer: items.filter((i) => needsSecondReviewer(i, reviewers)).length,
-          filed,
-          reportStored: reportObjectId !== null,
-        },
+        completed: { ...counts, filed, ...(organisation ? { organisation } : {}), reportStored: reportObjectId !== null },
         warnings: warnings.map((w) => ({ rule: 'REVIEW-SINGLE-ADMIN' as const, messages: { en: w.messages.en, id: w.messages.id } })),
       };
       await sql`update access_review set status = 'completed', completed_at = ${now}, completed_by = ${actor}, summary = ${JSON.stringify(summary)}::jsonb,
@@ -277,12 +344,55 @@ export class AccessReviewsService {
         before: { status: 'open' },
         after: { status: 'completed', ...summary.completed, warnings: warnings.map((w) => w.rule) },
       });
-      const systems = parts.flatMap((p) => (p.ms ? [p.ms] : []));
-      const message: Pair = filed.length
-        ? [`Access review ${review.review_no} completed; the rows of ${filed.length} system(s) were filed as evidence`, `Tinjauan akses ${review.review_no} selesai; baris dari ${filed.length} sistem diarsipkan sebagai bukti`]
-        : [`Access review ${review.review_no} completed`, `Tinjauan akses ${review.review_no} selesai`];
-      return commandResult(systems, { message, warnings, data: { filed: filed.map((f) => ({ ms: f.ms, evidenceCode: f.evidenceCode })), reportStored: reportObjectId !== null } });
+      const systems = [...new Set([...parts.flatMap((p) => (p.ms ? [p.ms] : [])), orgEvidence.ms])];
+      return commandResult(systems, {
+        message: completedMessage(review.review_no, orgEvidence.code, filed.length),
+        warnings,
+        data: {
+          filed: filed.map((f) => ({ ms: f.ms, evidenceCode: f.evidenceCode })),
+          organisation: { ms: orgEvidence.ms, evidenceCode: orgEvidence.code },
+          reportStored: reportObjectId !== null,
+        },
+      });
     });
+  }
+
+  /**
+   * The summary of the whole review that the organisation part's file carries after its rows (M3-14): two columns,
+   * `summary` and `value`, with the counts, each part with its sign-off and evidence item, whether the report is in a
+   * Managed Vault, and each warning.
+   */
+  private summaryCsv(review: ReviewRow, input: {
+    counts: Record<string, number>;
+    warnings: readonly Warning[];
+    parts: readonly PartRow[];
+    groups: readonly FilingGroup[];
+    completedAt: Date;
+    completedBy: { handle: string; displayName: string };
+    reportStored: boolean;
+  }): string {
+    const evidenceOf = (part: PartRow) => {
+      const group = input.groups.find((g) => (part.management_system_id === null ? g.organisation : g.systems.some((p) => p.id === part.id)));
+      return group?.evidenceCode ?? 'none';
+    };
+    const signed = (part: PartRow) => (part.management_system_id === null
+      ? `signed off ${input.completedAt.toISOString()} by ${input.completedBy.displayName} (${input.completedBy.handle})`
+      : `signed off ${iso(part.signed_off_at) ?? ''} by ${part.signed_name ?? part.signed_handle ?? ''}${part.signed_handle ? ` (${part.signed_handle})` : ''}`);
+    const rows: unknown[][] = [
+      ['review_no', review.review_no],
+      ['opened_on', review.opened_on],
+      ['due_on', review.due_on],
+      ['completed_at', input.completedAt.toISOString()],
+      ['completed_by', `${input.completedBy.displayName} (${input.completedBy.handle})`],
+      ...Object.entries(input.counts).map(([key, value]) => [key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), value]),
+      ...input.parts.map((part) => [
+        part.management_system_id === null ? 'part_organisation' : `part_${part.ms ?? ''}`,
+        `${signed(part)}; evidence ${evidenceOf(part)}`,
+      ]),
+      ['report_in_managed_vault', input.reportStored ? 'yes' : 'no'],
+      ...input.warnings.map((w) => ['warning', `${w.rule}: ${w.messages.en}`]),
+    ];
+    return toSafeCsv(rows, SUMMARY_COLUMNS);
   }
 
   /** 409 `conflict` naming what still holds up the completion. */
@@ -298,7 +408,7 @@ export class AccessReviewsService {
     const id: string[] = [];
     if (openSystems.length) {
       en.push(`not signed off yet: ${openSystems.join(', ')}`);
-      id.push(`belum ditandatangani: ${openSystems.join(', ')}`);
+      id.push(`belum disahkan: ${openSystems.join(', ')}`);
     }
     for (const code of noReviewer) {
       const text = noReviewerText(code);
@@ -483,10 +593,7 @@ export class AccessReviewsService {
         },
       });
       const code = part.ms_code ?? system.slug;
-      const message: Pair = evidence
-        ? [`${code} signed off; its rows are filed to ${evidence.code} when the review completes`, `${code} ditandatangani; barisnya diarsipkan ke ${evidence.code} saat tinjauan selesai`]
-        : [`${code} signed off`, `${code} ditandatangani`];
-      return commandResult([system.slug], { message, warnings: secondReviewerWarnings(items, reviewers) });
+      return commandResult([system.slug], { message: signedOffMessage(code, evidence?.code ?? null), warnings: secondReviewerWarnings(items, reviewers) });
     });
   }
 
@@ -541,6 +648,69 @@ export class AccessReviewsService {
        order by e.evidence_code
        limit 1`.execute(trx);
     return rows[0] ?? null;
+  }
+
+  /**
+   * The evidence item proposed for the organisation part at "Complete" (M3-14): the item whose targets include control
+   * A.5.18 in the first ISO/IEC 27001 system that has one (by the systems' order), with that system; not restricted.
+   */
+  private async organisationSuggestion(trx: Trx): Promise<{ id: string; code: string; ms: string } | null> {
+    const { rows } = await sql<{ id: string; code: string; ms: string }>`
+      select e.id, e.evidence_code as code, ms.slug as ms
+        from evidence e
+        join evidence_target t on t.evidence_id = e.id and t.deleted_at is null
+        join management_system ms on ms.id = t.management_system_id and ms.deleted_at is null
+        join ref.framework_version fv on fv.id = ms.framework_version_id
+        left join ref.catalogue_item ci on ci.id = t.catalogue_item_id
+        left join ref.requirement rq on rq.id = t.requirement_id
+       where e.deleted_at is null and e.classification <> 'restricted' and fv.pack_id like 'ISO27001%'
+         and (ci.item_code = ${ACCESS_RIGHTS_CONTROL} or rq.requirement_code = ${ACCESS_RIGHTS_CONTROL})
+       order by ms.position, ms.slug, e.evidence_code
+       limit 1`.execute(trx);
+    return rows[0] ?? null;
+  }
+
+  /** The systems the caller reads (`ms.read`), with the scope: Tenant Admins read none unless they hold a business role there. */
+  private async readableSystems(principal: Principal): Promise<ReadableSystems> {
+    const out = new Map<string, Exclude<PermissionDecision, null>>();
+    for (const slug of Object.keys(await this.evaluator.rolesByMs(principal))) {
+      const decision = await this.evaluator.evaluate(principal, 'ms.read', { scope: 'ms', ms: slug });
+      if (decision) out.set(slug, decision);
+    }
+    return out;
+  }
+
+  /**
+   * The evidence items "Complete" can file the organisation part to (M3-14): every item of every system (its links and
+   * targets), not deleted and not restricted, by system order and code; at most `EVIDENCE_OPTIONS_LIMIT`. The title of an
+   * item is given only when the caller reads its system (`ms.read`; with the own scope, the items they own) or when the
+   * item's targets include an access control control of an ISO/IEC 27001 system (`ACCESS_CONTROL_CONTROLS`); otherwise
+   * it is null and the item is offered by its code only.
+   */
+  private async evidenceOptions(trx: Trx, readable: ReadableSystems, caller: string): Promise<AccessReviewEvidenceOption[]> {
+    const { rows } = await sql<{ ms: string; id: string; code: string; title: string; owner_user_id: string | null; access_control: boolean }>`
+      select ms.slug as ms, e.id, e.evidence_code as code, e.title, e.owner_user_id,
+             exists (select 1 from evidence_target t
+                       join management_system tm on tm.id = t.management_system_id and tm.deleted_at is null
+                       join ref.framework_version fv on fv.id = tm.framework_version_id
+                       left join ref.catalogue_item ci on ci.id = t.catalogue_item_id
+                       left join ref.requirement rq on rq.id = t.requirement_id
+                      where t.evidence_id = e.id and t.deleted_at is null and fv.pack_id like 'ISO27001%'
+                        and (ci.item_code = any(${[...ACCESS_CONTROL_CONTROLS]}::text[])
+                             or rq.requirement_code = any(${[...ACCESS_CONTROL_CONTROLS]}::text[]))) as access_control
+        from evidence e
+        join management_system ms on ms.deleted_at is null
+       where e.deleted_at is null and e.classification <> 'restricted'
+         and (exists (select 1 from entity_ms_link l where l.entity_type = 'evidence' and l.entity_id = e.id and l.management_system_id = ms.id
+                        and l.deleted_at is null)
+              or exists (select 1 from evidence_target t where t.evidence_id = e.id and t.management_system_id = ms.id and t.deleted_at is null))
+       order by ms.position, ms.slug, e.evidence_code
+       limit ${EVIDENCE_OPTIONS_LIMIT}`.execute(trx);
+    return rows.map((r) => {
+      const scope = readable.get(r.ms);
+      const shown = r.access_control || scope === 'full' || (scope === 'own' && r.owner_user_id === caller);
+      return { ms: r.ms, id: r.id, code: r.code, title: shown ? r.title : null };
+    });
   }
 
   /** Closes the open tasks of a review (of one part when given); returns how many. */

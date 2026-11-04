@@ -4,8 +4,10 @@
 // and one part per management system (business roles and guest auditor grants; decided by the system's Management
 // System Managers and Programme Owners). The review takes a snapshot of every right in force. Nobody decides on their
 // own access (`REVIEW-OWN-ACCESS`). Revocations are applied through the existing services by people who hold those
-// rights. A completed review is filed as evidence; for ISO/IEC 27001:2022 control A.5.18 (access rights) the sign-off
-// proposes the evidence item of that control. A single Tenant Admin completes with the warning `REVIEW-SINGLE-ADMIN`.
+// rights. A completed review is filed as evidence, each part of the report in an evidence item: each system's rows in
+// the item named at its sign-off, the organisation part in the item chosen at "Complete" (M3-14); for ISO/IEC
+// 27001:2022 control A.5.18 (access rights) both propose the evidence item of that control. A single Tenant Admin
+// completes with the warning `REVIEW-SINGLE-ADMIN`.
 import { z } from 'zod';
 import { AccessReviewDecision, AccessReviewItemKind, AccessReviewPartStatus, AccessReviewStatus } from '../enums.js';
 import { BinaryBody, CommandResult, IdParams, Instant, IsoDate, MsId, MsParams, MsRecordParams, Uuid, Warning, defineRoute, named } from './common.js';
@@ -178,11 +180,47 @@ export type AccessReviewPartSummary = z.infer<typeof AccessReviewPartSummary>;
 
 export const AccessReviewPartDetail = named(
   'AccessReviewPartDetail',
-  z.object({ ...partShape, rows: z.array(AccessReviewItemView), suggestedEvidence: z.object({ id: Uuid, code: z.string() }).nullable() }),
+  z.object({
+    ...partShape,
+    rows: z.array(AccessReviewItemView),
+    /**
+     * For ISO/IEC 27001, the evidence item of control A.5.18 proposed for the sign-off of a system part; for the
+     * organisation part (M3-14), the A.5.18 item of the first ISO/IEC 27001 system, with that system (`ms`), proposed at
+     * "Complete".
+     */
+    suggestedEvidence: z.object({ id: Uuid, code: z.string(), ms: MsId.optional() }).nullable(),
+  }),
   'GET /ms/{ms}/access-reviews/{id}: the items of this system\'s part and, for ISO/IEC 27001, the evidence item of control A.5.18 proposed for the sign-off',
-  { valid: [{ ...EXAMPLE_PART, rows: [EXAMPLE_ITEM], suggestedEvidence: { id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EV-0518' } }, { ...EXAMPLE_PART, rows: [], suggestedEvidence: null }], invalid: [EXAMPLE_PART] },
+  {
+    valid: [
+      { ...EXAMPLE_PART, rows: [EXAMPLE_ITEM], suggestedEvidence: { id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EV-0518' } },
+      { ...EXAMPLE_PART, rows: [], suggestedEvidence: null },
+      { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: { id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EV-0518', ms: 'isms' } },
+    ],
+    invalid: [EXAMPLE_PART, { ...EXAMPLE_PART, rows: [], suggestedEvidence: { id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EV-0518', ms: 'ISMS 1' } }],
+  },
 );
 export type AccessReviewPartDetail = z.infer<typeof AccessReviewPartDetail>;
+
+const EXAMPLE_OPTION = { ms: 'isms', id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', code: 'EV-0518', title: 'Quarterly access review records' } as const;
+
+export const AccessReviewEvidenceOption = named(
+  'AccessReviewEvidenceOption',
+  z.object({
+    ms: MsId,
+    id: Uuid,
+    code: z.string(),
+    /**
+     * The item's title when the caller may read it: the caller holds `ms.read` in the item's system (with an own scope,
+     * for the items they own), or the item is evidence of access control (ISO/IEC 27001 A.5.15, A.5.18 or A.8.2).
+     * Null otherwise: a Tenant Admin without a role in a system sees that system's other items by code only.
+     */
+    title: z.string().nullable(),
+  }),
+  'An evidence item that can receive the organisation part of an access review at completion: its system, id, code and, when the caller may read it, title (M3-14)',
+  { valid: [EXAMPLE_OPTION, { ...EXAMPLE_OPTION, title: null }], invalid: [{ ...EXAMPLE_OPTION, id: 'EV-0518' }, { code: 'EV-0518' }, { ...EXAMPLE_OPTION, title: undefined }] },
+);
+export type AccessReviewEvidenceOption = z.infer<typeof AccessReviewEvidenceOption>;
 
 export const AccessReviewDetail = named(
   'AccessReviewDetail',
@@ -194,11 +232,20 @@ export const AccessReviewDetail = named(
     pendingApplications: z.array(AccessReviewItemView),
     /** Warnings the review completed with (REVIEW-SINGLE-ADMIN), and those that completing it now would give. */
     warnings: z.array(Warning),
+    /**
+     * While the review is open: the evidence items of every system that "Complete" can file the organisation part to
+     * (not deleted, not restricted; at most 2000, by system and code). The Tenant Admins need no role in a system to
+     * choose one; the title of an item shows only where the caller may read it (M3-14).
+     */
+    evidenceOptions: z.array(AccessReviewEvidenceOption).optional(),
   }),
-  'GET /admin/access-reviews/{id}: the organisation part with its items, the status of every system part, and the decided revocations still to apply',
+  'GET /admin/access-reviews/{id}: the organisation part with its items, the status of every system part, the decided revocations still to apply, and the evidence items the organisation part can be filed to',
   {
-    valid: [{ ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: null }, parts: [EXAMPLE_PART], pendingApplications: [], warnings: [] }],
-    invalid: [EXAMPLE_REVIEW],
+    valid: [
+      { ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: null }, parts: [EXAMPLE_PART], pendingApplications: [], warnings: [] },
+      { ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: { ...EXAMPLE_OPTION } }, parts: [EXAMPLE_PART], pendingApplications: [], warnings: [], evidenceOptions: [EXAMPLE_OPTION] },
+    ],
+    invalid: [EXAMPLE_REVIEW, { ...EXAMPLE_REVIEW, organisationPart: { ...EXAMPLE_PART, ms: null, rows: [], suggestedEvidence: null }, parts: [], pendingApplications: [], warnings: [], evidenceOptions: [{ code: 'EV-0518' }] }],
   },
 );
 export type AccessReviewDetail = z.infer<typeof AccessReviewDetail>;
@@ -254,6 +301,14 @@ export const AccessReviewSignOff = named(
 );
 export type AccessReviewSignOff = z.infer<typeof AccessReviewSignOff>;
 
+export const AccessReviewComplete = named(
+  'AccessReviewComplete',
+  z.strictObject({ ms: MsId.optional(), evidenceId: Uuid.optional() }),
+  'POST /admin/access-reviews/{id}/complete body: the system and the evidence item that receive the organisation part (memberships, admin roles, linked company sign-in, with the summary and warnings of the review). Both are needed: without them the completion is refused with 422 access_reviews.evidence_required (M3-14)',
+  { valid: [{ ms: 'isms', evidenceId: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e' }], invalid: [{ ms: 'isms', evidenceId: 'EV-0518' }, { ms: 'isms', evidenceId: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', note: 'x' }] },
+);
+export type AccessReviewComplete = z.infer<typeof AccessReviewComplete>;
+
 const manage = { owner: 'M3-07' as const, auth: 'session' as const, permission: 'access_review.manage' as const, scope: 'org' as const };
 const decide = { owner: 'M3-07' as const, auth: 'session' as const, permission: 'access_review.decide' as const, scope: 'ms' as const, msSource: 'path' as const };
 
@@ -294,8 +349,8 @@ export const accessReviewsApplyRoute = defineRoute({
 });
 export const accessReviewsCompleteRoute = defineRoute({
   ...manage, id: 'access-reviews.complete', method: 'POST', path: '/api/v1/admin/access-reviews/:id/complete',
-  summary: 'Complete when every part is signed off and every revocation applied or explained; stores the report and files each system\'s rows as evidence (warning REVIEW-SINGLE-ADMIN; audited access_review.completed)',
-  params: IdParams, response: CommandResult, errors: [404, 409, 422],
+  summary: 'Complete when every part is signed off and every revocation applied or explained; files the organisation part to the evidence item of the body (422 access_reviews.evidence_required without one) and each system\'s rows to the item named at its sign-off, and stores the report in a Managed Vault when there is one (warning REVIEW-SINGLE-ADMIN; audited access_review.completed)',
+  params: IdParams, body: AccessReviewComplete, response: CommandResult, errors: [404, 409, 422],
 });
 export const accessReviewsCancelRoute = defineRoute({
   ...manage, id: 'access-reviews.cancel', method: 'POST', path: '/api/v1/admin/access-reviews/:id/cancel',

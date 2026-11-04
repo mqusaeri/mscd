@@ -1,9 +1,10 @@
 // Sample adapter of "Policies to confirm" (MILESTONE-3 M3-05, D.7, C.6): the sample persona's rows of the read
 // confirmation requests of the sample organisation (screens/acknowledgements/sample-store.ts, shared with "Policy read
 // confirmations"), opening a version (the sample build has no stored files, so the row counts as opened) and the
-// confirmation with the rule of the api (ACK-OPEN-FIRST before opening). Loaded only by the sample build (adapter.ts).
+// confirmation with the rule of the api (ACK-OPEN-FIRST before opening). The due date is the persona's own (the day they
+// were added plus the request's period, M3-14). Loaded only by the sample build (adapter.ts).
 import type { ControllerData } from '../../data/types';
-import { sampleState, sampleToday } from '../acknowledgements/sample-store';
+import { personDue, sampleState, sampleToday } from '../acknowledgements/sample-store';
 import type { Confirmation, ConfirmationsAdapter } from './model';
 
 export interface SampleScope {
@@ -41,7 +42,7 @@ export function createSampleAdapter(scope: SampleScope): ConfirmationsAdapter {
           if (p.status === 'pending' && r.status !== 'open') continue;
           out.push({
             id: p.id, requestId: r.id, ms: p.ms, document: { code: r.document.code, title: r.document.title }, versionLabel: r.version.label, status: p.status,
-            dueOn: r.dueOn, openedAt: p.openedAt, confirmedAt: p.confirmedAt, overdue: p.status === 'pending' && r.dueOn < today(),
+            dueOn: personDue(r, p), openedAt: p.openedAt, confirmedAt: p.confirmedAt, overdue: p.status === 'pending' && personDue(r, p) < today(),
           });
         }
       }

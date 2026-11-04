@@ -3,6 +3,7 @@
 // `access_review.manage` (Tenant Admins), and `user.manage` for applying (route table); the services apply the rules.
 import { Controller, Inject, Req, Res } from '@nestjs/common';
 import {
+  type AccessReviewComplete,
   accessReviewsApplyRoute,
   accessReviewsCancelRoute,
   accessReviewsCompleteRoute,
@@ -93,8 +94,12 @@ export class AccessReviewsController {
   }
 
   @ApiRoute(accessReviewsCompleteRoute)
-  accessReviewsComplete(@CurrentPrincipal() principal: Principal, @RouteInputParam('params') params: { id: string }): Promise<CommandResult> {
-    return this.reviews.complete(principal, params.id);
+  accessReviewsComplete(
+    @CurrentPrincipal() principal: Principal,
+    @RouteInputParam('params') params: { id: string },
+    @RouteInputParam('body') body: AccessReviewComplete | undefined,
+  ): Promise<CommandResult> {
+    return this.reviews.complete(principal, params.id, body ?? {});
   }
 
   @ApiRoute(accessReviewsCancelRoute)

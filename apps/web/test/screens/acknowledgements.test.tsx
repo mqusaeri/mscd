@@ -2,7 +2,8 @@
 // checks before a request), the API adapter over a fake fetch (requests, the person list, a request by hand,
 // reminders, close and file, the CSV link, the settings of a document with If-Match and the BR-22 confirmation), the
 // sample adapter and its rules, the page action and the section of a document's detail, and the views in both
-// languages and themes.
+// languages and themes. M3-14: each person's own due date and the day they were added, the excusal reasons in both
+// languages, the register columns, the close dialog's proposal and warning, and "Ask the people who have not confirmed".
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
@@ -11,11 +12,11 @@ import screen from '../../src/screens/acknowledgements/index';
 import { ROUTES, ROUTE_IDS, pathOf } from '../../src/screens/acknowledgements/routes';
 import { createApiAdapter, fromDetail, fromItem, outcomeOf, resetSavedSettings } from '../../src/screens/acknowledgements/api';
 import { createSampleAdapter, csvCell, registerCsv, REGISTER_COLUMNS } from '../../src/screens/acknowledgements/sample';
-import { resetSampleAcknowledgements, sampleAudience, sampleState } from '../../src/screens/acknowledgements/sample-store';
+import { personDue, resetSampleAcknowledgements, sampleAudience, sampleState } from '../../src/screens/acknowledgements/sample-store';
 import { adapterFor, deferredAdapter } from '../../src/screens/acknowledgements/adapter';
 import {
-  AUDIENCE_ROLES, DEFAULT_SETTINGS, SCREEN_PERMS, approvedDocuments, askBlock, audienceText, confirmedShare, errorText, evidenceItems, personStatus,
-  recordSettings, requestsOf, settingsBody,
+  AUDIENCE_ROLES, DEFAULT_SETTINGS, EXCUSED_REASONS, SCREEN_PERMS, approvedDocuments, askBlock, audienceText, confirmedShare, errorText, evidenceItems,
+  earlierConfirmedOf, excusedReasonText, mayAskAgain, otherRegisterOf, personStatus, proposedEvidenceId, recordSettings, requestsOf, settingsBody,
 } from '../../src/screens/acknowledgements/model';
 import type { AcknowledgementsAdapter, RequestRow } from '../../src/screens/acknowledgements/model';
 import { AskDialog, CloseDialog, PeopleTable, RequestDrawer, RequestsTable, TotalsTiles } from '../../src/screens/acknowledgements/Screen';
@@ -60,7 +61,10 @@ const ITEM = {
   dueOn: '2026-10-13', createdAt: '2026-09-29T02:00:00Z', lastRemindedAt: null, closedAt: null, evidenceId: null,
   totals: { audience: 10, confirmed: 6, pending: 3, overdue: 1, excused: 1 },
 } as const;
-const PERSON = { person: { handle: 'bagus', displayName: 'Bagus Prasetyo' }, status: 'confirmed', openedAt: '2026-09-30T03:00:00Z', confirmedAt: '2026-09-30T03:05:00Z', reminderCount: 0, excusedReason: null, overdue: false } as const;
+const PERSON = {
+  person: { handle: 'bagus', displayName: 'Bagus Prasetyo' }, status: 'confirmed', openedAt: '2026-09-30T03:00:00Z', confirmedAt: '2026-09-30T03:05:00Z', reminderCount: 0,
+  excusedReason: null, overdue: false, addedOn: '2026-09-29', dueOn: '2026-10-13',
+} as const;
 const ROW: RequestRow = fromItem(ITEM as never);
 
 afterEach(() => {
@@ -120,6 +124,46 @@ describe('acknowledgement model', () => {
     expect(settingsBlock({ required: null, scope: 'system_roles', roles: [], dueDays: '14' })).toEqual(TEXT.chooseRequired);
     expect(settingsBlock({ required: false, scope: 'system_roles', roles: [], dueDays: '14' })).toBeNull();
   });
+
+  it('shows the stored excusal reasons in both languages, and an unknown one as stored (M3-14, texts B4)', () => {
+    expect(excusedReasonText('Membership of the organisation ended')).toEqual(['Membership of the organisation ended', 'Keanggotaan di organisasi telah berakhir']);
+    expect(excusedReasonText('No longer holds a role that is asked to confirm')[1]).toBe('Tidak lagi memegang peran yang diminta mengonfirmasi');
+    expect(excusedReasonText('The document is restricted to its owner, Management System Managers and Programme Owners')[1]).toBe('Dokumen dibatasi untuk pemiliknya, Management System Manager, dan Pemilik Program');
+    expect(excusedReasonText('The person was erased at their request')[1]).toBe('Data pribadi orang tersebut dihapus atas permintaannya');
+    expect(excusedReasonText('Replaced by version 5.0')).toEqual(['Replaced by version 5.0', 'Diganti oleh versi 5.0']);
+    expect(excusedReasonText('Left for another reason')).toEqual(['Left for another reason', 'Left for another reason']);
+    for (const [stored, pair] of Object.entries(EXCUSED_REASONS)) {
+      expect(pair[0], stored).toBe(stored);
+      expect(pair[1], stored).not.toBe(stored);
+    }
+  });
+
+  it('proposes the evidence item of the policy, warns about another policy\'s register, and offers to ask again (M3-14)', () => {
+    const EV_A = 'ev-a';
+    const EV_B = 'ev-b';
+    const earlier = { ...ROW, id: 'p1', status: 'closed' as const, createdAt: '2026-06-01T00:00:00Z', closedAt: '2026-06-20T00:00:00Z', evidenceId: EV_A };
+    const otherDoc = { ...ROW, id: 'p2', status: 'closed' as const, document: { ...ROW.document, code: 'POL-14' }, closedAt: '2026-07-01T00:00:00Z', evidenceId: EV_B };
+    const rows = [ROW, earlier, otherDoc];
+    expect(proposedEvidenceId(rows, 'POL-01', ROW.id)).toBe(EV_A);
+    expect(proposedEvidenceId(rows, 'POL-14', 'p2')).toBeNull();
+    expect(otherRegisterOf(rows, EV_B, 'POL-01')).toBe('POL-14');
+    expect(otherRegisterOf(rows, EV_A, 'POL-01')).toBeNull();
+    expect(otherRegisterOf(rows, null, 'POL-01')).toBeNull();
+    // The confirmations of earlier requests of the same version, which the register lists too.
+    const firstOfVersion = { ...earlier, totals: { ...earlier.totals, confirmed: 4 } };
+    const otherVersion = { ...earlier, id: 'p0', version: { id: 'v-old', label: '3.0' }, createdAt: '2026-01-01T00:00:00Z' };
+    expect(earlierConfirmedOf([ROW, firstOfVersion, otherVersion, otherDoc], ROW)).toBe(4);
+    expect(earlierConfirmedOf([ROW, firstOfVersion], firstOfVersion)).toBe(0);
+    expect(earlierConfirmedOf([ROW], ROW)).toBe(0);
+    const approved = [{ code: 'POL-01', version: '4.0' }];
+    const closed = { ...ROW, status: 'closed' as const, closedAt: '2026-10-20T00:00:00Z' };
+    expect(mayAskAgain([closed], closed, approved)).toBe(true);
+    // Not while the document has an open request, not when everyone confirmed, not for an earlier version.
+    expect(mayAskAgain([closed, ROW], closed, approved)).toBe(false);
+    expect(mayAskAgain([closed], { ...closed, totals: { ...closed.totals, confirmed: 10 } }, approved)).toBe(false);
+    expect(mayAskAgain([closed], closed, [{ code: 'POL-01', version: '5.0' }])).toBe(false);
+    expect(mayAskAgain([ROW], ROW, approved)).toBe(false);
+  });
 });
 
 describe('acknowledgement API adapter', () => {
@@ -136,7 +180,7 @@ describe('acknowledgement API adapter', () => {
     const adapter = createApiAdapter(client, () => API_D);
     expect(await adapter.list('isms')).toEqual({ ok: true, data: [ROW] });
     const detail = await adapter.get('isms', ITEM.id);
-    expect(detail).toMatchObject({ ok: true, data: { people: [{ handle: 'bagus', name: 'Bagus Prasetyo', status: 'confirmed', reminderCount: 0 }] } });
+    expect(detail).toMatchObject({ ok: true, data: { people: [{ handle: 'bagus', name: 'Bagus Prasetyo', status: 'confirmed', reminderCount: 0, addedOn: '2026-09-29', dueOn: '2026-10-13' }] } });
     expect(fromDetail(ITEM as never).people).toBeUndefined();
     const asked = await adapter.ask('isms', { documentId: DOC_ID, scope: 'roles', roles: ['domain_owner'], dueDays: 21 });
     expect(asked).toMatchObject({ ok: true, data: { changed: ['isms'], message: ['Asked 9 people to confirm POL-01 version 4.0', '9 orang diminta mengonfirmasi POL-01 versi 4.0'] } });
@@ -216,6 +260,11 @@ describe('acknowledgement sample adapter', () => {
     if (!detail.ok) throw new Error('get failed');
     for (const persona of ['rina', 'bagus', 'maya', 'hendra']) expect(detail.data.people!.find((p) => p.handle === persona)?.status, persona).toBe('confirmed');
     expect(detail.data.people![0]!.status).toBe('pending');
+    // One pending person joined three days after the start, with their own due date (M3-14).
+    const newcomer = detail.data.people!.find((p) => p.addedOn !== open.createdAt.slice(0, 10))!;
+    expect(newcomer.status).toBe('pending');
+    expect(newcomer.dueOn > open.dueOn).toBe(true);
+    expect(detail.data.people!.filter((p) => p !== newcomer).every((p) => p.dueOn === open.dueOn)).toBe(true);
     expect((await adapter.list('qms')).ok && (await adapter.list('qms') as { data: RequestRow[] }).data).toEqual([]);
     expect(adapter.settingsOf('isms', 'POL-01', null)).toEqual({ required: true, scope: 'system_roles', roles: null, dueDays: 14 });
     // The tab's store is the whole truth of the sample build: another document of the system has the defaults.
@@ -228,7 +277,9 @@ describe('acknowledgement sample adapter', () => {
     const adapter = createSampleAdapter(scope);
     expect(await adapter.ask('isms', { documentId: 'PRC-16', scope: 'system_roles', roles: [], dueDays: 14 })).toMatchObject({ ok: false, error: { status: 422, messageKey: 'acknowledgements.not_approved' } });
     expect(await adapter.ask('isms', { documentId: 'POL-01', scope: 'system_roles', roles: [], dueDays: 14 })).toMatchObject({ ok: false, error: { status: 409, messageKey: 'acknowledgements.open_request' } });
-    const asked = await adapter.ask('isms', { documentId: 'POL-14', scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
+    // A document without a request yet (POL-14's managers confirmed its version already, so they are not asked again).
+    const fresh = approvedDocuments(D, 'isms').find((d) => d.code !== 'POL-01' && d.code !== 'POL-14')!;
+    const asked = await adapter.ask('isms', { documentId: fresh.code, scope: 'roles', roles: ['ms_manager'], dueDays: 7 });
     expect(asked).toMatchObject({ ok: true, data: { changed: ['isms'], data: { dueOn: '2026-10-06' } } });
     const state = sampleState(D, 'ndt');
     const created = state.requests.at(-1)!;
@@ -243,10 +294,50 @@ describe('acknowledgement sample adapter', () => {
     const csv = registerCsv(D, created, '2026-10-30');
     const lines = csv.trim().split('\r\n');
     expect(lines[0]).toBe(REGISTER_COLUMNS.join(','));
-    expect(lines.find((l) => l.includes(',rina,'))).toMatch(/^POL-14,.+,rina,Rina Kusuma,pending,,,1,yes,$/);
+    expect(REGISTER_COLUMNS).toEqual([
+      'Document', 'Title', 'Version', 'Version approved on', 'Version SHA-256', 'User name', 'Name', 'Roles', 'Request opened on', 'Added on',
+      'Due date', 'Status', 'Opened at (link issued by MSCD)', 'Confirmed at', 'Statement confirmed', 'Reminders', 'Overdue', 'Excused reason',
+    ]);
+    expect(lines.find((l) => l.includes(',rina,'))).toMatch(new RegExp(`^${fresh.code},.+,rina,Rina Kusuma,"?ISMS: [^"]*Management System Manager[^"]*"?,2026-09-29,2026-09-29,2026-10-06,pending,,,,1,yes,$`));
+    // A confirmed person's row carries the statement they confirmed.
+    const earlier = state.requests.find((r) => r.document.code === 'POL-01')!;
+    const confirmedLine = registerCsv(D, earlier, '2026-09-29').split('\r\n').find((l) => l.includes(',bagus,'))!;
+    expect(confirmedLine).toContain(',confirmed,');
+    expect(confirmedLine).toContain(',I have read and understood this document,');
     expect(csvCell('=SUM(A1)')).toBe("'=SUM(A1)");
     expect(csvCell('a,b')).toBe('"a,b"');
     expect(csvCell(null)).toBe('');
+  });
+
+  it('does not ask again the people who confirmed the same version, and refuses when everyone did (M3-14)', async () => {
+    const adapter = createSampleAdapter(scope);
+    const state = sampleState(D, 'ndt');
+    const closed = state.requests.find((r) => r.document.code === 'POL-14')!;
+    const doc = D.bundles!.isms!.docs.find((d) => d.id === 'POL-14')!;
+    // The seeded closed request asked for the current version: its confirmed people are not asked again.
+    expect(closed.version.label).toBe(doc.ver);
+    const confirmed = closed.people.filter((p) => p.status === 'confirmed').map((p) => p.handle);
+    expect(confirmed.length).toBeGreaterThan(0);
+    const asked = await adapter.ask('isms', { documentId: 'POL-14', scope: 'system_roles', roles: [], dueDays: 14 });
+    expect(asked.ok).toBe(true);
+    const created = state.requests.at(-1)!;
+    expect(created.people.map((p) => p.handle).filter((h) => confirmed.includes(h))).toEqual([]);
+    expect(created.people.length).toBe(closed.people.length - confirmed.length);
+    // Everyone of the new request confirms; it closes; a third request has nobody left to ask.
+    for (const p of created.people) Object.assign(p, { status: 'confirmed', confirmedAt: '2026-09-29T04:00:00Z' });
+    expect(await adapter.close('isms', created.id, null)).toMatchObject({ ok: true });
+    expect(await adapter.ask('isms', { documentId: 'POL-14', scope: 'system_roles', roles: [], dueDays: 14 })).toMatchObject({ ok: false, error: { status: 422, messageKey: 'acknowledgements.everyone_confirmed' } });
+    expect(personDue(created, created.people[0]!)).toBe(created.dueOn);
+    // The register of the new request also lists the people who confirmed the version in the closed one, with the day
+    // that request opened, so its file holds every confirmation of the version; the closed one keeps its own people.
+    const lines = registerCsv(D, created, '2026-09-29', state.requests).trim().split('\r\n').slice(1);
+    expect(lines).toHaveLength(created.people.length + confirmed.length);
+    for (const handle of confirmed) {
+      expect(lines.filter((l) => l.includes(`,${handle},`))).toHaveLength(1);
+      expect(lines.find((l) => l.includes(`,${handle},`))).toContain(`,${closed.createdAt.slice(0, 10)},`);
+    }
+    expect(registerCsv(D, closed, '2026-09-29', state.requests).trim().split('\r\n')).toHaveLength(1 + closed.people.length);
+    expect(registerCsv(D, created, '2026-09-29').trim().split('\r\n')).toHaveLength(1 + created.people.length);
   });
 
   it('keeps the settings of a document in the tab, in every system of a shared document', async () => {
@@ -317,10 +408,25 @@ describe('acknowledgement views', () => {
         const tiles = render(<TotalsTiles ctx={ctx} totals={ROW.totals} />, ctx, theme);
         expect(tiles).toContain('data-stat="overdue"');
         expect(tiles).toContain('data-tone="bad"');
-        const people = render(<PeopleTable ctx={ctx} people={fromDetail({ ...ITEM, people: [PERSON, { ...PERSON, person: { handle: 'dewi', displayName: 'Dewi Anggraini' }, status: 'pending', overdue: true, confirmedAt: null }] } as never).people!} />, ctx, theme);
-        for (const p of [TEXT.colPerson, TEXT.colOpened, TEXT.colConfirmedAt, TEXT.colReminders, TEXT.personConfirmed, TEXT.personOverdue]) expect(people, p[0]).toContain(t(p));
+        const people = render(<PeopleTable ctx={ctx} people={fromDetail({ ...ITEM, people: [
+          PERSON,
+          { ...PERSON, person: { handle: 'dewi', displayName: 'Dewi Anggraini' }, status: 'pending', overdue: true, confirmedAt: null, addedOn: '2026-10-02', dueOn: '2026-10-16' },
+          { ...PERSON, person: { handle: 'joko', displayName: 'Joko Widodo' }, status: 'excused', confirmedAt: null, excusedReason: 'Membership of the organisation ended' },
+        ] } as never).people!} />, ctx, theme);
+        for (const p of [TEXT.colPerson, TEXT.colAdded, TEXT.colDue, TEXT.colOpened, TEXT.colConfirmedAt, TEXT.colReminders, TEXT.personConfirmed, TEXT.personOverdue, TEXT.personExcused]) expect(people, p[0]).toContain(t(p));
+        expect(people).toContain('data-added="2026-10-02"');
+        expect(people).toContain('data-due="2026-10-16"');
+        // The excusal reason in the interface language (texts B4).
+        expect(people).toContain(t(EXCUSED_REASONS['Membership of the organisation ended']!));
         const drawer = render(<RequestDrawer ctx={ctx} adapter={adapter} ms="isms" row={ROW} onClose={() => undefined} onChanged={() => undefined} />, ctx, theme);
-        for (const p of [TEXT.drawerCrumb, TEXT.factDocument, TEXT.factAudience, TEXT.factDue, TEXT.remind, TEXT.exportCsv, TEXT.closeFile]) expect(drawer, p[0]).toContain(t(p));
+        for (const p of [TEXT.drawerCrumb, TEXT.factDocument, TEXT.factAudience, TEXT.factDue, TEXT.remind, TEXT.exportCsv, TEXT.closeFile, TEXT.newcomersNote]) expect(drawer, p[0]).toContain(t(p));
+        expect(drawer).not.toContain(t(TEXT.askNewcomers));
+        // A closed request of the current version that someone did not confirm offers "Ask the people who have not confirmed".
+        const doc = approvedDocuments(D, 'isms').find((d) => d.code === 'POL-01')!;
+        const closedRow = { ...ROW, status: 'closed' as const, closedAt: '2026-10-20T00:00:00Z', version: { ...ROW.version, label: doc.version } };
+        const again = render(<RequestDrawer ctx={ctx} adapter={adapter} ms="isms" row={closedRow} rows={[closedRow]} onClose={() => undefined} onChanged={() => undefined} onAskAgain={() => undefined} />, ctx, theme);
+        expect(again).toContain(t(TEXT.askNewcomers));
+        expect(again).toContain(t(TEXT.closedNote));
         const top = render(<RequestDrawer ctx={ctxOf(lang, { can: (_ms, perm) => (Array.isArray(perm) ? perm : [perm]).includes('audit.pending.aggregate') })} adapter={adapter} ms="isms" row={ROW} onClose={() => undefined} onChanged={() => undefined} />, ctx, theme);
         expect(top).toContain(t(TEXT.totalsOnly));
         expect(top).not.toContain(t(TEXT.remind));
@@ -332,10 +438,26 @@ describe('acknowledgement views', () => {
         const ctx = ctxOf(lang);
         const t = (p: readonly [string, string]) => html(p[lang === 'id' ? 1 : 0]);
         const ask = render(<AskDialog ctx={ctx} adapter={adapter} ms="isms" onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
-        for (const p of [TEXT.askTitle, TEXT.askDocument, TEXT.audience, TEXT.scopeSystemRoles, TEXT.scopeRoles, TEXT.scopeOrganisation, TEXT.dueDays, TEXT.send]) expect(ask, p[0]).toContain(t(p));
+        for (const p of [TEXT.askTitle, TEXT.askDocument, TEXT.audience, TEXT.scopeSystemRoles, TEXT.scopeRoles, TEXT.scopeOrganisation, TEXT.dueDays, TEXT.send, TEXT.askSkipConfirmed, TEXT.newcomersNote]) expect(ask, p[0]).toContain(t(p));
         expect(ask).toContain('POL-01');
+        // "Ask the people who have not confirmed" fills in the document and the audience of the closed request.
+        const again = render(<AskDialog ctx={ctx} adapter={adapter} ms="isms" start={{ code: 'POL-01', scope: 'roles', roles: ['domain_owner'] }} onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(again).toMatch(/<option value="POL-01" selected="">/);
+        expect(again).toMatch(/name="role-domain_owner" checked=""/);
         const close = render(<CloseDialog ctx={ctx} adapter={adapter} ms="isms" row={ROW} onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
-        for (const p of [TEXT.closeSub, TEXT.closeEvidence, TEXT.closeAndFile, TEXT.closeOnly]) expect(close, p[0]).toContain(t(p));
+        for (const p of [TEXT.closeSub, TEXT.closeEvidence, TEXT.closeEvidenceHint, TEXT.closeAndFile, TEXT.closeOnly]) expect(close, p[0]).toContain(t(p));
+        // The item of an earlier register of the same policy is proposed; an item holding another policy's register is warned about.
+        const ev = evidenceItems(D, 'isms');
+        const proposed = render(<CloseDialog ctx={ctx} adapter={adapter} ms="isms" row={ROW} rows={[ROW, { ...ROW, id: 'old', status: 'closed', evidenceId: ev[1]!.code }]} onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(proposed).toMatch(new RegExp(`aria-selected="true"[^>]*>(<span>)?<span class="mx-mono"[^>]*>${ev[1]!.code}<`));
+        const warned = render(<CloseDialog ctx={ctx} adapter={adapter} ms="isms" row={ROW} rows={[ROW, { ...ROW, id: 'old', status: 'closed', evidenceId: ev[1]!.code, document: { ...ROW.document, code: 'POL-14' } }, { ...ROW, id: 'mine', status: 'closed', evidenceId: ev[1]!.code, createdAt: '2026-01-01T00:00:00Z', closedAt: '2026-01-02T00:00:00Z' }]} onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(warned).toContain('data-other-register="POL-14"');
+        expect(warned).toContain(html(ctx.fill(TEXT.otherRegister, { code: 'POL-14' })));
+        // After an earlier request of the same version the dialog says that the register lists its confirmations too.
+        expect(close).not.toContain('data-earlier-note');
+        const reAsk = render(<CloseDialog ctx={ctx} adapter={adapter} ms="isms" row={ROW} rows={[ROW, { ...ROW, id: 'first', status: 'closed', createdAt: '2026-09-01T02:00:00Z', evidenceId: ev[1]!.code }]} onCancel={() => undefined} onDone={() => undefined} />, ctx, theme);
+        expect(reAsk).toContain('data-earlier-note=""');
+        expect(reAsk).toContain(html(ctx.fill(TEXT.earlierNote, { version: '4.0', n: 6 })));
         const settings = render(<SettingsDialog ctx={ctx} adapter={adapter} ms="isms" code="POL-01" initial={{ required: true, scope: 'roles', roles: ['domain_owner'], dueDays: 21 }} onCancel={() => undefined} onSaved={() => undefined} />, ctx, theme);
         for (const p of [TEXT.required, TEXT.roles, TEXT.save]) expect(settings, p[0]).toContain(t(p));
         expect(settings).toMatch(/name="role-domain_owner" checked=""/);
@@ -381,12 +503,25 @@ describe('acknowledgement views', () => {
     }
   });
 
-  it('asks for a system, and shows the totals-only note without audit.pending.all', () => {
+  it('asks for a system, says who is asked, and shows the totals-only note without audit.pending.all', () => {
     expect(render(<AcknowledgementsScreen ctx={ctxOf('en', { msObj: null })} />, ctxOf('en'))).toContain(TEXT.noSystem[0]);
     const top = ctxOf('id', { can: (_ms, perm) => (Array.isArray(perm) ? perm : [perm]).includes('audit.pending.aggregate') });
     const body = render(<AcknowledgementsScreen ctx={top} />, top);
     expect(body).toContain(TEXT.totalsOnly[1]);
+    expect(body).toContain(html(TEXT.audienceNote[1]));
     expect(body).not.toContain(TEXT.ask[1]);
+    expect(render(<AcknowledgementsScreen ctx={ctxOf('en')} />, ctxOf('en'))).toContain(html(TEXT.audienceNote[0]));
+  });
+
+  it('uses the Indonesian words of the text review (M3-14: texts A3, A6, B1, B2, B3, B5)', () => {
+    expect(TEXT.colDue[1]).toBe('Jatuh tempo');
+    expect(TEXT.colState[1]).toBe('Status');
+    for (const p of [TEXT.colPending, TEXT.statPending, TEXT.personPending]) expect(p[1]).toBe('Belum konfirmasi');
+    for (const p of [TEXT.colExcused, TEXT.statExcused, TEXT.personExcused]) expect(p).toEqual(['No longer asked', 'Tidak lagi diminta']);
+    expect(TEXT.closeOnly[1]).toBe('Tutup tanpa menyimpan sebagai bukti');
+    expect(TEXT.closeAndFile[1]).toBe('Tutup dan simpan sebagai bukti');
+    expect(TEXT.totalsOnly[1]).toContain('Management System Manager dan Pemilik Program');
+    expect(JSON.stringify(TEXT)).not.toMatch(/[Tt]ertunda|Tenggat|Keadaan|Dikecualikan/);
   });
 
   it('every text has both languages, Indonesian that differs, and no em dash or centre dot', () => {

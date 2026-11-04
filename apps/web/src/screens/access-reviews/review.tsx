@@ -1,23 +1,26 @@
 // One access review on Access reviews (MILESTONE-3 M3-07, D.9), for the Tenant Admins: its facts and progress,
-// "Complete" (disabled with what still waits), "Download report" and "Cancel review"; the status of each system part
-// (a system nobody may review now is named, so the Tenant Admin assigns a reviewer or cancels the review);
-// the revocations and changes to apply, with "Apply", "Mark as applied" and "Not applied" (a guest auditor grant is
-// revoked by a Management System Manager on the system's page); and the organisation items with filters, a decision
-// per item or for a selection, the session's own access (decided by another Tenant Admin) and the items that need a
-// second reviewer.
+// "Complete" (disabled with what still waits; it opens a dialog with the evidence item that receives the organisation
+// part, the A.5.18 item of the first ISO/IEC 27001 system proposed, M3-14), "Download report" and "Cancel review"; the
+// status of each system part (a system nobody may review now is named, so the Tenant Admin assigns a reviewer or
+// cancels the review); the revocations and changes to apply, with "Revoke now" (a confirmation that says what happens
+// before the call runs, M3-14), "Mark as applied" and "Not applied" (a guest auditor grant is revoked by a Management
+// System Manager on the system's page); and the organisation items with filters, a decision per item or for a
+// selection, the session's own access (decided by another Tenant Admin) and the items that need a second reviewer.
 import { useEffect, useState } from 'react';
 import { formatInstant, saveFile } from '../auditor-access/shared';
 import type { HostContext, TextPair } from '../types';
-import { Alert, Badge, Button, Card, Checkbox, EmptyState, Facts, Field, Meter, Modal, Select, Table, Textarea, UI_TEXT } from '../ui';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Facts, Field, Meter, Modal, RecordPicker, Select, Table, Textarea, UI_TEXT } from '../ui';
 import type { Column } from '../ui';
 import { Illustration } from '../../illustrations';
 import { adapterFor } from './adapter';
 import type { ApplyBody, ItemKind, ItemRow, PartRow, ReviewDetail } from './model';
 import {
-  KIND_TEXT, ORG_KINDS, PART_STATUS_TEXT, PART_STATUS_TONE, STATUS_TEXT, STATUS_TONE, completionBlocks, formatDay, mayApplyOrg, noReviewerParts, noteError,
-  settled,
+  KIND_TEXT, ORG_KINDS, PART_STATUS_TEXT, PART_STATUS_TONE, STATUS_TEXT, STATUS_TONE, completeOptionKey, completionBlocks, formatDay, mayApplyOrg, noReviewerParts,
+  noteError, proposedCompleteOption, settled,
 } from './model';
-import { AccessCell, ApplyNoteDialog, DecisionCell, DecisionDialog, ItemsTable, LoadState, PersonAt, PersonCell, Warnings, errorText, outcomeText, useLoad } from './parts';
+import {
+  AccessCell, ApplyNoteDialog, DecisionCell, DecisionDialog, ItemsTable, LoadState, PersonAt, PersonCell, RevokeDialog, Warnings, errorText, outcomeText, useLoad,
+} from './parts';
 import { noteAccessReviewsChanged } from './store';
 import { TEXT } from './text';
 
@@ -62,6 +65,72 @@ function CancelDialog({ ctx, review, onClose, onDone }: { ctx: HostContext; revi
         <Textarea name="reason" rows={3} maxLength={500} value={reason} onChange={(v) => { setReason(v); setError(null); }} />
       </Field>
       {typeof error === 'string' ? <div className="mx-error" role="alert">{error}</div> : null}
+    </Modal>
+  );
+}
+
+/**
+ * "Complete" (M3-14, ISO review m1): the evidence item that receives the organisation part of the report (memberships,
+ * admin roles, linked company sign-in, with the summary and warnings), from the items of every system; the A.5.18 item
+ * of the first ISO/IEC 27001 system is proposed. An item whose title the caller may not read shows its code only. The
+ * call runs only from the dialog's button.
+ */
+export function CompleteDialog({ ctx, review, onClose, onDone }: { ctx: HostContext; review: ReviewDetail; onClose(): void; onDone(): void }) {
+  const adapter = adapterFor(ctx);
+  const options = review.evidenceOptions ?? [];
+  const proposed = proposedCompleteOption(review);
+  const [key, setKey] = useState(proposed ? completeOptionKey(proposed) : '');
+  const [error, setError] = useState<TextPair | string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = () => {
+    const chosen = options.find((o) => completeOptionKey(o) === key);
+    if (!chosen) {
+      setError(TEXT.chooseCompleteEvidence);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    void ctx.track(settled(adapter.complete(review.id, { ms: chosen.ms, evidenceId: chosen.id }))).then((res) => {
+      setBusy(false);
+      if (!res.ok) {
+        setError(errorText(ctx, res.error));
+        return;
+      }
+      ctx.toast(outcomeText(ctx, res.data, ctx.li(TEXT.completed)));
+      if (res.data.changed.length) ctx.reload(res.data.changed).catch(() => undefined);
+      onDone();
+    });
+  };
+  return (
+    <Modal
+      open
+      title={ctx.fill(TEXT.completeTitle, { no: review.reviewNo })}
+      sub={TEXT.completeSub}
+      onClose={onClose}
+      layer={ctx.layer()}
+      footer={(
+        <>
+          <Button onClick={onClose}>{ctx.li(UI_TEXT.cancel)}</Button>
+          <Button variant="primary" busy={busy} disabled={!options.length} onClick={submit}>{ctx.li(TEXT.complete)}</Button>
+        </>
+      )}
+    >
+      <div className="mx-stack" data-complete-review={review.id}>
+        {options.length ? (
+          <Field label={TEXT.completeEvidence} hint={TEXT.completeEvidenceHint} error={typeof error === 'string' ? null : error} required>
+            <RecordPicker
+              value={key}
+              onChange={(v) => { setKey(v); setError(null); }}
+              records={options.map((o) => (o.title === null
+                ? { id: completeOptionKey(o), title: '', note: ctx.li(TEXT.titleHidden) }
+                : { id: completeOptionKey(o), title: o.title }))}
+              limit={80}
+            />
+          </Field>
+        ) : <Alert tone="info">{ctx.li(TEXT.completeNoEvidence)}</Alert>}
+        {options.some((o) => o.title === null) ? <div className="mx-small" data-codes-only>{ctx.li(TEXT.completeCodesOnly)}</div> : null}
+        {typeof error === 'string' ? <div className="mx-error" role="alert">{error}</div> : null}
+      </div>
     </Modal>
   );
 }
@@ -113,23 +182,8 @@ function ApplicationsCard({ ctx, review }: { ctx: HostContext; review: ReviewDet
   const adapter = adapterFor(ctx);
   const canApply = mayApplyOrg(ctx) && review.status === 'open';
   const [noteFor, setNoteFor] = useState<{ row: ItemRow; kind: 'not_applied' | 'mark_applied' } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<ItemRow | null>(null);
   const run = (row: ItemRow, body: ApplyBody) => adapter.apply(review.id, row.id, body);
-  const apply = (row: ItemRow) => {
-    setBusy(row.id);
-    setFailure(null);
-    void ctx.track(settled(run(row, { action: 'apply' }))).then((res) => {
-      setBusy(null);
-      if (!res.ok) {
-        setFailure(errorText(ctx, res.error));
-        return;
-      }
-      ctx.toast(outcomeText(ctx, res.data, ctx.li(TEXT.applied)));
-      if (res.data.changed.length) ctx.reload(res.data.changed).catch(() => undefined);
-      noteAccessReviewsChanged();
-    });
-  };
   const columns: Column<ItemRow>[] = [
     { key: 'person', label: TEXT.colPerson, render: (r) => <PersonCell ctx={ctx} row={r} /> },
     { key: 'access', label: TEXT.colAccess, render: (r) => <AccessCell ctx={ctx} row={r} /> },
@@ -141,7 +195,7 @@ function ApplicationsCard({ ctx, review }: { ctx: HostContext; review: ReviewDet
         if (!canApply) return <span className="mx-small">{ctx.li(TEXT.applyNeedsRight)}</span>;
         return (
           <span className="mx-btn-group">
-            {r.decision === 'revoke' ? <Button variant="primary" busy={busy === r.id} disabled={busy !== null} onClick={() => apply(r)}>{ctx.li(TEXT.apply)}</Button> : null}
+            {r.decision === 'revoke' ? <Button variant="danger" onClick={() => setRevoking(r)}>{ctx.li(TEXT.apply)}</Button> : null}
             <Button onClick={() => setNoteFor({ row: r, kind: 'mark_applied' })}>{ctx.li(TEXT.markApplied)}</Button>
             <Button variant="link" onClick={() => setNoteFor({ row: r, kind: 'not_applied' })}>{ctx.li(TEXT.notApplied)}</Button>
           </span>
@@ -151,13 +205,26 @@ function ApplicationsCard({ ctx, review }: { ctx: HostContext; review: ReviewDet
   ];
   return (
     <Card title={TEXT.applyTitle} sub={TEXT.applySub} flush>
-      {failure ? <div style={{ padding: 12 }}><Alert tone="bad">{failure}</Alert></div> : null}
       <Table
         columns={columns}
         rows={review.pendingApplications}
         rowKey={(r) => r.id}
         empty={<div className="mx-small" style={{ padding: 12 }}>{ctx.li(TEXT.nothingToApplyNow)}</div>}
       />
+      {revoking ? (
+        <RevokeDialog
+          ctx={ctx}
+          row={revoking}
+          run={() => run(revoking, { action: 'apply' })}
+          onClose={() => setRevoking(null)}
+          onDone={(outcome) => {
+            ctx.toast(outcomeText(ctx, outcome, ctx.li(TEXT.applied)));
+            setRevoking(null);
+            if (outcome.changed.length) ctx.reload(outcome.changed).catch(() => undefined);
+            noteAccessReviewsChanged();
+          }}
+        />
+      ) : null}
       {noteFor ? (
         <ApplyNoteDialog
           ctx={ctx}
@@ -259,21 +326,7 @@ export function ReviewPage({ ctx, id, onBack }: { ctx: HostContext; id: string; 
   const review = loaded.data;
   const blocks = review ? completionBlocks(review, ctx.li, ctx.fill) : [];
   const unreviewable = review ? noReviewerParts(review) : [];
-  const complete = () => {
-    if (!review) return;
-    setCompleting(true);
-    setFailure(null);
-    void ctx.track(settled(adapter.complete(review.id))).then((res) => {
-      setCompleting(false);
-      if (!res.ok) {
-        setFailure(errorText(ctx, res.error));
-        return;
-      }
-      ctx.toast(outcomeText(ctx, res.data, ctx.li(TEXT.completed)));
-      if (res.data.changed.length) ctx.reload(res.data.changed).catch(() => undefined);
-      noteAccessReviewsChanged();
-    });
-  };
+  const orgPart = review?.organisationPart;
   const download = () => {
     if (!review) return;
     void settled(adapter.report(review)).then((res) => {
@@ -297,7 +350,7 @@ export function ReviewPage({ ctx, id, onBack }: { ctx: HostContext; id: string; 
                 <Button onClick={download}>{ctx.li(TEXT.downloadReport)}</Button>
                 {review.status === 'open' ? <Button variant="link" onClick={() => setCancelling(true)}>{ctx.li(TEXT.cancelReview)}</Button> : null}
                 {review.status === 'open' ? (
-                  <Button variant="primary" busy={completing} disabledReason={blocks.length ? TEXT.completeWaits : null} onClick={complete}>{ctx.li(TEXT.complete)}</Button>
+                  <Button variant="primary" disabledReason={blocks.length ? TEXT.completeWaits : null} onClick={() => setCompleting(true)}>{ctx.li(TEXT.complete)}</Button>
                 ) : null}
               </>
             )}
@@ -318,6 +371,15 @@ export function ReviewPage({ ctx, id, onBack }: { ctx: HostContext; id: string; 
                   ),
                 },
                 ...(review.completedAt ? [{ label: TEXT.colCompleted, value: `${formatInstant(review.completedAt, ctx.lang)} (${review.completedBy?.displayName ?? '-'})` }] : []),
+                ...(orgPart?.evidenceCode ? [{
+                  label: TEXT.colEvidence,
+                  value: (
+                    <span style={{ display: 'block' }} data-org-evidence={orgPart.evidenceCode}>
+                      {ctx.fill(TEXT.orgFiledTo, { code: orgPart.evidenceCode })}
+                      {orgPart.evidenceFiledAt ? <span className="mx-small" style={{ display: 'block' }}>{ctx.fill(TEXT.filedAt, { at: formatInstant(orgPart.evidenceFiledAt, ctx.lang) })}</span> : null}
+                    </span>
+                  ),
+                }] : []),
                 ...(review.cancelReason ? [{ label: TEXT.cancelReason, value: review.cancelReason }] : []),
               ]}
             />
@@ -336,6 +398,17 @@ export function ReviewPage({ ctx, id, onBack }: { ctx: HostContext; id: string; 
           <PartsCard ctx={ctx} review={review} />
           {review.status === 'open' ? <ApplicationsCard ctx={ctx} review={review} /> : null}
           <OrganisationCard ctx={ctx} review={review} />
+          {completing ? (
+            <CompleteDialog
+              ctx={ctx}
+              review={review}
+              onClose={() => setCompleting(false)}
+              onDone={() => {
+                setCompleting(false);
+                noteAccessReviewsChanged();
+              }}
+            />
+          ) : null}
           {cancelling ? (
             <CancelDialog
               ctx={ctx}

@@ -5,7 +5,9 @@
 // before opening with rule `ACK-OPEN-FIRST`, H.7). The manager sees the totals and, with `audit.pending.all`, the
 // person list; Top Management and anyone with only `audit.pending.aggregate` see totals (product decision 2). Closing
 // a request files the register as a new file of an evidence item. Audit terms: ISO/IEC 27001:2022 A.5.1 asks that
-// policies are acknowledged by the people concerned; clause 7.3 of each standard asks for awareness.
+// policies are acknowledged by the people concerned; clause 7.3 of each standard asks for awareness. M3-14: people who
+// join the audience while a request is open are added to it by the daily job with their own due date (`addedOn`,
+// `dueOn` of each person), and a new request skips the people who confirmed the same version in an earlier one.
 import { z } from 'zod';
 import { AcknowledgementRequestStatus, AcknowledgementRole, AcknowledgementScope, AcknowledgementStatus } from '../enums.js';
 import { BinaryBody, CommandResult, Code, IdParams, Instant, IsoDate, MsId, MsParams, MsRecordParams, Uuid, defineRoute, named } from './common.js';
@@ -57,7 +59,7 @@ export type AcknowledgementRequestItem = z.infer<typeof AcknowledgementRequestIt
 
 const EXAMPLE_PERSON = {
   person: { handle: 'bagus', displayName: 'Bagus Prasetyo' }, status: 'confirmed', openedAt: '2026-11-01T03:00:00Z', confirmedAt: '2026-11-01T03:05:00Z',
-  reminderCount: 0, excusedReason: null, overdue: false,
+  reminderCount: 0, excusedReason: null, overdue: false, addedOn: '2026-10-31', dueOn: '2026-11-14',
 } as const;
 
 export const AcknowledgementPerson = named(
@@ -68,11 +70,20 @@ export const AcknowledgementPerson = named(
     openedAt: Instant.nullable(),
     confirmedAt: Instant.nullable(),
     reminderCount: z.int().min(0),
+    /** The reason as stored (the screens show its English and Indonesian text, M3-14). */
     excusedReason: z.string().nullable(),
+    /** Pending past the person's own due date (`dueOn`). */
     overdue: z.boolean(),
+    /**
+     * The day the person was added to the request in the organisation's time zone: the request's start, or for a person
+     * who joined the audience while it was open (or came back to it) the day the daily job added them (M3-14).
+     */
+    addedOn: IsoDate,
+    /** The person's own due date: `addedOn` plus the request's period (its due date minus its start). */
+    dueOn: IsoDate,
   }),
-  'One person of a confirmation request: status, when they opened and confirmed the version, reminders, excusal reason',
-  { valid: [EXAMPLE_PERSON, { ...EXAMPLE_PERSON, status: 'pending', openedAt: null, confirmedAt: null, reminderCount: 1, overdue: true }], invalid: [{ ...EXAMPLE_PERSON, status: 'read' }] },
+  'One person of a confirmation request: status, when they were added, their due date, when they opened and confirmed the version, reminders, excusal reason',
+  { valid: [EXAMPLE_PERSON, { ...EXAMPLE_PERSON, status: 'pending', openedAt: null, confirmedAt: null, reminderCount: 1, overdue: true, addedOn: '2026-11-04', dueOn: '2026-11-18' }], invalid: [{ ...EXAMPLE_PERSON, status: 'read' }, { ...EXAMPLE_PERSON, dueOn: '14 Nov 2026' }] },
 );
 export type AcknowledgementPerson = z.infer<typeof AcknowledgementPerson>;
 
@@ -124,6 +135,7 @@ export const MyAcknowledgementItem = named(
     document: z.object({ code: Code, title: z.string() }),
     versionLabel: z.string(),
     status: AcknowledgementStatus,
+    /** The caller's own due date (the day they were added plus the request's period, M3-14). */
     dueOn: IsoDate,
     openedAt: Instant.nullable(),
     confirmedAt: Instant.nullable(),
@@ -145,7 +157,7 @@ export const acknowledgementRequestsListRoute = defineRoute({
 });
 export const acknowledgementRequestsCreateRoute = defineRoute({
   ...manage, id: 'acknowledgement-requests.create', method: 'POST', path: '/api/v1/ms/:ms/acknowledgement-requests',
-  summary: 'Ask for confirmation of the current approved version of a document; closes the open request of an earlier version (409 when the version has an open request; audited acknowledgement_request.created)',
+  summary: 'Ask for confirmation of the current approved version of a document; people who confirmed that version in an earlier request are not asked again; closes the open request of an earlier version (409 when the version has an open request; 422 everyone_confirmed when everyone confirmed it already; audited acknowledgement_request.created)',
   params: MsParams, body: AcknowledgementRequestCreate, response: CommandResult, status: 201, errors: [404, 409, 422], idempotent: true,
 });
 export const acknowledgementRequestsGetRoute = defineRoute({

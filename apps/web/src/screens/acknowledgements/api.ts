@@ -42,6 +42,8 @@ export function fromPerson(p: AcknowledgementPerson): PersonRow {
     reminderCount: p.reminderCount,
     excusedReason: p.excusedReason,
     overdue: p.overdue,
+    addedOn: p.addedOn,
+    dueOn: p.dueOn,
   };
 }
 

@@ -4,11 +4,12 @@ import {
 } from '../helpers.js';
 
 // Access reviews of the sample build (MILESTONE-3 M3-07, D.9), as rina, one of the two Tenant Admins of the sample
-// organisation: the open review (opened by the schedule five days ago) and the completed one of the last quarter, the
-// schedule with "Change schedule", the review page with its organisation items, rina's own items (decided by tono, no
-// checkbox), a decision for a selection and a revocation applied from "Revocations and changes to apply", "Not applied"
-// and "Mark as applied", "Complete" disabled with what still waits, the report as CSV, "Cancel review", and the
-// Indonesian screen. @sample-only: the API project covers the screen in e2e/api-only/access-reviews.spec.js.
+// organisation: the open review (opened on schedule five days ago) and the completed one of the last quarter, whose
+// organisation part was filed to the A.5.18 evidence item (M3-14), the schedule with "Change schedule", the review page
+// with its organisation items, rina's own items (decided by tono, no checkbox), a decision for a selection and a
+// revocation applied from "Revocations and changes to apply" through the "Revoke now" dialog (M3-14), "Not applied" and
+// "Mark as applied", "Complete" disabled with what still waits, the report as CSV, "Cancel review", and the Indonesian
+// screen. @sample-only: the API project covers the screen in e2e/api-only/access-reviews.spec.js.
 const meta = metaById('access-reviews');
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
@@ -36,7 +37,7 @@ test.describe('Access reviews @sample-only', () => {
     await openScreen(page, meta);
     const open = card(page, 'Open review');
     await expect(open).toContainText(/AR-\d{4}-03 is open and due on/);
-    await expect(open).toContainText('by the schedule');
+    await expect(open).toContainText('on schedule');
     await expect(rows(card(page, 'All reviews'))).toHaveCount(2);
     await expect(card(page, 'All reviews')).toContainText('Completed');
     await expect(card(page, 'Schedule')).toContainText('Every 3 months');
@@ -57,6 +58,11 @@ test.describe('Access reviews @sample-only', () => {
     await expect(dialog(page)).toHaveCount(0);
     await expect(card(page, 'Schedule')).toContainText('Every 6 months');
     await expect(card(page, 'Schedule')).toContainText('21 days');
+
+    // The completed review: its organisation part was filed as evidence to the A.5.18 item (M3-14).
+    await rows(card(page, 'All reviews')).filter({ hasText: 'Completed' }).click();
+    await expect(page.locator('main [data-review] [data-org-evidence]')).toContainText(/^Organisation part filed to EV-\d+/);
+    await expect(page.locator('main [data-review] [data-org-evidence]')).toContainText('Filed as evidence');
   });
 
   test('decides a selection, revokes a linked sign-in and applies it; rina\'s own items wait for another Tenant Admin', async ({ page }) => {
@@ -106,7 +112,16 @@ test.describe('Access reviews @sample-only', () => {
     await button(waiting, 'Mark as applied').click();
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Cancel').click();
-    await button(waiting, 'Apply').click();
+    // "Revoke now" asks first and says what happens (M3-14); "Cancel" changes nothing.
+    await button(waiting, 'Revoke now').click();
+    await expect(dialog(page)).toContainText('Revoke keycloak of Bagus Prasetyo?');
+    await expect(dialog(page)).toContainText('The link between this person and the company sign-in is removed, and their sessions signed in through it end now.');
+    await inBothThemes(page, () => expectOverlayReadable(page));
+    await button(dialog(page), 'Cancel').click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(personRows(apply, 'Bagus Prasetyo')).toHaveCount(1);
+    await button(waiting, 'Revoke now').click();
+    await button(dialog(page), 'Revoke now').click();
     await expectToast(page, 'Linked sign-in removed');
     await expect(personRows(apply, 'Bagus Prasetyo')).toHaveCount(0);
     await expect(personRows(org, 'Bagus Prasetyo')).toContainText('Applied');
@@ -147,7 +162,7 @@ test.describe('Access reviews @sample-only', () => {
   test('shows the screen in Indonesian', async ({ page }) => {
     await openScreen(page, meta, 'lang=id');
     await expect(page.locator('main h1')).toHaveText('Tinjauan akses');
-    await expect(card(page, 'Tinjauan terbuka')).toContainText('oleh jadwal');
+    await expect(card(page, 'Tinjauan terbuka')).toContainText('sesuai jadwal');
     await expect(card(page, 'Jadwal')).toContainText('Setiap 3 bulan');
     await button(card(page, 'Tinjauan terbuka'), 'Buka tinjauan').click();
     await expect(card(page, 'Akses organisasi')).toContainText('Keanggotaan aktif');

@@ -95,7 +95,7 @@ test.describe('Access review of this system against the api @api-only', () => {
     await expect(dialog(page)).toContainText('1 item(s) stay without a decision');
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Choose none').click();
-    await expect(dialog(page)).toContainText('No evidence item chosen: the rows of this system are not filed.');
+    await expect(dialog(page)).toContainText('No evidence item chosen: this system\'s part of the review report is not filed.');
     await button(dialog(page), 'Sign off').click();
     await expectToast(page, /^ISMS signed off/);
     await expect(head).toContainText('Signed off');

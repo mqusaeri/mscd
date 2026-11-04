@@ -134,6 +134,8 @@ export interface ReviewSummaryData {
     notApplied: number;
     needsSecondReviewer: number;
     filed: { ms: string; evidenceCode: string; storageObjectId: string }[];
+    /** The evidence item the organisation part was filed to at completion (M3-14). */
+    organisation?: { ms: string; evidenceCode: string; storageObjectId: string };
     reportStored: boolean;
   };
   warnings?: { rule: 'REVIEW-SINGLE-ADMIN'; messages: { en: string; id: string } }[];

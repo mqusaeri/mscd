@@ -1,7 +1,8 @@
 // Open work totals (MILESTONE-3 M3-08, D.10): the route against the shared table, the model (rows of `aggregate=unit`,
 // role columns, stage lines and sums), the API adapter over a fake fetch, the sample adapter over the sample snapshot,
 // the page actions of Chain stages and the Overview (API builds only), and the views in both languages and themes,
-// which show counts only and never a person's name (product decision 2).
+// which show counts only and never a person's name (product decision 2). M3-14: a role held by one person in the
+// system joins "Other roles", so no total points to one person (ISO review o11, product owner 2026-11-02).
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { BUSINESS_ROLES, routeById } from '@mscd/shared';
@@ -14,9 +15,10 @@ import { createSampleAdapter, sampleTotals } from '../../src/screens/pending-tot
 import { adapterFor, deferredAdapter } from '../../src/screens/pending-totals/adapter';
 import { extraPageActions, mayOpenTotals } from '../../src/screens/pending-totals/actions';
 import {
-  ROLE_ORDER, SCREEN_ID, TABS, TOTALS_PERM, aggregateItems, keyOf, onTime, overdueShare, roleColumns, roleLabel, roleTotals, stageLines,
+  ROLE_ORDER, SCREEN_ID, TABS, TOTALS_PERM, aggregateItems, keyOf, keyOfRow, onTime, overdueShare, roleColumns, roleLabel, roleTotals, stageLines,
   stagesOf, stagesWithWork, sumOf, systemName, systemTitle, systemsWithTotals, toRows,
 } from '../../src/screens/pending-totals/model';
+import { sampleMembers } from '../../src/screens/users/sample';
 import type { PendingTotalsAdapter, TotalsRow } from '../../src/screens/pending-totals/model';
 import PendingTotalsScreen, {
   AllSystemsView, CountCell, PendingTotalsBody, StageRoleTable, SummaryCard, SystemView,
@@ -115,6 +117,43 @@ describe('pending-totals model', () => {
     for (const bad of [null, {}, 'rows', { items: [] }, [null], [{ stage: 'risk', role: 1, open: 1, overdue: 0 }], [{ stage: 'risk', role: null, open: -1, overdue: 0 }], [{ stage: 'risk', role: null, open: 1.5, overdue: 0 }]]) {
       expect(toRows(bad), JSON.stringify(bad)).toBeNull();
     }
+    // The number of holders of a role (M3-14) is kept; a value that is not a count makes the answer unreadable.
+    expect(toRows([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 3 }])).toEqual([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 3 }]);
+    for (const holders of [-1, 1.5, '2', null]) expect(toRows([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders }]), String(holders)).toBeNull();
+  });
+
+  it('joins a role with one holder into "Other roles", so no total points to one person (M3-14)', () => {
+    const rows: TotalsRow[] = [
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 2, overdue: 2 },
+      { stage: 'control', role: 'ms_manager', open: 3, overdue: 0, holders: 1 },
+      { stage: 'control', role: 'domain_owner', open: 5, overdue: 2, holders: 3 },
+      { stage: 'evidence', role: 'top_management', open: 1, overdue: 1, holders: 1 },
+      { stage: 'control', role: 'risk_owner', open: 2, overdue: 1, holders: 1 },
+    ];
+    expect(keyOfRow(rows[0]!)).toBe('domain_owner');
+    expect(keyOfRow(rows[1]!)).toBe('none');
+    expect(keyOfRow(rows[2]!)).toBe('other');
+    // A role whose only holder left the organisation (no active holder) shows that leaver's work: it joins too.
+    expect(keyOfRow({ role: 'risk_owner', holders: 0 })).toBe('other');
+    expect(keyOfRow({ role: 'risk_owner', holders: 2 })).toBe('risk_owner');
+    // Without the number of holders (a server before M3-14) the role keeps its column.
+    expect(keyOfRow({ role: 'top_management' })).toBe('top_management');
+    expect(roleColumns(rows)).toEqual(['domain_owner', 'other', 'none']);
+    expect(roleLabel('other')).toEqual(['Other roles', 'Peran lainnya']);
+    expect(roleTotals(rows)).toEqual({ domain_owner: { open: 9, overdue: 3 }, other: { open: 6, overdue: 2 }, none: { open: 2, overdue: 2 } });
+    const control = stageLines(rows, STAGES).find((l) => l.key === 'control')!;
+    expect(control.cells).toEqual({ other: { open: 5, overdue: 1 }, domain_owner: { open: 5, overdue: 2 } });
+    for (const lang of ['en', 'id'] as const) {
+      const ctx = ctxOf(lang);
+      const html = render(<SystemView ctx={ctx} ms="isms" rows={rows} />, ctx);
+      expect(html).toContain(`data-role="other">${TEXT.otherRoles[lang === 'id' ? 1 : 0]}</th>`);
+      expect(html).not.toContain('data-role="ms_manager"');
+      expect(html).not.toContain('data-role="top_management"');
+      expect(html).toContain('data-other-note=""');
+      expect(html).toContain(TEXT.otherRolesNote[lang === 'id' ? 1 : 0].replace(/"/g, '&quot;'));
+      expect(render(<SystemView ctx={ctx} ms="isms" rows={ROWS} />, ctx)).not.toContain('data-other-note');
+    }
   });
 
   it('adds counts, the items on time and the overdue share', () => {
@@ -165,6 +204,13 @@ describe('pending-totals model', () => {
       { stage: 'risk', role: null, open: 2, overdue: 1 },
       { stage: 'control', role: 'domain_owner', open: 2, overdue: 1 },
     ]);
+    // With the people of the system, each row of a role gives its holders, as the server does (M3-14).
+    const people = aggregateItems([{ stage: 'risk', h: 'bagus', st: 'pending' }, { stage: 'risk', h: 'rina', st: 'pending' }, { stage: 'risk', h: 'none', st: 'pending' }], (h) => ({ ...roles, dewi: ['domain_owner'] })[h] ?? [], ['risk'], ['rina', 'bagus', 'dewi', 'maya']);
+    expect(people).toEqual([
+      { stage: 'risk', role: 'ms_manager', open: 1, overdue: 0, holders: 1 },
+      { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 1, overdue: 0 },
+    ]);
   });
 
   it('names the systems and lists those where the session sees the totals', () => {
@@ -207,13 +253,16 @@ describe('pending-totals sample adapter', () => {
     // Per stage as the tabs of Chain stages count them.
     const byStage = Object.fromEntries(stageLines(rows, stagesOf(ctxOf('en'), 'isms')).map((l) => [l.key, l.total.open]));
     expect(byStage).toEqual({ context: 1, risk: 5, treatment: 4, control: 28, soa: 3, document: 8, evidence: 10, metric: 4 });
-    expect(roleColumns(rows)).toEqual(['ms_manager', 'domain_owner', 'top_management', 'none']);
-    // The sample roles: rina manages every system, hendra is Top Management, unassigned items count under no role.
+    // The sample roles: rina manages every system and hendra is Top Management, each the only holder of the role in the
+    // ISMS, so both join "Other roles" (M3-14); unassigned items count under no role.
+    const isOnly = (role: string) => sampleMembers(D).members.filter((m) => m.membershipStatus === 'active' && m.roles.some((r) => r.ms === 'isms' && r.role === role && r.approvalStatus === 'active')).length;
+    expect([isOnly('ms_manager'), isOnly('top_management')]).toEqual([1, 1]);
+    expect(rows.filter((r) => r.role !== null).every((r) => typeof r.holders === 'number' && r.holders > 0)).toBe(true);
+    expect(roleColumns(rows)).toEqual(['domain_owner', 'other', 'none']);
     const items = D.bundles.isms.chain.items;
     const count = (pred: (h: string) => boolean) => items.filter((i) => pred(i.h)).length;
     const totals = roleTotals(rows);
-    expect(totals.ms_manager!.open).toBe(count((h) => h === 'rina'));
-    expect(totals.top_management!.open).toBe(count((h) => h === 'hendra'));
+    expect(totals.other!.open).toBe(count((h) => h === 'rina' || h === 'hendra'));
     expect(totals.none!.open).toBe(count((h) => h === 'none'));
     expect(totals.domain_owner!.open).toBe(count((h) => !['rina', 'hendra', 'none'].includes(h)));
     for (const ms of ['qms', 'bcms', 'abms']) {
@@ -272,7 +321,10 @@ describe('pending-totals views', () => {
         expect(html).toContain(ctx.fill(TEXT.stagesValue, { n: 8, total: 8 }));
         expect(html).toContain(ctx.fill(TEXT.shareValue, { n: 38 }));
         expect(html).toMatch(/data-stat="ontime".*?data-value="">39</);
-        for (const role of ['ms_manager', 'domain_owner', 'top_management'] as const) expect(html).toContain(BUSINESS_ROLE_LABELS[role][i]);
+        // The Management System Manager and Top Management are each held by one person in the sample ISMS: "Other roles" (M3-14).
+        expect(html).toContain(BUSINESS_ROLE_LABELS.domain_owner[i]);
+        expect(html).toContain(`data-role="other">${TEXT.otherRoles[i]}</th>`);
+        for (const role of ['ms_manager', 'top_management'] as const) expect(html).not.toContain(`data-role="${role}"`);
         expect(html).toContain(TEXT.noRole[i]);
         expect(html).toContain(TEXT.rowAllStages[i]);
         expect(html).toContain(TEXT.colAllRoles[i]);

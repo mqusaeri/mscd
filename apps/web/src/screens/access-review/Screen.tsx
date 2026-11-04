@@ -1,9 +1,9 @@
 // Access review of this system (MILESTONE-3 M3-07, C.2, D.9), for the Management System Managers and Programme Owners
 // of the selected system (`access_review.decide`): the system's part of the open review (or of an earlier one), its
 // items with filters, a decision per item or for a selection (never on one's own access), "Revoke guest access" for a
-// guest auditor grant decided "revoke" (Management System Managers, `auditor_access.grant`), and "Sign off" with the
-// evidence item that receives the system's rows when the review completes (for ISO/IEC 27001 the item of control
-// A.5.18 is proposed).
+// guest auditor grant decided "revoke" (Management System Managers, `auditor_access.grant`; it opens a confirmation and
+// runs only after "Revoke now", M3-14), and "Sign off" with the evidence item that receives this system's part of the
+// review report when the review completes (for ISO/IEC 27001 the item of control A.5.18 is proposed).
 import { useEffect, useState } from 'react';
 import type { MsId } from '../../data/types';
 import type { HostContext, ScreenProps, TextPair } from '../types';
@@ -14,14 +14,14 @@ import type { ItemKind, ItemRow, PartDetail } from '../access-reviews/model';
 import {
   KIND_TEXT, PART_STATUS_TEXT, PART_STATUS_TONE, STATUS_TEXT, SYSTEM_KINDS, formatDay, mayDecide, mayRevokeGuest, settled, signOffBlock,
 } from '../access-reviews/model';
-import { ApplyNoteDialog, DecisionDialog, ItemsTable, LoadState, PersonAt, errorText, outcomeText, useLoad } from '../access-reviews/parts';
+import { ApplyNoteDialog, DecisionDialog, ItemsTable, LoadState, PersonAt, RevokeDialog, errorText, outcomeText, useLoad } from '../access-reviews/parts';
 import { noteAccessReviewsChanged } from '../access-reviews/store';
 import { TEXT as SHARED } from '../access-reviews/text';
 import { TEXT } from './text';
 
 type DecisionFilter = '' | 'undecided' | 'decided';
 
-/** "Sign off": the evidence item for the system's rows (the A.5.18 item proposed), or none. */
+/** "Sign off": the evidence item for this system's part of the review report (the A.5.18 item proposed), or none. */
 export function SignOffDialog({ ctx, ms, part, onClose, onDone }: { ctx: HostContext; ms: MsId; part: PartDetail; onClose(): void; onDone(): void }) {
   const adapter = adapterFor(ctx);
   const items = adapter.evidence(ms);
@@ -84,8 +84,7 @@ export function PartPage({ ctx, ms, part }: { ctx: HostContext; ms: MsId; part: 
   const [deciding, setDeciding] = useState<ItemRow[] | null>(null);
   const [noteFor, setNoteFor] = useState<{ row: ItemRow; kind: 'not_applied' | 'mark_applied' } | null>(null);
   const [signing, setSigning] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<ItemRow | null>(null);
   useEffect(() => setSelected(new Set()), [part.id, kind, decided]);
   const decidable = (r: ItemRow) => open && !r.ownAccess && r.appliedAt === null && r.notAppliedReason === null;
   const rows = part.rows.filter((r) => (!kind || r.kind === kind) && (decided === '' || (decided === 'undecided' ? r.decision === null : r.decision !== null)));
@@ -99,25 +98,12 @@ export function PartPage({ ctx, ms, part }: { ctx: HostContext; ms: MsId; part: 
     return next;
   });
   const block: TextPair | null = signOffBlock(part);
-  const revoke = (row: ItemRow) => {
-    setBusy(row.id);
-    setFailure(null);
-    void ctx.track(settled(adapter.msApply(ms, part.reviewId, row.id, { action: 'apply' }))).then((res) => {
-      setBusy(null);
-      if (!res.ok) {
-        setFailure(errorText(ctx, res.error));
-        return;
-      }
-      ctx.toast(outcomeText(ctx, res.data, ctx.li(TEXT.guestRevoked)));
-      noteAccessReviewsChanged();
-    });
-  };
   const guestActions = (r: ItemRow) => {
     if (r.kind !== 'auditor_access' || !canRevoke || r.appliedAt !== null || r.notAppliedReason !== null) return null;
     if (r.decision === 'revoke') {
       return (
         <span className="mx-btn-group">
-          <Button variant="danger" busy={busy === r.id} disabled={busy !== null} onClick={() => revoke(r)}>{ctx.li(TEXT.revokeGuest)}</Button>
+          <Button variant="danger" onClick={() => setRevoking(r)}>{ctx.li(TEXT.revokeGuest)}</Button>
           <Button variant="link" onClick={() => setNoteFor({ row: r, kind: 'not_applied' })}>{ctx.li(SHARED.notApplied)}</Button>
         </span>
       );
@@ -147,7 +133,6 @@ export function PartPage({ ctx, ms, part }: { ctx: HostContext; ms: MsId; part: 
           ? <Button variant="primary" disabledReason={block} onClick={() => setSigning(true)}>{ctx.li(TEXT.signOff)}</Button>
           : null}
       >
-        {failure ? <Alert tone="bad">{failure}</Alert> : null}
         <Facts
           items={[
             { label: SHARED.colStatus, value: <Badge tone={PART_STATUS_TONE[part.status]}>{ctx.li(PART_STATUS_TEXT[part.status])}</Badge> },
@@ -221,6 +206,19 @@ export function PartPage({ ctx, ms, part }: { ctx: HostContext; ms: MsId; part: 
           onDone={(outcome) => {
             ctx.toast(outcomeText(ctx, outcome, ctx.li(SHARED.applied)));
             setNoteFor(null);
+            noteAccessReviewsChanged();
+          }}
+        />
+      ) : null}
+      {revoking ? (
+        <RevokeDialog
+          ctx={ctx}
+          row={revoking}
+          run={() => adapter.msApply(ms, part.reviewId, revoking.id, { action: 'apply' })}
+          onClose={() => setRevoking(null)}
+          onDone={(outcome) => {
+            ctx.toast(outcomeText(ctx, outcome, ctx.li(TEXT.guestRevoked)));
+            setRevoking(null);
             noteAccessReviewsChanged();
           }}
         />

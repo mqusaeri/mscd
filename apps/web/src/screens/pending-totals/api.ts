@@ -1,7 +1,8 @@
 // API adapter of the Open work totals screen (MILESTONE-3 M3-08, D.10) through the host's client (R-17): the counts
 // per chain stage and business role of one system, `GET /ms/{ms}/audit/pending?aggregate=unit`
 // (`readmodel.audit.pending` with `audit.pending.aggregate`). The answer holds no names (product decision 2); `toRows`
-// keeps only the four fields of `PendingAggregate`, and an answer of another shape shows as a failure.
+// keeps only the fields of `PendingAggregate` (the counts and the number of holders of a role, M3-14), and an answer of
+// another shape shows as a failure.
 import type { ApiClient } from '../../data/api/ApiClient';
 import type { MsId } from '../../data/types';
 import { call } from '../api';

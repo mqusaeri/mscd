@@ -231,7 +231,7 @@ describe('role labels (M2-01, D2-06)', () => {
     expect(primaryBusinessRole(['domain_owner', 'programme_owner'])).toBe('programme_owner');
     expect(heldRoleLabel(['programme_owner'])).toEqual(['Programme Owner', 'Pemilik Program']);
     expect(heldRoleLabel(['external_auditor'])).toEqual(['External Auditor', 'Auditor Eksternal']);
-    expect(heldRoleLabel([], ['storage_admin', 'tenant_admin'])).toEqual(['Tenant Admin', 'Admin Tenant']);
+    expect(heldRoleLabel([], ['storage_admin', 'tenant_admin'])).toEqual(['Tenant Admin', 'Tenant Admin']);
     expect(heldRoleLabel(null, [], ['platform_operator'])).toEqual(['Platform Operator', 'Operator Platform']);
     expect(heldRoleLabel([], [], [])).toBeNull();
   });

@@ -1,7 +1,8 @@
 // Texts of read confirmation (Milestone 3 D.7, J.4) in English and Indonesian: the stored task of each person, the
 // notifications `acknowledgement_requested` and `acknowledgement_overdue`, the excusal reasons, the refusals of the
-// routes, and the columns of the confirmation register CSV. Plain English (writing rules of CLAUDE.md); the screen
-// names are the labels of C.2 ("Policies to confirm", "Policy read confirmations").
+// routes, and the columns of the confirmation register CSV with the role names of its "Roles" column. Plain English
+// (writing rules of CLAUDE.md); the screen names are the labels of C.2 ("Policies to confirm", "Policy read
+// confirmations").
 import type { Messages } from '@mscd/shared';
 import { fmtDay } from '../../common/dates';
 
@@ -49,13 +50,23 @@ export function overdueNotice(doc: DocumentFacts, dueOn: string, pending: number
   };
 }
 
-/** Why a person no longer needs to confirm (stored in `acknowledgement.excused_reason`, at most 200 characters). */
+/**
+ * Why a person no longer needs to confirm (stored in `acknowledgement.excused_reason`, at most 200 characters). The
+ * stored value stays English; the screens show it in English and Indonesian through the map of
+ * `apps/web/src/screens/acknowledgements/model.ts` (M3-14), which also knows the reason of the privacy module.
+ */
 export const EXCUSED = {
   replaced: (version: string) => `Replaced by version ${version}`.slice(0, 200),
   membershipEnded: 'Membership of the organisation ended',
   roleEnded: 'No longer holds a role that is asked to confirm',
   restricted: 'The document is restricted to its owner, Management System Managers and Programme Owners',
 } as const;
+
+/** The reasons after which a person who is back in the audience of an open request is asked again (M3-14). */
+export const RETURNING_REASONS: readonly string[] = [EXCUSED.membershipEnded, EXCUSED.roleEnded];
+
+/** The statement a person confirms (H.7), written on each confirmed row of the register CSV. */
+export const STATEMENT = 'I have read and understood this document';
 
 /** Refusals of the routes: message key and both texts. */
 export const REFUSALS = {
@@ -78,6 +89,11 @@ export const REFUSALS = {
     key: 'acknowledgements.open_request',
     en: 'This version already has an open confirmation request.',
     id: 'Versi ini sudah memiliki permintaan konfirmasi yang terbuka.',
+  },
+  everyoneConfirmed: {
+    key: 'acknowledgements.everyone_confirmed',
+    en: 'Everyone this request would ask has confirmed this version already. People who confirmed a version are not asked again.',
+    id: 'Semua orang yang akan diminta oleh permintaan ini sudah mengonfirmasi versi ini. Orang yang sudah mengonfirmasi suatu versi tidak diminta lagi.',
   },
   notApproved: {
     key: 'acknowledgements.not_approved',
@@ -107,7 +123,7 @@ export const REFUSALS = {
   restricted: {
     key: 'acknowledgements.restricted',
     en: 'This document is now restricted to its owner and to the Management System Managers and Programme Owners of its systems, so you are no longer asked to confirm it.',
-    id: 'Dokumen ini kini dibatasi untuk pemiliknya serta Management System Manager dan Programme Owner sistemnya, sehingga Anda tidak lagi diminta mengonfirmasinya.',
+    id: 'Dokumen ini kini dibatasi untuk pemiliknya serta Management System Manager dan Pemilik Program sistemnya, sehingga Anda tidak lagi diminta mengonfirmasinya.',
   },
   noRole: {
     key: 'acknowledgements.no_role',
@@ -121,7 +137,26 @@ export const REFUSALS = {
   },
 } as const;
 
-/** The columns of the confirmation register CSV, in order. */
+/**
+ * The columns of the confirmation register CSV, in order (M3-14, ISO review o1 and o2): the version's approval date and
+ * SHA-256 fingerprint, the person's business roles in the document's systems at the export, the day the request of the
+ * row opened (an earlier request of the same version for a person who confirmed there), the day they were added and
+ * their own due date, and the statement they confirmed. "Opened at" is when MSCD issued the link to the file: for a
+ * file in SharePoint or Google Drive MSCD cannot see when the person read it.
+ */
 export const REGISTER_COLUMNS = [
-  'Document', 'Title', 'Version', 'Due date', 'User name', 'Name', 'Status', 'Opened at', 'Confirmed at', 'Reminders', 'Overdue', 'Excused reason',
+  'Document', 'Title', 'Version', 'Version approved on', 'Version SHA-256', 'User name', 'Name', 'Roles', 'Request opened on', 'Added on',
+  'Due date', 'Status', 'Opened at (link issued by MSCD)', 'Confirmed at', 'Statement confirmed', 'Reminders', 'Overdue', 'Excused reason',
 ] as const;
+
+/** English names of the business roles for the "Roles" column of the register CSV. */
+export const ROLE_NAMES: Readonly<Record<string, string>> = {
+  ms_manager: 'Management System Manager',
+  programme_owner: 'Programme Owner',
+  domain_owner: 'Domain Owner',
+  risk_owner: 'Risk Owner',
+  internal_auditor: 'Internal Auditor',
+  top_management: 'Top Management',
+  external_auditor: 'External Auditor',
+  compliance_investigator: 'Compliance Investigator',
+};

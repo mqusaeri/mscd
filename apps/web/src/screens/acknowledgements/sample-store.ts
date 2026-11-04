@@ -4,7 +4,9 @@
 // snapshot the first time an organisation is read: the people of a request are the members with an active role in the
 // document's systems as the People and roles screen shows them in the sample build (`sampleMembers`). Every sample
 // persona has already confirmed the requests the store starts with, so no persona has an open confirmation (and no
-// banner) until a manager asks for one in the tab. Loaded only through the sample adapters' dynamic import (R-13).
+// banner) until a manager asks for one in the tab. Each person has the day they were added and their own due date (that
+// day plus the request's period, M3-14); in the open request one person joined after the start, as a newcomer the daily
+// job adds. Loaded only through the sample adapters' dynamic import (R-13).
 import type { ControllerData, MsId } from '../../data/types';
 import { sampleMembers } from '../users/sample';
 import type { AcknowledgementRole, AcknowledgementScope, PersonStatus, RequestRow, Settings, Totals } from './model';
@@ -24,6 +26,8 @@ export interface SamplePerson {
   remindedAt: string | null;
   reminderCount: number;
   excusedReason: string | null;
+  /** The day the person was added to the request (M3-14). */
+  addedOn: string;
 }
 
 export interface SampleRequest extends Omit<RequestRow, 'totals'> {
@@ -91,14 +95,24 @@ export function sampleAudience(D: ControllerData | null, systems: readonly MsId[
   return out.sort((a, b) => a.handle.localeCompare(b.handle));
 }
 
-/** The totals of a request on `today` (overdue: pending past the due date). */
-export function totalsOf(request: Pick<SampleRequest, 'people' | 'dueOn'>, today: string): Totals {
+/** The days between two ISO dates. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+/** A person's own due date (M3-14): the day they were added plus the request's period (its due date minus its start). */
+export function personDue(request: Pick<SampleRequest, 'dueOn' | 'createdAt'>, person: Pick<SamplePerson, 'addedOn'>): string {
+  return addDays(request.dueOn, daysBetween(request.createdAt.slice(0, 10), person.addedOn));
+}
+
+/** The totals of a request on `today` (overdue: pending past the person's own due date). */
+export function totalsOf(request: Pick<SampleRequest, 'people' | 'dueOn' | 'createdAt'>, today: string): Totals {
   const count = (s: PersonStatus) => request.people.filter((p) => p.status === s).length;
   return {
     audience: request.people.length,
     confirmed: count('confirmed'),
     pending: count('pending'),
-    overdue: request.dueOn < today ? count('pending') : 0,
+    overdue: request.people.filter((p) => p.status === 'pending' && personDue(request, p) < today).length,
     excused: count('excused'),
   };
 }
@@ -139,20 +153,23 @@ function seed(D: ControllerData | null): SampleState {
       evidenceId: null,
       evidenceCode: null,
       people: people.map((p, i) => {
-        // The personas have confirmed; of the others, every third is still pending, and one left the audience.
+        // The personas have confirmed; of the others, every third is still pending, and one left the audience. In the
+        // open request the first pending person got their role three days after the start (a newcomer, M3-14).
         const pending = !PERSONAS.has(p.handle) && i % 3 === 0;
         const excused = !PERSONAS.has(p.handle) && !pending && i === people.length - 1;
+        const newcomer = open && pending && people.findIndex((q, n) => !PERSONAS.has(q.handle) && n % 3 === 0) === i;
         const opened = pending ? (i % 2 === 0 ? null : at(addDays(started, 2), '04:00')) : at(addDays(started, 1 + (i % 5)), '02:30');
         return {
           id: nextId(state, 'ack'),
           handle: p.handle,
           ms: p.ms,
           status: excused ? 'excused' : pending ? 'pending' : 'confirmed',
-          openedAt: excused ? null : opened,
+          openedAt: excused || newcomer ? null : opened,
           confirmedAt: pending || excused ? null : at(addDays(started, 1 + (i % 5)), '02:40'),
-          remindedAt: pending && open ? at(addDays(started, 7), '01:10') : null,
-          reminderCount: pending && open ? 1 : 0,
+          remindedAt: pending && open && !newcomer ? at(addDays(started, 7), '01:10') : null,
+          reminderCount: pending && open && !newcomer ? 1 : 0,
           excusedReason: excused ? 'No longer holds a role that is asked to confirm' : null,
+          addedOn: newcomer ? addDays(started, 3) : started,
         };
       }),
     });

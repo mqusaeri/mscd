@@ -13,7 +13,14 @@
 //   owner and the Management System Managers and Programme Owners of a linked system are (the classification rule of
 //   F.7, acknowledgement-visibility.ts);
 // - writes one `acknowledgement` row, one stored task (source `acknowledgement`, entity the person's row, C.3) and one
-//   `acknowledgement_requested` notification per person, then `acknowledgement_request.created`.
+//   `acknowledgement_requested` notification per person, then `acknowledgement_request.created`;
+// - leaves out everyone who confirmed the same version in an earlier request (M3-14), so a closed request can be
+//   followed by a new one for the current version that asks only the people who have not confirmed.
+//
+// The audience is fixed when the request opens; the daily job (acknowledgement-reminders.job.ts) adds the people who
+// join it while the request is open (M3-14). Each person's due date is computed on read (`personDueSql`): the day they
+// were added (`acknowledgement.created_at` in the organisation's time zone) plus the request's period (its due date
+// minus its start), so the people of the start keep the request's due date.
 //
 // A request belongs to the document's primary system (`management_system_id`) and shows in every system the document
 // is linked to (every system for an organisation-wide document) while that system is the document's primary one
@@ -84,6 +91,8 @@ export interface AudienceQuery {
    * the rule hides the document from apart from one who no longer holds an asked role.
    */
   ignoreClassification?: boolean;
+  /** A document version: leaves out the people who confirmed it in any request (M3-14). */
+  skipConfirmedOf?: string;
 }
 
 export interface OpenRequestInput {
@@ -140,6 +149,24 @@ export function requestVisibleIn(msId: string): RawBuilder<boolean> {
                       and p.management_system_id = r.management_system_id and p.is_primary and p.deleted_at is null)))`;
 }
 
+/**
+ * SQL: the day the person of acknowledgement row `a` of request `r` was added to it, in the time zone `timeZone`
+ * (M3-14): the request's start for the people of the start, the day the daily job added a newcomer or a returning
+ * person; never before the request's start.
+ */
+export function addedOnSql(timeZone: string): RawBuilder<string> {
+  return sql<string>`greatest((timezone(${timeZone}, a.created_at))::date, (timezone(${timeZone}, r.created_at))::date)`;
+}
+
+/**
+ * SQL: the own due date of the person of row `a` in request `r` (M3-14): the day they were added plus the request's
+ * period (its due date minus its start), so the people of the start keep the request's due date and nobody's due date
+ * is earlier than the request's.
+ */
+export function personDueSql(timeZone: string): RawBuilder<string> {
+  return sql<string>`(r.due_on + greatest(0, (timezone(${timeZone}, a.created_at))::date - (timezone(${timeZone}, r.created_at))::date))`;
+}
+
 @Injectable()
 export class AcknowledgementService {
   constructor(
@@ -158,7 +185,8 @@ export class AcknowledgementService {
 
   /**
    * Opens the request of `input.version` (D.7 "Request"). 409 when the version has an open request; with
-   * `emptyAudience: 'refuse'` 422 when nobody is in the audience, with `skip` null (after closing earlier requests).
+   * `emptyAudience: 'refuse'` 422 when nobody is in the audience (`everyone_confirmed` when everyone in it confirmed the
+   * version in an earlier request, M3-14), with `skip` null (after closing earlier requests).
    */
   async openRequest(trx: Trx, input: OpenRequestInput, options: { emptyAudience: 'refuse' | 'skip' }): Promise<OpenedRequest | null> {
     const msId = await primarySystemOf(trx, input.document.id);
@@ -170,8 +198,12 @@ export class AcknowledgementService {
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
     if (open) throw conflict(REFUSALS.openRequest);
-    const people = await audienceOf(trx, { documentId: input.document.id, isOrgWide: input.document.isOrgWide, scope: input.scope, roles: input.roles, primaryMsId: msId });
-    if (people.length === 0 && options.emptyAudience === 'refuse') throw refusal(REFUSALS.noAudience);
+    const query: AudienceQuery = { documentId: input.document.id, isOrgWide: input.document.isOrgWide, scope: input.scope, roles: input.roles, primaryMsId: msId };
+    const people = await audienceOf(trx, { ...query, skipConfirmedOf: input.version.id });
+    if (people.length === 0 && options.emptyAudience === 'refuse') {
+      const everyone = await audienceOf(trx, query);
+      throw refusal(everyone.length > 0 ? REFUSALS.everyoneConfirmed : REFUSALS.noAudience);
+    }
     const replaced = await this.closeEarlierRequests(trx, input.document, input.version, input.actorId);
     if (people.length === 0) return null;
 
@@ -308,12 +340,14 @@ export async function primarySystemOf(trx: Trx, documentId: string): Promise<str
  * The people of an audience (D.7 "Setting"), each with the system their task is listed in: the request's system when
  * they hold a role there, else the first such system by slug. Active members with an active business role (approved,
  * not expired) other than the external auditor; accounts of kind `person` only (no guests, no system user); for a
- * `restricted` document only the people the classification rule lets see it (`classificationAllows`).
+ * `restricted` document only the people the classification rule lets see it (`classificationAllows`); with
+ * `skipConfirmedOf` not the people who confirmed that version in any request (M3-14).
  */
 export async function audienceOf(trx: Trx, query: AudienceQuery): Promise<AudienceMember[]> {
   const everySystem = query.scope === 'organisation' || query.isOrgWide;
   const roles = query.scope === 'roles' && query.roles && query.roles.length > 0 ? [...query.roles] : null;
   const classification = query.ignoreClassification ? sql<boolean>`true` : classificationAllows(sql.ref('r.user_id'), sql`${query.documentId}::uuid`);
+  const skip = query.skipConfirmedOf ?? null;
   const { rows } = await sql<{ user_id: string; ms_id: string }>`
     with target as (
       select m.id, m.slug from management_system m
@@ -332,6 +366,9 @@ export async function audienceOf(trx: Trx, query: AudienceQuery): Promise<Audien
        and r.role = any(${[...AUDIENCE_ROLES]}::text[])
        and (${roles}::text[] is null or r.role = any(${roles}::text[]))
        and ${classification}
+       and (${skip}::uuid is null or not exists (
+             select 1 from acknowledgement c join acknowledgement_request cr on cr.id = c.acknowledgement_request_id and cr.deleted_at is null
+              where cr.document_version_id = ${skip}::uuid and c.user_id = r.user_id and c.status = 'confirmed' and c.deleted_at is null))
      group by r.user_id
      order by r.user_id`.execute(trx);
   return rows.map((r) => ({ userId: r.user_id, msId: r.ms_id }));

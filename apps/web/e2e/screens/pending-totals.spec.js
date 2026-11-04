@@ -5,7 +5,7 @@ import * as D from '../../src/data/mscd-data.js';
 
 // Open work totals of the sample build (MILESTONE-3 M3-08, D.10): the sample build opens the screen by its address
 // (`?screen=pending-totals&persona=top`, C.1), the totals of the ISMS equal those of Chain stages (63 open, 24 overdue
-// or missing), the stage by role table names roles and never a person, "All my systems" lists the four systems, and
+// or missing), the stage by role table names roles and never a person (a role with one holder joins "Other roles"), "All my systems" lists the four systems, and
 // Chain stages and the Overview keep the page actions of the generated views (the action that opens the screen shows in
 // API builds only). @sample-only: the API project covers the screen in e2e/api-only/pending-totals.spec.js.
 const meta = metaById('pending-totals');
@@ -49,7 +49,11 @@ test.describe('Open work totals @sample-only', () => {
     await expect(stat(page, 'ontime')).toHaveText('39');
     await expect(stat(page, 'stages')).toHaveText('8 of 8');
 
-    await expect(matrix(page).locator('thead th')).toHaveText(['Stage', 'Management System Manager', 'Domain Owner', 'Top Management', 'No role or unassigned', 'All roles']);
+    // The Management System Manager and Top Management are each held by one person in the ISMS: their counts join
+    // "Other roles", so no total points to one person (M3-14).
+    await expect(matrix(page).locator('thead th')).toHaveText(['Stage', 'Domain Owner', 'Other roles', 'No role or unassigned', 'All roles']);
+    await expect(body(page).locator('[data-other-note]')).toHaveText('Roles held by only one person in this system are counted together under "Other roles" and are not named.');
+    await expect(cell(page, 'all', 'other')).toHaveAttribute('data-open', '6');
     await expect(matrix(page).locator('tbody th')).toHaveText(['Context issue', 'Risk', 'Risk treatment', 'Control', 'SoA', 'Document', 'Evidence', 'Metric']);
     for (const [stage, open] of Object.entries(ISMS_STAGES)) {
       await expect(cell(page, stage, 'all'), stage).toHaveAttribute('data-open', String(open));
@@ -108,7 +112,7 @@ test.describe('Open work totals @sample-only', () => {
     await expect(tab(page, 'Sistem ini')).toHaveAttribute('aria-selected', 'true');
     await expect(body(page).locator('h2').first()).toHaveText('Pekerjaan terbuka di ISMS');
     await expect(stat(page, 'stages')).toHaveText('8 dari 8');
-    await expect(matrix(page).locator('thead th')).toHaveText(['Tahap', 'Management System Manager', 'Pemilik Domain', 'Manajemen Puncak', 'Tanpa peran atau belum ditugaskan', 'Semua peran']);
+    await expect(matrix(page).locator('thead th')).toHaveText(['Tahap', 'Pemilik Domain', 'Peran lainnya', 'Tanpa peran atau belum ditugaskan', 'Semua peran']);
     await expect(cell(page, 'all', 'all')).toContainText('24 terlambat');
     await tab(page, 'Semua sistem saya').click();
     await expect(systemRow(page, 'all')).toContainText('Semua sistem');

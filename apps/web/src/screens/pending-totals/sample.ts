@@ -1,7 +1,7 @@
 // Sample adapter of the Open work totals screen (MILESTONE-3 M3-08, D.10, C.6): the same totals the api computes,
 // from the chain items of the sample snapshot (`bundles[ms].chain.items`) and the business role of each holder in the
 // system as the People and roles screen shows it in the sample build (`sampleMembers` of screens/users/sample.ts:
-// active grants only, as the server counts them). Nothing is written. Loaded only through the dynamic import of
+// active grants only, as the server counts them), with the number of holders of each role (M3-14). Nothing is written. Loaded only through the dynamic import of
 // adapter.ts, so the api build holds none of it (R-13).
 import type { ControllerData, MsId } from '../../data/types';
 import { sampleMembers } from '../users/sample';
@@ -19,7 +19,9 @@ export function sampleTotals(D: ControllerData | null, ms: MsId): TotalsRow[] | 
     roles.set(member.handle, member.roles.filter((r) => r.ms === ms && r.approvalStatus === 'active').map((r) => r.role));
   }
   const stageOrder = (D.STAGES?.[ms] ?? []).map((s) => s.id);
-  return aggregateItems(bundle.chain.items, (handle) => roles.get(handle) ?? [], stageOrder);
+  // The people of the system with a role, so a role with one holder joins "Other roles" as the api tells it (M3-14).
+  const people = [...roles].filter(([, held]) => held.length > 0).map(([handle]) => handle);
+  return aggregateItems(bundle.chain.items, (handle) => roles.get(handle) ?? [], stageOrder, people);
 }
 
 export function createSampleAdapter(getD: () => ControllerData | null): PendingTotalsAdapter {

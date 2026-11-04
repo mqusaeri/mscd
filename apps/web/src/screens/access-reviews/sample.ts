@@ -5,15 +5,16 @@
 // rina's organisation items already, and a completed review of the last quarter. Changes stay for the browser session
 // and follow the server's rules: nobody decides on their own access (REVIEW-OWN-ACCESS), an item only its own subject
 // could decide needs a second reviewer, decisions lock once a part is signed off or applied, and the review completes
-// only when nothing waits.
+// only when nothing waits. "Complete" files the organisation part to the evidence item chosen from every system's items
+// (the A.5.18 item of the first ISO/IEC 27001 system proposed) and refuses without one (M3-14).
 import type { ControllerData, MsId } from '../../data/types';
 import { textFile } from '../auditor-access/shared';
 import type { TextPair } from '../types';
 import { sampleMembers } from '../users/sample';
 import type { Member } from '../users/model';
 import type {
-  AccessReviewsAdapter, ApplyBody, DecideBody, EvidenceOption, ItemKind, ItemRow, Outcome, PartDetail, PartRow, PersonRef, Progress, Result, ReviewDetail, ReviewRow,
-  Settings, SettingsBody, WarningRow,
+  AccessReviewsAdapter, ApplyBody, CompleteEvidenceOption, DecideBody, EvidenceOption, ItemKind, ItemRow, Outcome, PartDetail, PartRow, PersonRef, Progress, Result,
+  ReviewDetail, ReviewRow, Settings, SettingsBody, WarningRow,
 } from './model';
 import { completionBlocks, signOffBlock } from './model';
 import { TEXT } from './text';
@@ -27,6 +28,8 @@ interface SamplePart {
   id: string;
   reviewId: string;
   ms: MsId | null;
+  /** The system of the evidence item of the organisation part (M3-14). */
+  evidenceMs?: MsId | null;
   status: 'open' | 'signed_off';
   signedOffBy: PersonRef | null;
   signedOffAt: string | null;
@@ -57,6 +60,17 @@ export function resetSampleAccessReviews(): void {
 
 const GUEST: PersonRef = { handle: 'ext.auditor', displayName: 'Eko Santoso' };
 const ACCESS_RIGHTS = 'A.5.18';
+/** The access control controls whose evidence "Complete" lists with its title for every Tenant Admin (M3-14). */
+const ACCESS_CONTROLS = new Set(['A.5.15', ACCESS_RIGHTS, 'A.8.2']);
+/** The business roles that read a whole system, and those that read only their own records (`ms.read`, F.6). */
+const FULL_READ_ROLES = new Set<string>(['ms_manager', 'programme_owner', 'internal_auditor', 'top_management', 'external_auditor']);
+const OWN_READ_ROLES = new Set<string>(['domain_owner', 'risk_owner', 'compliance_investigator']);
+
+/** The refusal of "Complete" without an evidence item (server `access-review-text.ts` `EVIDENCE_REQUIRED`, M3-14). */
+export const EVIDENCE_REQUIRED: readonly [string, string] = [
+  'Choose the evidence item for the organisation part of the review: its memberships, admin roles and linked company sign-in are filed there with the summary of the review.',
+  'Pilih item bukti untuk bagian organisasi dari tinjauan: keanggotaan, peran admin, dan masuk perusahaan tertautnya disimpan di sana beserta ringkasan tinjauan.',
+];
 
 function refuse<T>(status: number, message: readonly [string, string], extra: { rule?: string; errors?: { path: string; message: string }[] } = {}): Result<T> {
   return { ok: false, error: { status, message: [message[0], message[1]], ...extra } };
@@ -96,6 +110,33 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
   const suggested = (ms: MsId): { id: string; code: string } | null => {
     const ev = (D()?.bundles?.[ms]?.evs ?? []).find((e) => e.ctrl === ACCESS_RIGHTS);
     return ev ? { id: ev.code, code: ev.code } : null;
+  };
+  /**
+   * The evidence items of every system for "Complete" (M3-14), as the server lists them: the title where the person
+   * reads the system (a role that reads it in full, or the items they own) or where the item is evidence of access
+   * control, the code only otherwise.
+   */
+  const completeOptions = (): CompleteEvidenceOption[] => {
+    const grants = people().find((p) => p.handle === getPerson())?.roles.filter((r) => r.approvalStatus === 'active') ?? [];
+    return (D()?.MS ?? []).flatMap((m) => {
+      const full = grants.some((r) => r.ms === m.id && FULL_READ_ROLES.has(r.role));
+      const own = grants.some((r) => r.ms === m.id && OWN_READ_ROLES.has(r.role));
+      const evs = new Map((D()?.bundles?.[m.id]?.evs ?? []).map((e) => [e.code, e]));
+      return evidenceOf(m.id).map((e) => {
+        const ev = evs.get(e.code);
+        const shown = full || (own && ev?.owner === getPerson()) || ACCESS_CONTROLS.has(ev?.ctrl ?? '');
+        return { ms: m.id, id: e.id, code: e.code, title: shown ? e.title : null };
+      });
+    });
+  };
+  /** The A.5.18 item of the first ISO/IEC 27001 system, proposed for the organisation part (M3-14). */
+  const organisationSuggestion = (): { id: string; code: string; ms: MsId } | null => {
+    for (const m of D()?.MS ?? []) {
+      if (!/27001/.test(m.code)) continue;
+      const ev = suggested(m.id);
+      if (ev) return { ...ev, ms: m.id };
+    }
+    return null;
   };
 
   /** The people who may decide the items of a part now: the Tenant Admins, or the system's managers and Programme Owners. */
@@ -173,6 +214,10 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       if (part.ms) {
         const ev = suggested(part.ms);
         if (ev) Object.assign(part, { evidenceId: ev.id, evidenceFiledAt: at(addDays(pastOpened, 12)) });
+      } else {
+        // The organisation part was filed to the A.5.18 item of the first ISO/IEC 27001 system at completion (M3-14).
+        const ev = organisationSuggestion();
+        if (ev) Object.assign(part, { evidenceId: ev.id, evidenceMs: ev.ms, evidenceFiledAt: at(addDays(pastOpened, 12)) });
       }
     }
     // The open review, opened by the schedule five days ago; tono decided rina's organisation items.
@@ -211,11 +256,14 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       signedOffBy: part.signedOffBy, signedOffAt: part.signedOffAt, evidenceId: part.evidenceId, evidenceCode: part.evidenceId, evidenceFiledAt: part.evidenceFiledAt,
     };
   };
-  const partDetail = (s: SampleState, part: SamplePart): PartDetail => ({
-    ...partRow(s, part),
-    rows: s.items.filter((i) => i.partId === part.id).map(view),
-    suggestedEvidence: part.ms ? suggested(part.ms) : null,
-  });
+  const partDetail = (s: SampleState, part: SamplePart): PartDetail => {
+    const open = s.reviews.find((r) => r.id === part.reviewId)?.status === 'open';
+    return {
+      ...partRow(s, part),
+      rows: s.items.filter((i) => i.partId === part.id).map(view),
+      suggestedEvidence: part.ms ? suggested(part.ms) : open ? organisationSuggestion() : null,
+    };
+  };
   const progressOf = (s: SampleState, reviewId: string): Progress => {
     const items = s.items.filter((i) => s.parts.some((p) => p.id === i.partId && p.reviewId === reviewId));
     const parts = s.parts.filter((p) => p.reviewId === reviewId);
@@ -244,6 +292,7 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       parts: parts.filter((p) => p.ms !== null).map((p) => partRow(s, p)),
       pendingApplications: all.filter((i) => (i.decision === 'revoke' || i.decision === 'change') && i.appliedAt === null && i.notAppliedReason === null),
       warnings: r.status === 'completed' ? r.warnings : r.status === 'open' ? singleReviewerWarnings(s, r.id) : [],
+      ...(r.status === 'open' ? { evidenceOptions: completeOptions() } : {}),
     };
   };
   const reviewOf = (s: SampleState, id: string) => s.reviews.find((r) => r.id === id) ?? null;
@@ -340,26 +389,42 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
     async apply(id, itemId, body) {
       return applyIn(id, itemId, body, null);
     },
-    async complete(id) {
+    async complete(id, choice) {
       const s = init();
       const review = reviewOf(s, id);
       if (!review) return refuse(404, TEXT.notFound);
       const current = detail(s, review);
       const blocks = completionBlocks(current, (t) => t[0], (t, v) => t[0].replace(/\{(\w+)\}/g, (_m, k: string) => String(v[k])));
       if (blocks.length) return refuse(409, [`${TEXT.cannotComplete[0]} ${blocks.join('; ')}.`, `${TEXT.cannotComplete[1]} ${completionBlocks(current, (t) => t[1], (t, v) => t[1].replace(/\{(\w+)\}/g, (_m, k: string) => String(v[k]))).join('; ')}.`]);
+      // The evidence item of the organisation part (M3-14): required, an item of the named system.
+      if (!choice?.ms || !choice.evidenceId) {
+        return { ok: false, error: { status: 422, slug: 'business-rule', messageKey: 'access_reviews.evidence_required', message: [EVIDENCE_REQUIRED[0], EVIDENCE_REQUIRED[1]] } };
+      }
+      const chosen = evidenceOf(choice.ms).find((e) => e.id === choice.evidenceId);
+      if (!chosen) return refuse(404, TEXT.notFound);
       const now = new Date().toISOString();
       const warnings = singleReviewerWarnings(s, id);
       for (const part of s.parts.filter((p) => p.reviewId === id)) {
-        if (part.ms === null) Object.assign(part, { status: 'signed_off', signedOffBy: me(), signedOffAt: now });
+        if (part.ms === null) Object.assign(part, { status: 'signed_off', signedOffBy: me(), signedOffAt: now, evidenceId: chosen.id, evidenceMs: choice.ms, evidenceFiledAt: now });
         else if (part.evidenceId) part.evidenceFiledAt = now;
       }
       Object.assign(review, { status: 'completed', completedAt: now, completedBy: me(), warnings });
-      const filed = s.parts.filter((p) => p.reviewId === id && p.evidenceId).length;
+      const filed = s.parts.filter((p) => p.reviewId === id && p.ms !== null && p.evidenceId).length;
       return ok(
         filed
-          ? [`Access review ${review.reviewNo} completed; the rows of ${filed} system(s) were filed as evidence`, `Tinjauan akses ${review.reviewNo} selesai; baris dari ${filed} sistem diarsipkan sebagai bukti`]
-          : [`Access review ${review.reviewNo} completed`, `Tinjauan akses ${review.reviewNo} selesai`],
-        { warnings, changed: s.parts.filter((p) => p.reviewId === id && p.ms).map((p) => p.ms!) },
+          ? [
+            `Access review ${review.reviewNo} completed; the organisation part was filed to ${chosen.code}, and the rows of ${filed} system(s) were filed as evidence`,
+            `Tinjauan akses ${review.reviewNo} selesai; bagian organisasi disimpan sebagai bukti di ${chosen.code}, dan baris dari ${filed} sistem disimpan sebagai bukti`,
+          ]
+          : [
+            `Access review ${review.reviewNo} completed; the organisation part was filed to ${chosen.code}`,
+            `Tinjauan akses ${review.reviewNo} selesai; bagian organisasi disimpan sebagai bukti di ${chosen.code}`,
+          ],
+        {
+          warnings,
+          changed: [...new Set([...s.parts.filter((p) => p.reviewId === id && p.ms).map((p) => p.ms!), choice.ms])],
+          data: { organisation: { ms: choice.ms, evidenceCode: chosen.code } },
+        },
       );
     },
     async cancel(id, reason) {
@@ -413,8 +478,8 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       const warnings: WarningRow[] = names.length ? [{ rule: 'REVIEW-SINGLE-ADMIN', messages: { en: `${TEXT.singleAdmin[0]} ${names.join(', ')}.`, id: `${TEXT.singleAdmin[1]} ${names.join(', ')}.` } }] : [];
       return ok(
         evidenceId
-          ? [`${code} signed off; its rows are filed to ${evidenceId} when the review completes`, `${code} ditandatangani; barisnya diarsipkan ke ${evidenceId} saat tinjauan selesai`]
-          : [`${code} signed off`, `${code} ditandatangani`],
+          ? [`${code} signed off; its rows are filed to ${evidenceId} when the review completes`, `${code} disahkan; barisnya disimpan sebagai bukti di ${evidenceId} saat tinjauan selesai`]
+          : [`${code} signed off`, `${code} disahkan`],
         { warnings, changed: [ms] },
       );
     },

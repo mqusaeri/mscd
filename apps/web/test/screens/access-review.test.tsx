@@ -2,7 +2,9 @@
 // the re-exported adapters, and the part page and the sign-off dialog in both languages and themes: the decision
 // actions, "Revoke guest access" for a guest grant decided "revoke" (only for holders of `auditor_access.grant`), the
 // session's own access left to another reviewer, "Sign off" disabled while items wait, and the A.5.18 evidence item
-// proposed in the sign-off.
+// proposed in the sign-off. M3-14: "Revoke guest access" opens the revoke dialog with the text for a guest grant, and
+// the call runs only from its "Revoke now"; the Indonesian sign-off words ("Sahkan").
+import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
@@ -17,7 +19,8 @@ import { ROUTES, ROUTE_IDS } from '../../src/screens/access-review/routes';
 import { createSampleAdapter, resetSampleAccessReviews } from '../../src/screens/access-review/sample';
 import { PartPage, SignOffDialog } from '../../src/screens/access-review/Screen';
 import { TEXT } from '../../src/screens/access-review/text';
-import type { ItemRow, PartDetail } from '../../src/screens/access-reviews/model';
+import type { ItemRow, Outcome, PartDetail, Result } from '../../src/screens/access-reviews/model';
+import { RevokeDialog } from '../../src/screens/access-reviews/parts';
 import { TEXT as SHARED } from '../../src/screens/access-reviews/text';
 import { HostCtx } from '../../src/screens/ui';
 import type { HostContext, Lang } from '../../src/screens/types';
@@ -54,6 +57,62 @@ const PART: PartDetail = {
 afterEach(() => {
   resetSampleAccessReviews();
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// A hook harness without a DOM (as findings.test.tsx, M3-12): a component is called as a function with a stand-in for
+// React's hook dispatcher whose state keeps its value between calls; effects do not run. The returned element tree is
+// searched for the handlers a click would run.
+// ---------------------------------------------------------------------------------------------------------------
+
+type Found = React.ReactElement<Record<string, unknown>>;
+
+const dispatcherRef: { get(): unknown; set(d: unknown): void } = (() => {
+  const r19 = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  return { get: () => r19.H, set: (d) => { r19.H = d; } };
+})();
+
+function hooked<P>(component: (props: P) => React.ReactNode) {
+  const slots: { value: unknown }[] = [];
+  return (props: P): React.ReactNode => {
+    let index = 0;
+    const dispatcher = {
+      useState: (initial: unknown) => {
+        const k = index++;
+        if (!slots[k]) slots[k] = { value: typeof initial === 'function' ? (initial as () => unknown)() : initial };
+        const slot = slots[k]!;
+        return [slot.value, (next: unknown) => { slot.value = typeof next === 'function' ? (next as (v: unknown) => unknown)(slot.value) : next; }];
+      },
+      useRef: (initial: unknown) => {
+        const k = index++;
+        if (!slots[k]) slots[k] = { value: { current: initial } };
+        return slots[k]!.value;
+      },
+      useEffect: () => { index++; },
+      useLayoutEffect: () => { index++; },
+      useMemo: (make: () => unknown) => { index++; return make(); },
+      useCallback: (fn: unknown) => { index++; return fn; },
+      useContext: (context: { _currentValue: unknown }) => context._currentValue,
+    };
+    const before = dispatcherRef.get();
+    dispatcherRef.set(dispatcher);
+    try {
+      return component(props);
+    } finally {
+      dispatcherRef.set(before);
+    }
+  };
+}
+
+function elementsOf(node: unknown, out: Found[] = []): Found[] {
+  if (Array.isArray(node)) node.forEach((n) => elementsOf(n, out));
+  else if (React.isValidElement(node)) {
+    out.push(node as Found);
+    for (const value of Object.values((node as Found).props)) elementsOf(value, out);
+  }
+  return out;
+}
+
+const buttonsOf = (tree: React.ReactNode, text: string) => elementsOf(tree).filter((e) => typeof e.props.onClick === 'function' && e.props.children === text);
 
 describe('access review of a system: routes and definition', () => {
   it('match the shared route table and its permissions', () => {
@@ -112,8 +171,57 @@ describe('part page and sign-off', () => {
     expect(render(<PartPage ctx={programmeOwner} ms="isms" part={PART} />, programmeOwner)).not.toContain(TEXT.revokeGuest[0]);
     const ctx = ctxOf('en');
     const waiting = render(<PartPage ctx={ctx} ms="isms" part={{ ...PART, rows: [{ ...ROW, decision: null, decisionNote: null }], decided: 0, needsSecondReviewer: 0 }} />, ctx);
-    expect(waiting).toContain(SHARED.blockUndecided[0]);
+    expect(waiting).toContain(SHARED.blockUndecided[0].replace(/'/g, '&#x27;'));
     const signed = render(<PartPage ctx={ctx} ms="isms" part={{ ...PART, status: 'signed_off', signedOffBy: { handle: 'rina', displayName: 'Rina Kusuma' }, signedOffAt: '2026-10-01T02:00:00Z' }} />, ctx);
     expect(signed).not.toContain(`>${TEXT.signOff[0]}<`);
+  });
+});
+
+describe('revoking a guest grant (M3-14, texts D1)', () => {
+  it('"Revoke guest access" opens the dialog with the guest text; cancel calls nothing', async () => {
+    const ctx = ctxOf('en');
+    const page = hooked(PartPage);
+    let tree = page({ ctx, ms: 'isms', part: PART });
+    expect(elementsOf(tree).some((e) => e.type === RevokeDialog)).toBe(false);
+    // The row actions of the item table (a render function of ItemsTable).
+    const table = elementsOf(tree).find((e) => typeof e.props.actions === 'function' && Array.isArray(e.props.rows))!;
+    const [revoke] = buttonsOf((table.props.actions as (r: ItemRow) => React.ReactNode)(ROW), TEXT.revokeGuest[0]);
+    expect(revoke).toBeTruthy();
+    (revoke!.props.onClick as () => void)();
+    tree = page({ ctx, ms: 'isms', part: PART });
+    const dialog = elementsOf(tree).find((e) => e.type === RevokeDialog)!;
+    expect(dialog).toBeTruthy();
+    expect((dialog.props.row as ItemRow).id).toBe('item-guest');
+    // Nothing was revoked by opening the dialog: the sample guest grant of the open review is still waiting.
+    const sample = createSampleAdapter(() => D, () => 'ndt', () => 'rina');
+    const open = ((await sample.msList('isms')) as { ok: true; data: { reviewId: string }[] }).data[0]!.reviewId;
+    const part = (await sample.msGet('isms', open)) as { ok: true; data: PartDetail };
+    expect(part.data.rows.filter((r) => r.kind === 'auditor_access').every((r) => r.appliedAt === null)).toBe(true);
+    // Cancel closes the dialog without a call.
+    (dialog.props.onClose as () => void)();
+    tree = page({ ctx, ms: 'isms', part: PART });
+    expect(elementsOf(tree).some((e) => e.type === RevokeDialog)).toBe(false);
+
+    for (const lang of ['en', 'id'] as const) {
+      const c = ctxOf(lang);
+      const run = vi.fn(async (): Promise<Result<Outcome>> => ({ ok: true, data: { message: null, warnings: [], changed: [], data: null } }));
+      const html = render(<RevokeDialog ctx={c} row={ROW} run={run} onClose={() => undefined} onDone={() => undefined} />, c);
+      const t = (pair: readonly [string, string]) => pair[lang === 'id' ? 1 : 0];
+      expect(html).toContain(t(SHARED.revokeGuest));
+      expect(html).toContain(t(SHARED.apply));
+      expect(html).toContain(c.fill(SHARED.revokeTitle, { access: lang === 'en' ? 'External Auditor' : 'Auditor Eksternal', name: 'Eko Santoso' }));
+      expect(run).not.toHaveBeenCalled();
+    }
+  });
+
+  it('uses "Sahkan" for the sign-off in Indonesian (ISO review o12) and names this system\'s part of the report (texts D7)', () => {
+    expect(TEXT.signOff).toEqual(['Sign off', 'Sahkan']);
+    expect(TEXT.signedOff).toEqual(['Signed off', 'Disahkan']);
+    expect(TEXT.signOffTitle).toEqual(['Sign off {ms} in access review {no}', 'Sahkan {ms} dalam tinjauan akses {no}']);
+    expect(TEXT.fEvidence[0]).toContain('this system\'s part of the review report');
+    expect(TEXT.fEvidence[1]).toContain('bagian laporan tinjauan untuk sistem ini');
+    expect(TEXT.signOffSecond[0]).toBe('{n} item(s) stay without a decision: they concern the only reviewer of this system, so nobody else can decide them.');
+    expect(TEXT.guestRevoked[1]).toBe('Akses tamu dicabut; sesi auditor telah diakhiri');
+    expect(JSON.stringify(TEXT)).not.toMatch(/[Tt]anda ?tangan|dikeluarkan|[Dd]iarsipkan|baris sistem/);
   });
 });

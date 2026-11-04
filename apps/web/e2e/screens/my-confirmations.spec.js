@@ -2,7 +2,7 @@ import { test, expect, ui, openScreen, metaById, expectToast, expectReadableText
 
 // Policies to confirm of the sample build (MILESTONE-3 M3-05, D.7 "Confirming", H.7): every persona starts with its
 // confirmations done, so no banner shows. The Management System Manager asks the Management System Managers of the ISMS
-// to confirm POL-14; the banner counts the open confirmation and opens the screen; "Confirm" waits until the document
+// to confirm STD-05; the banner counts the open confirmation and opens the screen; "Confirm" waits until the document
 // is opened and the statement ticked; the confirmation moves to Done and the banner goes. @sample-only: the API project
 // covers the screen in e2e/api-only/my-confirmations.spec.js.
 const meta = metaById('my-confirmations');
@@ -36,11 +36,11 @@ test.describe('Policies to confirm @sample-only', () => {
     await openScreen(page, register);
     await expect(banner(page)).toHaveCount(0);
     await ui.pageAction(page, 'Ask for confirmation').click();
-    await dialog(page).locator('select[name="document"]').selectOption('POL-14');
+    await dialog(page).locator('select[name="document"]').selectOption('STD-05');
     await dialog(page).getByLabel('Only the roles I choose').check();
     await dialog(page).getByLabel('Management System Manager').check();
     await button(dialog(page), 'Send the request').click();
-    await expectToast(page, 'Asked 1 person to confirm POL-14 version 1.0');
+    await expectToast(page, 'Asked 1 person to confirm STD-05 version 1.1');
 
     await expect(banner(page)).toHaveAttribute('data-confirmation-banner', '1');
     await expect(banner(page)).toContainText('You have 1 policy to confirm');
@@ -49,7 +49,7 @@ test.describe('Policies to confirm @sample-only', () => {
     await expect(ui.title(page)).toHaveText('Policies to confirm');
     await expect(banner(page)).toHaveCount(0);
 
-    const item = body(page).locator('[data-confirmation="POL-14"]');
+    const item = body(page).locator('[data-confirmation="STD-05"]');
     await expect(item).toContainText('Not opened yet');
     await expect(item).toContainText('Confirm by 13 Oct 2026');
     await expect(button(item, 'Confirm')).toBeDisabled();
@@ -63,8 +63,8 @@ test.describe('Policies to confirm @sample-only', () => {
     await expect(item).toContainText('Tick the statement first.');
     await item.getByLabel('I have read and understood this document').check();
     await button(item, 'Confirm').click();
-    await expectToast(page, 'You confirmed POL-14 version 1.0');
+    await expectToast(page, 'You confirmed STD-05 version 1.1');
     await expect(body(page)).toContainText('Nothing to confirm');
-    await expect(body(page).locator('tbody tr', { hasText: 'POL-14' }).first()).toContainText('Confirmed on 29 Sep 2026');
+    await expect(body(page).locator('tbody tr', { hasText: 'STD-05' }).first()).toContainText('Confirmed on 29 Sep 2026');
   });
 });

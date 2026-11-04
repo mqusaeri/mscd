@@ -2,7 +2,8 @@
 // settings with their ETag (`If-Match`), the reviews, one review, decisions, applying, completion, cancel, the report
 // (the api's download link: the session cookie goes with it and the api audits `file.downloaded`), and the parts of a
 // system with their decisions, the guest grant revocation and the sign-off. The evidence items of the sign-off picker
-// come from the snapshot (`D.bundles[ms].evs` with the uuids of `D.refs`).
+// come from the snapshot (`D.bundles[ms].evs` with the uuids of `D.refs`); those of "Complete" come with the review
+// (`evidenceOptions`, M3-14), since a Tenant Admin may hold no role in any system.
 import type {
   AccessReviewDetail, AccessReviewItemView, AccessReviewPartDetail, AccessReviewPartSummary, AccessReviewSettings, AccessReviewSummary,
   CommandResult, RecordRef,
@@ -35,7 +36,11 @@ export const fromPart = (p: AccessReviewPartSummary): PartRow => ({
   evidenceCode: p.evidenceCode, evidenceFiledAt: p.evidenceFiledAt,
 });
 
-export const fromPartDetail = (p: AccessReviewPartDetail): PartDetail => ({ ...fromPart(p), rows: p.rows.map(fromItem), suggestedEvidence: p.suggestedEvidence });
+export const fromPartDetail = (p: AccessReviewPartDetail): PartDetail => ({
+  ...fromPart(p),
+  rows: p.rows.map(fromItem),
+  suggestedEvidence: p.suggestedEvidence ? { id: p.suggestedEvidence.id, code: p.suggestedEvidence.code, ...(p.suggestedEvidence.ms ? { ms: p.suggestedEvidence.ms } : {}) } : null,
+});
 
 export const fromDetail = (d: AccessReviewDetail): ReviewDetail => ({
   ...fromSummary(d),
@@ -43,6 +48,7 @@ export const fromDetail = (d: AccessReviewDetail): ReviewDetail => ({
   parts: d.parts.map(fromPart),
   pendingApplications: d.pendingApplications.map(fromItem),
   warnings: d.warnings.map((w) => ({ rule: w.rule, messages: { en: w.messages.en, id: w.messages.id } })),
+  ...(d.evidenceOptions ? { evidenceOptions: d.evidenceOptions.map((o) => ({ ms: o.ms, id: o.id, code: o.code, title: o.title })) } : {}),
 });
 
 export const outcomeOf = (r: CommandResult): Outcome => ({
@@ -82,7 +88,7 @@ export function createApiAdapter(client: ApiClient | null, getD: () => Controlle
     },
     decide: (id, itemId, body) => command(ROUTES.decide, { params: { id, itemId }, body }),
     apply: (id, itemId, body) => command(ROUTES.apply, { params: { id, itemId }, body }),
-    complete: (id) => command(ROUTES.complete, { params: { id } }),
+    complete: (id, choice) => command(ROUTES.complete, { params: { id }, body: { ms: choice.ms, evidenceId: choice.evidenceId } }),
     cancel: (id, reason) => command(ROUTES.cancel, { params: { id }, body: { reason } }),
     async report(review) {
       return { ok: true, data: { href: reportHref(review.id), fileName: `access-review-${review.reviewNo}.csv` } };

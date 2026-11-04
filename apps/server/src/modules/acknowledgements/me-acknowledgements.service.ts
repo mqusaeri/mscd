@@ -37,7 +37,7 @@ import { ruleMessageKey, ruleMessages } from '../rules';
 import { StorageGatewayContext, type RepositoryRow } from '../storage';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { REFUSALS } from './acknowledgement-text';
-import { closeTasks, conflict, refusal } from './acknowledgement.service';
+import { closeTasks, conflict, personDueSql, refusal } from './acknowledgement.service';
 import { classificationAllows } from './acknowledgement-visibility';
 import { orgOf } from './acknowledgement-requests.service';
 
@@ -109,13 +109,17 @@ export class MeAcknowledgementsService {
   // GET /me/acknowledgements
   // -------------------------------------------------------------------------------------------------------------
 
-  /** Pending confirmations of open requests first (by due date), then the confirmed and excused ones of the last 180 days. */
+  /**
+   * Pending confirmations of open requests first (by due date), then the confirmed and excused ones of the last 180 days.
+   * The due date is the person's own (`personDueSql`: the day they were added plus the request's period, M3-14).
+   */
   async list(principal: Principal): Promise<MyAcknowledgementItem[]> {
     const org = orgOf(principal);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const today = this.clock.todayIn(org.timeZone);
       const { rows } = await sql<MineRow>`
-        select a.id, a.acknowledgement_request_id, a.status, a.opened_at, a.confirmed_at, r.due_on, r.status as request_status,
+        select a.id, a.acknowledgement_request_id, a.status, a.opened_at, a.confirmed_at, ${personDueSql(org.timeZone)}::text as due_on,
+               r.status as request_status,
                d.doc_code, d.title, v.version_label, coalesce(tm.slug, rm.slug) as ms
           from acknowledgement a
           join acknowledgement_request r on r.id = a.acknowledgement_request_id and r.deleted_at is null
@@ -130,7 +134,7 @@ export class MeAcknowledgementsService {
            and ${classificationAllows(sql`${principal.user.id}::uuid`, sql.ref('d.id'))}
            and ((a.status = 'pending' and r.status = 'open')
                 or (a.status <> 'pending' and a.updated_at > now() - make_interval(days => ${RECENT_DAYS})))
-         order by (a.status = 'pending') desc, case when a.status = 'pending' then r.due_on end, a.updated_at desc, a.id
+         order by (a.status = 'pending') desc, case when a.status = 'pending' then ${personDueSql(org.timeZone)} end, a.updated_at desc, a.id
          limit 200`.execute(trx);
       return rows.map((r) => ({
         id: r.id,

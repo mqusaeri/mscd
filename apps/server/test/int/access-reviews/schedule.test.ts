@@ -3,7 +3,8 @@
 // The first run writes the settings with the first review due one period later; the run on the due date opens a review
 // (opened by the schedule) with its notices and moves the next due date on; a second run of the same day does nothing;
 // the reminder goes three days before the due date and the overdue notice the day after it and every 7 days after that;
-// rina's own organisation items need a second reviewer and the review completes with REVIEW-SINGLE-ADMIN.
+// rina's own organisation items need a second reviewer and the review completes with REVIEW-SINGLE-ADMIN, its
+// organisation part filed to the proposed A.5.18 evidence item (M3-14).
 import type { AccessReviewDetail, AccessReviewSettings, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -110,9 +111,16 @@ describe('access-review.open and the single Tenant Admin (Milestone 3 D.9)', () 
       const signed = await rina.post<CommandResult>(`/api/v1/ms/${part.ms}/access-reviews/${review!.id}/sign-off`, {});
       expect(signed.status, `${part.ms}: ${JSON.stringify(signed.body)}`).toBe(200);
     }
-    const done = await rina.post<CommandResult & { data: { filed: unknown[] } }>(`${ADMIN}/${review!.id}/complete`, {});
+    // The parts were signed off without an evidence item; the organisation part goes to the proposed A.5.18 item of the
+    // ISMS (M3-14), which then holds the only file of the review.
+    const proposed = (await rina.get<AccessReviewDetail>(`${ADMIN}/${review!.id}`)).body.organisationPart.suggestedEvidence!;
+    expect(proposed.ms).toBe('isms');
+    const done = await rina.post<CommandResult & { data: { filed: unknown[]; organisation: { ms: string; evidenceCode: string } } }>(
+      `${ADMIN}/${review!.id}/complete`, { ms: proposed.ms, evidenceId: proposed.id },
+    );
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     expect(done.body.data.filed).toEqual([]);
+    expect(done.body.data.organisation).toEqual({ ms: 'isms', evidenceCode: proposed.code });
     expect(done.body.warnings).toEqual([expect.objectContaining({ rule: 'REVIEW-SINGLE-ADMIN' })]);
     expect(done.body.warnings![0]!.messages.en).toContain('one Tenant Admin');
     // The overdue notices stop with the completion.

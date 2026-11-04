@@ -19,6 +19,8 @@ const SAME = new Set([
   // the Indonesian interface uses the English words "Checkpoint" (Item checkpoint terbuka, Memblokir checkpoint) and
   // "Management System Manager" (product decision 10 of CLAUDE.md)
   'CHECKPOINT', 'Management System Manager',
+  // the admin role "Tenant Admin" keeps its English name in the Indonesian interface (texts A4, M3-14)
+  'Tenant Admin',
   'Golden Thread Viewer', 'Tera', 'Link', 'Upload', 'Zero-transit', 'Pass-through',
   'SaaS, region Jakarta',
 ]);

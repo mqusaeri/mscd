@@ -5,10 +5,12 @@ import { test, expect, ui, go, openApp, expectToast, expectOverlayReadable, expe
 // Access reviews against the api (MILESTONE-3 M3-07, D.9). In the Test Organisation tenant.admin and rina are the two
 // Tenant Admins, rina is the only Management System Manager of the ISMS and the guest Eko Santoso holds an auditor
 // grant there. tenant.admin sets a 3-month schedule and starts a review; rina decides the ISMS items, cannot decide her
-// own role, revokes the guest grant, signs off into the A.5.18 evidence and decides tenant.admin's organisation items;
-// tenant.admin applies the business role revocation rina decided, decides the other organisation items, removes bagus's
-// linked company sign-in and completes the review with the single-reviewer warning; the evidence item holds the new
-// file and the report downloads as CSV. Every form is readable in the light and dark themes.
+// own role, revokes the guest grant ("Revoke now" in its dialog, M3-14), signs off into the A.5.18 evidence and decides
+// tenant.admin's organisation items; tenant.admin applies the business role revocation rina decided ("Revoke now",
+// after a Cancel that changes nothing), decides the other organisation items, removes bagus's linked company sign-in and
+// completes the review with the single-reviewer warning, choosing the evidence item of the organisation part (the
+// proposed A.5.18 item, M3-14); the evidence item holds the new file and the report downloads as CSV. Every form is
+// readable in the light and dark themes.
 const dialog = (page) => ui.modal(page);
 const button = (scope, name) => scope.locator('button', { hasText: new RegExp(`^${name}$`) });
 const card = (page, title) => page.locator('main section.mx-card').filter({ has: page.locator('h2', { hasText: new RegExp(title) }) });
@@ -132,6 +134,9 @@ test.describe('Access reviews against the api @api-only', () => {
     await button(dialog(page), 'Save decision').click();
     await expectToast(page, 'Decision saved for 1 item(s)');
     await button(guest, 'Revoke guest access').click();
+    await expect(dialog(page)).toContainText('Revoke External Auditor of Eko Santoso?');
+    await expect(dialog(page)).toContainText('The auditor is signed out now and can no longer sign in with this grant.');
+    await button(dialog(page), 'Revoke now').click();
     await expectToast(page, 'Guest access revoked; the auditor was signed out');
     await expect(guest).toContainText('Applied');
     const bagusRole = personRows(items, 'Bagus Prasetyo');
@@ -170,7 +175,16 @@ test.describe('Access reviews against the api @api-only', () => {
     const apply = card(page, '^Revocations and changes to apply');
     const waiting = personRows(apply, 'Bagus Prasetyo');
     await expect(waiting).toContainText('Moved to the finance team');
-    await button(waiting, 'Apply').click();
+    // "Revoke now" asks first (M3-14): Cancel calls nothing, the dialog's "Revoke now" revokes the role.
+    await button(waiting, 'Revoke now').click();
+    await expect(dialog(page)).toContainText('Revoke Domain Owner of Bagus Prasetyo?');
+    await expect(dialog(page)).toContainText('The role ends now. To give it back, grant it again on People and roles.');
+    await inBothThemes(page, () => expectOverlayReadable(page));
+    await button(dialog(page), 'Cancel').click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(personRows(apply, 'Bagus Prasetyo')).toHaveCount(1);
+    await button(waiting, 'Revoke now').click();
+    await button(dialog(page), 'Revoke now').click();
     await expectToast(page, 'Role revoked');
     await expect(personRows(apply, 'Bagus Prasetyo')).toHaveCount(0);
     const orgCard = card(page, '^Organisation access');
@@ -182,15 +196,24 @@ test.describe('Access reviews against the api @api-only', () => {
     await dialog(page).locator('textarea[name="note"]').fill('Signs in with the password only');
     await button(dialog(page), 'Save decision').click();
     await expectToast(page, 'Decision saved for 1 item(s)');
-    await button(personRows(apply, 'Bagus Prasetyo'), 'Apply').click();
+    await button(personRows(apply, 'Bagus Prasetyo'), 'Revoke now').click();
+    await expect(dialog(page)).toContainText('The link between this person and the company sign-in is removed');
+    await button(dialog(page), 'Revoke now').click();
     await expectToast(page, 'Linked sign-in removed');
     await orgCard.locator('select[name="kind"]').selectOption('');
     await keepTheRest(page, orgCard);
 
     const reviewHead = page.locator('main [data-review] section.mx-card').first();
+    // "Complete" names the evidence item of the organisation part; the A.5.18 item of the ISMS is proposed (M3-14).
     await button(reviewHead, 'Complete').click();
-    await expectToast(page, 'Access review AR-2026-01 completed; the rows of 1 system(s) were filed as evidence');
+    await expect(dialog(page)).toContainText('Evidence item for the organisation part');
+    await expect(dialog(page)).toContainText('For ISO/IEC 27001 the item of control A.5.18 is proposed.');
+    await expect(dialog(page).locator('[role="option"][aria-selected="true"] .mx-mono')).toHaveText(`ISMS ${evidenceCode}`);
+    await inBothThemes(page, () => expectOverlayReadable(page));
+    await button(dialog(page), 'Complete').click();
+    await expectToast(page, `Access review AR-2026-01 completed; the organisation part was filed to ${evidenceCode}, and the rows of 1 system(s) were filed as evidence`);
     await expect(reviewHead).toContainText('Completed');
+    await expect(reviewHead.locator('[data-org-evidence]')).toContainText(`Organisation part filed to ${evidenceCode}`);
     await expect(page.locator('main')).toContainText('Not reviewed by a second person: Rina Kusuma');
     await expect(card(page, '^Systems')).toContainText(evidenceCode);
 

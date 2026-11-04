@@ -6,9 +6,10 @@
 // REVIEW-OWN-ACCESS; the guest grant revoked through the system route; the sign-off refused with undecided items and
 // accepted with rina's own role left for a second reviewer (REVIEW-SINGLE-ADMIN), proposing the A.5.18 evidence; a
 // business role revocation, a linked sign-in removal and a membership change applied by tenant.admin; completion
-// refused while something waits, then completed with the report in the vault and the ISMS rows filed as a new file of
-// the evidence item; the report CSV; cancel; a system nobody may review (its own message, no "second reviewer" items)
-// and the requester and approver of a business role. Every route answers 403 to a person without the permission.
+// refused while something waits, then completed with the report in the vault and, in one new file of the A.5.18
+// evidence item that both name, the ISMS rows and the organisation part with the summary of the review (M3-14); the
+// report CSV; cancel; a system nobody may review (its own message, no "second reviewer" items) and the requester and
+// approver of a business role. Every route answers 403 to a person without the permission.
 import type { AccessReviewDetail, AccessReviewPartDetail, AccessReviewPartSummary, AccessReviewSettings, AccessReviewSummary, CommandResult } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -262,15 +263,30 @@ describe('periodic access review (Milestone 3 D.9)', () => {
       expect((await decideOrg(by, row.id, { decision: 'keep' })).status, row.subject.handle).toBe(200);
     }
     const before = await rowsOf<{ storage_object_id: string; file_sequence: number }>(db, 'tst', sql`select storage_object_id, file_sequence from evidence where id = (select evidence_id from access_review_part where access_review_id = ${reviewId} and management_system_id is not null)`);
-    const done = await admin.post<CommandResult & { data: { filed: { ms: string; evidenceCode: string }[]; reportStored: boolean } }>(`${ADMIN}/${reviewId}/complete`, {});
+    // The organisation part needs an evidence item (M3-14); the A.5.18 item of the ISMS is proposed, the one the ISMS
+    // part was signed off into, so both parts go into one new file of it.
+    const open = await detail();
+    expect(open.organisationPart.suggestedEvidence).toMatchObject({ ms: 'isms', code: open.parts[0]!.evidenceCode });
+    expect(open.evidenceOptions!.some((o) => o.id === open.organisationPart.suggestedEvidence!.id)).toBe(true);
+    const without = await admin.post<Problem>(`${ADMIN}/${reviewId}/complete`, {});
+    expect(without.status).toBe(422);
+    expect(without.body.messageKey).toBe('access_reviews.evidence_required');
+    const done = await admin.post<CommandResult & { data: { filed: { ms: string; evidenceCode: string }[]; organisation: { ms: string; evidenceCode: string }; reportStored: boolean } }>(
+      `${ADMIN}/${reviewId}/complete`, { ms: 'isms', evidenceId: open.organisationPart.suggestedEvidence!.id },
+    );
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     expect(done.body.data.reportStored).toBe(true);
     expect(done.body.data.filed).toEqual([{ ms: 'isms', evidenceCode: expect.any(String) }]);
+    expect(done.body.data.organisation).toEqual({ ms: 'isms', evidenceCode: open.parts[0]!.evidenceCode });
+    expect(done.body.message![0]).toBe(`Access review AR-2026-02 completed; the organisation part was filed to ${open.parts[0]!.evidenceCode}, and the rows of 1 system(s) were filed as evidence`);
+    expect(done.body.message![1]).toContain('disimpan sebagai bukti');
     expect(done.body.warnings).toEqual([expect.objectContaining({ rule: 'REVIEW-SINGLE-ADMIN' })]);
 
     const review = await detail();
     expect(review).toMatchObject({ status: 'completed', completedBy: { handle: 'tenant.admin' }, completedAt: expect.any(String) });
-    expect(review.organisationPart.status).toBe('signed_off');
+    expect(review.organisationPart).toMatchObject({ status: 'signed_off', evidenceCode: open.parts[0]!.evidenceCode });
+    expect(review.organisationPart.evidenceFiledAt).not.toBeNull();
+    expect(review.evidenceOptions).toBeUndefined();
     expect(review.parts[0]!.evidenceFiledAt).not.toBeNull();
     expect(review.warnings).toEqual([expect.objectContaining({ rule: 'REVIEW-SINGLE-ADMIN' })]);
     const stored = await rowsOf<{ report_object_id: string | null; summary: Record<string, unknown> }>(db, 'tst', sql`select report_object_id, summary from access_review where id = ${reviewId}`);
@@ -282,7 +298,17 @@ describe('periodic access review (Milestone 3 D.9)', () => {
     expect(after[0]!.file_sequence).toBe(before[0]!.file_sequence + 1);
     expect(after[0]!.storage_object_id).not.toBe(before[0]!.storage_object_id);
     const filed = await rowsOf<{ after_data: Record<string, unknown> }>(db, 'tst', sql`select after_data from audit_trail where action = 'evidence.file_uploaded' and entity_id = ${review.parts[0]!.evidenceId} order by seq desc limit 1`);
-    expect(filed[0]!.after_data).toMatchObject({ source: 'generated', generated: { mimeType: 'text/csv' } });
+    expect(filed[0]!.after_data).toMatchObject({ source: 'generated', generated: { mimeType: 'text/csv', fileName: expect.stringMatching(/^access-review-AR-2026-02-organisation-isms-/) } });
+    // The one file holds the ISMS rows, the organisation rows and the summary of the whole review.
+    const content = await rina.get(`/api/v1/storage/objects/${after[0]!.storage_object_id}/content?ms=isms`);
+    expect(content.status).toBe(200);
+    const text = content.raw.toString('utf8');
+    expect(text).toContain(',business_role,');
+    expect(text).toContain(',membership,');
+    expect(text).toContain(',linked_sign_in,');
+    expect(text).toContain('summary,value');
+    expect(text).toContain('report_in_managed_vault,yes');
+    expect(text).toMatch(/warning,"?REVIEW-SINGLE-ADMIN: /);
 
     // Completed: no more changes.
     expect((await admin.post(`${ADMIN}/${reviewId}/complete`, {})).status).toBe(409);

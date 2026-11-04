@@ -18,7 +18,7 @@ export const BUSINESS_ROLE_LABELS: Readonly<Record<BusinessRole, Pair>> = {
 };
 
 export const ADMIN_ROLE_LABELS: Readonly<Record<OrgRole, Pair>> = {
-  tenant_admin: ['Tenant Admin', 'Admin Tenant'],
+  tenant_admin: ['Tenant Admin', 'Tenant Admin'],
   storage_admin: ['Storage Admin', 'Admin Penyimpanan'],
 };
 

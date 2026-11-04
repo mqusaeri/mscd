@@ -33,6 +33,6 @@ test.describe('Administration landing @api-only', () => {
     await expect(ui.pageAction(page, 'Install licence')).toBeVisible();
     await page.locator('header button', { hasText: /^ID$/ }).click();
     await expect(ui.title(page)).toHaveText('Lisensi');
-    await expect(page.locator('header')).toContainText('Admin Tenant');
+    await expect(page.locator('header')).toContainText('Tenant Admin');
   });
 });

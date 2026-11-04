@@ -4,7 +4,11 @@
 // person list; Top Management and anyone with only `audit.pending.aggregate` see the totals (product decisions 2 and 3).
 // The Management System Manager asks for confirmation of an approved document ("Ask for confirmation", also the page
 // action), reminds the pending people, downloads the register as CSV and closes a request, filing the register as a
-// new file of an evidence item ("Close and file as evidence").
+// new file of an evidence item ("Close and file as evidence"). M3-14: the page says who the register covers; the person
+// list shows the day each person was added and their own due date (newcomers join an open request), the excusal reason
+// in the interface language, and what "Opened" means; a closed request offers "Ask the people who have not confirmed";
+// the close dialog proposes the evidence item of the policy and warns when the chosen item holds another policy's
+// register.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { MsId } from '../../data/types';
@@ -16,8 +20,8 @@ import { invalidateConfirmations } from '../my-confirmations/store';
 import { adapterFor } from './adapter';
 import type { AcknowledgementRole, AcknowledgementScope, AcknowledgementsAdapter, Download, PersonRow, RequestDetail, RequestRow, Totals } from './model';
 import {
-  AUDIENCE_ROLES, MANAGE_PERM, PEOPLE_PERM, SCOPES, approvedDocuments, askBlock, audienceText, dayOf, errorText, evidenceItems, personStatus, roleLabel,
-  settled,
+  AUDIENCE_ROLES, MANAGE_PERM, PEOPLE_PERM, SCOPES, approvedDocuments, askBlock, audienceText, dayOf, errorText, evidenceItems, excusedReasonText, mayAskAgain,
+  earlierConfirmedOf, otherRegisterOf, personStatus, proposedEvidenceId, roleLabel, settled,
 } from './model';
 import { TEXT } from './text';
 import './acknowledgements.css';
@@ -82,7 +86,10 @@ export function RequestsTable({ ctx, rows, onOpen }: { ctx: HostContext; rows: R
   return <Table columns={columns} rows={rows} rowKey={(r) => r.id} onRow={onOpen} />;
 }
 
-/** The people of a request with their status, dates and reminders. */
+/**
+ * The people of a request with their status (and why a person is no longer asked, in the interface language), the day
+ * each was added and their own due date, when MSCD issued the link and when they confirmed, and the reminders.
+ */
 export function PeopleTable({ ctx, people }: { ctx: HostContext; people: PersonRow[] }) {
   const columns: Column<PersonRow>[] = [
     { key: 'person', label: TEXT.colPerson, render: (p) => <span data-person={p.handle}>{p.name}</span> },
@@ -91,9 +98,17 @@ export function PeopleTable({ ctx, people }: { ctx: HostContext; people: PersonR
       label: TEXT.colState,
       render: (p) => {
         const s = personStatus(p);
-        return <Badge tone={s.tone} title={p.excusedReason ?? undefined}>{ctx.li(s.label)}</Badge>;
+        const reason = p.status === 'excused' && p.excusedReason ? ctx.li(excusedReasonText(p.excusedReason)) : null;
+        return (
+          <span className="mx-ack-status">
+            <Badge tone={s.tone} title={reason ?? undefined}>{ctx.li(s.label)}</Badge>
+            {reason ? <span className="mx-ack-reason" data-reason="">{reason}</span> : null}
+          </span>
+        );
       },
     },
+    { key: 'added', label: TEXT.colAdded, render: (p) => <span data-added={p.addedOn}>{dayOf(ctx, p.addedOn)}</span> },
+    { key: 'due', label: TEXT.colDue, render: (p) => <span data-due={p.dueOn}>{dayOf(ctx, p.dueOn)}</span> },
     { key: 'opened', label: TEXT.colOpened, render: (p) => dayOf(ctx, p.openedAt) },
     { key: 'confirmed', label: TEXT.colConfirmedAt, render: (p) => dayOf(ctx, p.confirmedAt) },
     { key: 'reminders', label: TEXT.colReminders, align: 'right', render: (p) => <span className="mx-ack-num">{p.reminderCount}</span> },
@@ -103,14 +118,20 @@ export function PeopleTable({ ctx, people }: { ctx: HostContext; people: PersonR
 
 type Busy = 'remind' | 'export' | null;
 
-/** One request in a drawer: facts, totals, the person list where allowed, and the actions of the manager. */
-export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
+/**
+ * One request in a drawer: facts, totals, the person list where allowed, and the actions of the manager. `rows` is the
+ * request list of the system (the close dialog's proposal and warning, "Ask the people who have not confirmed").
+ */
+export function RequestDrawer({ ctx, adapter, ms, row, rows = [], onClose, onChanged, onAskAgain }: {
   ctx: HostContext;
   adapter: AcknowledgementsAdapter;
   ms: MsId;
   row: RequestRow;
+  rows?: readonly RequestRow[];
   onClose(): void;
   onChanged(): void;
+  /** "Ask the people who have not confirmed" of a closed request (M3-14). */
+  onAskAgain?(row: RequestRow): void;
 }) {
   const [detail, setDetail] = useState<RequestDetail | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -134,6 +155,7 @@ export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
   const manager = ctx.can(ms, MANAGE_PERM);
   const peopleAllowed = ctx.can(ms, PEOPLE_PERM);
   const open = current.status === 'open';
+  const askAgain = manager && onAskAgain && mayAskAgain(rows, current, approvedDocuments(ctx.D, ms));
   const remind = () => {
     setBusy('remind');
     setActionError(null);
@@ -160,6 +182,7 @@ export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
     });
   };
   const title = ctx.fill(TEXT.drawerTitle, { code: current.document.code, version: current.version.label });
+  const earlier = earlierConfirmedOf(rows, current);
   return (
     <>
       <Drawer open title={title} crumb={TEXT.drawerCrumb} onClose={onClose} layer={ctx.layer()}>
@@ -176,13 +199,14 @@ export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
             ]}
           />
           <TotalsTiles ctx={ctx} totals={current.totals} />
-          {!open ? <Alert tone="info">{ctx.li(TEXT.closedNote)}</Alert> : null}
+          {open ? <p className="mx-ack-note" data-newcomers-note="">{ctx.li(TEXT.newcomersNote)}</p> : <Alert tone="info">{ctx.li(TEXT.closedNote)}</Alert>}
           {actionError ? <Alert tone="bad">{errorText(ctx, actionError)}</Alert> : null}
           {manager || peopleAllowed ? (
             <div className="mx-ack-actions">
               {manager && open ? <Button busy={busy === 'remind'} onClick={remind}>{ctx.li(TEXT.remind)}</Button> : null}
               {peopleAllowed ? <Button busy={busy === 'export'} onClick={exportCsv}>{ctx.li(TEXT.exportCsv)}</Button> : null}
               {manager && open ? <Button variant="primary" onClick={() => setClosing(true)}>{ctx.li(TEXT.closeFile)}</Button> : null}
+              {askAgain ? <Button variant="primary" onClick={() => onAskAgain!(current)}>{ctx.li(TEXT.askNewcomers)}</Button> : null}
             </div>
           ) : null}
           {error ? (
@@ -192,9 +216,13 @@ export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
             </Alert>
           ) : null}
           {peopleAllowed && detail?.people ? (
-            <Card title={TEXT.peopleTitle} flush>
-              <PeopleTable ctx={ctx} people={detail.people} />
-            </Card>
+            <>
+              <Card title={TEXT.peopleTitle} flush>
+                <PeopleTable ctx={ctx} people={detail.people} />
+              </Card>
+              <p className="mx-ack-note" data-opened-note="">{ctx.li(TEXT.openedNote)}</p>
+              {earlier > 0 ? <p className="mx-ack-note" data-earlier-note="">{ctx.fill(TEXT.earlierNote, { version: current.version.label, n: earlier })}</p> : null}
+            </>
           ) : !peopleAllowed ? <p className="mx-ack-note">{ctx.li(TEXT.totalsOnly)}</p> : null}
         </div>
       </Drawer>
@@ -204,6 +232,7 @@ export function RequestDrawer({ ctx, adapter, ms, row, onClose, onChanged }: {
           adapter={adapter}
           ms={ms}
           row={current}
+          rows={rows}
           onCancel={() => setClosing(false)}
           onDone={() => {
             setClosing(false);
@@ -224,17 +253,26 @@ function evidenceLabel(ctx: HostContext, ms: MsId, id: string): string {
   return hit ? hit[1].code : id;
 }
 
-/** "Close and file as evidence": an evidence item of the system, or a close without filing. */
-export function CloseDialog({ ctx, adapter, ms, row, onCancel, onDone }: {
+/**
+ * "Close and file as evidence": an evidence item of the system, or a close without filing. It proposes the item an
+ * earlier request of the same document was filed to, and warns when the chosen item holds another document's register
+ * (each new register replaces the item's current file, M3-14). After an earlier request of the same version it says
+ * that the register lists that request's confirmations too, so the item's new file is complete.
+ */
+export function CloseDialog({ ctx, adapter, ms, row, rows = [], onCancel, onDone }: {
   ctx: HostContext;
   adapter: AcknowledgementsAdapter;
   ms: MsId;
   row: RequestRow;
+  rows?: readonly RequestRow[];
   onCancel(): void;
   onDone(): void;
 }) {
   const items = evidenceItems(ctx.D, ms);
-  const [code, setCode] = useState('');
+  const proposed = proposedEvidenceId(rows, row.document.code, row.id);
+  const [code, setCode] = useState(() => (proposed ? items.find((e) => adapter.evidenceId(ms, e.code) === proposed)?.code ?? '' : ''));
+  const other = code ? otherRegisterOf(rows, adapter.evidenceId(ms, code), row.document.code) : null;
+  const earlier = earlierConfirmedOf(rows, row);
   const [busy, setBusy] = useState<'file' | 'close' | null>(null);
   const [error, setError] = useState<TextPair | string | null>(null);
   const send = (withEvidence: boolean) => {
@@ -277,24 +315,37 @@ export function CloseDialog({ ctx, adapter, ms, row, onCancel, onDone }: {
             <RecordPicker value={code} onChange={(v) => { setCode(v); setError(null); }} records={items.map((e) => ({ id: e.code, title: e.title }))} />
           </Field>
         ) : <Alert tone="info">{ctx.li(TEXT.closeNoEvidence)}</Alert>}
+        {other ? <Alert tone="warn"><span data-other-register={other}>{ctx.fill(TEXT.otherRegister, { code: other })}</span></Alert> : null}
+        {earlier > 0 ? <p className="mx-ack-note" data-earlier-note="">{ctx.fill(TEXT.earlierNote, { version: row.version.label, n: earlier })}</p> : null}
         {error ? <div className="mx-error" role="alert">{typeof error === 'string' ? error : ctx.li(error)}</div> : null}
       </div>
     </Modal>
   );
 }
 
-/** "Ask for confirmation": an approved document, who is asked and the days to confirm. */
-export function AskDialog({ ctx, adapter, ms, onCancel, onDone }: {
+/** What "Ask the people who have not confirmed" fills in: the closed request's document and audience (M3-14). */
+export interface AskStart {
+  code: string;
+  scope: AcknowledgementScope;
+  roles: AcknowledgementRole[] | null;
+}
+
+/**
+ * "Ask for confirmation": an approved document, who is asked and the days to confirm. People who confirmed the version
+ * already are not asked again (M3-14), so `start` fills the form for the people of a closed request who did not confirm.
+ */
+export function AskDialog({ ctx, adapter, ms, start, onCancel, onDone }: {
   ctx: HostContext;
   adapter: AcknowledgementsAdapter;
   ms: MsId;
+  start?: AskStart | null;
   onCancel(): void;
   onDone(): void;
 }) {
   const docs = approvedDocuments(ctx.D, ms);
-  const [code, setCode] = useState('');
-  const [scope, setScope] = useState<AcknowledgementScope>('system_roles');
-  const [roles, setRoles] = useState<AcknowledgementRole[]>([]);
+  const [code, setCode] = useState(start?.code ?? '');
+  const [scope, setScope] = useState<AcknowledgementScope>(start?.scope ?? 'system_roles');
+  const [roles, setRoles] = useState<AcknowledgementRole[]>(start?.roles ? [...start.roles] : []);
   const [days, setDays] = useState('14');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<TextPair | string | null>(null);
@@ -369,6 +420,8 @@ export function AskDialog({ ctx, adapter, ms, onCancel, onDone }: {
             <TextInput type="number" value={days} onChange={(v) => { setDays(v); setError(null); }} name="dueDays" />
           </Field>
         </div>
+        <p className="mx-ack-note" data-skip-confirmed="">{ctx.li(TEXT.askSkipConfirmed)}</p>
+        <p className="mx-ack-note">{ctx.li(TEXT.newcomersNote)}</p>
         {error ? <div className="mx-error" role="alert">{typeof error === 'string' ? error : ctx.li(error)}</div> : null}
       </div>
     </Modal>
@@ -381,6 +434,7 @@ export function RegisterBody({ ctx, adapter, ms }: { ctx: HostContext; adapter: 
   const [state, setState] = useState<LoadState>({ loading: true, rows: null, error: null });
   const [openId, setOpenId] = useState<string | null>(typeof ctx.params.request === 'string' ? ctx.params.request : null);
   const [asking, setAsking] = useState(false);
+  const [askStart, setAskStart] = useState<AskStart | null>(null);
   const live = useRef(true);
   useEffect(() => () => {
     live.current = false;
@@ -404,13 +458,14 @@ export function RegisterBody({ ctx, adapter, ms }: { ctx: HostContext; adapter: 
   return (
     <div className="mx-stack" data-register="">
       <p className="mx-ack-note">{ctx.li(TEXT.intro)}</p>
+      <p className="mx-ack-note" data-audience-note="">{ctx.li(TEXT.audienceNote)}</p>
       {!ctx.can(ms, PEOPLE_PERM) ? <Alert tone="info">{ctx.li(TEXT.totalsOnly)}</Alert> : null}
       {adapter.sample ? <Alert tone="info">{ctx.li(TEXT.sampleNote)}</Alert> : null}
       <Card
         title={TEXT.listTitle}
         sub={TEXT.listSub}
         flush
-        actions={manager ? <Button variant="primary" onClick={() => setAsking(true)}>{ctx.li(TEXT.ask)}</Button> : null}
+        actions={manager ? <Button variant="primary" onClick={() => { setAskStart(null); setAsking(true); }}>{ctx.li(TEXT.ask)}</Button> : null}
       >
         {state.error ? (
           <div style={{ padding: 12 }}>
@@ -427,12 +482,29 @@ export function RegisterBody({ ctx, adapter, ms }: { ctx: HostContext; adapter: 
           <RequestsTable ctx={ctx} rows={rows} onOpen={(r) => setOpenId(r.id)} />
         )}
       </Card>
-      {selected ? <RequestDrawer key={selected.id} ctx={ctx} adapter={adapter} ms={ms} row={selected} onClose={() => setOpenId(null)} onChanged={load} /> : null}
+      {selected ? (
+        <RequestDrawer
+          key={selected.id}
+          ctx={ctx}
+          adapter={adapter}
+          ms={ms}
+          row={selected}
+          rows={rows}
+          onClose={() => setOpenId(null)}
+          onChanged={load}
+          onAskAgain={(r) => {
+            setOpenId(null);
+            setAskStart({ code: r.document.code, scope: r.audienceScope, roles: r.audienceRoles });
+            setAsking(true);
+          }}
+        />
+      ) : null}
       {asking ? (
         <AskDialog
           ctx={ctx}
           adapter={adapter}
           ms={ms}
+          start={askStart}
           onCancel={() => setAsking(false)}
           onDone={() => {
             setAsking(false);
