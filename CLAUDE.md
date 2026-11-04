@@ -125,6 +125,4 @@ Decided by the product owner on 2026-10-31 and 2026-11-01 (Milestone 3, `docs/pl
 
 ## Open follow-ups
 
-- Installer: an option for the internal subnet (`MSCD_SUBNET`, `MSCD_WEB_ADDRESS`) of a new install. When `172.31.250.0/24` is taken on the host, the first run of `install.sh` fails when it starts the stack; the operator then edits `.env` and runs `install.sh` again.
-- CI nightly bundle rehearsal (`ci.yml`, job `bundle`): install without `--org-slug` and with `COMPOSE_PROJECT_NAME`, and uninstall without it, as the M3-M01 rehearsal does.
 - Every dependency change runs `node tools/scripts/third-party-notices.mjs` in the same change, or the CI step "Third-party notices" fails (Dependabot pull requests included).

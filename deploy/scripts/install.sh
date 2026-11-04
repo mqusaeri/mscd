@@ -14,6 +14,10 @@
 # changed later, so a new slug is confirmed first) and invites the first
 # administrator or prints how to do it. The Compose project name (COMPOSE_PROJECT_NAME,
 # default mscd) is saved in .env, where upgrade.sh, uninstall.sh and Compose read it.
+# So are the internal network range of the containers and the web container's address
+# on it (MSCD_SUBNET, MSCD_WEB_ADDRESS): the range is checked against the Docker networks
+# and routes of this host before anything is written, and when the default range
+# 172.31.250.0/24 is taken, --yes takes the first free range up to 172.31.254.0/24.
 #
 # Safe to run again: existing settings and secrets are kept unless you pass new
 # values. An installation of the web-only package (MSCD 1.0) is extended to the
@@ -49,6 +53,14 @@ Options:
   --http-redirect on|off   Redirect HTTP to HTTPS (default: on)
   --hsts on|off            Send Strict-Transport-Security (default: off; needs a trusted certificate)
   --external-fonts on|off  Allow the optional Google Fonts (default: off)
+  --subnet CIDR            Internal network range of the containers: a private IPv4 range of
+                           /24 or larger that nothing on this host uses, such as 172.31.252.0/24
+                           (default: 172.31.250.0/24; when that range is in use, --yes takes the
+                           first free one up to 172.31.254.0/24 and the installer otherwise asks).
+                           Without it, an existing installation keeps its range
+  --web-address IP         Fixed address of the web container in that range; the api trusts the
+                           client address only from it (default: the tenth address of the range,
+                           such as 172.31.252.10)
   --org-slug SLUG          Short name of your organisation: a lower-case letter, then 2 to 40
                            lower-case letters, digits or _ (it cannot change once created).
                            Asked; with --yes on a new install the default is "default"
@@ -76,6 +88,10 @@ Environment:
                            install.sh saves it in .env; upgrade.sh and uninstall.sh read it
                            there, so it is not needed again. A value that differs from the
                            saved one stops the scripts before anything changes.
+  MSCD_SUBNET, MSCD_WEB_ADDRESS
+                           Docker Compose takes these before .env. When set, they must agree with
+                           --subnet and --web-address and with the values saved in .env;
+                           otherwise the installer stops before anything changes.
 EOF
 }
 
@@ -85,6 +101,9 @@ OPT_SELF_SIGNED=false OPT_TLS_CERT='' OPT_TLS_KEY=''
 OPT_REDIRECT='' OPT_HSTS='' OPT_FONTS='' VERIFY_KEY='' SKIP_SIGNATURE=false TIMEOUT=600
 OPT_ORG_SLUG='' OPT_ORG_NAME='' OPT_ADMIN_EMAIL=''
 OPT_SMTP_HOST='' OPT_SMTP_PORT='' OPT_SMTP_USER='' OPT_SMTP_PASSWORD_FILE='' OPT_MAIL_FROM=''
+OPT_SUBNET='' OPT_WEB_ADDRESS=''
+# Set by resolve_network: the rule for a new range that the kept range of the installation breaks.
+KEPT_RULE=''
 
 need_value() {
     if [[ $# -lt 2 || -z $2 || $2 == --* ]]; then
@@ -113,6 +132,8 @@ parse_args() {
             --http-redirect) need_value "$@"; OPT_REDIRECT=$(to_bool "$2") || die "--http-redirect takes on or off"; shift 2 ;;
             --hsts) need_value "$@"; OPT_HSTS=$(to_bool "$2") || die "--hsts takes on or off"; shift 2 ;;
             --external-fonts) need_value "$@"; OPT_FONTS=$(to_bool "$2") || die "--external-fonts takes on or off"; shift 2 ;;
+            --subnet) need_value "$@"; OPT_SUBNET=$2; shift 2 ;;
+            --web-address) need_value "$@"; OPT_WEB_ADDRESS=$2; shift 2 ;;
             --org-slug) need_value "$@"; OPT_ORG_SLUG=$2; shift 2 ;;
             --org-name) need_value "$@"; OPT_ORG_NAME=$2; shift 2 ;;
             --admin-email) need_value "$@"; OPT_ADMIN_EMAIL=$2; shift 2 ;;
@@ -164,6 +185,14 @@ parse_args() {
     if [[ -n $OPT_MAIL_FROM ]] && ! env_safe "$OPT_MAIL_FROM"; then
         die "--mail-from cannot contain quotes, \$, backslash, backquote or #"
     fi
+    local problem
+    if [[ -n $OPT_SUBNET ]]; then
+        problem=$(subnet_problem "$OPT_SUBNET")
+        [[ -z $problem ]] || die "--subnet $OPT_SUBNET $problem"
+    fi
+    if [[ -n $OPT_WEB_ADDRESS ]] && ! ipv4_int "$OPT_WEB_ADDRESS" >/dev/null; then
+        die "--web-address '$OPT_WEB_ADDRESS' is not an IPv4 address"
+    fi
 }
 
 # ask PROMPT DEFAULT [CHECK ERROR]: prints the answer, or DEFAULT when empty.
@@ -189,6 +218,20 @@ https_port_ok() { valid_port "$1" && [[ $1 != "$HTTP_PORT" ]]; }
 cert_choice_ok() { [[ $1 == 1 || $1 == 2 ]]; }
 # shellcheck disable=SC2329
 readable_file() { [[ -n $1 && -f $1 && -r $1 ]]; }
+# shellcheck disable=SC2329
+subnet_answer_ok() {
+    local problem users
+    problem=$(subnet_problem "$1")
+    if [[ -n $problem ]]; then
+        printf '  %s %s.\n' "${1:-An empty answer}" "$problem" >&2
+        return 1
+    fi
+    users=$(subnet_users_text "$1")
+    if [[ -n $users ]]; then
+        printf '  %s is in use on this host: %s.\n' "$1" "$users" >&2
+        return 1
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Settings: flag > saved .env value > question > default
@@ -325,6 +368,111 @@ resolve_settings() {
         warn "HSTS is turned off: browsers would lock users out of a site with a self-signed certificate"
         HSTS=false
     fi
+    resolve_network
+}
+
+# resolve_network: the internal network of the containers. The range is --subnet, else
+# MSCD_SUBNET of the environment, else the range saved in .env, else the default
+# 172.31.250.0/24. When the default is in use on this host, --yes takes the first free
+# range of MSCD_SUBNET_CHOICES and a terminal asks. The web address is --web-address,
+# else MSCD_WEB_ADDRESS of the environment, else the saved one while it lies inside the
+# range, else the tenth address of the range. Compose takes the environment before .env,
+# so a value there must agree with the flag and with the saved value. Sets SUBNET,
+# SUBNET_SOURCE, WEB_ADDRESS, WEB_SOURCE and NET_SUBNET (the range of this installation's
+# network when it exists; the checks of the settings do not count it as taken).
+resolve_network() {
+    local saved_subnet saved_web problem users free
+    saved_subnet=$(kv_get "$ENV_FILE" MSCD_SUBNET)
+    saved_web=$(kv_get "$ENV_FILE" MSCD_WEB_ADDRESS)
+    NET_SUBNET=$(project_network_subnet)
+
+    if [[ -n $MSCD_ENV_SUBNET ]]; then
+        if [[ -n $OPT_SUBNET && $OPT_SUBNET != "$MSCD_ENV_SUBNET" ]]; then
+            die "MSCD_SUBNET is set to $MSCD_ENV_SUBNET in the environment, and Docker Compose would use it instead of --subnet $OPT_SUBNET. Unset MSCD_SUBNET and run ./install.sh again."
+        fi
+        if [[ -z $OPT_SUBNET && -n $saved_subnet && $saved_subnet != "$MSCD_ENV_SUBNET" ]]; then
+            if [[ $NET_SUBNET == "$MSCD_ENV_SUBNET" ]]; then
+                die "The internal network of the installation in $INSTALL_DIR uses $NET_SUBNET, as MSCD_SUBNET in the environment says, but $ENV_FILE saves $saved_subnet. Add --subnet $NET_SUBNET to save that range in .env, or unset MSCD_SUBNET to move the installation to $saved_subnet."
+            fi
+            die "The installation in $INSTALL_DIR uses the internal range $saved_subnet (MSCD_SUBNET in $ENV_FILE), but MSCD_SUBNET is set to $MSCD_ENV_SUBNET in the environment. Unset MSCD_SUBNET to keep $saved_subnet, or add --subnet $MSCD_ENV_SUBNET to move the installation to that range."
+        fi
+    fi
+    if [[ -n $MSCD_ENV_WEB_ADDRESS ]]; then
+        if [[ -n $OPT_WEB_ADDRESS && $OPT_WEB_ADDRESS != "$MSCD_ENV_WEB_ADDRESS" ]]; then
+            die "MSCD_WEB_ADDRESS is set to $MSCD_ENV_WEB_ADDRESS in the environment, and Docker Compose would use it instead of --web-address $OPT_WEB_ADDRESS. Unset MSCD_WEB_ADDRESS and run ./install.sh again."
+        fi
+        if [[ -z $OPT_WEB_ADDRESS && -n $saved_web && $saved_web != "$MSCD_ENV_WEB_ADDRESS" ]]; then
+            die "The installation in $INSTALL_DIR gives the web container the address $saved_web (MSCD_WEB_ADDRESS in $ENV_FILE), but MSCD_WEB_ADDRESS is set to $MSCD_ENV_WEB_ADDRESS in the environment. Unset MSCD_WEB_ADDRESS to keep $saved_web, or add --web-address $MSCD_ENV_WEB_ADDRESS."
+        fi
+    fi
+
+    if [[ -n $OPT_SUBNET ]]; then
+        SUBNET=$OPT_SUBNET SUBNET_SOURCE="from --subnet"
+    elif [[ -n $MSCD_ENV_SUBNET ]]; then
+        SUBNET=$MSCD_ENV_SUBNET SUBNET_SOURCE="from MSCD_SUBNET in the environment"
+    elif [[ -n $saved_subnet && ($saved_subnet != "$MSCD_DEFAULT_SUBNET" || -n $NET_SUBNET) ]]; then
+        SUBNET=$saved_subnet SUBNET_SOURCE="saved in $ENV_FILE"
+    elif [[ -z $saved_subnet && -n $NET_SUBNET ]]; then
+        # An installation whose .env never held the range keeps the one its network has.
+        SUBNET=$NET_SUBNET SUBNET_SOURCE="the range of this installation's network"
+    else
+        # The default, also when .env holds it but no network of this installation exists yet.
+        SUBNET=$MSCD_DEFAULT_SUBNET SUBNET_SOURCE=default
+    fi
+    # A range this installation already has (its network's, or the saved one while it has no
+    # network) only needs the form of a range: installations made before this check, with
+    # MSCD_SUBNET written into .env by hand, keep working. The rule for a new range (private,
+    # /24 or larger) then gives a warning in check_network. --subnet was checked already.
+    KEPT_RULE=''
+    if [[ $SUBNET == "$NET_SUBNET" || (-z $NET_SUBNET && -n $saved_subnet && $SUBNET == "$saved_subnet") ]]; then
+        problem=$(subnet_form_problem "$SUBNET")
+        if [[ -z $problem ]]; then KEPT_RULE=$(subnet_rule_problem "$SUBNET"); fi
+    else
+        problem=$(subnet_problem "$SUBNET")
+    fi
+    if [[ -n $problem ]]; then
+        free=$(suggest_subnet)
+        free=${free:-10.250.0.0/24}
+        if [[ $SUBNET_SOURCE == *environment* ]]; then
+            die "The internal range $SUBNET ($SUBNET_SOURCE) $problem. Unset MSCD_SUBNET, or set it to a private range of /24 or larger such as $free"
+        fi
+        die "The internal range $SUBNET ($SUBNET_SOURCE) $problem. Run ./install.sh again with --subnet and a free private range of /24 or larger, such as --subnet $free"
+    fi
+
+    if [[ $SUBNET_SOURCE == default ]]; then
+        users=$(subnet_users_text "$SUBNET")
+        if [[ -n $users ]]; then
+            free=$(first_free_subnet)
+            if [[ $INTERACTIVE == true ]]; then
+                printf '  The default internal range %s of the containers is in use on this host:\n' "$SUBNET"
+                printf '  %s.\n' "$users"
+                SUBNET=$(ask "Internal range for the containers (private, /24 or larger)" "$free" subnet_answer_ok \
+                    "Use a free private range of /24 or larger, such as ${free:-10.250.0.0/24}.")
+                SUBNET_SOURCE="your answer"
+            elif [[ -n $free ]]; then
+                info "The default internal range $SUBNET is in use on this host: $users"
+                detail "MSCD takes $free, the first free range from ${MSCD_SUBNET_CHOICES[0]} to ${MSCD_SUBNET_CHOICES[-1]} (saved in .env)."
+                SUBNET=$free SUBNET_SOURCE="chosen, the default is in use"
+            fi
+            # Without a free range, check_network stops the installer and names one to choose.
+        fi
+    fi
+
+    if [[ -n $OPT_WEB_ADDRESS ]]; then
+        WEB_ADDRESS=$OPT_WEB_ADDRESS WEB_SOURCE="from --web-address"
+    elif [[ -n $MSCD_ENV_WEB_ADDRESS ]]; then
+        WEB_ADDRESS=$MSCD_ENV_WEB_ADDRESS WEB_SOURCE="from MSCD_WEB_ADDRESS in the environment"
+    elif [[ -n $saved_web && -z $(web_address_problem "$saved_web" "$SUBNET") ]]; then
+        WEB_ADDRESS=$saved_web WEB_SOURCE="saved in $ENV_FILE"
+    else
+        WEB_ADDRESS=$(default_web_address "$SUBNET") WEB_SOURCE=default
+    fi
+    problem=$(web_address_problem "$WEB_ADDRESS" "$SUBNET")
+    if [[ -n $problem && $WEB_SOURCE == *environment* ]]; then
+        die "The web address $WEB_ADDRESS ($WEB_SOURCE) $problem. Unset MSCD_WEB_ADDRESS for the tenth address of the range ($(default_web_address "$SUBNET")), or set it to another address inside $SUBNET"
+    elif [[ -n $problem ]]; then
+        die "The web address $WEB_ADDRESS ($WEB_SOURCE) $problem. Leave --web-address out for the tenth address of the range ($(default_web_address "$SUBNET")), or give another address inside $SUBNET"
+    fi
 }
 
 show_settings() {
@@ -344,12 +492,14 @@ show_settings() {
         "Certificate" "$TLS_MODE${OPT_TLS_CERT:+ ($OPT_TLS_CERT)}" \
         "HSTS" "$HSTS" \
         "External fonts" "$FONTS" \
+        "Internal network" "$SUBNET, web container $WEB_ADDRESS" \
         "Email" "$smtp"
 }
 
 check_settings() {
     check_port "$HTTP_PORT" HTTP --http-port
     check_port "$HTTPS_PORT" HTTPS --https-port
+    check_network
     if [[ $TLS_MODE == provided && -n $OPT_TLS_CERT ]]; then
         validate_cert_pair "$OPT_TLS_CERT" "$OPT_TLS_KEY" "$DOMAIN"
     elif [[ $TLS_MODE == provided ]]; then
@@ -361,6 +511,44 @@ check_settings() {
         else
             pass "Keeping the installed certificate (valid until $(cert_end_date "$INSTALL_DIR/tls/tls.crt"))"
         fi
+    fi
+}
+
+# check_network: nothing on this host (another Docker network, a route or an address of
+# the host) uses the internal range, apart from this installation's own network.
+check_network() {
+    local users suggestion fix base size ip
+    users=$(subnet_users_text "$SUBNET")
+    if [[ -n $users && $NET_SUBNET == "$SUBNET" ]]; then
+        # The installation runs on this range already; something on the host came later.
+        warn "The internal range $SUBNET of this installation overlaps $users. This server cannot reach those addresses while MSCD runs; --subnet moves MSCD to another range"
+    elif [[ -n $users ]]; then
+        suggestion=$(suggest_subnet)
+        fix="Choose a free private range of /24 or larger with --subnet"
+        if [[ $SUBNET_SOURCE == *environment* ]]; then fix="Unset MSCD_SUBNET and choose a free private range of /24 or larger with --subnet"; fi
+        if [[ -n $suggestion ]]; then fix+=", for example --subnet $suggestion"; fi
+        fix+=" (the web address follows it unless --web-address is given)"
+        if [[ $SUBNET_SOURCE == default ]]; then
+            fail "The default internal range $SUBNET is in use on this host ($users), and so are the other ranges the installer tries, up to ${MSCD_SUBNET_CHOICES[-1]}" "$fix"
+        else
+            fail "The internal range $SUBNET ($SUBNET_SOURCE) is in use on this host: $users" "$fix"
+        fi
+        return 0
+    elif [[ -n $NET_SUBNET && $NET_SUBNET != "$SUBNET" ]]; then
+        pass "Internal range $SUBNET is free; the installation moves to it from $NET_SUBNET (its services stop and start again)"
+    elif [[ -n $NET_SUBNET ]]; then
+        pass "Internal range $SUBNET is the network of this installation"
+    else
+        pass "Internal range $SUBNET is free on this host"
+    fi
+    if [[ -n $KEPT_RULE ]]; then
+        suggestion=$(suggest_subnet)
+        warn "$(kept_subnet_note "$SUBNET" "$KEPT_RULE" "./install.sh --yes --dir $INSTALL_DIR --subnet ${suggestion:-<a free private range of /24 or larger>}")"
+    fi
+    read -r base size < <(cidr_range "$SUBNET")
+    ip=$(ipv4_int "$WEB_ADDRESS")
+    if ((ip - base < 10)); then
+        warn "The web address $WEB_ADDRESS is among the first addresses of $SUBNET, which Docker gives the other containers; one from $(default_web_address "$SUBNET") up avoids a clash"
     fi
 }
 
@@ -451,6 +639,8 @@ write_env() {
     env_set "$ENV_FILE" MSCD_MAIL_FROM "$MAIL_FROM"
     env_set "$ENV_FILE" MSCD_RUN_UID "$RUN_UID"
     env_set "$ENV_FILE" MSCD_RUN_GID "$RUN_GID"
+    env_set "$ENV_FILE" MSCD_SUBNET "$SUBNET"
+    env_set "$ENV_FILE" MSCD_WEB_ADDRESS "$WEB_ADDRESS"
     save_project "$ENV_FILE"
     pass "Settings saved to $ENV_FILE (Compose project $MSCD_PROJECT)"
 }
@@ -556,6 +746,8 @@ restore_previous() {
         mv -f "$dir/tls.crt.bak" "$dir/tls.crt"
         mv -f "$dir/tls.key.bak" "$dir/tls.key"
     fi
+    # The previous settings may name the previous internal range.
+    stop_for_network_change "$INSTALL_DIR" || true
     compose_in "$INSTALL_DIR" up -d --remove-orphans --force-recreate --wait --wait-timeout "$TIMEOUT"
 }
 
@@ -569,7 +761,8 @@ start_stack() {
         args+=(--force-recreate)
     fi
     info "Starting the services; the database migrations run first (this can take a few minutes)"
-    if compose_in "$INSTALL_DIR" "${args[@]}"; then
+    # A new internal range: the services stop and the network is created again on it.
+    if stop_for_network_change "$INSTALL_DIR" && compose_in "$INSTALL_DIR" "${args[@]}"; then
         pass "All MSCD services are running and healthy"
         return 0
     fi
@@ -660,6 +853,10 @@ print_done() {
     if [[ $DEFAULT_ORG == true ]]; then
         printf '\n  No --org-slug was given, so the organisation has the slug %s, which cannot change.\n' "$ORG_SLUG"
         printf '  A Tenant Admin can change its name in the app: Administration, Organisation.\n'
+    fi
+    if [[ $SUBNET != "$MSCD_DEFAULT_SUBNET" ]]; then
+        printf '\n  The containers use the internal range %s (web container %s),\n' "$SUBNET" "$WEB_ADDRESS"
+        printf '  saved in %s as MSCD_SUBNET and MSCD_WEB_ADDRESS.\n' "$ENV_FILE"
     fi
     if [[ ${INVITATION_EMAILED:-false} == true ]]; then
         printf '\n  First administrator: the invitation (valid 72 hours) was emailed to %s.\n' "$OPT_ADMIN_EMAIL"

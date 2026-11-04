@@ -7,7 +7,9 @@
 #   sudo /opt/mscd/upgrade.sh --rollback
 #
 # Settings (.env), secrets and certificates are kept, and the Compose project name
-# is read from .env (COMPOSE_PROJECT_NAME, saved by install.sh). Order of an upgrade:
+# is read from .env (COMPOSE_PROJECT_NAME, saved by install.sh), as are the internal
+# network range and the web container's address on it (MSCD_SUBNET, MSCD_WEB_ADDRESS).
+# Order of an upgrade:
 #   1. the new images are loaded and the new web image is started once on its
 #      own as a test (canary);
 #   2. the database migrations of the new version run (docker compose run --rm
@@ -52,7 +54,10 @@ Options:
 
 The Compose project name comes from COMPOSE_PROJECT_NAME in the installation's .env,
 which install.sh saved. COMPOSE_PROJECT_NAME in the environment is not needed; when it
-is set to another name, the upgrade stops before anything changes.
+is set to another name, the upgrade stops before anything changes. The same holds for
+the internal network range and the web container's address (MSCD_SUBNET and
+MSCD_WEB_ADDRESS in .env): the upgrade keeps them, and a different value of either
+variable in the environment stops it before anything changes.
 EOF
 }
 
@@ -97,6 +102,24 @@ check_installation() {
     pass "MSCD $CURRENT_VERSION is installed in $INSTALL_DIR"
     resolve_project "$INSTALL_DIR"
     check_container_owner "$INSTALL_DIR"
+    if ((FAILURES == 0)); then
+        check_network_settings "$INSTALL_DIR" "$(network_mover)"
+    fi
+}
+
+# network_mover: the bundle whose install.sh can move the installation to another internal
+# range once this run is done (install.sh --subnet works only from the bundle of the
+# installed version). This bundle has the option; it is the installed version after an
+# upgrade. Nothing for a rollback or an older bundle: the version that then runs may be
+# older than the option.
+network_mover() {
+    if [[ $ROLLBACK == true || -z ${TARGET_VERSION:-} ]]; then
+        return 0
+    elif [[ $TARGET_VERSION == "$CURRENT_VERSION" ]]; then
+        echo "this bundle"
+    elif version_ge "$TARGET_VERSION" "$CURRENT_VERSION"; then
+        echo "this bundle (MSCD $TARGET_VERSION) once the upgrade is done"
+    fi
 }
 
 latest_backup() {
@@ -130,8 +153,9 @@ save_backup() {
 restore_files() {
     local backup=$1
     cp -p "$backup/.env" "$INSTALL_DIR/.env"
-    # Settings saved before the Compose project name was kept in .env.
+    # Settings saved before the Compose project name and the internal network were kept in .env.
     save_project "$INSTALL_DIR/.env"
+    save_network "$INSTALL_DIR/.env"
     cp -p "$backup/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
     if [[ -f $backup/VERSION ]]; then cp -p "$backup/VERSION" "$INSTALL_DIR/VERSION"; fi
     if [[ -d $backup/config ]]; then
@@ -159,6 +183,8 @@ restore_backup() {
         fi
     done < <(backup_images "$backup")
     restore_files "$backup"
+    # Saved settings that name another internal range than the running network.
+    stop_for_network_change "$INSTALL_DIR" || true
     compose_in "$INSTALL_DIR" up -d --remove-orphans --force-recreate --wait --wait-timeout "$TIMEOUT" &&
         verify_endpoints "$INSTALL_DIR/.env"
 }
@@ -362,9 +388,10 @@ upgrade_main() {
     warn "Back up the database and the object store before you continue (INSTALL-ONPREM.md, Upgrades and backups)"
     confirm "Upgrade MSCD from $CURRENT_VERSION to $TARGET_VERSION?" || die "Cancelled. Nothing was changed."
     lock_dir "$INSTALL_DIR"
-    # An installation made before the project name was saved keeps it from now on
-    # (also in the settings saved for a rollback).
+    # An installation made before the project name and the internal network were saved
+    # keeps them from now on (also in the settings saved for a rollback).
     save_project "$INSTALL_DIR/.env"
+    save_network "$INSTALL_DIR/.env"
 
     step "Loading the new images"
     local had_image=false

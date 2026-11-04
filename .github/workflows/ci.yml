@@ -78,7 +78,7 @@ jobs:
           docker run --rm -v "$PWD/deploy:/d:ro" -w /d/scripts koalaman/shellcheck:stable -x \
             install.sh upgrade.sh uninstall.sh build-bundle.sh check-release-artefacts.sh deploy-demo.sh lib/common.sh \
             build-release-images.sh saas-keys.sh saas-deploy.sh saas-ops.sh bootstrap-host.sh lib/saas.sh \
-            test/saas-stack.sh test/saas-rehearsal.sh
+            test/saas-stack.sh test/saas-rehearsal.sh test/subnet-rehearsal.sh
           docker run --rm -v "$PWD/deploy:/d:ro" -w /d/backup koalaman/shellcheck:stable -x \
             backup.sh backup-run.sh restore.sh restore-test.sh lib.sh
           docker run --rm -v "$PWD/deploy:/d:ro" -w /d/ops koalaman/shellcheck:stable -x test-ops.sh
@@ -636,25 +636,27 @@ jobs:
           deploy/scripts/build-bundle.sh --version "$BUNDLE_VERSION" \
             --trusted-keys-dir "$REHEARSAL_KEYS" --pack-signing-key "$REHEARSAL_KEYS/pack-rehearsal.key" \
             --sign-key "$REHEARSAL_KEYS/bundle-signing.key" --os-updates true --scan report
-      - name: Check, install and uninstall the bundle
+      - name: Check the bundle, then install and uninstall it twice
+        # deploy/scripts/test/subnet-rehearsal.sh (M3-M03), as an operator installs: first
+        # without --org-slug and with COMPOSE_PROJECT_NAME set, uninstalled without it, and no
+        # volume of the project may be left; then again while a throwaway network holds the
+        # default internal range 172.31.250.0/24, so install.sh must take a free range and start.
+        # Between the steps it checks the saved range, a rerun, a move with --subnet, and that
+        # install.sh and upgrade.sh stop on a range in use or a differing MSCD_SUBNET.
         run: |
           v=$BUNDLE_VERSION
-          cd deploy/dist
-          sha256sum -c "mscd-onprem-$v.tar.gz.sha256"
-          mkdir -p "$RUNNER_TEMP/delivery"
-          cp "mscd-onprem-$v.tar.gz" mscd-release.pub "$RUNNER_TEMP/delivery/"
-          cd "$RUNNER_TEMP/delivery"
-          tar -xzf "mscd-onprem-$v.tar.gz"
-          cd "mscd-onprem-$v"
-          sha256sum -c --quiet SHA256SUMS
-          sudo ./install.sh --yes --self-signed --dir "$RUNNER_TEMP/mscd" --http-port 18090 --https-port 18453 \
-            --org-slug rehearsal --org-name "CI Rehearsal" --verify-key ../mscd-release.pub
-          curl -fsSk https://localhost:18453/api/v1/system/profile
-          sudo ./uninstall.sh --dir "$RUNNER_TEMP/mscd" --purge --yes
-      - name: Upload the build logs
+          (cd deploy/dist && sha256sum -c "mscd-onprem-$v.tar.gz.sha256")
+          sudo bash deploy/scripts/test/subnet-rehearsal.sh --bundle "deploy/dist/mscd-onprem-$v.tar.gz" \
+            --verify-key deploy/dist/mscd-release.pub --prefix mscdci --work-dir "$RUNNER_TEMP/rehearsal" \
+            --http-port 18090 --https-port 18453
+          test -z "$(docker volume ls -q --filter label=com.docker.compose.project=mscdci)"
+          test -z "$(docker network ls -q --filter name=mscdci)"
+      - name: Upload the build and rehearsal logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: bundle-logs
-          path: deploy/dist/*.logs
+          path: |
+            deploy/dist/*.logs
+            ${{ runner.temp }}/rehearsal/logs
           retention-days: 7

@@ -27,7 +27,9 @@
 | M3-10 Demo personas | The demo gains a Programme Owner, a Risk Owner and a Compliance Investigator to sign in as |
 | M3-11 Data lifecycle run and documents | An automatic test of the whole data lifecycle on the SaaS test stack, and updated texts for the lawyer, the operator and the user flows |
 | M3-M01 Open follow-ups (may be dropped) | The installer remembers its project name, accepts a default organisation, and every bundle carries a third-party notices file |
+| M3-15 Small follow-ups | The demo persona menu shows only people who work in that organisation, an export refuses a too small database pool with a clear message, an operator can rerun the daily retention review, and the disposal register says when a file was kept because another record still uses it |
 | M3-M02 Major dependency upgrades (may be dropped) | Newer major versions of the programming tools and libraries that Dependabot proposes today |
+| M3-M03 Installer subnet option | A new on-premise install picks a free internal network range by itself, or takes the one the operator names, and the nightly test installs the way an operator does |
 
 ## Contents
 
@@ -642,7 +644,8 @@ A wave starts when every package of the previous wave is done and committed (R-1
 | 3 | M3-04 Requests from one person; M3-07 Periodic access review; M3-09 Export and deletion screens | none | M3-04: `modules/exports/**`, `jobs/{cleanup-expired.job.ts,tenant-cleanup.ts}`, `modules/read-model/**`, `audit/audit-trail.service.ts`, `admin-users/user-views.ts`, `apps/web/src/screens/account/**`, `packages/shared/src/api/exports.ts` (schemas). M3-07: `admin-users/{admin-users.controller.ts,admin-users.module.ts,identities.service.ts}`, `packages/shared/src/api/admin-users.ts` (schemas). M3-09: `apps/web/src/screens/ops/**` | API E2E each, one at a time on the lock |
 | 4 | M3-10 Demo personas; M3-11 Data lifecycle run and documents | none | M3-10: `apps/server/src/seed/**`, `apps/web/src/data/mscd-data.js`, the seed snapshot, `tools/mock-providers/fixtures/demo.json`, `apps/web/src/MscdApp.jsx` (UI role handling only), `apps/web/src/data/types.ts` (`UiRole` only), `apps/web/src/screens/roles.ts` (`UI_ROLE_LABEL` only), `apps/web/src/screens/host.tsx`, `apps/web/src/routing/address.ts`, the `roles` field of every host screen, `apps/web/test/api/controller.test.ts`, `apps/web/test/screens/host.test.tsx`, `packages/shared/src/{enums.ts,authz/matrix.ts}` (persona values only), `deploy/scripts/check-release-artefacts.sh`, `deploy/compose/dev/keycloak/realm-mscd.json`. M3-11: `tools/smoke/**`, `docs/saas/{records-of-processing,legal-inputs,operator,README}.md`, `docs/product/USER-FLOWS.md`, `docs/platform/ui-contract.md`, `apps/web/src/screens/notifications/**` | M3-10 API E2E and smoke; M3-11 lifecycle run, journeys, SaaS run |
 | 5 | M3-M02 Major dependency upgrades (alone) | M3-M02 | any file | every suite |
-| 6 | M3-13 Erasure, disposal and restore fixes; M3-14 Read confirmation, access review and wording fixes (added 2026-11-02 after three read-only reviews) | none | M3-13: area files `privacy`, `retention`, `org-export`, the correction migrations `platform/0010_milestone3_review_fix.sql` and `tenant/0011_milestone3_review_fix.sql`, `deploy/backup/**`; M3-14: area files `acknowledgements`, `access-reviews`, the pending aggregate holder count, every document. The orchestrator owns `tools/smoke/tests/data-lifecycle.spec.mjs`, `apps/web/test/screens/host.test.tsx` and this plan except the D prose M3-14 owns | M3-13: API E2E, restore test; M3-14: API E2E |
+| 6 | M3-13 Erasure, disposal and restore fixes; M3-14 Read confirmation, access review and wording fixes (added 2026-11-02 after three read-only reviews); M3-M03 Installer subnet option (added 2026-11-04) | none | M3-13: area files `privacy`, `retention`, `org-export`, the correction migrations `platform/0010_milestone3_review_fix.sql` and `tenant/0011_milestone3_review_fix.sql`, `deploy/backup/**`; M3-14: area files `acknowledgements`, `access-reviews`, the pending aggregate holder count, every document; M3-M03: `deploy/scripts/{install.sh,upgrade.sh,lib/common.sh}`, `deploy/scripts/test/subnet-rehearsal.sh`, the `bundle` job of `.github/workflows/ci.yml`. The orchestrator owns `tools/smoke/tests/data-lifecycle.spec.mjs`, `apps/web/test/screens/host.test.tsx` and this plan except the D prose M3-14 owns | M3-13: API E2E, restore test; M3-14: API E2E; M3-M03: bundle build and installer rehearsal |
+| 7 | M3-15 Small follow-ups (added 2026-11-04) | none | M3-15: area files `retention`, `org-export`, `privacy-checks` (web), `authz/me-assembler.ts`, `DISPOSAL_FILE_ACTIONS` and `OPS_RUNNABLE_JOBS` in `packages/shared/src/enums.ts`, the correction migration `tenant/0012_milestone3_followups.sql`. It starts when M3-13 is committed and may run while M3-14 and M3-M03 finish, because it shares no file with them | M3-15: API E2E |
 
 Wave 1 holds M3-01 with the two packages that need no contract: M3-08 reads an existing route, and M3-M01 touches only installer and packaging files. M3-03 starts first in wave 2 because the first customer may leave before Milestone 3 ends. M3-04 waits for wave 3 because it reuses the account anonymiser and the redaction function of M3-03, and M3-09 because it shows the routes of M3-02 and M3-03. M3-10 waits for wave 4 because its seed fills the screens of M3-05 to M3-07. Waves 1 to 4 do not depend on the maintenance track; when the owner drops it, M3-M01 leaves wave 1 and wave 5 does not run.
 
@@ -1229,6 +1232,34 @@ Not in this package:
 - Texts A2, A5, the `ops/account-text.ts` and `rules/messages.ts` parts of A4, and the `ops/lifecycle-text.ts` part of A7: M3-13 owns those files.
 - The human lead auditor and lawyer review of the updated documents (M3-11 open item) stays open.
 
+#### M3-15 Small follow-ups
+
+| | |
+|---|---|
+| Wave, depends on | 7; M3-13 committed (it owns `retention`, `privacy` and `org-export` in wave 6). It may start while M3-14 and M3-M03 still run: no shared file. Added by the orchestrator on 2026-11-04 at the product owner's request to use two free lanes |
+| Owns | `apps/server/src/modules/authz/me-assembler.ts`, `apps/server/src/modules/org-export/**`, `apps/server/src/modules/retention/**`, `apps/server/src/modules/ops/ops.service.ts` and the job runner it calls, `packages/shared/src/enums.ts` (`DISPOSAL_FILE_ACTIONS` and `OPS_RUNNABLE_JOBS` only), `packages/shared/src/api/retention.ts` (schemas), the correction migration `tenant/0012_milestone3_followups.sql` (new) with its Kysely types, `apps/web/src/screens/{retention,privacy-checks,findings}/**` except `index.tsx` and `meta.json`, `apps/web/src/screens/ops/model.ts` (the runnable job list), their unit tests, integration tests and browser specs, the J.7 line of `retention_review.file_action` in this plan, `docs/platform/handoff/M3-15.md`. Documents belong to M3-14 while it runs: the handoff holds the new document text, which the orchestrator applies |
+| Host stack | API E2E |
+
+Brief, each item from the open items of `docs/platform/M3-STATUS.md` and the follow-ups of the M3-13 handoff:
+- Demo persona menu (M3-10): `Me.personas` lists only the persona users who hold a business role or an organisation role in the current organisation, so the menu of `bsd` and `rmn` no longer offers the Compliance Investigator, who has no role there. No contract change. An integration test for `bsd` (no Gilang Saputra) and `ndt` (all three new personas).
+- Sample build roles (M3-10): sample-mode unit tests of `canVerify` and `canSeePeople` for the Programme Owner, the Risk Owner and the Compliance Investigator, and `baseRole` in the sample branch of `apps/web/src/screens/findings/shared.ts` (today `ctx.role === 'manager'`), so a Programme Owner in the sample build edits findings as a manager does.
+- Export build connections (M3-12): a build holds three database connections at once (build lock, snapshot, one read). When `database.pool_max` is below 3, the build job fails the request at once with a clear reason in English and Indonesian, before it takes the build lock, and the worker logs a warning at start. The handoff gives the sentence for `docs/INSTALL-ONPREM.md` that names the minimum of 3.
+- Operator rerun of the retention review (M3-11): `retention.review` joins `OPS_RUNNABLE_JOBS`, so an operator can run the daily review for one organisation from the console after an outage. The run is audited like the other runnable jobs.
+- Personal data checks (M3-11): the open drawer stays open while the list reloads after "Mark checked".
+- Disposal register (M3-13 follow-up 1): a disposed record whose only file another record still uses shows the file action `kept_in_use` ("File kept: used by another record", with its Indonesian pair) in the register, the CSV and the approve dialog, in place of "No file". The value joins `DISPOSAL_FILE_ACTIONS`; `tenant/0012_milestone3_followups.sql` widens the CHECK of `retention_review.file_action` (additive, R-14) and reapplies to existing schemas; the J.7 line follows; the approval writes the value from the `keptInUse` list the disposal already computes.
+- Disposal receipts and their re-apply after a restore (M3-13 follow-up 2, owner decision 20) stay outside this package: they come in their own package before the production go-live.
+
+Acceptance:
+
+```bash
+npm run typecheck && npm run lint && npm test
+flock /tmp/mscd-stack.lock flock -s /tmp/mscd-npm.lock npm run test:int -w @mscd/server -- test/int/authz test/int/identity test/int/org-export test/int/retention test/int/ops test/int/db test/int/seed test/int/parity test/int/contract
+npm run test:int -w @mscd/server -- test/int/org-export/coverage.test.ts
+CI=1 npm run test:e2e -w @mscd/web -- e2e/screens/retention.spec.js e2e/screens/privacy-checks.spec.js e2e/screens/findings.spec.js e2e/screens/ops.spec.js e2e/personas.spec.js
+flock /tmp/mscd-stack.lock flock /tmp/mscd-e2e.lock flock -s /tmp/mscd-npm.lock npm run test:e2e:api -w @mscd/web -- e2e/api-only/retention.spec.js e2e/api-only/privacy-checks.spec.js e2e/api-only/ops.spec.js e2e/personas.spec.js
+npm run check:text
+```
+
 ## H. Questions for the product owner
 
 Each question has a default that is built when no answer arrives before the package that needs it.
@@ -1496,7 +1527,7 @@ CREATE TABLE export_file (
 
 ## K. Maintenance track
 
-This track holds two packages the product owner can drop (H.11), separately or together. Neither changes product behaviour, and no core package depends on them. Rules R-01 to R-22 apply. M3-M01 runs in wave 1 next to the core packages because it owns no file of theirs; M3-M02 runs alone in wave 5, after every other package, because a major upgrade may change any file.
+This track holds three packages the product owner can drop (H.11), separately or together; M3-M03 was added on 2026-11-04. Neither changes product behaviour, and no core package depends on them. Rules R-01 to R-22 apply. M3-M01 runs in wave 1 next to the core packages because it owns no file of theirs; M3-M02 runs alone in wave 5, after every other package, because a major upgrade may change any file.
 
 ### K.1 Open follow-ups of `CLAUDE.md`
 
@@ -1592,3 +1623,32 @@ flock /tmp/mscd-stack.lock npm run lifecycle -w @mscd/smoke
 node tools/scripts/check-workflows.mjs --saas --require-all
 npm run check:text
 ```
+
+#### M3-M03 Installer subnet option and nightly install rehearsal
+
+| | |
+|---|---|
+| Wave, depends on | 6, next to M3-13 and M3-14 (no shared file); M3-M01. Added by the orchestrator on 2026-11-04 at the product owner's request to use two free lanes |
+| Owns | `deploy/scripts/{install.sh,upgrade.sh,lib/common.sh}`, `deploy/scripts/test/subnet-rehearsal.sh` (new), `.github/workflows/ci.yml` (job `bundle` only), `docs/platform/handoff/M3-M03.md`. Documents belong to M3-14 in this wave: the handoff holds the new text for `docs/INSTALL-ONPREM.md` and for the "Open follow-ups" list of `CLAUDE.md`, which the orchestrator applies |
+| Host stack | bundle build and installer rehearsal, under the lock |
+
+Brief, the two open items left in the "Open follow-ups" list of `CLAUDE.md`:
+- Internal subnet: today a new install whose range `172.31.250.0/24` is already taken fails when it starts the stack, and the operator edits `.env` and runs `install.sh` again. `install.sh` gains `--subnet CIDR` (a private IPv4 range of /24 or larger) and `--web-address IP` (default: the tenth address of the range). Before it writes anything, it checks the range against the Docker networks and the host routes; on an overlap it stops with a message that names what is in the way and the option to use. With `--yes` and no `--subnet`, when the default range is taken, it takes the first free range from `172.31.250.0/24` to `172.31.254.0/24` and prints it; without `--yes` it asks. It saves `MSCD_SUBNET` and `MSCD_WEB_ADDRESS` in `.env`; `upgrade.sh` keeps the saved values, and an environment value that differs from a saved one stops it with a clear message, as M3-M01 does for the project name.
+- Nightly rehearsal (`ci.yml`, job `bundle`): install without `--org-slug` and with `COMPOSE_PROJECT_NAME` set, uninstall without it, and check that no volume of that project is left, as the M3-M01 acceptance does; then a second install whose default range the job first blocks with a throwaway network, which must pick a free range and start.
+- `deploy/scripts/test/subnet-rehearsal.sh` runs the same two cases on the build host. It touches only the networks, volumes and containers it creates (project and network names start with `mscdm03`); a range held by another project's network counts as taken and is never removed.
+- No product change. The SaaS scripts (`lib/saas.sh`, `saas-deploy.sh`) already choose their ranges and stay as they are.
+
+Acceptance:
+
+```bash
+bash -n deploy/scripts/install.sh deploy/scripts/upgrade.sh deploy/scripts/uninstall.sh deploy/scripts/lib/common.sh deploy/scripts/test/subnet-rehearsal.sh
+node -e "require('yaml').parse(require('fs').readFileSync('.github/workflows/ci.yml','utf8'))"
+node tools/scripts/check-workflows.mjs --saas
+bash deploy/scripts/build-bundle.sh --help >/dev/null
+flock /tmp/mscd-stack.lock bash deploy/scripts/test/subnet-rehearsal.sh
+test -z "$(docker volume ls -q --filter label=com.docker.compose.project=mscdm03)"
+test -z "$(docker network ls -q --filter name=mscdm03)"
+npm run check:text
+```
+
+The rehearsal uses the newest bundle in `deploy/dist`, built once by the package with `build-bundle.sh` and throwaway keys as M3-M01 did, under `flock /tmp/mscd-stack.lock` (R-05).

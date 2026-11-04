@@ -12,6 +12,18 @@ readonly MSCD_DEFAULT_PROJECT=mscd
 # The value of COMPOSE_PROJECT_NAME in the environment of the calling script.
 readonly MSCD_ENV_PROJECT=${COMPOSE_PROJECT_NAME:-}
 MSCD_PROJECT=${COMPOSE_PROJECT_NAME:-$MSCD_DEFAULT_PROJECT}
+# Internal network of the containers (the Compose network "mscd", which has no route out) and
+# the fixed address of the web container on it, which the api trusts for X-Forwarded-For.
+# install.sh saves both in .env (MSCD_SUBNET, MSCD_WEB_ADDRESS); Compose and upgrade.sh read
+# them there.
+readonly MSCD_DEFAULT_SUBNET=172.31.250.0/24
+# The ranges install.sh --yes tries, in this order, when no --subnet is given and the default
+# range is in use on the host.
+readonly MSCD_SUBNET_CHOICES=(172.31.250.0/24 172.31.251.0/24 172.31.252.0/24 172.31.253.0/24 172.31.254.0/24)
+# The values of MSCD_SUBNET and MSCD_WEB_ADDRESS in the environment of the calling script.
+# Compose takes them before .env, so they must agree with the values saved there.
+readonly MSCD_ENV_SUBNET=${MSCD_SUBNET:-}
+readonly MSCD_ENV_WEB_ADDRESS=${MSCD_WEB_ADDRESS:-}
 readonly MSCD_WEB_SERVICE=web
 # Name of the web container of installations made before the full platform
 # (one container, mscd-web); still recognised so they can be upgraded.
@@ -114,8 +126,16 @@ sudo_prefix() {
 # Small utilities
 # ---------------------------------------------------------------------------
 
-# version_ge A B: true when version A is B or later.
+# version_ge A B: true when version A is B or later. A pre-release such as
+# 1.1.0-rc.3 is older than its release 1.1.0 (sort -V alone orders it after).
 version_ge() {
+    local a=${1%%-*} b=${2%%-*}
+    if [[ $a != "$b" ]]; then
+        [[ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)" == "$b" ]]
+        return
+    fi
+    [[ $1 != *-* ]] && return 0
+    [[ $2 != *-* ]] && return 1
     [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
 }
 
@@ -295,6 +315,375 @@ save_project() {
             '# docker compose read it here. Do not change it, or the data volumes are not found.' >>"$env"
     fi
     env_set "$env" COMPOSE_PROJECT_NAME "$MSCD_PROJECT"
+}
+
+# ---------------------------------------------------------------------------
+# Internal network of an installation (MSCD_SUBNET, MSCD_WEB_ADDRESS)
+# ---------------------------------------------------------------------------
+
+# ipv4_int ADDRESS: prints the IPv4 address as a number; fails for anything else
+# (four numbers from 0 to 255 without leading zeros).
+ipv4_int() {
+    local part='(0|[1-9][0-9]{0,2})'
+    [[ $1 =~ ^$part\.$part\.$part\.$part$ ]] || return 1
+    ((BASH_REMATCH[1] <= 255 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 255 && BASH_REMATCH[4] <= 255)) || return 1
+    echo $(((BASH_REMATCH[1] << 24) | (BASH_REMATCH[2] << 16) | (BASH_REMATCH[3] << 8) | BASH_REMATCH[4]))
+}
+
+# int_ipv4 NUMBER: the dotted IPv4 address of a number.
+int_ipv4() {
+    printf '%d.%d.%d.%d\n' $(($1 >> 24 & 255)) $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255))
+}
+
+# cidr_range CIDR: prints "<first address as a number> <number of addresses>" of an
+# IPv4 range such as 172.31.250.0/24 (an address without /N is one address); fails
+# for anything else, IPv6 ranges included.
+cidr_range() {
+    local addr=${1%/*} prefix=32 base size
+    if [[ $1 == */* ]]; then
+        prefix=${1##*/}
+        [[ $prefix =~ ^(0|[1-9][0-9]?)$ ]] && ((prefix <= 32)) || return 1
+    fi
+    base=$(ipv4_int "$addr") || return 1
+    size=$((1 << (32 - prefix)))
+    echo "$((base - base % size)) $size"
+}
+
+# subnet_form_problem CIDR: prints why CIDR is not an IPv4 range written with its first
+# address, or nothing when it is one. This is all a range an installation already has
+# must be (see subnet_problem).
+subnet_form_problem() {
+    local cidr=$1 base size
+    if [[ ! $cidr =~ ^[0-9.]+/[0-9]{1,2}$ ]] || ! read -r base size < <(cidr_range "$cidr"); then
+        echo "is not an IPv4 range such as 172.31.252.0/24"
+    elif [[ $(ipv4_int "${cidr%/*}") != "$base" ]]; then
+        echo "does not start at the first address of its range: use $(int_ipv4 "$base")/${cidr##*/}"
+    fi
+}
+
+# subnet_rule_problem CIDR: for an IPv4 range, prints the rule for a new internal range
+# that it breaks ("is smaller than /24" or "is not a private range"), or nothing.
+subnet_rule_problem() {
+    local cidr=$1 base size private pbase psize
+    read -r base size < <(cidr_range "$cidr") || return 0
+    if ((${cidr##*/} > 24)); then
+        echo "is smaller than /24"
+        return 0
+    fi
+    for private in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+        read -r pbase psize < <(cidr_range "$private")
+        if ((base >= pbase && base + size <= pbase + psize)); then
+            return 0
+        fi
+    done
+    echo "is not a private range"
+}
+
+# subnet_problem CIDR: prints why CIDR cannot be a new internal range, or nothing when it
+# can: a private IPv4 range (inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16) of /24
+# or larger, written with its first address. The rule applies to a range named with
+# --subnet, given as an answer or in the environment for a new range. A range an
+# installation already has (its network's, or the saved one while it has no network) is
+# kept when it has the form of a range, with a warning for the rule (kept_subnet_note).
+subnet_problem() {
+    local problem
+    problem=$(subnet_form_problem "$1")
+    if [[ -z $problem ]]; then
+        problem=$(subnet_rule_problem "$1")
+        case $problem in
+            '') ;;
+            *'/24'*) problem+=": use a range of /24 or larger (a prefix of 24 or less)" ;;
+            *) problem+=": use one inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16" ;;
+        esac
+    fi
+    if [[ -n $problem ]]; then echo "$problem"; fi
+}
+
+# kept_subnet_note CIDR RULE MOVE: the warning for a range an installation already has
+# that breaks the rule for a new range (RULE, from subnet_rule_problem). MOVE is the
+# command that moves the installation to a range that keeps the rule.
+kept_subnet_note() {
+    printf 'The internal range %s %s. MSCD keeps it, because this installation already has it; a new range must be private and /24 or larger. To move MSCD to one, run %s\n' \
+        "$1" "$2" "$3"
+}
+
+# web_address_problem ADDRESS CIDR: prints why ADDRESS cannot be the address of the web
+# container in the internal range CIDR, or nothing when it can. Docker gives the first
+# address of the range to the gateway.
+web_address_problem() {
+    local addr=$1 cidr=$2 ip base size
+    if ! ip=$(ipv4_int "$addr"); then
+        echo "is not an IPv4 address"
+    elif ! read -r base size < <(cidr_range "$cidr"); then
+        echo "cannot be checked: the internal range $cidr is not valid"
+    elif ((ip < base || ip >= base + size)); then
+        echo "is not inside the internal range $cidr"
+    elif ((ip == base || ip == base + size - 1)); then
+        echo "is the network or broadcast address of $cidr"
+    elif ((ip == base + 1)); then
+        echo "is the gateway address Docker gives the range $cidr"
+    fi
+}
+
+# default_web_address CIDR: the tenth address of the range, such as 172.31.250.10.
+# Docker gives the other containers addresses from the second address up.
+default_web_address() {
+    local base size
+    read -r base size < <(cidr_range "$1") || return 1
+    int_ipv4 $((base + 10))
+}
+
+# docker_networks: one line per Docker network: "name|Compose project|bridge device|subnets"
+# (the project and device are empty when the network has none).
+docker_networks() {
+    local ids=()
+    command -v docker >/dev/null 2>&1 || return 0
+    mapfile -t ids < <(docker network ls -q 2>/dev/null || true)
+    ((${#ids[@]} > 0)) || return 0
+    docker network inspect --format '{{.Name}}|{{with index .Labels "com.docker.compose.project"}}{{.}}{{end}}|{{if eq .Driver "bridge"}}{{with index .Options "com.docker.network.bridge.name"}}{{.}}{{else}}br-{{printf "%.12s" .Id}}{{end}}{{end}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}' \
+        "${ids[@]}" 2>/dev/null || true
+}
+
+# host_routes: the IPv4 routes and local addresses of this host, all routing tables, one
+# per line: "range|interface|table|type". The default route, broadcast and multicast
+# entries are left out.
+host_routes() {
+    if command -v ip >/dev/null 2>&1; then
+        ip -4 route show table all 2>/dev/null | awk '
+            {
+                type = "unicast"; i = 1
+                if ($1 ~ /^(unicast|local|broadcast|multicast|anycast|unreachable|blackhole|prohibit|throw|nat)$/) { type = $1; i = 2 }
+                if (type == "broadcast" || type == "multicast" || type == "anycast" || type == "throw") next
+                dest = $i
+                if (dest == "default" || dest ~ /\/0$/) next
+                if (dest !~ /\//) dest = dest "/32"
+                dev = ""; table = "main"
+                for (j = i + 1; j < NF; j++) {
+                    if ($j == "dev") dev = $(j + 1)
+                    if ($j == "table") table = $(j + 1)
+                }
+                print dest "|" dev "|" table "|" type
+            }'
+    elif [[ -r /proc/net/route ]]; then
+        # Destination and mask are 32-bit hexadecimal numbers in little-endian byte order.
+        awk '
+            function hex(s,    i, n) { n = 0; for (i = 1; i <= length(s); i++) n = n * 16 + index("0123456789ABCDEF", toupper(substr(s, i, 1))) - 1; return n }
+            function dotted(s) { return hex(substr(s, 7, 2)) "." hex(substr(s, 5, 2)) "." hex(substr(s, 3, 2)) "." hex(substr(s, 1, 2)) }
+            NR > 1 && $8 != "00000000" {
+                mask = $8; bits = 0
+                for (i = 1; i <= 8; i++) { d = hex(substr(mask, i, 1)); while (d > 0) { bits += d % 2; d = int(d / 2) } }
+                print dotted($2) "/" bits "|" $1 "|main|unicast"
+            }' /proc/net/route
+    fi
+}
+
+# subnet_users CIDR: prints, one per line, what already uses addresses of the range CIDR
+# on this host: Docker networks outside the Compose project MSCD_PROJECT, and host routes
+# and addresses that are not on a Docker network's bridge (those are counted as the
+# network). The networks of MSCD_PROJECT belong to the installation itself. Prints
+# nothing when the range is free.
+subnet_users() {
+    local base size name project device subnets s sbase ssize dest dev table type text
+    local devices=" "
+    read -r base size < <(cidr_range "$1") || return 0
+    while IFS='|' read -r name project device subnets; do
+        [[ -n $device ]] && devices+="$device "
+        [[ -z $project || $project != "$MSCD_PROJECT" ]] || continue
+        for s in $subnets; do
+            read -r sbase ssize < <(cidr_range "$s") || continue
+            if ((base < sbase + ssize && sbase < base + size)); then
+                echo "the Docker network $name ($s${project:+, Compose project $project})"
+                break
+            fi
+        done
+    done < <(docker_networks)
+    while IFS='|' read -r dest dev table type; do
+        [[ -z $dev || $devices != *" $dev "* ]] || continue
+        read -r sbase ssize < <(cidr_range "$dest") || continue
+        ((base < sbase + ssize && sbase < base + size)) || continue
+        if [[ $type == local ]]; then
+            text="the address ${dest%/32} of this host"
+        else
+            text="the host route $dest"
+            if [[ $type != unicast ]]; then text+=" ($type)"; fi
+        fi
+        if [[ -n $dev ]]; then text+=" on $dev"; fi
+        if [[ $table != main && $type != local ]]; then text+=" (routing table $table)"; fi
+        echo "$text"
+    done < <(host_routes)
+}
+
+# subnet_users_text CIDR: subnet_users on one line, separated by "; ", with the first
+# three named and the number of the others.
+subnet_users_text() {
+    local users=() text
+    mapfile -t users < <(subnet_users "$1")
+    ((${#users[@]} > 0)) || return 0
+    text=${users[0]}
+    if ((${#users[@]} > 1)); then text+="; ${users[1]}"; fi
+    if ((${#users[@]} > 2)); then text+="; ${users[2]}"; fi
+    if ((${#users[@]} > 3)); then text+="; and $((${#users[@]} - 3)) more"; fi
+    echo "$text"
+}
+
+# first_free_subnet [CIDR...]: the first range of the arguments (default:
+# MSCD_SUBNET_CHOICES) that nothing on this host uses; prints nothing when all are used.
+first_free_subnet() {
+    local cidr
+    if (($# == 0)); then set -- "${MSCD_SUBNET_CHOICES[@]}"; fi
+    for cidr in "$@"; do
+        if [[ -z $(subnet_users "$cidr") ]]; then
+            echo "$cidr"
+            return 0
+        fi
+    done
+}
+
+# suggest_subnet: a free private range to name in a fix: the first free one of
+# MSCD_SUBNET_CHOICES, then of a few ranges outside 172.16.0.0/12.
+suggest_subnet() {
+    first_free_subnet "${MSCD_SUBNET_CHOICES[@]}" 10.250.0.0/24 10.251.0.0/24 192.168.250.0/24 192.168.251.0/24
+}
+
+# project_network_subnet: the IPv4 range of the internal network ("mscd") of the Compose
+# project MSCD_PROJECT, when that network exists.
+project_network_subnet() {
+    local id
+    command -v docker >/dev/null 2>&1 || return 0
+    id=$(docker network ls -q --filter "label=com.docker.compose.project=$MSCD_PROJECT" \
+        --filter label=com.docker.compose.network=mscd 2>/dev/null | head -n 1 || true)
+    if [[ -z $id ]] && docker network inspect "${MSCD_PROJECT}_mscd" >/dev/null 2>&1; then
+        id=${MSCD_PROJECT}_mscd
+    fi
+    [[ -n $id ]] || return 0
+    docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$id" 2>/dev/null |
+        tr ' ' '\n' | grep -m 1 -E '^[0-9.]+/[0-9]+$' || true
+}
+
+# check_network_settings DIR [MOVER]: upgrade.sh keeps the internal network of the
+# installation in DIR as DIR/.env saves it. Fails when MSCD_SUBNET or MSCD_WEB_ADDRESS in the
+# environment differs from the saved value (Compose would take it before .env), when a
+# saved value is not a range or an address of it, when the installation's network has
+# another range than the saved one, and, while that network does not exist, when something
+# else on this host uses the range. The range the installation has (its network's, or the
+# saved one while there is no network) is kept even when a new range could not be it
+# (smaller than /24, or not private): a warning says so. Sets MSCD_NET_SUBNET and
+# MSCD_NET_WEB_ADDRESS to the values the installation uses (save_network writes them into
+# a .env that lacks them).
+# A move to another range needs install.sh --subnet from the bundle of the installed
+# version (the installation has no install.sh, and the install.sh of another version
+# refuses it), and versions released before the option lack it. MOVER names the bundle
+# whose install.sh can move the installation once the calling script is done, such as
+# "this bundle (MSCD 1.2.0) once the upgrade is done". Without MOVER, a failure names no
+# move, and the warning names the bundle of the installed version when its install.sh has
+# the option.
+check_network_settings() {
+    local dir=$1 mover=${2:-} env=$1/.env saved_subnet saved_web net problem rule users script origin free move fix
+    script=$(basename -- "$0")
+    saved_subnet=$(kv_get "$env" MSCD_SUBNET)
+    saved_web=$(kv_get "$env" MSCD_WEB_ADDRESS)
+    net=$(project_network_subnet)
+    if [[ -n $MSCD_ENV_SUBNET && -n $saved_subnet && $MSCD_ENV_SUBNET != "$saved_subnet" ]]; then
+        if [[ $net == "$MSCD_ENV_SUBNET" ]]; then
+            fail "The internal network of the installation in $dir uses $net, as MSCD_SUBNET in the environment says, but $env saves MSCD_SUBNET=$saved_subnet" \
+                "Write MSCD_SUBNET=$net and MSCD_WEB_ADDRESS (the web address inside it, such as $(default_web_address "$net")) into $env, unset both variables and run $script again"
+        else
+            fail "The installation in $dir uses the internal range $saved_subnet (saved in $env), but MSCD_SUBNET is set to $MSCD_ENV_SUBNET" \
+                "Unset MSCD_SUBNET (or set it to $saved_subnet) and run $script again; it reads the range from $env"
+        fi
+        return 0
+    fi
+    if [[ -n $MSCD_ENV_WEB_ADDRESS && -n $saved_web && $MSCD_ENV_WEB_ADDRESS != "$saved_web" ]]; then
+        fail "The installation in $dir gives the web container the address $saved_web (saved in $env), but MSCD_WEB_ADDRESS is set to $MSCD_ENV_WEB_ADDRESS" \
+            "Unset MSCD_WEB_ADDRESS (or set it to $saved_web) and run $script again; it reads the address from $env"
+        return 0
+    fi
+
+    if [[ -n $saved_subnet ]]; then
+        MSCD_NET_SUBNET=$saved_subnet origin="saved in $env"
+    elif [[ -n $MSCD_ENV_SUBNET ]]; then
+        MSCD_NET_SUBNET=$MSCD_ENV_SUBNET origin="MSCD_SUBNET in the environment"
+    else
+        MSCD_NET_SUBNET=${net:-$MSCD_DEFAULT_SUBNET} origin="the default"
+    fi
+    problem=$(subnet_form_problem "$MSCD_NET_SUBNET")
+    if [[ -n $problem ]]; then
+        free=$(suggest_subnet)
+        if [[ -z $saved_subnet ]]; then
+            fix="Unset MSCD_SUBNET and run $script again"
+        elif [[ -n $net ]]; then
+            fix="Write MSCD_SUBNET=$net, the range of the installation's network, into $env and run $script again"
+            if [[ -n $mover ]]; then
+                fix+=". To move the installation to another range, run ./install.sh --yes --dir $dir --subnet ${free:-<a free private range of /24 or larger>} from $mover"
+            fi
+        else
+            # No network yet: the range written into .env is the one Compose creates it on.
+            fix="Write a free private range of /24 or larger into $env as MSCD_SUBNET and an address inside it as MSCD_WEB_ADDRESS${free:+ (for example $free and $(default_web_address "$free"))}, then run $script again"
+        fi
+        fail "The internal range MSCD_SUBNET=$MSCD_NET_SUBNET ($origin) of the installation in $dir $problem" "$fix"
+        return 0
+    fi
+    MSCD_NET_WEB_ADDRESS=${saved_web:-${MSCD_ENV_WEB_ADDRESS:-$(default_web_address "$MSCD_NET_SUBNET")}}
+    problem=$(web_address_problem "$MSCD_NET_WEB_ADDRESS" "$MSCD_NET_SUBNET")
+    if [[ -n $problem ]]; then
+        fail "The web address MSCD_WEB_ADDRESS=$MSCD_NET_WEB_ADDRESS of the installation in $dir $problem" \
+            "Write an address inside $MSCD_NET_SUBNET into $env as MSCD_WEB_ADDRESS, such as $(default_web_address "$MSCD_NET_SUBNET")"
+        return 0
+    fi
+
+    if [[ -n $net && $net != "$MSCD_NET_SUBNET" ]]; then
+        fail "The internal network of the installation in $dir uses $net, but Compose would use $MSCD_NET_SUBNET ($origin)" \
+            "Write MSCD_SUBNET=$net and MSCD_WEB_ADDRESS=$(default_web_address "$net") into $env, unset both variables when they are set, and run $script again"
+        return 0
+    fi
+    # The rule for a new range: the range of the installation's network, or the saved one,
+    # is kept with a warning; a range only the environment names is new.
+    rule=$(subnet_rule_problem "$MSCD_NET_SUBNET")
+    if [[ -n $rule && -z $net && -z $saved_subnet ]]; then
+        free=$(suggest_subnet)
+        fail "The internal range $MSCD_NET_SUBNET ($origin) $(subnet_problem "$MSCD_NET_SUBNET")" \
+            "Unset MSCD_SUBNET, or set it to a private range of /24 or larger${free:+ such as $free}, and run $script again"
+        return 0
+    fi
+    if [[ -z $net ]]; then
+        users=$(subnet_users_text "$MSCD_NET_SUBNET")
+        if [[ -n $users ]]; then
+            free=$(suggest_subnet)
+            fail "The internal range $MSCD_NET_SUBNET of the installation in $dir is in use on this host: $users" \
+                "Free that range, or write a free private range into $env as MSCD_SUBNET and an address inside it as MSCD_WEB_ADDRESS${free:+ (for example $free and $(default_web_address "$free"))}"
+            return 0
+        fi
+    fi
+    pass "Internal network $MSCD_NET_SUBNET, web address $MSCD_NET_WEB_ADDRESS${saved_subnet:+ (saved in $env)}"
+    if [[ -n $rule ]]; then
+        free=$(suggest_subnet)
+        move="./install.sh --yes --dir $dir --subnet ${free:-<a free private range of /24 or larger>} from ${mover:-the bundle of the installed version when its install.sh has that option (./install.sh --help lists --subnet)}"
+        warn "$(kept_subnet_note "$MSCD_NET_SUBNET" "$rule" "$move")"
+    fi
+}
+
+# save_network ENV_FILE: writes MSCD_SUBNET and MSCD_WEB_ADDRESS (as check_network_settings
+# found them) into ENV_FILE when it lacks them, so Compose and later upgrades use them.
+save_network() {
+    local env=$1
+    [[ -n ${MSCD_NET_SUBNET:-} && -n ${MSCD_NET_WEB_ADDRESS:-} ]] || return 0
+    if [[ -z $(kv_get "$env" MSCD_SUBNET) ]]; then env_set "$env" MSCD_SUBNET "$MSCD_NET_SUBNET"; fi
+    if [[ -z $(kv_get "$env" MSCD_WEB_ADDRESS) ]]; then env_set "$env" MSCD_WEB_ADDRESS "$MSCD_NET_WEB_ADDRESS"; fi
+}
+
+# stop_for_network_change DIR: when the internal network of the installation in DIR
+# exists with another range than the one Compose will use (MSCD_SUBNET of the environment
+# or of DIR/.env), stops the services and removes the networks with docker compose down.
+# The data volumes stay. The next "docker compose up" creates the network on the new range;
+# without this step Compose versions differ in how they handle the changed network.
+stop_for_network_change() {
+    local dir=$1 want have
+    want=${MSCD_ENV_SUBNET:-$(kv_get "$dir/.env" MSCD_SUBNET)}
+    want=${want:-$MSCD_DEFAULT_SUBNET}
+    have=$(project_network_subnet)
+    [[ -n $have && $have != "$want" ]] || return 0
+    info "The internal network moves from $have to $want: the services stop first (the data stays)"
+    compose_in "$dir" --profile '*' down --remove-orphans
 }
 
 # ---------------------------------------------------------------------------
