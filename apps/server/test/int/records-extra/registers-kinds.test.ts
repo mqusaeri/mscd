@@ -153,7 +153,25 @@ describe('register kinds objectives and competence (M2-07)', () => {
       const proof = await rina.post(URL('competence'), { ...record, proofObjectId: '0b7a4e7c-1d2f-4a3b-9c8d-7e6f5a4b3c2d' });
       expect(proof.status).toBe(422);
       expect(proof.body).toMatchObject({ messageKey: 'register.unknown_proof' });
-      const [object] = await rowsOf<{ id: string }>(db, 'tst', sql`select id from storage_object limit 1`);
+      // M3-13 (security review 2): the proof is the current or an earlier file of an evidence item of the same system, as
+      // the competence form uploads it; another record's file, such as a document version's, is refused.
+      const [versionFile] = await rowsOf<{ id: string }>(db, 'tst', sql`
+        select v.storage_object_id as id from document_version v
+         where v.storage_object_id is not null and not exists (select 1 from evidence e where e.storage_object_id = v.storage_object_id)
+         order by v.created_at limit 1`);
+      expect(versionFile, 'a document version with a file in the demo').toBeDefined();
+      const documentProof = await rina.post(URL('competence'), { ...record, title: 'Security analyst', proofObjectId: versionFile!.id });
+      expect(documentProof.status).toBe(422);
+      expect(documentProof.body).toMatchObject({
+        messageKey: 'register.unknown_proof',
+        messages: { en: 'The proof file must be a file of an evidence item of this management system. Upload it with the competence form.' },
+      });
+      const [object] = await rowsOf<{ id: string }>(db, 'tst', sql`
+        select e.storage_object_id as id from evidence e
+          join entity_ms_link l on l.entity_type = 'evidence' and l.entity_id = e.id and l.deleted_at is null
+          join management_system m on m.id = l.management_system_id and m.slug = 'isms'
+         where e.storage_object_id is not null and e.deleted_at is null order by e.evidence_code limit 1`);
+      expect(object, 'an evidence item of the ISMS with a file in the demo').toBeDefined();
       const analyst = await rina.post(URL('competence'), { ...record, title: 'Security analyst', proofObjectId: object!.id });
       expect(analyst.status).toBe(201);
       // The role is stored in role_title (150 characters), below the 255 the shared title allows.

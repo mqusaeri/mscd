@@ -30,7 +30,8 @@ export interface CompetenceRecordTable {
   created_by: string | null;
   updated_by: string | null;
   deleted_at: Date | null;
-  user_id: string;
+  /** The person; null only once a disposal cleared the record (tenant/0011, M3-13). */
+  user_id: string | null;
   role_title: string;
   competence_required: string;
   proof_type: 'certificate' | 'training' | 'experience' | 'assessment';
@@ -41,6 +42,8 @@ export interface CompetenceRecordTable {
   owner_user_id: string | null;
   pending_action: string | null;
   action_due_at: string | null;
+  /** Set by an approved disposal, which cleared the text and person columns (tenant/0011, M3-13). */
+  disposed_at: Date | null;
 }
 
 /** `import_run`: one bulk import file, its dry-run results and its commit (D2-13). */
@@ -84,7 +87,7 @@ export const TABLE_COLUMNS = tableColumns<TenantMilestone2Tables>()({
   competence_record: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'user_id', 'role_title',
     'competence_required', 'proof_type', 'storage_object_id', 'achieved_at', 'valid_until', 'verified_by', 'owner_user_id',
-    'pending_action', 'action_due_at',
+    'pending_action', 'action_due_at', 'disposed_at',
   ],
   import_run: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'management_system_id',

@@ -22,6 +22,8 @@ export interface TenantTablePlan {
 const SEALED_CREDENTIAL = 'Sealed repository credential (client secret, certificate key or token). It opens the repository and is a secret; the repository settings are in storage_repository';
 const FEED_TOKEN = 'Hash of a calendar feed token. It is a secret that opens the feed; the feed itself holds only review dates that are in the exported tables';
 const GUEST_CODE = 'Hash of the guest auditor sign-in link token. It is a secret that opens the guest sign-in';
+const DISPOSED = 'Records disposed of under a retention rule (disposed_at set, product owner decision 18): their content was deleted; the disposal register (retention_review) keeps their line';
+const DISPOSED_CHILD = 'Rows of a record disposed of under a retention rule (product owner decision 18): their content was deleted with the record; the disposal register (retention_review) keeps its line';
 const ENCRYPTION_HEADER = 'Encryption header of a Managed Vault file with its wrapped content key. The export holds the decrypted file instead, under files/';
 
 /** Every tenant table and where it goes (R-21). */
@@ -36,9 +38,9 @@ export const TENANT_TABLES: Readonly<Record<string, TenantTablePlan>> = {
   applicability_entry_document: { file: 'data' },
   applicability_entry_risk: { file: 'data' },
   asset: { file: 'data' },
-  audit_activity: { file: 'data' },
-  audit_event: { file: 'data' },
-  audit_prep_task: { file: 'data' },
+  audit_activity: { file: 'data', excludedRows: DISPOSED_CHILD },
+  audit_event: { file: 'data', excludedRows: DISPOSED },
+  audit_prep_task: { file: 'data', excludedRows: DISPOSED_CHILD },
   audit_trail: { file: 'audit' },
   auditor_access_grant: { file: 'data', excludedColumns: { token_hash: GUEST_CODE } },
   background_task: { file: 'data' },
@@ -49,9 +51,9 @@ export const TENANT_TABLES: Readonly<Record<string, TenantTablePlan>> = {
   certification_cycle: { file: 'data' },
   chain_record: { file: 'data' },
   clause_readiness: { file: 'data' },
-  competence_record: { file: 'data' },
+  competence_record: { file: 'data', excludedRows: DISPOSED },
   context_issue: { file: 'data' },
-  corrective_action: { file: 'data' },
+  corrective_action: { file: 'data', excludedRows: DISPOSED },
   corrective_action_finding: { file: 'data' },
   cycle_requirement_status: { file: 'data' },
   document: { file: 'data' },
@@ -67,14 +69,14 @@ export const TENANT_TABLES: Readonly<Record<string, TenantTablePlan>> = {
   evidence_target: { file: 'data' },
   exercise: { file: 'data' },
   export_file: { file: 'data' },
-  finding: { file: 'data' },
+  finding: { file: 'data', excludedRows: DISPOSED },
   freshness_threshold: { file: 'data' },
   implementation_activity_progress: { file: 'data' },
   import_run: { file: 'data' },
   interested_party: { file: 'data' },
   link_health_result: { file: 'data' },
-  management_review: { file: 'data' },
-  management_review_input: { file: 'data' },
+  management_review: { file: 'data', excludedRows: DISPOSED },
+  management_review_input: { file: 'data', excludedRows: DISPOSED_CHILD },
   management_system: { file: 'data' },
   management_system_version: { file: 'data' },
   metric: { file: 'data' },

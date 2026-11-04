@@ -649,7 +649,8 @@ export class RegistersService {
 
   /**
    * Stored values of the wire values: handles to user ids (members of the organisation, NOT-A-MEMBER otherwise),
-   * metric codes to the id of a live metric of the system, proof files to a stored object of the organisation. `shown`
+   * metric codes to the id of a live metric of the system, proof files to the current or an earlier file of an evidence
+   * item of the system (M3-13). `shown`
    * keeps the wire values for the audit entry.
    */
   private async resolveValues(
@@ -676,9 +677,29 @@ export class RegistersService {
         }
         values[field.column] = rows[0].id;
       } else if (field.type === 'uuid') {
-        const { rows } = await sql<{ id: string }>`select id from storage_object where id = ${value as string}`.execute(trx);
+        // The competence form uploads its proof to an evidence item of this system (M3-13, security review 2): only the
+        // current or an earlier file of an evidence item linked to the system is accepted, never another record's file.
+        const { rows } = await sql<{ id: string }>`
+          select o.id from storage_object o
+           where o.id = ${value as string}
+             and exists (
+               select 1 from evidence e
+                where (e.storage_object_id = o.id
+                       or exists (select 1 from audit_trail a
+                                   where a.entity_type = 'evidence' and a.entity_id = e.id
+                                     and a.action in ('evidence.file_uploaded', 'evidence.file_linked')
+                                     and nullif(a.before_data->>'storageObjectId', '')::uuid = o.id))
+                  and (exists (select 1 from entity_ms_link l
+                                where l.entity_type = 'evidence' and l.entity_id = e.id and l.management_system_id = ${system.id}
+                                  and l.deleted_at is null)
+                       or exists (select 1 from evidence_target t
+                                   where t.evidence_id = e.id and t.management_system_id = ${system.id} and t.deleted_at is null)))`.execute(trx);
         if (!rows[0]) {
-          throw unprocessable('register.unknown_proof', 'The proof file is not stored in this organisation', 'Berkas bukti tidak tersimpan di organisasi ini');
+          throw unprocessable(
+            'register.unknown_proof',
+            'The proof file must be a file of an evidence item of this management system. Upload it with the competence form.',
+            'Berkas bukti harus berupa berkas dari item bukti sistem manajemen ini. Unggah berkas melalui formulir kompetensi.',
+          );
         }
       }
     }

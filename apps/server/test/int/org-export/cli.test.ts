@@ -42,7 +42,7 @@ describe('export organization and export verify (D.4)', () => {
     const exportCommand = buildProgram().commands.find((c) => c.name() === 'export') as Command;
     const flags = (name: string) => exportCommand.commands.find((c) => c.name() === name)!.options.map((o) => o.long);
     expect(flags('organization')).toEqual(['--out', '--org', '--anchor-key']);
-    expect(flags('verify')).toEqual(['--dir', '--anchor-key']);
+    expect(flags('verify')).toEqual(['--dir', '--anchor-key', '--allow-unanchored']);
   });
 
   it('builds the export into an empty folder, audited, and the folder verifies', async () => {

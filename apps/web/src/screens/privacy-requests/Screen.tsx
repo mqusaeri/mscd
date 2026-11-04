@@ -3,7 +3,7 @@
 // person without an account by name and email; what they ask for, when and how it arrived), and the request drawer
 // (detail.tsx) with the system checks, the steps taken and the actions of the request's type. A link from a
 // notification opens its request (`params.request`).
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import type { ApiResult } from '../../data/api/ApiClient';
 import { useMutation } from '../api';
 import { formatInstant } from '../auditor-access/shared';
@@ -49,6 +49,7 @@ export function RecordDialog({ ctx, adapter, open, onClose, onDone }: {
   const [form, setForm] = useState<RecordForm>(() => emptyRecordForm());
   const [members, setMembers] = useState<Member[]>([]);
   const [shown, setShown] = useState<Partial<Record<'userId' | 'name' | 'email' | 'date' | 'time', TextPair>>>({});
+  const receivedHintId = useId();
   useEffect(() => {
     if (!open) return undefined;
     setForm(emptyRecordForm());
@@ -114,13 +115,17 @@ export function RecordDialog({ ctx, adapter, open, onClose, onDone }: {
             </Field>
           </>
         )}
-        <div className="mx-row" style={{ alignItems: 'flex-start' }}>
-          <Field label={TEXT.receivedAt} error={shown.date ?? null} required>
-            <DateInput value={form.date} onChange={set('date')} max={localDay(new Date())} />
-          </Field>
-          <Field label={TEXT.receivedTime} error={shown.time ?? null} required>
-            <TextInput value={form.time} onChange={set('time')} maxLength={5} placeholder={['HH:MM', 'JJ:MM']} />
-          </Field>
+        {/* The received date and time, with the hint for a request the provider forwarded right under them. */}
+        <div role="group" aria-describedby={receivedHintId} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="mx-row" style={{ alignItems: 'flex-start' }}>
+            <Field label={TEXT.receivedAt} error={shown.date ?? null} required>
+              <DateInput value={form.date} onChange={set('date')} max={localDay(new Date())} />
+            </Field>
+            <Field label={TEXT.receivedTime} error={shown.time ?? null} required>
+              <TextInput value={form.time} onChange={set('time')} maxLength={5} placeholder={['HH:MM', 'JJ:MM']} />
+            </Field>
+          </div>
+          <span id={receivedHintId} className="mx-hint">{ctx.li(TEXT.receivedProviderHint)}</span>
         </div>
         <Field label={TEXT.channel}>
           <Select value={form.channel} onChange={set('channel')} options={RECORD_CHANNELS.map((c) => ({ value: c, label: CHANNEL_TEXT[c] }))} />

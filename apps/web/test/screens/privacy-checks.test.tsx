@@ -21,7 +21,7 @@ import { fakeFetch, json, problem } from '../auth/helpers';
 import { ctxOf, esc, loadSampleD, render, sampleD, t, textProblems } from './ctx-m2-16';
 
 const ID = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
-const ITEM = { id: ID, requestNo: 'PR-2026-004', type: 'erasure', subject: { name: 'Andi Wijaya', handle: null }, dueAt: '2026-11-02T09:00:00Z', status: 'open', doneAt: null } as const;
+const ITEM = { id: ID, requestNo: 'PR-2026-004', type: 'erasure', subject: { name: 'Andi Wijaya', handle: null }, requestClosed: false, dueAt: '2026-11-02T09:00:00Z', status: 'open', doneAt: null } as const;
 const ROW: CheckRow = fromItem(ITEM as never);
 const MENTION: Mention = { recordKind: 'risk', recordId: '8d9e0f1a-2b3c-4d4e-9f5a-6b7c8d9e0f1a', code: 'R-031', field: 'description', excerpt: '... reported by Andi Wijaya of the supplier ...' };
 
@@ -93,6 +93,9 @@ describe('personal data check API adapter', () => {
     client.setCsrfToken('csrf-token-0123456789abcdef');
     const adapter = createApiAdapter(client);
     expect(await adapter.list('isms')).toEqual({ ok: true, status: 200, data: [ROW] });
+    expect(ROW).toMatchObject({ subject: { name: 'Andi Wijaya', handle: null }, requestClosed: false });
+    // M3-13 (ISO m8): a check of a closed request names no person.
+    expect(fromItem({ ...ITEM, subject: null, requestClosed: true, status: 'done', doneAt: '2026-10-31T01:00:00Z' } as never)).toMatchObject({ subject: null, requestClosed: true });
     expect(await adapter.mentions('isms', ID)).toEqual({ ok: true, status: 200, data: { items: [MENTION], truncated: true } });
     expect(await adapter.done('isms', ID, 'Risk R-031 edited')).toEqual({ ok: true, status: 200, data: { message: ['Check of PR-2026-004 marked done', 'Pemeriksaan PR-2026-004 ditandai selesai'] } });
     expect(f.calls.at(-1)).toMatchObject({ method: 'POST', body: { note: 'Risk R-031 edited' }, headers: { 'x-csrf-token': 'csrf-token-0123456789abcdef' } });
@@ -112,6 +115,14 @@ describe('personal data check sample adapter', () => {
     expect(list.data.map((r) => [r.requestNo.slice(-3), r.status])).toEqual([['002', 'open'], ['001', 'done']]);
     const open = list.data[0]!;
     expect(open.subject).toEqual({ name: 'Bima Haryanto', handle: null });
+    // Once its request is closed, a check names only the request (M3-13, ISO m8).
+    expect(list.data[1]).toMatchObject({ requestClosed: false });
+    const answered = requestsOf(sampleD(), 'ndt').find((r) => r.requestNo === list.data[1]!.requestNo)!;
+    const status = answered.status;
+    answered.status = 'completed';
+    const relisted = await a.list(ms);
+    expect(relisted.ok && relisted.data.find((r) => r.requestNo === answered.requestNo)).toMatchObject({ subject: null, requestClosed: true });
+    answered.status = status;
     const mentions = await a.mentions(ms, open.id);
     expect(mentions.ok && mentions.data.items.map((m) => m.recordKind)).toEqual(['document', 'risk']);
     expect(await a.done(ms, open.id, 'Risk R-031 edited')).toEqual({ ok: true, status: 200, data: { message: null } });
@@ -156,6 +167,12 @@ describe('personal data check views', () => {
         expect(noAccount).toContain(tr(TEXT.noAccount));
         expect(noAccount).toContain(tr(TEXT.alreadyDone));
         expect(noAccount).not.toContain(tr(TEXT.handoverOpen));
+        // A closed request: only the request number, no person, no mention search and no hand-over.
+        const closed = render(<CheckDrawer ctx={ctx} adapter={sample} ms="isms" row={{ ...ROW, subject: null, requestClosed: true, status: 'done', doneAt: '2026-10-31T01:00:00Z' }} onClose={() => undefined} />, ctx, theme);
+        expect(closed).toContain(esc(t(TEXT.closedRequest, lang).replace('{no}', 'PR-2026-004')));
+        expect(closed).not.toContain('Andi Wijaya');
+        expect(closed).not.toContain(tr(TEXT.mentionsLoading));
+        expect(closed).not.toContain(tr(TEXT.handoverOpen));
         const table = render(<MentionsTable ctx={ctx} ms="isms" mentions={{ items: [MENTION, { ...MENTION, recordKind: 'task', recordId: 'b', code: null, field: 'title_en' }], truncated: true }} />, ctx, theme);
         for (const p of [TEXT.colRecord, TEXT.colCode, TEXT.colField, TEXT.colText, TEXT.openRecord, TEXT.noPage, TEXT.truncated, KIND_TEXT.risk!]) expect(table, p[0]).toContain(tr(p));
         expect(table).toContain('R-031');

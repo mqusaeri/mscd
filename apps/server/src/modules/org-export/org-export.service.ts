@@ -215,8 +215,8 @@ export class OrgExportService {
         throw new ConflictError(`The export is ${row.status}; only a requested export can be decided`, {
           messageKey: 'export_not_requested',
           messages: {
-            en: `This export is ${row.status}. Only an export that waits for approval can be approved or rejected.`,
-            id: `Ekspor ini berstatus ${row.status}. Hanya ekspor yang menunggu persetujuan yang dapat disetujui atau ditolak.`,
+            en: 'This export no longer waits for approval, so it cannot be approved or rejected.',
+            id: 'Ekspor ini tidak lagi menunggu persetujuan, sehingga tidak dapat disetujui atau ditolak.',
           },
         });
       }

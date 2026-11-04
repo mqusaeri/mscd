@@ -73,16 +73,16 @@ test.describe('Personal data checks @sample-only', () => {
     await dialog(page).locator('textarea').fill('Letter from the supplier with a signed identity card copy');
     await button(dialog(page), 'Start work').click();
     await expectToast(page, /Work on PR-\d{4}-002 started/);
-    await button(drawer(page), 'Erase the person').click();
+    await button(drawer(page), 'Erase personal data').click();
     await expect(dialog(page)).toContainText('The person has no account.');
     await inBothThemes(page, () => expectOverlayReadable(page));
-    await button(dialog(page), 'Erase the person').click();
-    await expectToast(page, /The person of PR-\d{4}-002 is erased in this organisation/);
+    await button(dialog(page), 'Erase personal data').click();
+    await expectToast(page, /The personal data of the person in PR-\d{4}-002 is erased in this organisation/);
     await button(drawer(page), 'Close with the answer').click();
     await dialog(page).locator('textarea').fill('Records edited in every system; answered by letter');
     await button(dialog(page), 'Close with the answer').click();
     await expectToast(page, /Request PR-\d{4}-002 completed/);
-    await expect(drawer(page)).toContainText('Person erased');
+    await expect(drawer(page)).toContainText('Personal data erased');
   });
 
   test('the Indonesian screen links to Handover for a member', async ({ page }) => {

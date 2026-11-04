@@ -77,6 +77,15 @@ export interface RequestDetail extends RequestRow {
   checks: CheckView[];
   actions: ActionView[];
   exportTaskId: string | null;
+  /** An erasure in progress that has not run yet: the audit entries it changes and the legal holds it touches (M3-13). */
+  erasureImpact: ErasureImpact | null;
+}
+
+/** What an erasure will change, shown in the erase dialog before it runs. */
+export interface ErasureImpact {
+  tenantEntries: number;
+  platformEntries: number;
+  legalHolds: number;
 }
 
 /** A member a request can name (the subject picker). */
@@ -259,7 +268,7 @@ export const RESULT_TEXT: Readonly<Record<string, TextPair>> = {
   rolesRevoked: ['Roles revoked', 'Peran dicabut'],
   linkedSignInsRemoved: ['Linked sign-ins removed', 'Masuk tertaut dihapus'],
   invitationsRemoved: ['Invitations removed', 'Undangan dihapus'],
-  confirmationsExcused: ['Read confirmations excused', 'Konfirmasi baca dibebaskan'],
+  confirmationsExcused: ['Read confirmations no longer asked', 'Konfirmasi baca yang tidak lagi diminta'],
   tasksCancelled: ['Tasks cancelled', 'Tugas dibatalkan'],
   notificationsDeleted: ['Notifications deleted', 'Notifikasi dihapus'],
   calendarFeedsDeleted: ['Calendar feeds deleted', 'Umpan kalender dihapus'],
@@ -276,6 +285,6 @@ export const ACTION_TEXT: Readonly<Record<string, TextPair>> = {
   'privacy_request.updated': ['Updated', 'Diperbarui'],
   'privacy_request.rectified': ['Account corrected', 'Akun dikoreksi'],
   'privacy_request.restricted': ['Membership disabled', 'Keanggotaan dinonaktifkan'],
-  'privacy_request.erased': ['Person erased', 'Orang dihapus'],
+  'privacy_request.erased': ['Personal data erased', 'Data pribadi dihapus'],
   'privacy_request.closed': ['Completed', 'Selesai'],
 };

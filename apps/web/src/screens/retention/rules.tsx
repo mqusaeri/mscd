@@ -97,6 +97,7 @@ export function RulesTab({ ctx, ms }: { ctx: HostContext; ms: MsId }) {
       {!manage ? <div style={{ padding: 12 }}><Alert tone="info">{ctx.li(TEXT.readOnly)}</Alert></div> : null}
       <LoadState ctx={ctx} list={list} />
       {list.data ? <Table columns={columns} rows={list.data} rowKey={(r) => `${r.recordClass}:${r.docType ?? ''}`} /> : null}
+      {list.data ? <p className="mx-small" style={{ margin: 0, padding: 12 }} data-rules="gap">{ctx.li(TEXT.rulesGap)}</p> : null}
       {editing ? (
         <RuleDialog
           ctx={ctx}

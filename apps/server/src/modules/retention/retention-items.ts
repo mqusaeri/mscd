@@ -13,6 +13,11 @@
 // pack, its build date; an audit event, its last day; a finding, its closing date; a corrective action, its
 // verification date; a management review, its closing date; a competence record, `valid_until` or its deletion date.
 // Instants are read as local dates in the organisation's time zone.
+//
+// Files still in use (M3-13, security review 2): a storage object that another live record uses stays out of
+// `objectIds`, so a disposal never deletes it, and is listed in `keptInUse` with the code of that record: a version of a
+// document that is not deleted, the current file of an evidence item that is not deleted, a copy in an evidence pack
+// that is not disposed, or another competence record that is not disposed.
 import type { RetentionRecordClass } from '@mscd/shared';
 import { sql, type RawBuilder } from 'kysely';
 import { ConflictError, NotFoundError } from '../../common/problems';
@@ -35,6 +40,8 @@ export interface ItemFacts {
   ownerUserId: string | null;
   /** Storage objects whose content a disposal removes (or whose owner is asked to delete the file). */
   objectIds: string[];
+  /** Storage objects of the item that another live record uses: kept by a disposal (M3-13). */
+  keptInUse: { objectId: string; code: string }[];
   /** The record is already marked deleted (records only). */
   recordDeleted: boolean;
 }
@@ -205,7 +212,7 @@ const CLASS_QUERIES: Readonly<Record<RetentionRecordClass, (mode: ItemMode, ctx:
       from competence_record c
       left join storage_object proof on proof.id = c.storage_object_id and proof.content_disposed_at is null and proof.deleted_at is null
      where ${mode.kind === 'discover'
-       ? sql`((c.deleted_at is null and c.valid_until < ${ctx.today}::date) or (c.deleted_at is not null and proof.id is not null))`
+       ? sql`c.disposed_at is null and ((c.deleted_at is null and c.valid_until < ${ctx.today}::date) or (c.deleted_at is not null and proof.id is not null))`
        : sql`c.id = any(${idsOf(mode)}::uuid[])`}`,
 };
 
@@ -221,16 +228,64 @@ function factsOf(recordClass: RetentionRecordClass, row: ItemRow): ItemFacts {
     current: row.current,
     ownerUserId: row.owner_user_id,
     objectIds: row.object_ids ?? [],
+    keptInUse: [],
     recordDeleted: row.record_deleted,
   };
+}
+
+/**
+ * The storage objects of items that another live record uses, with the code of one such record (see the top of the
+ * file); `items` of one class. Keyed by item id, then object id.
+ */
+async function objectsInUse(trx: Trx, recordClass: RetentionRecordClass, items: readonly ItemFacts[]): Promise<Map<string, Map<string, string>>> {
+  const pairs = items.flatMap((i) => i.objectIds.map((objectId) => ({ itemId: i.itemId, objectId })));
+  const out = new Map<string, Map<string, string>>();
+  if (pairs.length === 0) return out;
+  const { rows } = await sql<{ item_id: string; object_id: string; code: string }>`
+    with p as (
+      select * from unnest(${pairs.map((p) => p.itemId)}::uuid[], ${pairs.map((p) => p.objectId)}::uuid[]) as p(item_id, object_id)
+    )
+    select p.item_id, p.object_id, u.code from p
+     cross join lateral (
+       select left(d.doc_code || ' v' || v.version_label, 60) as code from document_version v join document d on d.id = v.document_id
+        where v.storage_object_id = p.object_id and v.deleted_at is null and d.deleted_at is null
+          and not (${recordClass} = 'document_version' and v.id = p.item_id)
+       union all
+       select left(e.evidence_code, 60) from evidence e
+        where e.storage_object_id = p.object_id and e.deleted_at is null and not (${recordClass} = 'evidence_file' and e.storage_object_id = p.item_id)
+       union all
+       select 'PACK-' || upper(substr(replace(k.id::text, '-', ''), 1, 8)) from evidence_pack_item i join evidence_pack k on k.id = i.evidence_pack_id
+        where i.copy_storage_object_id = p.object_id and k.deleted_at is null
+          and not (${recordClass} = 'evidence_pack' and k.id = p.item_id)
+          and not exists (select 1 from retention_review r where r.record_class = 'evidence_pack' and r.item_id = k.id and r.status = 'disposed'
+                            and r.deleted_at is null)
+       union all
+       select 'CMP-' || upper(substr(replace(c.id::text, '-', ''), 1, 8)) from competence_record c
+        where c.storage_object_id = p.object_id and c.disposed_at is null and not (${recordClass} = 'competence_record' and c.id = p.item_id)
+       limit 1
+     ) u`.execute(trx);
+  for (const r of rows) {
+    const of = out.get(r.item_id) ?? new Map<string, string>();
+    of.set(r.object_id, r.code);
+    out.set(r.item_id, of);
+  }
+  return out;
 }
 
 /** The items of a class that may be due (with a period start), or the given items whatever their state. */
 export async function itemsOf(trx: Trx, recordClass: RetentionRecordClass, mode: ItemMode, ctx: QueryContext): Promise<ItemFacts[]> {
   if (mode.kind === 'ids' && mode.ids.length === 0) return [];
   const { rows } = await CLASS_QUERIES[recordClass](mode, ctx).execute(trx);
-  const items = rows.map((r) => factsOf(recordClass, r));
-  return mode.kind === 'discover' ? items.filter((i) => i.startsOn !== null && i.msId !== null) : items;
+  let items = rows.map((r) => factsOf(recordClass, r));
+  if (mode.kind === 'discover') items = items.filter((i) => i.startsOn !== null && i.msId !== null);
+  const inUse = await objectsInUse(trx, recordClass, items);
+  for (const item of items) {
+    const used = inUse.get(item.itemId);
+    if (!used) continue;
+    item.keptInUse = item.objectIds.filter((id) => used.has(id)).map((objectId) => ({ objectId, code: used.get(objectId)! }));
+    item.objectIds = item.objectIds.filter((id) => !used.has(id));
+  }
+  return items;
 }
 
 /** The facts of given items of one class, by id. */

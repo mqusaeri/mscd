@@ -5,7 +5,7 @@ import type { ApiError } from '../../data/api/ApiClient';
 import type { HostContext } from '../types';
 import { Alert, Button } from '../ui';
 import { formatInstant } from '../auditor-access/shared';
-import type { PersonRef, ReviewModel, Result } from './model';
+import type { PersonRef, ReviewFile, ReviewModel, Result } from './model';
 import { itemLabel, settled } from './model';
 import { retentionVersion, subscribeRetention } from './store';
 import { TEXT } from './text';
@@ -55,6 +55,25 @@ export function ItemCell({ row }: { row: Pick<ReviewModel, 'itemCode' | 'itemTit
       <strong className="mx-mono" style={{ overflowWrap: 'anywhere' }}>{itemLabel(row)}</strong>
       {row.itemTitle && row.itemCode ? <span className="mx-small" style={{ display: 'block', overflowWrap: 'anywhere' }}>{row.itemTitle}</span> : null}
     </span>
+  );
+}
+
+/** The files of a review item and what a disposal does with each (M3-13). */
+export function FilesList({ ctx, files }: { ctx: HostContext; files: readonly ReviewFile[] }) {
+  if (files.length === 0) return null;
+  const actionText = (f: ReviewFile) =>
+    f.action === 'kept_in_use' ? ctx.fill(TEXT.fileKept, { code: f.usedBy ?? '-' }) : ctx.li(f.action === 'delete' ? TEXT.fileDelete : TEXT.fileOwner);
+  return (
+    <div className="mx-small" data-files="retention">
+      <span style={{ fontWeight: 600 }}>{ctx.li(TEXT.filesTitle)}</span>
+      <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+        {files.map((f, i) => (
+          <li key={`${f.name ?? ''}-${i}`} data-file-action={f.action} style={{ overflowWrap: 'anywhere' }}>
+            {`${f.name ?? '-'} (${f.repository}): ${actionText(f)}`}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

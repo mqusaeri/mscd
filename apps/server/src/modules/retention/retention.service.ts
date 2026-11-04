@@ -19,7 +19,7 @@
 //   rule in force today for reviews decided before the entries carried the period.
 import { Inject, Injectable } from '@nestjs/common';
 import type {
-  CommandResult, Pair, RetentionDecide, RetentionHoldCreate, RetentionHoldItem, RetentionRecordClass, RetentionRegisterItem,
+  CommandResult, Pair, RetentionDecide, RetentionHoldCreate, RetentionHoldItem, RetentionRecordClass, RetentionRegisterItem, RetentionReviewFile,
   RetentionReviewItem, RetentionReviewListQuery, RetentionRuleItem, RetentionRulePut,
 } from '@mscd/shared';
 import { sql } from 'kysely';
@@ -205,6 +205,8 @@ export class RetentionService {
   // -------------------------------------------------------------------------------------------------------------
 
   async reviews(principal: Principal, ms: string, query: RetentionReviewListQuery): Promise<Page<RetentionReviewItem>> {
+    const org = orgOf(principal);
+    const today = this.clock.todayIn(org.timeZone);
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const rows = await this.reviewRows(trx, system.id, {
@@ -217,7 +219,13 @@ export class RetentionService {
         pageSize: query.pageSize,
         order: 'due',
       });
-      return { items: rows.map((r) => this.reviewItem(r)), page: query.page, pageSize: query.pageSize, total: Number(rows[0]?.total ?? 0) };
+      const files = await this.filesOfReviews(trx, await this.factsOfReviews(trx, org, today, rows));
+      return {
+        items: rows.map((r) => ({ ...this.reviewItem(r), files: files.get(r.id) ?? [] })),
+        page: query.page,
+        pageSize: query.pageSize,
+        total: Number(rows[0]?.total ?? 0),
+      };
     });
   }
 
@@ -663,7 +671,7 @@ export class RetentionService {
           : { en: `${n} disposals wait for your approval`, id: `${n} pemusnahan menunggu persetujuan Anda` },
         body: {
           en: `A second person must approve before records of ${name} are disposed of. Open Retention and disposal, Awaiting approval.`,
-          id: `Orang kedua harus menyetujui sebelum catatan ${name} dimusnahkan. Buka Retensi dan pemusnahan, Menunggu persetujuan.`,
+          id: `Orang kedua harus menyetujui sebelum rekaman ${name} dimusnahkan. Buka Retensi dan pemusnahan, Menunggu persetujuan.`,
         },
       });
     }
@@ -767,8 +775,35 @@ export class RetentionService {
     };
   }
 
-  private reviewItem(r: ReviewRow): RetentionReviewItem {
+  private reviewItem(r: ReviewRow): Omit<RetentionReviewItem, 'files'> {
     return { ...this.reviewShape(r), onHold: r.on_hold };
+  }
+
+  /**
+   * The files of each review's item and what a disposal does with them (M3-13): `delete` for Managed Vault content,
+   * `owner_asked` for a file in a customer repository, `kept_in_use` with the code of the record that still uses it.
+   */
+  private async filesOfReviews(trx: Trx, facts: ReadonlyMap<string, ItemFacts>): Promise<Map<string, RetentionReviewFile[]>> {
+    const ids = [...new Set([...facts.values()].flatMap((f) => [...f.objectIds, ...f.keptInUse.map((k) => k.objectId)]))];
+    const out = new Map<string, RetentionReviewFile[]>();
+    if (ids.length === 0) return out;
+    const { rows } = await sql<{ id: string; display_name: string | null; repository: string; adapter: string }>`
+      select o.id, o.display_name, r.name as repository, r.adapter from storage_object o join storage_repository r on r.id = o.storage_repository_id
+       where o.id = any(${ids}::uuid[])`.execute(trx);
+    const objects = new Map(rows.map((r) => [r.id, r]));
+    for (const [reviewId, f] of facts) {
+      const list: RetentionReviewFile[] = [];
+      for (const id of f.objectIds) {
+        const o = objects.get(id);
+        if (o) list.push({ name: o.display_name, repository: o.repository, action: o.adapter === 'managed_vault' ? 'delete' : 'owner_asked', usedBy: null });
+      }
+      for (const k of f.keptInUse) {
+        const o = objects.get(k.objectId);
+        if (o) list.push({ name: o.display_name, repository: o.repository, action: 'kept_in_use', usedBy: k.code });
+      }
+      out.set(reviewId, list);
+    }
+    return out;
   }
 
   /** Document types of the system's edition (pack lookup `doc_type`), in pack order. */

@@ -3,6 +3,7 @@ import { StorageModule } from '../../storage/storage.module';
 import { DeletionController } from './deletion.controller';
 import { DeletionMailer } from './deletion-mailer';
 import { DeletionService } from './deletion.service';
+import { ErasureReceiptSender } from './erasure-receipts';
 import { OrgLifecycleJob } from './org-lifecycle.job';
 import { orgPurgeJobProvider } from './org-purge.job';
 import { OrganizationTransitions } from './organization-transitions';
@@ -14,13 +15,15 @@ import { PurgeRunner } from './purge-runner';
  * and `org.lifecycle` share), the operator routes of `ops.deletion.*` (`DeletionService`), the purge (`PurgeRunner`,
  * with the storage gateway client of `StorageModule` for the vault step and `DeletionMailer` for the certificate email),
  * and the `org.lifecycle` and `org.purge` jobs. `org.purge` exists only in multi tenancy; `org.lifecycle` exists in both
- * modes and does nothing in single tenancy (D.5.1). Uses the global identity (anonymiser, session revocation, account
- * mailer), audit (writer, redactor, verifier), keys, tenancy and job queue providers.
+ * modes, signs and emails the erasure receipts (`ErasureReceiptSender`, M3-13) and has no lifecycle work in single
+ * tenancy (D.5.1). `PrivacyModule` imports this module as well, for `ErasureReceiptSender` in its daily
+ * `privacy.deadlines` job. Uses the global identity (anonymiser, session revocation, account mailer), audit (writer,
+ * redactor, verifier), keys, tenancy and job queue providers.
  */
 @Module({
   imports: [StorageModule],
   controllers: [DeletionController],
-  providers: [OrganizationTransitions, DeletionService, DeletionMailer, PurgeRunner, OrgLifecycleJob, orgPurgeJobProvider],
-  exports: [OrganizationTransitions, DeletionService, PurgeRunner],
+  providers: [OrganizationTransitions, DeletionService, DeletionMailer, PurgeRunner, ErasureReceiptSender, OrgLifecycleJob, orgPurgeJobProvider],
+  exports: [OrganizationTransitions, DeletionService, PurgeRunner, ErasureReceiptSender],
 })
 export class DeletionModule {}

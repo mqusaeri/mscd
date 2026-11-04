@@ -81,6 +81,23 @@ export function allowedMoves(from: OrganizationStatus, context: MoveContext = { 
   return targets.filter((to) => to !== from && transitionsVia('organization.status', from, to, STATUS_ROUTE).length > 0);
 }
 
+/**
+ * The statuses of an organisation by name, as the operator console labels them (`ops/org-text.ts`): English and
+ * Indonesian (M3-13, texts H4).
+ */
+export const STATUS_NAMES: Readonly<Record<OrganizationStatus, readonly [string, string]>> = {
+  active: ['Active', 'Aktif'],
+  suspended: ['Suspended', 'Ditangguhkan'],
+  offboarding: ['Offboarding', 'Pengakhiran'],
+  archived: ['Archived', 'Diarsipkan'],
+  deleted: ['Deleted', 'Dihapus'],
+};
+
+/** The name of a status in one language (0 English, 1 Indonesian). */
+export function statusName(status: OrganizationStatus | string, language: 0 | 1): string {
+  return STATUS_NAMES[status as OrganizationStatus]?.[language] ?? status;
+}
+
 /** 409 `transition-not-allowed` with messageKey `invalid_status_transition` (J.6). */
 export function invalidStatusTransition(
   slug: string,
@@ -89,28 +106,30 @@ export function invalidStatusTransition(
   context: MoveContext = { deletionScheduled: false },
 ): TransitionNotAllowedError {
   const allowed = allowedMoves(from, context);
+  const [fromEn, fromId] = [statusName(from, 0), statusName(from, 1)];
+  const [toEn, toId] = [statusName(to, 0), statusName(to, 1)];
   const final =
     from === 'archived'
       ? [
-          'archived is final. It can move back to offboarding only while its deletion is scheduled.',
-          'archived adalah status akhir. Status ini hanya dapat kembali ke offboarding selama penghapusannya dijadwalkan.',
+          'Archived is final. It can move back to Offboarding only while its deletion is scheduled.',
+          'Diarsipkan adalah status akhir. Status ini hanya dapat kembali ke Pengakhiran selama penghapusannya dijadwalkan.',
         ]
-      : [`${from} is final.`, `${from} adalah status akhir.`];
+      : [`${fromEn} is final.`, `${fromId} adalah status akhir.`];
   const en =
     from === to
-      ? `Organisation ${slug} is already ${to}.`
-      : `Organisation ${slug} is ${from} and cannot move to ${to}. ${allowed.length > 0 ? `From ${from} it can move to ${allowed.join(' or ')}.` : final[0]}`;
+      ? `Organisation ${slug} is already ${toEn}.`
+      : `Organisation ${slug} is ${fromEn} and cannot move to ${toEn}. ${allowed.length > 0 ? `From ${fromEn} it can move to ${allowed.map((s) => statusName(s, 0)).join(' or ')}.` : final[0]}`;
   const id =
     from === to
-      ? `Organisasi ${slug} sudah berstatus ${to}.`
-      : `Organisasi ${slug} berstatus ${from} dan tidak dapat dipindahkan ke ${to}. ${allowed.length > 0 ? `Dari ${from} organisasi dapat dipindahkan ke ${allowed.join(' atau ')}.` : final[1]}`;
+      ? `Organisasi ${slug} sudah berstatus ${toId}.`
+      : `Organisasi ${slug} berstatus ${fromId} dan tidak dapat dipindahkan ke ${toId}. ${allowed.length > 0 ? `Dari ${fromId} organisasi dapat dipindahkan ke ${allowed.map((s) => statusName(s, 1)).join(' atau ')}.` : final[1]}`;
   return new TransitionNotAllowedError(from, to, { messageKey: 'invalid_status_transition', messages: { en, id } });
 }
 
 /** 422 `business-rule` with messageKey `confirmation_mismatch` (J.6): `confirmSlug` must repeat the slug. */
 export function confirmationMismatch(slug: string, to: OrganizationStatus): ProblemError {
-  const en = `Moving organisation ${slug} to ${to} needs confirmSlug equal to the slug ${slug}.`;
-  const id = `Memindahkan organisasi ${slug} ke ${to} memerlukan confirmSlug yang sama dengan slug ${slug}.`;
+  const en = `Moving organisation ${slug} to ${statusName(to, 0)} needs confirmSlug equal to the slug ${slug}.`;
+  const id = `Memindahkan organisasi ${slug} ke ${statusName(to, 1)} memerlukan confirmSlug yang sama dengan slug ${slug}.`;
   return new ProblemError('business-rule', { detail: en, messageKey: 'confirmation_mismatch', messages: { en, id } });
 }
 

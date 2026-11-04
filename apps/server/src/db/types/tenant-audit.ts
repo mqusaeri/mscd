@@ -32,6 +32,8 @@ export interface AuditEventTable {
   /** Milestone 2 (tenant 0008, D.2): internal audit scope and report. */
   scope_text: string | null;
   report_document_id: string | null;
+  /** Set by an approved disposal, which cleared the text and person columns (tenant/0011, M3-13). */
+  disposed_at: Date | null;
 }
 
 /** `audit_prep_task` */
@@ -85,6 +87,8 @@ export interface FindingTable {
   position: Generated<number>;
   /** Milestone 2 (tenant 0008, D.2): clause or control code of the edition. */
   target_code: string | null;
+  /** Set by an approved disposal, which cleared the text and person columns (tenant/0011, M3-13). */
+  disposed_at: Date | null;
 }
 
 /** `corrective_action` */
@@ -112,6 +116,8 @@ export interface CorrectiveActionTable {
   verified_at: string | null;
   effective: boolean | null;
   verification_note: string | null;
+  /** Set by an approved disposal, which cleared the text and person columns (tenant/0011, M3-13). */
+  disposed_at: Date | null;
 }
 
 /** `management_review` */
@@ -133,6 +139,8 @@ export interface ManagementReviewTable {
   decisions_text: string | null;
   closed_at: string | null;
   closed_by_user_id: string | null;
+  /** Set by an approved disposal, which cleared the text and person columns (tenant/0011, M3-13). */
+  disposed_at: Date | null;
 }
 
 /** `management_review_input` */
@@ -281,7 +289,7 @@ export const TABLE_COLUMNS = tableColumns<TenantAuditTables>()({
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'certification_cycle_id', 'event_type', 'name_en', 'name_id', 'short_label', 'scheduled_at',
     'audit_days', 'lead_auditor_name', 'expected_focus', 'prep_window_days', 'outcome', 'outcome_summary', 'scope_text',
-    'report_document_id',
+    'report_document_id', 'disposed_at',
   ],
   audit_prep_task: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'audit_event_id',
@@ -292,18 +300,18 @@ export const TABLE_COLUMNS = tableColumns<TenantAuditTables>()({
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'framework_version_id', 'audit_event_id', 'code', 'title', 'classification', 'clause_ref',
     'source', 'status', 'status_note', 'owner_user_id', 'raised_at', 'due_at', 'rca_text', 'systemic_check_text',
-    'closed_at', 'closed_by_user_id', 'close_note', 'position', 'target_code',
+    'closed_at', 'closed_by_user_id', 'close_note', 'position', 'target_code', 'disposed_at',
   ],
   corrective_action: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',
     'management_system_id', 'code', 'title', 'owner_user_id', 'status', 'correction_text', 'rca_text',
     'systemic_check_text', 'action_text', 'due_at', 'implemented_at', 'implemented_by_user_id', 'verified_by_user_id',
-    'verified_at', 'effective', 'verification_note',
+    'verified_at', 'effective', 'verification_note', 'disposed_at',
   ],
   management_review: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'code', 'title',
     'owner_user_id', 'planned_at', 'held_at', 'status', 'decisions_recorded', 'decisions_text', 'closed_at',
-    'closed_by_user_id',
+    'closed_by_user_id', 'disposed_at',
   ],
   management_review_input: [
     'id', 'organization_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at',

@@ -9,26 +9,33 @@
 //   sessions       sessions in this organisation, with network address and browser
 //   signInEvents   sign-in events in this organisation (platform audit entries `auth.*` of the person)
 //   auditEntries   the organisation's audit entries where the person acted (action, record, time; no values)
+//   auditEntriesAbout  the organisation's audit entries about the account, the membership or the business roles of the
+//                  person (action, record, time; no values; M3-13, ISO m9)
 //   records        records the person owns or holds in any system (kind, code, title, status, due date, holder columns)
+//   mentions       records of every system whose text names the person (record kind, code, field and a short excerpt,
+//                  the mention search of the system checks; M3-13, ISO m9)
 //   confirmations  read confirmations of policies
 //   competenceRecords  competence records about the person
 //   notifications  in-app notifications to the person (kind, title, dates)
 //   requests       the person's personal data requests
 //
 // Secrets (password hash, second factors, recovery codes, token and session hashes) and other people's data are left
-// out: audit entries carry no before and after values, and no record code of an entry about another account.
+// out: audit entries carry no before and after values, and no record code of an entry about another account. Records
+// disposed of under a retention rule are left out (decision 18). The content of uploaded files is not in the file: the
+// Tenant Admin adds copies of the files that name the person when the person asks for them.
 import { sql } from 'kysely';
 import type { TenantInfo, Trx } from '../../common/tokens';
 import { inPlatformScope } from '../identity/platform-scope';
+import { searchMentions } from '../privacy/mention-search';
 import { competenceCode } from '../risk-registers/competence';
 
 /** Format id of the file (`format` member). */
-export const PERSONAL_DATA_FORMAT = 'mscd-personal-data-v1';
+export const PERSONAL_DATA_FORMAT = 'mscd-personal-data-v2';
 
 /** The sections of the file, in order (the integration tests and the screens name them). */
 export const PERSONAL_DATA_SECTIONS = [
-  'account', 'membership', 'businessRoles', 'linkedSignIns', 'sessions', 'signInEvents', 'auditEntries', 'records', 'confirmations',
-  'competenceRecords', 'notifications', 'requests',
+  'account', 'membership', 'businessRoles', 'linkedSignIns', 'sessions', 'signInEvents', 'auditEntries', 'auditEntriesAbout', 'records',
+  'mentions', 'confirmations', 'competenceRecords', 'notifications', 'requests',
 ] as const;
 
 /** Columns that name the person who owns or holds a record. */
@@ -76,7 +83,9 @@ export interface PersonalData {
   sessions: Record<string, unknown>[];
   signInEvents: Record<string, unknown>[];
   auditEntries: Record<string, unknown>[];
+  auditEntriesAbout: Record<string, unknown>[];
   records: HeldRecord[];
+  mentions: Record<string, unknown>[];
   confirmations: Record<string, unknown>[];
   competenceRecords: Record<string, unknown>[];
   notifications: Record<string, unknown>[];
@@ -153,6 +162,13 @@ export async function personalDataOf(trx: Trx, org: Pick<TenantInfo, 'id' | 'nam
       from audit_trail t left join management_system m on m.id = t.management_system_id
      where t.actor_user_id = ${userId}::uuid
      order by t.seq`.execute(trx);
+  // Entries about the account, the membership or a business role of the person, whoever acted (no values).
+  const { rows: about } = await sql<{ seq: string; occurred_at: Date; action: string; entity_type: string | null; ms: string | null }>`
+    select t.seq, t.occurred_at, t.action, t.entity_type, m.slug as ms
+      from audit_trail t left join management_system m on m.id = t.management_system_id
+     where (t.entity_type in ('user', 'org_membership') and t.entity_id = ${userId}::uuid)
+        or (t.entity_type = 'user_ms_role' and t.entity_id in (select r.id from user_ms_role r where r.user_id = ${userId}::uuid))
+     order by t.seq`.execute(trx);
   const { rows: confirmations } = await sql<{ doc_code: string; title: string; version_label: string; status: string; opened_at: Date | null; confirmed_at: Date | null; excused_reason: string | null; due_on: string }>`
     select d.doc_code, d.title, v.version_label, a.status, a.opened_at, a.confirmed_at, a.excused_reason, r.due_on::text as due_on
       from acknowledgement a
@@ -165,7 +181,7 @@ export async function personalDataOf(trx: Trx, org: Pick<TenantInfo, 'id' | 'nam
     select c.id, c.role_title, c.competence_required, c.proof_type, c.achieved_at::text as achieved_at, c.valid_until::text as valid_until,
            c.verified_by is not null as verified
       from competence_record c
-     where c.user_id = ${userId}::uuid and c.deleted_at is null
+     where c.user_id = ${userId}::uuid and c.deleted_at is null and c.disposed_at is null
      order by c.created_at`.execute(trx);
   const { rows: notifications } = await sql<{ kind: string; title_en: string; title_id: string; created_at: Date; read_at: Date | null }>`
     select n.kind, n.title_en, n.title_id, n.created_at, n.read_at
@@ -230,7 +246,11 @@ export async function personalDataOf(trx: Trx, org: Pick<TenantInfo, 'id' | 'nam
       recordCode: e.entity_type && ACCOUNT_ENTITIES.has(e.entity_type) ? null : e.entity_code,
       ms: e.ms,
     })),
+    auditEntriesAbout: about.map((e) => ({ seq: Number(e.seq), at: iso(e.occurred_at), action: e.action, recordType: e.entity_type, ms: e.ms })),
     records: await heldRecords(trx, userId),
+    mentions: platform.account
+      ? await mentionsOf(trx, [platform.account.display_name, platform.account.email, platform.account.handle])
+      : [],
     confirmations: confirmations.map((c) => ({
       document: c.doc_code, title: c.title, version: c.version_label, status: c.status, dueOn: c.due_on, openedAt: iso(c.opened_at),
       confirmedAt: iso(c.confirmed_at), excusedReason: c.excused_reason,
@@ -245,6 +265,26 @@ export async function personalDataOf(trx: Trx, org: Pick<TenantInfo, 'id' | 'nam
       closedAt: iso(r.closed_at), outcome: r.outcome,
     })),
   };
+}
+
+/**
+ * The records of every management system whose text names the person (the mention search of the system checks, D.6.4),
+ * each record field once.
+ */
+async function mentionsOf(trx: Trx, values: readonly string[]): Promise<Record<string, unknown>[]> {
+  const systems = await trx.selectFrom('management_system').select(['id', 'slug']).where('deleted_at', 'is', null).orderBy('position').orderBy('slug').execute();
+  const seen = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+  for (const system of systems) {
+    const found = await searchMentions(trx, system.id, values);
+    for (const m of found.items) {
+      const key = `${m.recordKind}:${m.recordId}:${m.field}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ms: system.slug, recordType: m.recordKind, code: m.code, field: m.field, excerpt: m.excerpt });
+    }
+  }
+  return out;
 }
 
 /**

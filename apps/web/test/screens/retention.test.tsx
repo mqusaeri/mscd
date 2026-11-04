@@ -25,6 +25,7 @@ import {
 import type { HoldModel, ReviewModel, RuleModel } from '../../src/screens/retention/model';
 import { DecisionDialog, RejectDialog } from '../../src/screens/retention/reviews';
 import { RuleDialog } from '../../src/screens/retention/rules';
+import { FilesList } from '../../src/screens/retention/parts';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/retention/routes';
 import { createSampleAdapter, resetSampleRetention } from '../../src/screens/retention/sample';
 import { TABS } from '../../src/screens/retention/Screen';
@@ -54,6 +55,10 @@ const REVIEW: RetentionReviewItem = {
   id: '4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a', recordClass: 'evidence_file', itemId: '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b', itemCode: 'EV-0313 v2', itemTitle: 'Backup job log',
   retentionEndsOn: '2026-09-15', status: 'awaiting_approval', decision: 'dispose', decidedBy: { handle: 'rina', displayName: 'Rina Kusuma' }, decidedAt: '2026-09-29T02:00:00Z',
   reason: 'Replaced by later logs', keepUntil: null, approvedBy: null, approvedAt: null, rejectedNote: null, disposedAt: null, fileAction: null, fileRemovedAt: null, onHold: false,
+  files: [
+    { name: 'backup-job-2025-09.log', repository: 'Managed Vault', action: 'delete', usedBy: null },
+    { name: 'restore-test.pdf', repository: 'Managed Vault', action: 'kept_in_use', usedBy: 'EV-0402' },
+  ],
 };
 const RULE: RetentionRuleItem = { recordClass: 'document_version', docType: 'policy', docTypeLabel: ['Policy', 'Kebijakan'], retainMonths: 36, source: 'default', basis: null };
 const HOLD: RetentionHoldItem = {
@@ -175,6 +180,8 @@ describe('API adapter', () => {
     expect(calls[1]!.headers['x-csrf-token']).toBe('csrf-token-0123456789abcdef');
     const page = await adapter.reviews('qms', { status: 'awaiting_approval', recordClass: 'evidence_file', code: 'EV-0313', page: 2, pageSize: 50 });
     expect(page.ok && page.data).toMatchObject({ total: 1, items: [{ itemCode: 'EV-0313 v2', decidedBy: { handle: 'rina' } }] });
+    // M3-13: the files of the item and what the disposal does with each.
+    expect(page.ok && page.data.items[0]!.files).toEqual(REVIEW.files);
     expect(calls[2]!.url).toContain('status=awaiting_approval');
     expect(calls[2]!.url).toContain('recordClass=evidence_file');
     expect(calls[2]!.url).toContain('code=EV-0313');
@@ -237,6 +244,10 @@ describe('sample adapter', () => {
     expect(due.ok && due.data.items.map((r) => r.recordClass)).toEqual(expect.arrayContaining(['document_version', 'evidence_file', 'finding']));
     const awaiting = await a.reviews('isms', { status: 'awaiting_approval', page: 1, pageSize: 50 });
     expect(awaiting.ok && awaiting.data.items.map((r) => r.decidedBy?.handle).sort()).toEqual(['rina', 'sari']);
+    // M3-13: each item lists its files and what the disposal does with them, a file still in use included.
+    const files = [...(due.ok ? due.data.items : []), ...(awaiting.ok ? awaiting.data.items : [])].flatMap((r) => r.files);
+    expect(files.map((f) => f.action)).toEqual(expect.arrayContaining(['delete', 'kept_in_use']));
+    expect(files.find((f) => f.action === 'kept_in_use')?.usedBy).toMatch(/^CMP-/);
     const holds = await a.holds('isms');
     expect(holds.ok && holds.data.map((h) => Boolean(h.releasedAt))).toEqual([false, true]);
     const register = await a.register('isms', 1, 50);
@@ -337,7 +348,13 @@ describe('dialogs in both languages and themes', () => {
         const reset = render(<RuleDialog ctx={ctx} ms="isms" rule={{ ...rule, source: 'set', retainMonths: 60 }} reset onClose={() => undefined} onSaved={() => undefined} />, ctx, theme);
         expect(reset).not.toContain(pick(TEXT.fMonths));
         expect(reset).toContain(pick(TEXT.resetText));
-        for (const html of [decision, reject, hold, release, edit, reset]) expect(html).not.toMatch(FORBIDDEN);
+        // M3-13 (security review 2): the files of an item and what a disposal does with each.
+        const files = render(<FilesList ctx={ctx} files={[...REVIEW.files, { name: 'scan.pdf', repository: 'SharePoint QMS', action: 'owner_asked', usedBy: null }]} />, ctx, theme);
+        for (const p of [TEXT.filesTitle, TEXT.fileDelete, TEXT.fileOwner]) expect(files, p[0]).toContain(pick(p));
+        expect(files).toContain(pick(TEXT.fileKept).replace('{code}', 'EV-0402'));
+        expect(files).toContain('data-file-action="kept_in_use"');
+        expect(render(<FilesList ctx={ctx} files={[]} />, ctx, theme)).not.toContain('data-files');
+        for (const html of [decision, reject, hold, release, edit, reset, files]) expect(html).not.toMatch(FORBIDDEN);
       });
     }
   }

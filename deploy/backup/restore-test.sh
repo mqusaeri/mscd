@@ -33,7 +33,14 @@
 #      that the purge explains pass), restores the copy from before the purge with
 #      "restore.sh --reapply-deletions", and checks that the organisation is deleted again and the
 #      other one intact.
-#   8. Removes everything it made: containers, networks, volumes, images and folders.
+#   8. Erasure of a person (Milestone 3 D.6.5, M3-13): in the remaining organisation it makes an
+#      invented member with an audit entry and an erasure request, sends a pre-deploy copy
+#      off-site, erases the member (through the erasure service in the cli image), waits for the
+#      worker to sign the erasure receipt (the org.lifecycle run that the erasure queues), prints it
+#      with "tenant erasure --print-receipts", restores the copy from before the erasure with
+#      "restore.sh --reapply-erasures", and checks that the member is erased again under the same
+#      pseudonym and that no audit entry holds the member's email.
+#   9. Removes everything it made: containers, networks, volumes, images and folders.
 #
 # --ci-version: prints version=, snapshot=, time= and orgs= of the newest database dump.
 # --ci: the weekly restore test of restore-test.yml. It restores the newest database dump and a
@@ -1190,6 +1197,132 @@ check_purge() {
     fi
 }
 
+# erase_member REQUEST ADMIN: the erasure of the person of a request through PrivacyErasureService,
+# as a Tenant Admin would choose Erase personal data (the cli image holds the compiled server; the
+# test does not sign in through the web app). Prints the pseudonym.
+erase_member() {
+    # shellcheck disable=SC2016  # JavaScript, not shell
+    compose run --rm --no-deps -T --entrypoint node cli -e '
+const { loadConfigOrExit } = require("/app/apps/server/dist/config/run-context");
+const { createErasureCliContext } = require("/app/apps/server/dist/cli/tenant");
+const { PrivacyErasureService } = require("/app/apps/server/dist/modules/privacy/privacy-erasure.service");
+const { TenantResolver } = require("/app/apps/server/dist/modules/tenancy/tenant-resolver");
+(async () => {
+  const config = loadConfigOrExit("cli");
+  const app = await createErasureCliContext(config);
+  try {
+    const org = await app.get(TenantResolver, { strict: false }).resolveBySlug("rtbeta");
+    const principal = {
+      user: { id: process.argv[2], handle: "rt.admin", email: "rt.admin@restore-test.invalid", displayName: "Restore Test Admin", jobTitle: null, kind: "person" },
+      org, session: null,
+    };
+    const result = await app.get(PrivacyErasureService, { strict: false }).erase(principal, process.argv[1]);
+    process.stdout.write(`erased ${JSON.stringify(result.data)}\n`);
+  } finally {
+    await app.close();
+  }
+})().catch((error) => { process.stderr.write(`${error.message}\n`); process.exit(1); });
+' "$1" "$2"
+}
+
+# receipt_signed: the erasure receipt of the test request is signed (by the org.lifecycle run
+# of the worker that the erasure queued).
+receipt_signed() {
+    [[ $(db "select count(*) from org_rtbeta.privacy_request where request_no = 'PR-2026-901' and erasure_receipt_signature is not null") == 1 ]]
+}
+
+check_erasure() {
+    local beta admin member request dump pre_id rc pseudonym again email=rt.member@restore-test.invalid
+    step "Erasure of a person: erase, then a restore from before the erasure (Milestone 3 D.6.5, M3-13)"
+    beta=$(db "select id from platform.organization where slug = 'rtbeta'")
+    [[ -n $beta ]] || die "rtbeta is missing"
+    # An invented Tenant Admin and member (R-19), an audit entry where the member acted and an
+    # erasure request in progress with no system check (the organisation has no system).
+    admin=$(db "insert into platform.app_user (handle, email, display_name) values ('rt.admin', 'rt.admin@restore-test.invalid', 'Restore Test Admin') returning id")
+    member=$(db "insert into platform.app_user (handle, email, display_name) values ('rt.member', '$email', 'Restore Test Member') returning id")
+    db "insert into platform.org_membership (organization_id, user_id, admin_roles) values ('$beta', '$admin', '{tenant_admin}'), ('$beta', '$member', '{}')" >/dev/null
+    db "insert into org_rtbeta.audit_trail (organization_id, actor_user_id, actor_kind, action, entity_type, entity_id, entity_code, after_data)
+        values ('$beta', '$member', 'user', 'restore.test', 'user', '$member', 'rt.member', '{\"email\": \"$email\"}')" >/dev/null
+    request=$(db "insert into org_rtbeta.privacy_request (organization_id, request_no, request_type, status, subject_kind, subject_user_id, subject_name,
+        subject_email, channel, received_at, due_at, identity_check_note, identity_checked_by, created_by, updated_by)
+        values ('$beta', 'PR-2026-901', 'erasure', 'in_progress', 'member', '$member', 'Restore Test Member', '$email', 'email', now(),
+        now() + interval '72 hours', 'Restore test', '$admin', '$admin', '$admin') returning id")
+    [[ -n $admin && -n $member && -n $request ]] || die "The member and the erasure request of the test could not be made"
+    ok "An invented member of rtbeta with an audit entry and an erasure request in progress"
+
+    # The copy from before the erasure, sent off-site as a pre-deploy dump.
+    dump=$STATE/backup/pre-deploy/$(bk_stamp)-before-erasure.dump
+    compose exec -T postgres pg_dump -U postgres --format=custom --dbname=mscd >"$dump"
+    chmod 0600 "$dump"
+    chown "$RUN_UID:$RUN_UID" "$dump"
+    if run_backup pre-erasure --pre-deploy "$dump" && log_has pre-erasure "Pre-deploy dump sent off-site: snapshot"; then
+        pre_id=$(grep -o 'Pre-deploy dump sent off-site: snapshot [0-9a-f]*' "$LOGS/pre-erasure.log" | awk '{print $NF}' | head -n 1)
+        ok "The copy from before the erasure is off-site (pre-deploy snapshot $pre_id)"
+    else
+        show_log pre-erasure 20
+        die "The copy from before the erasure could not be sent off-site"
+    fi
+
+    if erase_member "$request" "$admin" >"$LOGS/erase.log" 2>&1 && log_has erase '^erased '; then
+        pseudonym=$(db "select pseudonym from org_rtbeta.erased_person where erased_user_id = '$member'")
+        ok "The member is erased (${pseudonym:-no pseudonym})"
+    else
+        show_log erase 20
+        die "The erasure of the member failed (log: $LOGS/erase.log)"
+    fi
+    if [[ -n $pseudonym && $(db "select count(*) from org_rtbeta.audit_trail where position('$email' in coalesce(after_data::text, '') || coalesce(before_data::text, '')) > 0") == 0 ]]; then
+        ok "No audit entry of rtbeta holds the member's email"
+    else
+        fail "An audit entry of rtbeta still holds the member's email after the erasure"
+    fi
+    # The erasure queued an org.lifecycle run when it committed; the worker's run signs the receipt.
+    if bk_wait 120 receipt_signed; then
+        ok "The worker signed the erasure receipt with the anchor key (the org.lifecycle run the erasure queued)"
+    else
+        compose logs --no-color --no-log-prefix worker 2>/dev/null | grep -E 'erasure|org.lifecycle' | bk_redact | tail -n 20 >"$LOGS/worker-receipts.log" || true
+        die "The worker did not sign the erasure receipt (log: $LOGS/worker-receipts.log)"
+    fi
+    # The receipt as the email attaches it, printed by "tenant erasure --print-receipts" (the way of
+    # an installation without email): one receipt file per line, rtbeta holds one erasure.
+    install -d -m 0755 "$STATE/receipts"
+    if compose run --rm --no-deps -T cli tenant erasure --print-receipts rtbeta \
+        >"$STATE/receipts/erasure-receipt-rtbeta-PR-2026-901.json" 2>"$LOGS/print-receipts.log" &&
+        [[ $(wc -l <"$STATE/receipts/erasure-receipt-rtbeta-PR-2026-901.json") -eq 1 ]] &&
+        grep -q '"mscd.erasure-receipt"' "$STATE/receipts/erasure-receipt-rtbeta-PR-2026-901.json" &&
+        grep -q 'PR-2026-901: erasure-receipt-rtbeta-PR-2026-901.json' "$LOGS/print-receipts.log"; then
+        ok "tenant erasure --print-receipts printed the signed receipt of rtbeta, one receipt file"
+    else
+        cat "$LOGS/print-receipts.log" >&2 || true
+        die "tenant erasure --print-receipts did not print the signed receipt (log: $LOGS/print-receipts.log)"
+    fi
+    chmod 0644 "$STATE/receipts/erasure-receipt-rtbeta-PR-2026-901.json"
+    if grep -q "$email" "$STATE/receipts/erasure-receipt-rtbeta-PR-2026-901.json"; then fail "The erasure receipt names the member"; else ok "The erasure receipt names no person"; fi
+
+    # A restore from the copy before the erasure brings the member back; the receipt erases them again.
+    rc=0
+    backup_env
+    bash "$SCRIPT_DIR/restore.sh" --install-dir "$STATE" --yes --no-timer --keep-secrets --snapshot "$pre_id" \
+        --reapply-erasures "$STATE/receipts" >"$LOGS/restore-erasure.log" 2>&1 || rc=$?
+    if ((rc == 0)) && log_has restore-erasure "The restore is done" && log_has restore-erasure "the person is erased again"; then
+        ok "restore.sh --reapply-erasures restored the copy from before the erasure and erased the member again"
+    else
+        show_log restore-erasure 40
+        die "restore.sh --reapply-erasures failed with exit code $rc (log: $LOGS/restore-erasure.log)"
+    fi
+    again=$(db "select pseudonym from org_rtbeta.erased_person where erased_user_id = '$member'")
+    if [[ -n $again && $again == "$pseudonym" ]]; then
+        ok "The pseudonym is back after the restore ($again)"
+    else
+        fail "After the restore the member has the pseudonym '${again:-none}', not '$pseudonym'"
+    fi
+    if [[ $(db "select count(*) from org_rtbeta.audit_trail where position('$email' in coalesce(after_data::text, '') || coalesce(before_data::text, '')) > 0") == 0 &&
+        $(db "select count(*) from platform.org_membership where organization_id = '$beta' and user_id = '$member' and deleted_at is null") == 0 ]]; then
+        ok "After the restore no audit entry holds the member's email and the membership is removed again"
+    else
+        fail "After the restore the member's email or membership is back"
+    fi
+}
+
 local_down_quiet() {
     local id
     if [[ -n $OFFSITE ]]; then docker rm -f -v "$OFFSITE" >/dev/null 2>&1 || true; fi
@@ -1269,6 +1402,7 @@ local_main() {
     check_restore
     check_ci
     check_purge
+    check_erasure
 
     if ((FAILURES > 0)); then
         printf '\n%s%d check(s) failed%s, %d passed.\n' "$C_RED" "$FAILURES" "$C_RESET" "$CHECKS"

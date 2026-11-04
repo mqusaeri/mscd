@@ -538,8 +538,10 @@ describe('requests from one person (Milestone 3 D.6)', () => {
         expect(JSON.stringify(row), row.action).not.toMatch(/staff14|Staff 14|nusantaradigital/);
         if (row.action === 'user.updated') expect(row).toMatchObject({ source_ip: null, user_agent: null });
       }
+      // Two sets, each under its own attestation (M3-13): the person's own entries and those about the account, then the
+      // other entries that hold the email or the handle (the competence record about the person).
       const attestations = await rowsOf<{ action: string }>(db, ORG, sql`select action from audit_trail where action = 'privacy.audit_redacted' and entity_id = ${id}`);
-      expect(attestations).toHaveLength(1);
+      expect(attestations).toHaveLength(2);
       const verifier = ctx.moduleRef.get(AuditChainVerifier);
       const tenantChain = await verifier.verifyTenant({ orgId: ORG_IDS[ORG], schema: `org_${ORG}` });
       expect(tenantChain).toMatchObject({ firstBrokenSeq: null });

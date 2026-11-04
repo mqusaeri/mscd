@@ -169,7 +169,7 @@ test.describe('My data of My account @sample-only', () => {
       await expect(dialog(page)).toContainText('Koreksi nama dan jabatan Anda');
       await expectOverlayReadable(page);
       await page.keyboard.press('Escape');
-      await id.locator('button', { hasText: 'Minta kepada organisasi' }).click();
+      await id.locator('button', { hasText: /^Ajukan permintaan$/ }).click();
       await expect(dialog(page)).toContainText('Yang Anda minta');
       await expectOverlayReadable(page);
     });

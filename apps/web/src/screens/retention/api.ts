@@ -20,10 +20,11 @@ export const fromReview = (r: RetentionReviewItem): ReviewModel => ({
   id: r.id, recordClass: r.recordClass, itemId: r.itemId, itemCode: r.itemCode, itemTitle: r.itemTitle, retentionEndsOn: r.retentionEndsOn, status: r.status,
   decision: r.decision, decidedBy: r.decidedBy, decidedAt: r.decidedAt, reason: r.reason, keepUntil: r.keepUntil, approvedBy: r.approvedBy,
   approvedAt: r.approvedAt, rejectedNote: r.rejectedNote, disposedAt: r.disposedAt, fileAction: r.fileAction, fileRemovedAt: r.fileRemovedAt, onHold: r.onHold,
+  files: r.files.map((f) => ({ ...f })),
 });
 
 export const fromRegister = (r: RetentionRegisterItem): RegisterModel => {
-  const { onHold: _onHold, ...rest } = fromReview({ ...r, onHold: false });
+  const { onHold: _onHold, files: _files, ...rest } = fromReview({ ...r, onHold: false, files: [] });
   return { ...rest, retainMonths: r.retainMonths };
 };
 

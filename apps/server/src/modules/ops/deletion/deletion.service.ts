@@ -39,7 +39,7 @@ import {
   tenantAdminsOf,
   type DeletionRow,
 } from './deletion-records';
-import { confirmationMismatch } from './organization-transitions';
+import { confirmationMismatch, statusName } from './organization-transitions';
 
 /** The organisation row the deletion routes read. */
 interface OrgRow {
@@ -103,8 +103,8 @@ export class DeletionService {
         if (org.status !== 'archived') {
           throw conflict(
             'deletion_not_archived',
-            `Organisation ${org.slug} is ${org.status}: only an archived organisation has a deletion date`,
-            `Organisasi ${org.slug} berstatus ${org.status}: hanya organisasi yang diarsipkan yang memiliki tanggal penghapusan`,
+            `Organisation ${org.slug} is ${statusName(org.status, 0)}: only an archived organisation has a deletion date`,
+            `Organisasi ${org.slug} berstatus ${statusName(org.status, 1)}: hanya organisasi yang diarsipkan yang memiliki tanggal penghapusan`,
           );
         }
         if (body.confirmSlug !== org.slug) throw confirmationMismatch(org.slug, 'archived');
@@ -113,15 +113,15 @@ export class DeletionService {
         if (scheduledFor.getTime() < earliest.getTime()) {
           throw conflict(
             'deletion_too_soon',
-            `The deletion of ${org.slug} cannot be earlier than ${earliest.toISOString()} (archived on ${localDate(archived, org.time_zone)} plus ${lifecyclePeriods(this.config).minGraceDays} days)`,
-            `Penghapusan ${org.slug} tidak boleh lebih awal dari ${earliest.toISOString()} (diarsipkan pada ${localDate(archived, org.time_zone)} ditambah ${lifecyclePeriods(this.config).minGraceDays} hari)`,
+            `The deletion of ${org.slug} cannot be earlier than ${localDate(earliest, org.time_zone)} (archived on ${localDate(archived, org.time_zone)} plus ${lifecyclePeriods(this.config).minGraceDays} days)`,
+            `Penghapusan ${org.slug} tidak boleh lebih awal dari ${localDate(earliest, org.time_zone)} (diarsipkan pada ${localDate(archived, org.time_zone)} ditambah ${lifecyclePeriods(this.config).minGraceDays} hari)`,
           );
         }
         if (scheduledFor.getTime() < now.getTime()) {
           throw conflict(
             'deletion_too_soon',
-            `The deletion date ${body.scheduledFor} of ${org.slug} is in the past; choose now or later`,
-            `Tanggal penghapusan ${body.scheduledFor} untuk ${org.slug} sudah lewat; pilih sekarang atau sesudahnya`,
+            `The deletion date ${localDate(scheduledFor, org.time_zone)} of ${org.slug} is in the past; choose now or later`,
+            `Tanggal penghapusan ${localDate(scheduledFor, org.time_zone)} untuk ${org.slug} sudah lewat; pilih sekarang atau sesudahnya`,
           );
         }
         const open = await openDeletion(trx, org.id, { lock: true });
@@ -305,12 +305,18 @@ export class DeletionService {
           });
         }
         if (open.status === 'scheduled') {
-          if (org.status !== 'archived') throw conflict('deletion_not_archived', `Organisation ${org.slug} is ${org.status}; only an archived organisation can be purged`, `Organisasi ${org.slug} berstatus ${org.status}; hanya organisasi yang diarsipkan yang dapat dihapus`);
+          if (org.status !== 'archived') {
+            throw conflict(
+              'deletion_not_archived',
+              `Organisation ${org.slug} is ${statusName(org.status, 0)}; only an archived organisation can be purged`,
+              `Organisasi ${org.slug} berstatus ${statusName(org.status, 1)}; hanya organisasi yang diarsipkan yang dapat dihapus`,
+            );
+          }
           if (open.scheduled_for.getTime() > now.getTime()) {
             throw conflict(
               'deletion_too_soon',
-              `The deletion of ${org.slug} is due on ${open.scheduled_for.toISOString()}; nobody starts a purge before its date (move the date first if the customer asked in writing)`,
-              `Penghapusan ${org.slug} jatuh tempo pada ${open.scheduled_for.toISOString()}; tidak ada yang memulai penghapusan sebelum tanggalnya`,
+              `The deletion of ${org.slug} is due on ${localDate(open.scheduled_for, org.time_zone)}; nobody starts a purge before its date (move the date first if the customer asked in writing)`,
+              `Penghapusan ${org.slug} jatuh tempo pada ${localDate(open.scheduled_for, org.time_zone)}; tidak ada yang memulai penghapusan sebelum tanggalnya (pindahkan tanggalnya terlebih dahulu jika pelanggan memintanya secara tertulis)`,
             );
           }
           await trx.updateTable('platform.organization_deletion').set({ status: 'running' }).where('id', '=', open.id).execute();

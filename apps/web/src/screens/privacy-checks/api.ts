@@ -8,7 +8,7 @@ import type { CheckRow, PrivacyChecksAdapter } from './model';
 import { ROUTES } from './routes';
 
 export const fromItem = (c: PrivacyCheckItem): CheckRow => ({
-  id: c.id, requestNo: c.requestNo, type: c.type, subject: { name: c.subject.name, handle: c.subject.handle }, dueAt: c.dueAt, status: c.status, doneAt: c.doneAt,
+  id: c.id, requestNo: c.requestNo, type: c.type, subject: c.subject ? { name: c.subject.name, handle: c.subject.handle } : null, requestClosed: c.requestClosed, dueAt: c.dueAt, status: c.status, doneAt: c.doneAt,
 });
 
 export function createApiAdapter(client: ApiClient | null): PrivacyChecksAdapter {

@@ -8,6 +8,11 @@
 // still links from row to row and the signed anchors still verify; the verifier (chain-verifier.ts) accepts a redacted
 // row only through its attestation.
 //
+// M3-13 (decision 18): the mode `clear_disposed` (platform/0010) is the redaction of the entries of a record an approved
+// disposal cleared: tenant chain only, no replacement values, every listed row about a disposed record or a child row of
+// one; every value inside before_data and after_data becomes null with its key kept, and the attestation has the same
+// form, so the chain verifier and `export verify` need no change.
+//
 // This service runs the function in the caller's transaction, so the redaction commits with the rest of the work.
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
@@ -43,6 +48,11 @@ export interface RedactionAttestation {
 export interface RedactionRequest {
   /** `platform` for `platform.audit_log`, or the tenant schema (`org_<slug>`) of the organisation's `audit_trail`. */
   chain: 'platform' | { schema: string };
+  /**
+   * `replace` (default): the personal values of `replacements` become pseudonyms. `clear_disposed`: the values of the
+   * entries of a disposed record become null (a tenant chain; `replacements` must be empty).
+   */
+  mode?: 'replace' | 'clear_disposed';
   /** The rows to redact; rows with nothing to remove stay as they are. */
   seqs: readonly (string | number | bigint)[];
   /**
@@ -83,6 +93,7 @@ export class AuditRedactor {
     const redactionId = request.redactionId ?? randomUUID();
     const attestation = request.attestation;
     const payload = {
+      mode: request.mode ?? 'replace',
       values: Object.fromEntries(Object.entries(request.replacements).filter(([value, pseudonym]) => value.trim().length >= 3 && pseudonym !== '')),
       attestation: {
         action: attestation.action,

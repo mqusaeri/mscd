@@ -280,7 +280,7 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
   },
   'SOD-SELF-GRANT': {
     en: 'You cannot decide a role grant that you requested or that names you. Another Tenant Admin must decide it.',
-    id: 'Anda tidak dapat memutuskan pemberian peran yang Anda minta atau yang menyebut Anda. Admin Tenant lain harus memutuskannya.',
+    id: 'Anda tidak dapat memutuskan pemberian peran yang Anda minta atau yang menyebut Anda. Tenant Admin lain harus memutuskannya.',
   },
   // Milestone 3 J.6 (written by M3-01; used by M3-04 to M3-07)
   'ACK-OPEN-FIRST': {
@@ -312,8 +312,8 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, RuleMessageTemplate>> = {
     id: 'Anda tidak dapat memutuskan akses Anda sendiri. Peninjau lain harus memutuskan item ini.',
   },
   'ERASE-OPEN-ITEMS': {
-    en: '{person} still holds {count} open items. Hand them over to someone else first, then erase the person.',
-    id: '{person} masih memegang {count} item terbuka. Serahkan item tersebut kepada orang lain terlebih dahulu, lalu hapus orang tersebut.',
+    en: '{person} still holds {count} open items. Hand them over to someone else first, then erase their personal data.',
+    id: '{person} masih memegang {count} item terbuka. Serahkan item tersebut kepada orang lain terlebih dahulu, lalu hapus data pribadinya.',
     defaults: { person: { en: 'This person', id: 'Orang ini' }, count: { en: 'some', id: 'beberapa' } },
   },
   'REVIEW-SINGLE-ADMIN': {

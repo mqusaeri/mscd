@@ -386,7 +386,7 @@ describe('My data (M3-04)', () => {
     const copy = await adapter.requestMyData({ name: 'Rina Kusuma', email: 'rina.kusuma@nusantaradigital.co.id', jobTitle: 'ISMS Manager' });
     if (!copy.ok || !('file' in copy.data)) throw new Error('no file');
     expect(copy.data.file.fileName).toMatch(/^personal-data-rina\.kusuma-\d{4}-\d{2}-\d{2}\.json$/);
-    expect(JSON.parse(copy.data.file.text)).toMatchObject({ format: 'mscd-personal-data-v1', account: { displayName: 'Rina Kusuma', jobTitle: 'ISMS Manager' } });
+    expect(JSON.parse(copy.data.file.text)).toMatchObject({ format: 'mscd-personal-data-v2', account: { displayName: 'Rina Kusuma', jobTitle: 'ISMS Manager' } });
     expect(await adapter.myDataState('x')).toEqual({ ok: true, data: { status: 'succeeded', downloadUrl: null } });
     expect(await adapter.correctProfile({ displayName: ' ', jobTitle: null })).toMatchObject({ ok: false, error: { status: 400 } });
     expect(await adapter.correctProfile({ displayName: 'Rina K.', jobTitle: null })).toEqual({ ok: true, data: null });
@@ -419,6 +419,10 @@ describe('My data (M3-04)', () => {
         expect(correct).toContain('value="Rina Kusuma"');
         const ask = render(<AskDialog ctx={ctx} adapter={adapter} open onClose={() => undefined} onSent={() => undefined} />, ctx, theme);
         for (const p of [TEXT.askTitle, TEXT.askSub, TEXT.askType, ASK_TEXT.rectification, ASK_TEXT.restriction, ASK_TEXT.erasure, TEXT.askNote, TEXT.askSend]) expect(ask, p[0]).toContain(tr(p));
+        // M3-13 (texts F1): what a stop to the use and an erasure mean, under each choice and named by it.
+        for (const p of [TEXT.askRestrictionHint, TEXT.askErasureHint]) expect(ask, p[0]).toContain(tr(p));
+        expect(ask).toContain('aria-describedby="my-privacy-hint-erasure"');
+        expect(ask).toContain('id="my-privacy-hint-restriction"');
         const rows = [REQUEST, { ...REQUEST, id: 'b', requestNo: 'PR-2026-002', type: 'access' as const, status: 'completed' as const, closedAt: '2026-10-31T02:00:00Z' }];
         const table = render(<MyRequestsTable ctx={ctx} rows={rows} />, ctx, theme);
         for (const p of [TEXT.colRequest, TEXT.colType, TEXT.colStatus, TEXT.colReceived, TEXT.colDue, MY_TYPE_TEXT.rectification, MY_TYPE_TEXT.access, MY_STATUS_TEXT.received, MY_STATUS_TEXT.completed]) expect(table, p[0]).toContain(tr(p));

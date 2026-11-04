@@ -1,7 +1,8 @@
 // platform.secure_tenant_schema and platform.secure_platform_schema (C.4): idempotent, and refusing what they
 // cannot secure.
 import { sql, type Kysely } from 'kysely';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createKysely } from '../../../src/db/kysely';
 import type { CreatedTenant } from '../../../src/db/tenant-provisioner';
 import type { DB } from '../../../src/db/types';
 import { createTenant } from '../../setup/global-db';
@@ -97,6 +98,8 @@ describe('secure functions (C.4)', () => {
     expect(rows.map((r) => r.proname)).toEqual([
       'assert_member',
       'audit_canonical_text',
+      // Milestone 3 platform 0010 (M3-13): the values of a disposed record's audit entries become null.
+      'audit_null_json',
       // Milestone 3 platform 0008 (M3-03, D.5.4): the redaction helpers of attested redaction.
       'audit_redact_json',
       'audit_redact_text',
@@ -114,5 +117,47 @@ describe('secure functions (C.4)', () => {
       'set_updated_at',
     ]);
     for (const row of rows) expect([row.proname, row.config]).toEqual([row.proname, ['search_path=pg_catalog, platform']]);
+  });
+
+  // M3-13 (security review 5): the report login of on-premise installations never reads the requests from one person.
+  describe('the report role mscd_report', () => {
+    const EXCLUDED = ['privacy_request', 'privacy_check', 'erased_person', 'audit_trail', 'storage_credential'] as const;
+    let admin: Kysely<DB>;
+
+    beforeAll(async () => {
+      admin = createKysely<DB>({ connectionString: db.urls.admin, max: 1, applicationName: 'mscd-test-report-role' });
+      // The role is cluster-wide (the bootstrap test of the report role makes it too): create it when missing.
+      await sql`do $$ begin if not exists (select 1 from pg_roles where rolname = 'mscd_report') then create role mscd_report nologin; end if; end $$`.execute(admin);
+    });
+    afterAll(async () => {
+      await admin?.destroy();
+    });
+
+    /** Selects one row of a tenant table as mscd_report; resolves with the error code, or null when the right is there. */
+    async function selectAsReport(schema: string, table: string): Promise<string | null> {
+      try {
+        await admin.transaction().execute(async (trx) => {
+          await sql`set local role mscd_report`.execute(trx);
+          await sql`select 1 from ${sql.id(schema, table)} limit 1`.execute(trx);
+        });
+        return null;
+      } catch (error) {
+        return (error as { code?: string }).code ?? 'error';
+      }
+    }
+
+    it('cannot read the requests from one person, the checks and the erased people of an existing schema', async () => {
+      // An existing schema: the right granted by an earlier version of the function, then the function of platform 0010.
+      await sql`grant select on ${sql.id(tenant.schemaName, 'privacy_request')} to mscd_report`.execute(admin);
+      await sql`select platform.secure_tenant_schema(${tenant.schemaName})`.execute(db.migrator);
+      for (const table of EXCLUDED) expect([table, await selectAsReport(tenant.schemaName, table)]).toEqual([table, '42501']);
+      expect(await selectAsReport(tenant.schemaName, 'risk')).toBeNull();
+    });
+
+    it('cannot read them in a new schema either', async () => {
+      const created = await createTenant(db, 'reportnew');
+      for (const table of EXCLUDED) expect([table, await selectAsReport(created.schemaName, table)]).toEqual([table, '42501']);
+      expect(await selectAsReport(created.schemaName, 'finding')).toBeNull();
+    });
   });
 });

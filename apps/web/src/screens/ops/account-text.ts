@@ -39,7 +39,7 @@ export const ACCOUNT_TEXT = {
   accountsFailed: ['The accounts could not be loaded.', 'Akun tidak dapat dimuat.'],
   noMatch: ['No account matches the search or the filters.', 'Tidak ada akun yang cocok dengan pencarian atau filter.'],
   noAccounts: ['No account yet', 'Belum ada akun'],
-  roleTenantAdmin: ['Tenant Admin', 'Admin tenant'],
+  roleTenantAdmin: ['Tenant Admin', 'Tenant Admin'],
   roleStorageAdmin: ['Storage Admin', 'Admin penyimpanan'],
   roleMember: ['Member', 'Anggota'],
   // Drawer
@@ -129,7 +129,7 @@ export const ACCOUNT_TEXT = {
   effResetMfa2: ['Every session of the account ends. At the next sign-in the person sets up a new authenticator.', 'Setiap sesi akun berakhir. Saat masuk berikutnya, orang tersebut mengatur autentikator baru.'],
   effEmail: ['The account is told by email.', 'Akun diberi tahu melalui email.'],
   effPassword1: ['A one-time link to choose a new password is emailed to the account. It works for 30 minutes.', 'Tautan sekali pakai untuk memilih kata sandi baru dikirim ke email akun. Tautan berlaku selama 30 menit.'],
-  effPassword2: ['Older password links stop working. The password changes only when the person uses the link.', 'Tautan kata sandi lama tidak berlaku lagi. Kata sandi baru berubah saat orang tersebut memakai tautan.'],
+  effPassword2: ['Older password links stop working. The password changes only when the person uses the link.', 'Tautan kata sandi lama tidak berlaku lagi. Kata sandi hanya berubah saat orang tersebut memakai tautan.'],
   effSessions1: ['Every session of the account ends, in every organisation.', 'Setiap sesi akun berakhir, di setiap organisasi.'],
   effSessions2: ['The person can sign in again right away.', 'Orang tersebut dapat langsung masuk kembali.'],
   effDisable1: ['The account cannot sign in to any organisation, and every session ends.', 'Akun tidak dapat masuk ke organisasi mana pun, dan setiap sesi berakhir.'],

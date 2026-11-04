@@ -100,8 +100,8 @@ export function createSampleAdapter(
       if (!approve && !note?.trim()) return refuse(400, ['Invalid request', 'Invalid request'], { slug: 'validation', errors: [{ path: 'body.note', message: 'A rejection needs a note' }] });
       if (e.status !== 'requested') {
         return refuse(409, [
-          `This export is ${e.status}. Only an export that waits for approval can be approved or rejected.`,
-          `Ekspor ini berstatus ${e.status}. Hanya ekspor yang menunggu persetujuan yang dapat disetujui atau ditolak.`,
+          'This export no longer waits for approval, so it cannot be approved or rejected.',
+          'Ekspor ini tidak lagi menunggu persetujuan, sehingga tidak dapat disetujui atau ditolak.',
         ], { slug: 'conflict', messageKey: 'export_not_requested' });
       }
       const person = getPerson();

@@ -71,7 +71,8 @@ describe('Accounts routes', () => {
   });
 
   it('every text has both languages, Indonesian that differs, and no em dash or centre dot', () => {
-    expect(textProblems(ACCOUNT_TEXT, ['colStatus', 'factStatus', 'confirmTitle', 'colOperator'])).toEqual([]);
+    // M3-13 (texts A4): the Indonesian screens keep the English role name Tenant Admin.
+    expect(textProblems(ACCOUNT_TEXT, ['colStatus', 'factStatus', 'confirmTitle', 'colOperator', 'roleTenantAdmin'])).toEqual([]);
   });
 });
 

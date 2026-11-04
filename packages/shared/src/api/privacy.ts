@@ -131,6 +131,21 @@ export const PrivacyRequestAction = named(
 );
 export type PrivacyRequestAction = z.infer<typeof PrivacyRequestAction>;
 
+export const PrivacyErasureImpact = named(
+  'PrivacyErasureImpact',
+  z.object({
+    /** Entries of the organisation's audit trail that the erasure redacts and that change. */
+    tenantEntries: z.int().min(0),
+    /** This organisation's entries of the provider's platform audit log that change. */
+    platformEntries: z.int().min(0),
+    /** Active legal holds on competence records about the person or on records the person owns. */
+    legalHolds: z.int().min(0),
+  }),
+  'What erasing the person will change, shown before erasing: audit entries per chain and legal holds (M3-13); the erasure still runs (H.12)',
+  { valid: [{ tenantEntries: 42, platformEntries: 3, legalHolds: 0 }], invalid: [{ tenantEntries: -1, platformEntries: 0, legalHolds: 0 }, { tenantEntries: 1 }] },
+);
+export type PrivacyErasureImpact = z.infer<typeof PrivacyErasureImpact>;
+
 export const PrivacyRequestDetail = named(
   'PrivacyRequestDetail',
   z.object({
@@ -145,10 +160,15 @@ export const PrivacyRequestDetail = named(
     actions: z.array(PrivacyRequestAction),
     /** The background task of the person export of an access request, once queued. */
     exportTaskId: Uuid.nullable(),
+    /** An erasure in progress that has not run yet: what it will change (M3-13); null otherwise. */
+    erasureImpact: PrivacyErasureImpact.nullable(),
   }),
-  'GET /admin/privacy-requests/{id}: one request with its system checks, the steps taken and the result (Milestone 3 D.6)',
+  'GET /admin/privacy-requests/{id}: one request with its system checks, the steps taken, the result and, for an erasure in progress, what it will change (Milestone 3 D.6)',
   {
-    valid: [{ ...EXAMPLE_REQUEST, note: null, identityCheckNote: 'Identity checked by video call', identityCheckedBy: { handle: 'tenant.admin', displayName: 'Tenant Admin' }, outcome: null, result: null, checks: [EXAMPLE_CHECK], actions: [], exportTaskId: null }],
+    valid: [
+      { ...EXAMPLE_REQUEST, note: null, identityCheckNote: 'Identity checked by video call', identityCheckedBy: { handle: 'tenant.admin', displayName: 'Tenant Admin' }, outcome: null, result: null, checks: [EXAMPLE_CHECK], actions: [], exportTaskId: null, erasureImpact: null },
+      { ...EXAMPLE_REQUEST, type: 'erasure', note: null, identityCheckNote: 'Identity checked by video call', identityCheckedBy: null, outcome: null, result: null, checks: [EXAMPLE_CHECK], actions: [], exportTaskId: null, erasureImpact: { tenantEntries: 42, platformEntries: 3, legalHolds: 1 } },
+    ],
     invalid: [EXAMPLE_REQUEST],
   },
 );
@@ -196,7 +216,7 @@ export type PrivacyClose = z.infer<typeof PrivacyClose>;
 
 const EXAMPLE_CHECK_ITEM = {
   id: '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f', requestNo: 'PR-2026-004', type: 'erasure', subject: { name: 'Andi Wijaya', handle: null },
-  dueAt: '2026-11-02T09:00:00Z', status: 'open', doneAt: null,
+  requestClosed: false, dueAt: '2026-11-02T09:00:00Z', status: 'open', doneAt: null,
 } as const;
 
 export const PrivacyCheckItem = named(
@@ -205,13 +225,19 @@ export const PrivacyCheckItem = named(
     id: Uuid,
     requestNo: PrivacyRequestNo,
     type: PrivacyRequestType,
-    subject: z.object({ name: z.string(), handle: z.string().nullable() }),
+    /** The person; null once the request is closed, when the list shows only the request number (M3-13, ISO m8). */
+    subject: z.object({ name: z.string(), handle: z.string().nullable() }).nullable(),
+    /** The request is completed, refused or withdrawn. */
+    requestClosed: z.boolean(),
     dueAt: Instant,
     status: PrivacyCheckStatus,
     doneAt: Instant.nullable(),
   }),
-  'A personal data check of this system: the request type, the person, the due time and the status (Milestone 3 D.6.4)',
-  { valid: [EXAMPLE_CHECK_ITEM, { ...EXAMPLE_CHECK_ITEM, status: 'done', doneAt: '2026-10-31T04:00:00Z' }], invalid: [{ ...EXAMPLE_CHECK_ITEM, status: 'closed' }] },
+  'A personal data check of this system: the request type, the person while the request is open, the due time and the status (Milestone 3 D.6.4)',
+  {
+    valid: [EXAMPLE_CHECK_ITEM, { ...EXAMPLE_CHECK_ITEM, status: 'done', doneAt: '2026-10-31T04:00:00Z', subject: null, requestClosed: true }],
+    invalid: [{ ...EXAMPLE_CHECK_ITEM, status: 'closed' }, { ...EXAMPLE_CHECK_ITEM, requestClosed: undefined }],
+  },
 );
 export type PrivacyCheckItem = z.infer<typeof PrivacyCheckItem>;
 
@@ -285,7 +311,7 @@ export const privacyRequestsCreateRoute = defineRoute({
 });
 export const privacyRequestsGetRoute = defineRoute({
   ...admin, id: 'privacy-requests.get', method: 'GET', path: '/api/v1/admin/privacy-requests/:id',
-  summary: 'One request with its system checks, the steps taken and the result',
+  summary: 'One request with its system checks, the steps taken, the result and, for an erasure in progress, the audit entries and legal holds it touches',
   params: IdParams, response: PrivacyRequestDetail, errors: [404],
 });
 export const privacyRequestsUpdateRoute = defineRoute({
@@ -305,7 +331,7 @@ export const privacyRequestsRestrictRoute = defineRoute({
 });
 export const privacyRequestsEraseRoute = defineRoute({
   ...admin, id: 'privacy-requests.erase', method: 'POST', path: '/api/v1/admin/privacy-requests/:id/erase',
-  summary: 'Erase the person in this organisation under a pseudonym after every system check (422 ERASE-OPEN-ITEMS, 409 last_tenant_admin; audited privacy_request.erased)',
+  summary: 'Erase the person in this organisation under a pseudonym after every system check (422 ERASE-OPEN-ITEMS, 409 last_tenant_admin, 409 privacy.name_changed; audited privacy_request.erased)',
   params: IdParams, body: PrivacyErase, response: CommandResult, errors: [404, 409, 422],
 });
 export const privacyRequestsCloseRoute = defineRoute({
@@ -321,7 +347,7 @@ export const personExportCreateRoute = defineRoute({
 });
 export const privacyChecksListRoute = defineRoute({
   ...assist, id: 'privacy-checks.list', method: 'GET', path: '/api/v1/ms/:ms/privacy-checks',
-  summary: 'The personal data checks of this system: request type, person, due time and status, open first',
+  summary: 'The personal data checks of this system: request type, person (while the request is open), due time and status, open first',
   params: MsParams, response: z.array(PrivacyCheckItem), errors: [404],
 });
 export const privacyChecksMentionsRoute = defineRoute({
@@ -353,8 +379,8 @@ export const meDataExportRoute = defineRoute({
 });
 export const meProfileRoute = defineRoute({
   ...self, id: 'me.profile', method: 'PATCH', path: '/api/v1/me/profile',
-  summary: 'Correct one\'s own display name and job title (audited user.updated)',
-  body: MyProfilePatch, response: NoBody, status: 204, errors: [422],
+  summary: 'Correct one\'s own display name and job title (409 privacy.erasure_pending for a new name while the caller\'s erasure request is open; audited user.updated)',
+  body: MyProfilePatch, response: NoBody, status: 204, errors: [409, 422],
 });
 
 export const routes: RouteDef[] = [

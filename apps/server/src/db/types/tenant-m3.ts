@@ -44,6 +44,11 @@ export interface PrivacyRequestTable extends TenantColumns {
   closed_at: Date | null;
   outcome: string | null;
   result: NullableJson;
+  /** The erasure receipt (tenant/0011, M3-13): names no person; signed and emailed by the worker. */
+  erasure_receipt: NullableJson;
+  erasure_receipt_signature: string | null;
+  erasure_receipt_key_id: string | null;
+  erasure_receipt_sent_at: Date | null;
 }
 
 /** `privacy_check`: the check of one management system for an access or erasure request (D.6.4). */
@@ -233,6 +238,7 @@ export const TABLE_COLUMNS = tableColumns<TenantMilestone3Tables>()({
   privacy_request: [
     'id', ...STANDARD, 'request_no', 'request_type', 'status', 'subject_kind', 'subject_user_id', 'subject_name', 'subject_email', 'channel',
     'received_at', 'due_at', 'identity_check_note', 'identity_checked_by', 'handled_by', 'closed_at', 'outcome', 'result',
+    'erasure_receipt', 'erasure_receipt_signature', 'erasure_receipt_key_id', 'erasure_receipt_sent_at',
   ],
   privacy_check: ['id', ...STANDARD, 'privacy_request_id', 'management_system_id', 'status', 'done_by', 'done_at', 'note'],
   erased_person: ['erased_user_id', ...STANDARD, 'pseudonym', 'privacy_request_id', 'erased_at', 'erased_by'],

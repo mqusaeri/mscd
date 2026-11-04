@@ -245,7 +245,8 @@ export const NOT_SEARCHED: Readonly<Record<string, Readonly<Record<string, strin
   prioritized_activity: columns(WHY.code, ['code']),
   privacy_check: columns(WHY.request, ['note', 'status']),
   privacy_request: columns(WHY.request, [
-    'channel', 'identity_check_note', 'outcome', 'request_no', 'request_type', 'result', 'status', 'subject_email', 'subject_kind', 'subject_name',
+    'channel', 'erasure_receipt', 'erasure_receipt_key_id', 'erasure_receipt_signature', 'identity_check_note', 'outcome', 'request_no', 'request_type',
+    'result', 'status', 'subject_email', 'subject_kind', 'subject_name',
   ]),
   process: columns(WHY.code, ['code']),
   quality_objective: { ...columns(WHY.code, ['code']), ...columns(WHY.status, ['status']) },

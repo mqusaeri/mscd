@@ -1,8 +1,9 @@
 // The drawer of one personal data request (MILESTONE-3 M3-04, D.6): what the person asked for and when it is due, the
 // system checks with who did them, what was done, the steps taken, and the actions of the request's type: "Start work"
 // with the identity check, "Prepare a copy of the data" (access), "Correct name or job title" (correction), "Stop using
-// the data" (restriction), "Erase the person" (erasure, a confirmation that names what stays and asks for the word
-// ERASE), "Close with the answer", "Refuse", "Record withdrawal" and "Add note". A button that cannot run yet says why.
+// the data" (restriction), "Erase personal data" (erasure, a confirmation that names what changes, the audit entries
+// and legal holds it touches, and what stays, and asks for the word ERASE), "Close with the answer", "Refuse", "Record
+// withdrawal" and "Add note". A button that cannot run yet says why.
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiResult } from '../../data/api/ApiClient';
 import { useMutation } from '../api';
@@ -198,6 +199,7 @@ export function RequestView({ ctx, adapter, detail: d, initialDialog = null }: {
       {acts.exportData.shown && task ? (
         <Alert tone="info">
           <div>{ctx.li(TEXT.exportQueued)}</div>
+          <div style={{ marginTop: 8 }} data-hint="access">{ctx.li(TEXT.accessHint)}</div>
           <div style={{ marginTop: 8 }}><Button onClick={() => checkExport(task)}>{ctx.li(TEXT.exportReady)}</Button></div>
         </Alert>
       ) : null}
@@ -308,12 +310,20 @@ export function RequestView({ ctx, adapter, detail: d, initialDialog = null }: {
         open={dialog === 'erase'}
         title={ctx.fill(TEXT.eraseTitle, { no: d.requestNo })}
         tone="bad"
-        body={d.subject.kind === 'member' ? (
-          <div className="mx-stack" data-erase="member">
-            <p style={{ margin: 0 }}>{ctx.li(TEXT.eraseBody)}</p>
-            <p style={{ margin: 0 }}>{ctx.li(TEXT.eraseStays)}</p>
+        body={(
+          <div className="mx-stack" data-erase={d.subject.kind}>
+            <p style={{ margin: 0 }}>{ctx.li(d.subject.kind === 'member' ? TEXT.eraseBody : TEXT.eraseOther)}</p>
+            {d.erasureImpact ? (
+              <p style={{ margin: 0 }} data-erase-impact="entries">
+                {ctx.fill(TEXT.eraseImpact, { n: String(d.erasureImpact.tenantEntries), p: String(d.erasureImpact.platformEntries) })}
+              </p>
+            ) : null}
+            {d.erasureImpact && d.erasureImpact.legalHolds > 0 ? (
+              <Alert tone="warn"><span data-erase-impact="holds">{ctx.fill(TEXT.eraseHolds, { n: String(d.erasureImpact.legalHolds) })}</span></Alert>
+            ) : null}
+            {d.subject.kind === 'member' ? <p style={{ margin: 0 }}>{ctx.li(TEXT.eraseStays)}</p> : null}
           </div>
-        ) : <div className="mx-stack" data-erase="other"><p style={{ margin: 0 }}>{ctx.li(TEXT.eraseOther)}</p></div>}
+        )}
         confirmLabel={TEXT.erase}
         requireText={d.subject.kind === 'member' ? 'ERASE' : undefined}
         busy={mutation.busy}

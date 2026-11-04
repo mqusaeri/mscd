@@ -30,6 +30,7 @@ import { AuthzModule } from '../modules/authz/authz.module';
 import { IdentityModule } from '../modules/identity/identity.module';
 import { KeysModule } from '../modules/keys/keys.module';
 import { LicenseModule } from '../modules/license/license.module';
+import { trustedAnchorKeys } from '../modules/audit/anchor-keys';
 import { compiledAnchorKeys } from '../modules/audit/anchors';
 import { certificateProblemText, verifyCertificateText, type CertificateCheck } from '../modules/ops/deletion/certificate';
 import { DeletionService } from '../modules/ops/deletion/deletion.service';
@@ -41,10 +42,18 @@ import { OpsMetricsCollector } from '../modules/ops/ops-metrics.collector';
 import { OpsService } from '../modules/ops/ops.service';
 import { OrganizationStatusService } from '../modules/ops/organization-status.service';
 import { CLI_OPERATOR, OpsOrganizationsService } from '../modules/ops/organizations.service';
+import {
+  receiptFileName, receiptFileText, receiptProblemText, verifyReceiptText, type ErasureReceipt,
+} from '../modules/privacy/erasure-receipt';
+import { PrivacyErasureService, type ReapplyOutcome } from '../modules/privacy/privacy-erasure.service';
+import { HoldingsService } from '../modules/registers/holdings.service';
+import { RulesModule } from '../modules/rules/rules.module';
 import { TenantDataKeys } from '../modules/ops/tenant-data-keys';
 import { MetricsService } from '../modules/platform/metrics';
 import { ReadinessService } from '../modules/platform/readiness.service';
 import { TenancyModule } from '../modules/tenancy/tenancy.module';
+import { TenantResolver } from '../modules/tenancy/tenant-resolver';
+import { TenantScope, systemContextOf } from '../modules/tenancy/tenant-scope';
 import {
   GatewayDataKeyIssuer,
   gatewayDataKeyIssuer,
@@ -85,6 +94,16 @@ import {
  *   the worker (which holds the gateway certificate the purge needs) and waits;
  * - `tenant verify-certificate <file>` checks a deletion certificate offline against the trusted anchor keys of the
  *   release (any tenancy).
+ *
+ * Erasure of one person (Milestone 3 D.6.5, M3-13), any tenancy:
+ * - `tenant erasure --reapply <receipt> --confirm <slug>` applies a signed erasure receipt again after a restore from a
+ *   backup older than the erasure: it checks the signature against the trusted anchor keys (those of the release and
+ *   the installation's `audit-anchor.pub`) and that the receipt names this organisation id, skips a person already
+ *   erased, refuses with the list when the restored person holds open items, and otherwise erases the person again as
+ *   the system with the receipt's pseudonym; for a person without an account it repeats the redaction from the restored
+ *   request, or prints the request number when the restored copy is older than the request.
+ * - `tenant erasure --print-receipts <slug>` prints every signed erasure receipt of the organisation, one receipt file per
+ *   line (the text of the email attachment), for an installation whose email does not work or a receipt that was lost.
  */
 export function register(program: Command): void {
   const tenant = program.command('tenant').description('Organisation (tenant) administration');
@@ -142,6 +161,7 @@ export function register(program: Command): void {
     });
   registerLifecycle(tenant);
   registerDeletion(tenant);
+  registerErasure(tenant);
 }
 
 /** `tenant list`, `show`, `set-status` and `onboard` (Milestone 2 K.6, M2-S09). */
@@ -963,4 +983,257 @@ async function waitForPurge(service: DeletionService, deletionId: string, timeou
     if (Date.now() >= deadline) return { deletionId, status: 'timeout', failedStep: null, error: null };
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Erasure receipts after a restore (Milestone 3 D.6.5, M3-13)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** `tenant erasure --reapply` and `tenant erasure --print-receipts`. */
+function registerErasure(tenant: Command): void {
+  tenant
+    .command('erasure')
+    .description(
+      'Apply an erasure receipt again after a restore from a backup older than the erasure, or print the signed receipts of an organisation (docs/saas/backup-restore.md)',
+    )
+    .option('--reapply <receipt>', 'the signed erasure receipt file (from the erasure receipt email or --print-receipts)')
+    .option('--confirm <slug>', 'with --reapply: the slug of the organisation the receipt names')
+    .option('--print-receipts <slug>', 'print every signed erasure receipt of the organisation, one receipt file per line')
+    .option('--json', 'with --reapply: print the outcome as JSON')
+    .addHelpText(
+      'after',
+      [
+        '',
+        'With --reapply, the receipt must verify against the trusted anchor keys and name this organisation id. A person',
+        'already erased in the restored database is skipped. A person who holds open items there is refused with the',
+        'list: hand the items over to someone else, then run the command again. Otherwise the person is erased again as',
+        'the system, with the pseudonym of the receipt. For a person without an account the redaction runs again from the',
+        'restored request; when the restored copy is older than the request, the command prints the request number so',
+        'the Tenant Admins record the request and erase the personal data again.',
+        '',
+        'With --print-receipts, each line of the output is one receipt file, as the erasure receipt email attaches it,',
+        'oldest first. A summary goes to stderr. Use it when email does not work or a receipt email was lost; keep the',
+        'receipts with the backups, one file per line, for example:',
+        '  mscd-server tenant erasure --print-receipts <slug> > receipts.jsonl',
+        '  split -l 1 -d -a 4 --additional-suffix=.json receipts.jsonl receipts/erasure-receipt-',
+      ].join('\n'),
+    )
+    .action(async (options: TenantErasureCommandOptions) => {
+      await runCommand('tenant erasure', async (config) => {
+        if (options.printReceipts !== undefined) {
+          if (options.reapply !== undefined || options.confirm !== undefined || options.json) {
+            throw new Error('--print-receipts goes alone: leave out --reapply, --confirm and --json');
+          }
+          const printed = await tenantErasureReceipts(config, options.printReceipts);
+          for (const receipt of printed.receipts) process.stdout.write(receipt.text);
+          process.stderr.write(`${formatPrintedReceipts(options.printReceipts, printed).join('\n')}\n`);
+          return;
+        }
+        if (options.reapply === undefined || options.confirm === undefined) {
+          throw new Error('Give --reapply <receipt> with --confirm <slug>, or --print-receipts <slug>');
+        }
+        const outcome = await tenantErasureReapply(config, { reapply: options.reapply, confirm: options.confirm, json: options.json });
+        if (options.json) process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
+        else process.stdout.write(`${formatErasureOutcome(options.confirm, outcome).join('\n')}\n`);
+        if (outcome.status === 'open_items' || outcome.status === 'last_tenant_admin' || outcome.status === 'account_missing') process.exitCode = 1;
+        if (outcome.status === 'request_missing') process.exitCode = 2;
+      });
+    });
+}
+
+export interface TenantErasureOptions {
+  reapply: string;
+  confirm: string;
+  json?: boolean;
+}
+
+/** The options of `tenant erasure` as commander gives them. */
+interface TenantErasureCommandOptions {
+  reapply?: string;
+  confirm?: string;
+  printReceipts?: string;
+  json?: boolean;
+}
+
+/** One signed receipt of `tenant erasure --print-receipts`. */
+export interface PrintedReceipt {
+  requestNo: string;
+  /** The file name of the email attachment. */
+  fileName: string;
+  /** The receipt file: canonical JSON on one line and a newline. */
+  text: string;
+  /** Whether the worker emailed it. */
+  sent: boolean;
+}
+
+/** What `tenant erasure --print-receipts` prints: the signed receipts, and the requests whose receipt waits for a signature. */
+export interface PrintedReceipts {
+  receipts: PrintedReceipt[];
+  unsigned: string[];
+}
+
+/**
+ * `tenant erasure --print-receipts <slug>`: every erasure receipt of the organisation that the worker has signed, in the
+ * order of the requests, as the email attaches it; and the request numbers of the receipts not signed yet (the worker
+ * signs them in its next run). Reads `privacy_request` as the system, whatever the organisation's status; changes
+ * nothing. The receipts name no person.
+ */
+export async function tenantErasureReceipts(config: MscdConfig, slug: string, context?: INestApplicationContext): Promise<PrintedReceipts> {
+  const org = await findOrganisationForReapply(config, slug);
+  if (!org) throw new Error(`No organisation with slug ${slug}`);
+  const app = context ?? (await createErasureCliContext(config));
+  try {
+    const info = await app.get(TenantResolver, { strict: false }).resolveById(org.id);
+    if (!info) throw new Error(`No organisation with slug ${slug}`);
+    const rows = await app.get(TenantScope, { strict: false }).withTenant(systemContextOf(info), async (trx) => {
+      const { rows: found } = await sql<{
+        request_no: string;
+        receipt: ErasureReceipt;
+        signature: string | null;
+        key_id: string | null;
+        sent: boolean;
+      }>`
+        select request_no, erasure_receipt as receipt, erasure_receipt_signature as signature, erasure_receipt_key_id as key_id,
+               erasure_receipt_sent_at is not null as sent
+          from privacy_request
+         where erasure_receipt is not null
+         order by created_at, id`.execute(trx);
+      return found;
+    });
+    const printed: PrintedReceipts = { receipts: [], unsigned: [] };
+    for (const row of rows) {
+      if (!row.signature || !row.key_id) {
+        printed.unsigned.push(row.request_no);
+        continue;
+      }
+      printed.receipts.push({
+        requestNo: row.request_no,
+        fileName: receiptFileName(row.receipt),
+        text: receiptFileText(row.receipt, row.signature, row.key_id),
+        sent: row.sent,
+      });
+    }
+    return printed;
+  } finally {
+    if (!context) await app.close();
+  }
+}
+
+/** The summary lines of `tenant erasure --print-receipts` (stderr). */
+export function formatPrintedReceipts(slug: string, printed: PrintedReceipts): string[] {
+  const command = 'tenant erasure --print-receipts';
+  const lines = [`${command}: ${printed.receipts.length} signed erasure receipt(s) of ${slug}`];
+  for (const r of printed.receipts) lines.push(`  ${r.requestNo}: ${r.fileName}${r.sent ? '' : ' (not emailed yet)'}`);
+  if (printed.unsigned.length > 0) {
+    lines.push(
+      `${command}: ${printed.unsigned.length} receipt(s) wait for the signature of the worker (${printed.unsigned.join(', ')}); ` +
+        'the worker signs them in its next run, then run the command again',
+    );
+  }
+  return lines;
+}
+
+/**
+ * `tenant erasure --reapply <receipt> --confirm <slug>`: the receipt must verify against the trusted anchor keys and
+ * name the organisation of the slug; then `PrivacyErasureService.reapply`. `trustedKeys` replaces the trusted anchor
+ * keys of the configuration in tests.
+ */
+export async function tenantErasureReapply(
+  config: MscdConfig,
+  options: TenantErasureOptions,
+  context?: INestApplicationContext,
+  trustedKeys?: readonly { keyId: string; publicKeyPem: string }[],
+): Promise<ReapplyOutcome> {
+  const check = checkedReceipt(readFileSync(options.reapply, 'utf8'), options.reapply, trustedKeys ?? trustedAnchorKeys(config, quietLogger()));
+  const receipt = check.receipt;
+  const org = await findOrganisationForReapply(config, options.confirm);
+  if (!org) throw new Error(`No organisation with slug ${options.confirm}`);
+  if (org.id !== receipt.organization.id) {
+    throw new Error(`The receipt names organisation ${receipt.organization.id} (${receipt.organization.slug}), and --confirm names ${org.slug} (${org.id}); nothing was changed`);
+  }
+  const app = context ?? (await createErasureCliContext(config));
+  try {
+    const info = await app.get(TenantResolver, { strict: false }).resolveById(org.id);
+    if (!info) throw new Error(`No organisation with slug ${options.confirm}`);
+    return await app.get(PrivacyErasureService, { strict: false }).reapply(info, receipt, { signature: check.signature, keyId: check.keyId });
+  } finally {
+    if (!context) await app.close();
+  }
+}
+
+/** The receipt of a file that verifies, with its signature, else an error naming the problem. */
+export function checkedReceipt(
+  text: string,
+  file: string,
+  trustedKeys: readonly { keyId: string; publicKeyPem: string }[],
+): { receipt: ErasureReceipt; signature: string; keyId: string } {
+  const check = verifyReceiptText(text, trustedKeys);
+  if (!check.ok || !check.receipt || !check.signature || !check.keyId) {
+    throw new Error(`The receipt ${file} does not verify: ${receiptProblemText(check.problem ?? 'not-a-receipt')}`);
+  }
+  return { receipt: check.receipt, signature: check.signature, keyId: check.keyId };
+}
+
+/** The lines of `tenant erasure --reapply`. */
+export function formatErasureOutcome(slug: string, outcome: ReapplyOutcome): string[] {
+  const command = 'tenant erasure --reapply';
+  switch (outcome.status) {
+    case 'erased':
+      return [
+        `${command}: the person of request ${outcome.requestNo ?? '(not in the restored copy)'} is erased again in ${slug} as ${outcome.pseudonym}`,
+        `Audit entries redacted: ${outcome.counts.auditEntriesRedacted} in the organisation, ${outcome.counts.platformEntriesRedacted} in the platform log`,
+      ];
+    case 'skipped':
+      return [`${command}: the person is erased in ${slug} already (${outcome.pseudonym}); nothing to do`];
+    case 'open_items':
+      return [
+        `${command}: the restored person holds open items in ${slug}; nothing was changed. Hand them over to someone else, then run the command again:`,
+        ...outcome.systems.map((s) => `  ${s.ms} (${s.name}): ${s.total} open item(s)`),
+      ];
+    case 'last_tenant_admin':
+      return [`${command}: the restored person is the last active Tenant Admin of ${slug}; nothing was changed. Make another member Tenant Admin, then run the command again`];
+    case 'request_missing':
+      return [
+        `${command}: the restored copy of ${slug} is older than request ${outcome.requestNo}; nothing was changed.`,
+        `Ask the Tenant Admins of ${slug} to record request ${outcome.requestNo} again and erase the personal data again.`,
+      ];
+    case 'account_missing':
+      return [`${command}: the account the receipt names does not exist in the restored database; nothing was changed`];
+  }
+}
+
+/** A logger that keeps the key loading quiet (the command prints its own lines). */
+function quietLogger(): { log: () => void; warn: () => void; debug: () => void } {
+  return { log: () => undefined, warn: () => undefined, debug: () => undefined };
+}
+
+/**
+ * The modules of `tenant erasure`: those of the operator commands, the rule engine, and the erasure service with the
+ * holdings service it uses for the open items check (both keep no state).
+ */
+@Module({})
+class ErasureCliModule {
+  static forRoot(config: MscdConfig): DynamicModule {
+    return {
+      module: ErasureCliModule,
+      imports: [
+        ConfigModule.forRoot(config),
+        OpsCliPlatformModule,
+        DatabaseModule,
+        TenancyModule,
+        AuditModule,
+        KeysModule,
+        AuthzModule,
+        IdentityModule,
+        LicenseModule,
+        RulesModule,
+      ],
+      providers: [PrivacyErasureService, HoldingsService],
+    };
+  }
+}
+
+/** A Nest application context for `tenant erasure`. */
+export async function createErasureCliContext(config: MscdConfig): Promise<INestApplicationContext> {
+  return NestFactory.createApplicationContext(ErasureCliModule.forRoot(config), { logger: ['error'], abortOnError: false });
 }

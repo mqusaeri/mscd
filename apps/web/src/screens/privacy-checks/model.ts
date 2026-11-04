@@ -12,7 +12,9 @@ export interface CheckRow {
   id: string;
   requestNo: string;
   type: CheckType;
-  subject: { name: string; handle: string | null };
+  /** The person; null once the request is closed, when only the request number shows (M3-13). */
+  subject: { name: string; handle: string | null } | null;
+  requestClosed: boolean;
   dueAt: string;
   status: 'open' | 'done';
   doneAt: string | null;

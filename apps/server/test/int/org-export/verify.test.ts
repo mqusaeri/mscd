@@ -23,7 +23,7 @@ import { ArchiveWriter } from '../../../src/modules/org-export/archive/archive-w
 import { anchorFiles } from '../../../src/modules/org-export/audit-data';
 import { OrgExportBuilder, type BuildRequest } from '../../../src/modules/org-export/builder';
 import { manifestBytes, manifestEntry, type ExportManifest, type ManifestEntry } from '../../../src/modules/org-export/manifest';
-import { verifyExportFolder } from '../../../src/modules/org-export/verify';
+import { NO_ANCHOR_PROBLEM, verifyExportFolder } from '../../../src/modules/org-export/verify';
 
 const ANCHOR_KEY_FILE = path.resolve(__dirname, '../../fixtures/secrets/audit-anchor.key');
 const CHAIN = 'org_tst.audit_trail';
@@ -192,10 +192,12 @@ describe('export verify trusts only the anchor keys of this build (D.4)', () => 
         `audit/anchor-keys.json: the key labelled ${trustedId} has the key id ${attackerId}`,
         `audit/audit-anchor.pub holds the key ${attackerId}, which is not among the trusted anchor keys`,
         `The anchor of seq 1 has no valid signature by the trusted anchor key ${trustedId}`,
+        // M3-13: so no trusted anchor proves any row.
+        NO_ANCHOR_PROBLEM,
       ]),
     );
     // Every part and entry still matches its manifest: only the anchor check finds the forgery.
-    expect(report.problems).toHaveLength(3);
+    expect(report.problems).toHaveLength(4);
   });
 
   it('fails an anchor signed by a key this build does not trust, under its real id', async () => {
@@ -216,6 +218,7 @@ describe('export verify trusts only the anchor keys of this build (D.4)', () => 
     expect(report.problems).toEqual([
       `audit/audit-anchor.pub holds the key ${otherId}, which is not among the trusted anchor keys`,
       `The anchor of seq 1 is signed with the key ${otherId}, which is not among the trusted anchor keys`,
+      NO_ANCHOR_PROBLEM,
     ]);
   });
 });
@@ -295,6 +298,7 @@ describe('an on-premise installation signs with its own anchor key (D.4)', () =>
     expect(compiledOnly.problems).toEqual([
       `audit/audit-anchor.pub holds the key ${ownId}, which is not among the trusted anchor keys`,
       `The anchor of seq 2 is signed with the key ${ownId}, which is not among the trusted anchor keys`,
+      NO_ANCHOR_PROBLEM,
     ]);
     expect(verifyLines(compiledOnly).err.join('\n')).toContain('--anchor-key');
 
@@ -339,15 +343,31 @@ describe('the report says up to which row the anchors prove the audit trail (D.4
     expect(verifyLines(report).out[2]).toContain('up to seq 1; no signature covers the 2 newer row(s)');
   });
 
-  it('says no signature proves a trail whose anchors were all removed', async () => {
-    // A rewritten trail with an empty anchors file and a manifest that names no anchor: every hash matches.
+  it('fails a trail whose anchors were all removed, unless --allow-unanchored keeps it as a warning (M3-13, security review 4)', async () => {
+    // A rewritten trail with recomputed hashes, an empty anchors file and a manifest that names no anchor: every hash matches.
     const dir = await mkdtemp(path.join(work, 'stripped-'));
     await writeExport(dir, ['forged.one', 'forged.two'], () => ({ anchors: '', pub: trustedPem, keys: JSON.stringify([{ keyId: trustedId, publicKeyPem: trustedPem }]) }));
     const report = await exportVerify(dir);
-    expect(report).toMatchObject({ ok: true, anchors: 0, anchorKeysTrusted: null, lastAnchoredSeq: null, rowsAfterLastAnchor: 2 });
-    const lines = verifyLines(report);
+    expect(report).toMatchObject({ ok: false, anchors: 0, anchorKeysTrusted: null, lastAnchoredSeq: null, rowsAfterLastAnchor: 2, warnings: [] });
+    expect(report.problems).toEqual([NO_ANCHOR_PROBLEM]);
+    expect(NO_ANCHOR_PROBLEM).toBe('No trusted anchor proves any audit row. Export again after the next nightly anchor, or check with --allow-unanchored.');
+    const failed = verifyLines(report);
+    expect(failed.err).toEqual(['FAILED: 1 problem(s)', `  ${NO_ANCHOR_PROBLEM}`]);
+
+    const allowed = await exportVerify(dir, { allowUnanchored: true });
+    expect(allowed).toMatchObject({ ok: true, problems: [], warnings: [NO_ANCHOR_PROBLEM], lastAnchoredSeq: null });
+    const lines = verifyLines(allowed);
     expect(lines.out[2]).toContain('No anchor: no signature proves any of the 2 audit row(s)');
     expect(lines.out[2]).toContain('anchors kept outside MSCD');
+    expect(lines.out.at(-1)).toBe(`WARNING: ${NO_ANCHOR_PROBLEM}`);
+    expect(lines.err).toEqual([]);
+  });
+
+  it('passes an empty audit trail without an anchor', async () => {
+    const dir = await mkdtemp(path.join(work, 'empty-'));
+    await writeExport(dir, [], () => ({ anchors: '', pub: trustedPem, keys: JSON.stringify([{ keyId: trustedId, publicKeyPem: trustedPem }]) }));
+    const report = await exportVerify(dir);
+    expect(report).toMatchObject({ ok: true, auditRows: 0, problems: [], warnings: [] });
   });
 });
 
@@ -449,8 +469,11 @@ describe('a redacted row is proven only through an attestation that an anchor co
     const fake = redacted(r1, { action: 'risk.accepted', after_data: { status: 'accepted', approvedBy: 'top.management' } }, redactionId);
     const r3 = attestation(3, String(r2.row_hash), redactionId, [fake.listed]);
     await writeExport(forged, trailOf([fake.row, r2, r3]), anchoredAt(2));
-    const report = await exportVerify(forged);
+    // M3-13: no trusted anchor proves any row, so the check fails; --allow-unanchored keeps that as a warning.
+    expect((await exportVerify(forged)).problems).toEqual([NO_ANCHOR_PROBLEM]);
+    const report = await exportVerify(forged, { allowUnanchored: true });
     expect(report.problems).toEqual([]);
+    expect(report.warnings).toEqual([NO_ANCHOR_PROBLEM]);
     expect(report).toMatchObject({
       auditRows: 3, anchors: 1, anchorKeysTrusted: true, redactedRows: 0, redactedUnanchored: 1, redactedUnanchoredSeqs: [1], newestAnchoredSeq: 2,
       lastAnchoredSeq: null, rowsAfterLastAnchor: 3,
@@ -515,7 +538,8 @@ describe('a redacted row is proven only through an attestation that an anchor co
     // Anchored at seq 3 only: the entry of seq 2 is explained by seq 4, so neither redacted row is proven.
     const open = await mkdtemp(path.join(work, 'nested-open-'));
     await writeExport(open, trailOf(rows), anchoredAt(3));
-    const report = await exportVerify(open);
+    expect((await exportVerify(open)).problems).toEqual([NO_ANCHOR_PROBLEM]);
+    const report = await exportVerify(open, { allowUnanchored: true });
     expect(report.problems).toEqual([]);
     expect(report).toMatchObject({ redactedRows: 0, redactedUnanchored: 2, redactedUnanchoredSeqs: [1, 2], newestAnchoredSeq: 3, lastAnchoredSeq: null, rowsAfterLastAnchor: 4 });
   });

@@ -498,6 +498,8 @@ The steps below prepare the install directory before `install.sh` runs for the f
 
    It prints `db bootstrap: database mscd ready`. The administrator account is not stored anywhere.
 
+   `--with-report-role` also creates the read-only role `mscd_report` for your reporting tools. It cannot sign in itself: grant it to the database login of your reporting tool. It reads the business tables of each organisation. It cannot read the audit trail, the requests of people about their own data (`privacy_request`, `privacy_check`) or the list of erased people (`erased_person`, which links a pseudonym to an account), nor any secret such as repository credentials or tokens.
+
 4. Turn off the bundled PostgreSQL:
 
    ```bash
@@ -759,6 +761,28 @@ On the same server, or on a new server with the same MSCD version:
    sudo docker compose up -d --wait
    ```
 
+**Erased people.** A restore from a backup older than the erasure of a person (Personal data requests, Erase personal data) brings that person's data back. Within minutes of each erasure the worker sends the Tenant Admins an email with an erasure receipt (`erasure-receipt-<slug>-<request>.json`), which names no person; when the email cannot be sent, the worker tries again once a day. Keep the receipts with your backups. Email is optional on-premise: when it does not work, or a receipt email is lost, print the signed receipts of the organisation and keep the files with your backups:
+
+```bash
+cd /opt/mscd
+sudo docker compose run --rm -T cli tenant erasure --print-receipts <slug> | sudo tee /path/to/receipts.jsonl > /dev/null
+sudo mkdir -p /path/to/receipts
+sudo split -l 1 -d -a 4 --additional-suffix=.json /path/to/receipts.jsonl /path/to/receipts/erasure-receipt-
+```
+
+Each line of the output is one receipt file, the same as the email attaches; `split` writes one file per line. The command lists the receipts on the screen and names a receipt the worker has not signed yet: run it again a few minutes later.
+
+After a restore, apply every receipt issued after the time of the backup again:
+
+```bash
+cd /opt/mscd
+sudo docker compose run --rm -v /path/to/receipts:/run/receipts:ro \
+  -v /opt/mscd/secrets/audit-anchor.pub:/run/secrets/audit-anchor.pub:ro \
+  cli tenant erasure --reapply /run/receipts/<file>.json --confirm <slug>
+```
+
+The command checks the signature with your installation's anchor key and that the receipt names this organisation. It erases the person again with the same pseudonym, skips a person who is erased already, and stops with a list per system when the restored person holds open items: hand them over in the app, then run it again. For a person without an account whose request the backup does not hold, it prints the request number: record the request again and erase the personal data again. Changes made after the backup are lost with the restore, as every other change of that time; a record disposed of after its retention review comes back too, so approve its disposal again.
+
 Test a restore on a separate server at least once a year.
 
 ### 15.4 Upgrade
@@ -957,7 +981,7 @@ sudo docker compose run --rm -v /srv/mscd-export:/export \
   cli export verify --dir /export --anchor-key /run/anchor/audit-anchor.pub
 ```
 
-The command reads the manifest (the downloaded `*-manifest.json`, or the copy in the last part), compares the size and SHA-256 of every part and every file with it, recomputes the hash of every audit trail entry from its canonical text, and checks every signed anchor. It trusts only the anchor keys built into your MSCD release and the public keys you name with `--anchor-key`. Repeat the option for a key your installation used before, for example after its anchor key was replaced, and keep every public anchor key for as long as you keep exports of its time. The command never uses a key from the export itself: the manifest and the parts are not signed, so anyone who changes the audit trail could also change them, but nobody without the private anchor key can sign a new anchor. An anchor signed with a key that is not trusted, a key file whose key id does not match its key, or an anchor that does not match its audit trail entry is a problem. When every check passes, the command prints `OK` and exits with status 0; otherwise it prints `FAILED` with each problem and exits with status 1. When `FAILED` names a key that is not trusted, check that you gave `--anchor-key` with the right file.
+The command reads the manifest (the downloaded `*-manifest.json`, or the copy in the last part), compares the size and SHA-256 of every part and every file with it, recomputes the hash of every audit trail entry from its canonical text, and checks every signed anchor. It trusts only the anchor keys built into your MSCD release and the public keys you name with `--anchor-key`. Repeat the option for a key your installation used before, for example after its anchor key was replaced, and keep every public anchor key for as long as you keep exports of its time. The command never uses a key from the export itself: the manifest and the parts are not signed, so anyone who changes the audit trail could also change them, but nobody without the private anchor key can sign a new anchor. An anchor signed with a key that is not trusted, a key file whose key id does not match its key, or an anchor that does not match its audit trail entry is a problem. When every check passes, the command prints `OK` and exits with status 0; otherwise it prints `FAILED` with each problem and exits with status 1. When `FAILED` names a key that is not trusted, check that you gave `--anchor-key` with the right file. When the audit trail has entries and no trusted anchor proves any of them, the hashes only show that the entries match each other, so the check fails with "No trusted anchor proves any audit row". This happens for an export built before the first nightly anchor: build it again the next day, or add `--allow-unanchored`, which keeps the line as a warning and exits with status 0.
 
 An anchor proves its audit trail entry and every entry before it. The worker writes one anchor a night, so no signature covers the entries made since the newest anchor; the command says up to which entry (its `seq`) the anchors prove the trail and how many entries come after it. Someone who rewrites the audit trail can also remove the newest anchors from the export. The command then still ends with `OK`, but it names an older anchor as the newest one, or says that no anchor proves the trail. So compare the newest anchor of the export with the anchors kept outside MSCD (section 14): when your log platform or your downloaded anchor files hold a later anchor of the same chain, or another hash for the same entry, the audit trail of the export was changed.
 

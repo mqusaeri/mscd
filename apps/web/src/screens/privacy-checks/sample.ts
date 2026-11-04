@@ -36,7 +36,12 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       for (const r of requests()) {
         for (const c of r.checks) {
           if (c.ms !== ms || (!isOpen(r.status) && c.status !== 'done')) continue;
-          rows.push({ id: c.id, requestNo: r.requestNo, type: r.type, subject: { name: r.subject.name, handle: r.subject.kind === 'member' ? r.subjectHandle : null }, dueAt: r.dueAt, status: c.status, doneAt: c.doneAt });
+          const closed = !isOpen(r.status);
+          rows.push({
+            id: c.id, requestNo: r.requestNo, type: r.type,
+            subject: closed ? null : { name: r.subject.name, handle: r.subject.kind === 'member' ? r.subjectHandle : null },
+            requestClosed: closed, dueAt: r.dueAt, status: c.status, doneAt: c.doneAt,
+          });
         }
       }
       return ok(sortChecks(rows));
@@ -44,6 +49,7 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
     async mentions(ms, id) {
       const found = find(ms, id);
       if (!found) return refuse(404, R.notFound);
+      if (!isOpen(found.request.status)) return ok({ items: [], truncated: false });
       return ok({ items: (found.request.mentions[ms] ?? []).map((m) => ({ ...m })), truncated: false });
     },
     async done(ms, id, note) {

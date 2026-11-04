@@ -14,7 +14,7 @@ export interface SampleMention {
   excerpt: string;
 }
 
-export interface SampleRequest extends RequestDetail {
+export interface SampleRequest extends Omit<RequestDetail, 'erasureImpact'> {
   /** The mentions each system's check finds, by system. */
   mentions: Record<string, SampleMention[]>;
   /** The handle of the person of the request (member subjects). */

@@ -100,10 +100,20 @@ export interface ReviewModel {
   fileAction: FileAction | null;
   fileRemovedAt: string | null;
   onHold: boolean;
+  /** The files of the item and what a disposal does with each (M3-13). */
+  files: ReviewFile[];
+}
+
+/** A file of a review item: deleted from the Managed Vault, its owner asked to delete it, or kept because another record uses it. */
+export interface ReviewFile {
+  name: string | null;
+  repository: string;
+  action: 'delete' | 'owner_asked' | 'kept_in_use';
+  usedBy: string | null;
 }
 
 /** A decided review in the disposal register, with the period of its class. */
-export type RegisterModel = Omit<ReviewModel, 'onHold'> & { retainMonths: number };
+export type RegisterModel = Omit<ReviewModel, 'onHold' | 'files'> & { retainMonths: number };
 
 /** A legal hold (`retention.holds.list`). */
 export interface HoldModel {

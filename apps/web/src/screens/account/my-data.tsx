@@ -7,7 +7,7 @@ import type { ApiResult } from '../../data/api/ApiClient';
 import { useMutation } from '../api';
 import { formatInstant, saveFile, textFile } from '../auditor-access/shared';
 import type { HostContext, TextPair } from '../types';
-import { Alert, Badge, Button, Card, Field, Modal, Radio, Table, TextInput, Textarea } from '../ui';
+import { Alert, Badge, Button, Card, Field, Modal, Table, TextInput, Textarea } from '../ui';
 import type { Column } from '../ui';
 import { ASK_TEXT, ASK_TYPES, MY_STATUS_TEXT, MY_TYPE_TEXT, myDataFileName } from './model';
 import type { AccountAdapter, AskType, MyRequest, ProfileCorrection, Result } from './model';
@@ -77,6 +77,9 @@ export function CorrectDialog({ ctx, adapter, open, profile, onClose, onSaved }:
   );
 }
 
+/** What each choice of "Ask the organisation" means for the person, shown under the choice (M3-13, texts F1). */
+const ASK_HINT: Readonly<Partial<Record<AskType, TextPair>>> = { restriction: TEXT.askRestrictionHint, erasure: TEXT.askErasureHint };
+
 /** "Ask the organisation": a correction, a stop to the use or an erasure. */
 export function AskDialog({ ctx, adapter, open, onClose, onSent }: {
   ctx: HostContext;
@@ -117,7 +120,18 @@ export function AskDialog({ ctx, adapter, open, onClose, onSent }: {
       )}
     >
       <div className="mx-stack" data-form="my-privacy-request">
-        <Radio legend={TEXT.askType} name="my-privacy-type" value={type} onChange={(v) => setType(v as AskType)} options={ASK_TYPES.map((t) => ({ value: t, label: ASK_TEXT[t] }))} />
+        <fieldset className="mx-radios" data-field="my-privacy-type">
+          <legend className="mx-label">{ctx.li(TEXT.askType)}</legend>
+          {ASK_TYPES.map((t) => (
+            <div key={t}>
+              <label className="mx-check">
+                <input type="radio" name="my-privacy-type" value={t} checked={type === t} onChange={() => setType(t)} aria-describedby={ASK_HINT[t] ? `my-privacy-hint-${t}` : undefined} />
+                <span>{ctx.li(ASK_TEXT[t])}</span>
+              </label>
+              {ASK_HINT[t] ? <div id={`my-privacy-hint-${t}`} className="mx-small" style={{ marginLeft: 28 }}>{ctx.li(ASK_HINT[t]!)}</div> : null}
+            </div>
+          ))}
+        </fieldset>
         <Field label={TEXT.askNote} hint={TEXT.askNoteHint}>
           <Textarea value={note} onChange={setNote} rows={4} maxLength={2000} />
         </Field>

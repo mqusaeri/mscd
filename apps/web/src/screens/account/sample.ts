@@ -97,7 +97,7 @@ export function createSampleAdapter(): AccountAdapter {
       const now = new Date();
       const handle = profile.email ? profile.email.split('@')[0] : profile.name;
       const text = JSON.stringify({
-        format: 'mscd-personal-data-v1',
+        format: 'mscd-personal-data-v2',
         generatedAt: now.toISOString(),
         sample: true,
         account: { displayName: profile.name, email: profile.email, jobTitle: profile.jobTitle },

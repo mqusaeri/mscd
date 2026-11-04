@@ -72,7 +72,7 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
 
   const review = (id: string, over: Partial<ReviewModel> & Pick<ReviewModel, 'recordClass' | 'itemCode' | 'itemTitle' | 'retentionEndsOn'>): ReviewModel => ({
     id, itemId: `${id}-item`, status: 'open', decision: null, decidedBy: null, decidedAt: null, reason: null, keepUntil: null, approvedBy: null, approvedAt: null,
-    rejectedNote: null, disposedAt: null, fileAction: null, fileRemovedAt: null, onHold: false, ...over,
+    rejectedNote: null, disposedAt: null, fileAction: null, fileRemovedAt: null, onHold: false, files: [], ...over,
   });
 
   function seed(ms: MsId): SystemState {
@@ -93,7 +93,10 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       add(review(`${p}-2`, { recordClass: 'document_version', itemCode: `${doc(1)!.id} ${previousVersion(doc(1)!.ver)}`, itemTitle: doc(1)!.title, retentionEndsOn: days(-41) }));
     }
     if (evs.length) {
-      add(review(`${p}-3`, { recordClass: 'evidence_file', itemCode: `${ev(0)!.code} ${previousFile(ev(0)!.ver)}`, itemTitle: ev(0)!.title, retentionEndsOn: days(-5) }));
+      add(review(`${p}-3`, {
+        recordClass: 'evidence_file', itemCode: `${ev(0)!.code} ${previousFile(ev(0)!.ver)}`, itemTitle: ev(0)!.title, retentionEndsOn: days(-5),
+        files: [{ name: `${ev(0)!.code.toLowerCase()}-${previousFile(ev(0)!.ver)}.pdf`, repository: 'Managed Vault', action: 'delete', usedBy: null }],
+      }));
     }
     if (evs.length > 1) {
       add(review(`${p}-4`, {
@@ -104,12 +107,19 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
     if (closed.length) {
       add(review(`${p}-5`, { recordClass: 'finding', itemCode: closed[0]![0], itemTitle: closed[0]![3], retentionEndsOn: days(-30) }));
     }
-    add(review(`${p}-6`, { recordClass: 'evidence_pack', itemCode: 'PACK-3C9E21A7', itemTitle: `/Compliance/_packs/${ms.toUpperCase()}/2023-09-12/`, retentionEndsOn: days(-17) }));
+    add(review(`${p}-6`, {
+      recordClass: 'evidence_pack', itemCode: 'PACK-3C9E21A7', itemTitle: `/Compliance/_packs/${ms.toUpperCase()}/2023-09-12/`, retentionEndsOn: days(-17),
+      files: [
+        { name: 'evidence-pack.tar.gz', repository: 'Managed Vault', action: 'delete', usedBy: null },
+        { name: 'manifest.pdf', repository: 'Compliance SharePoint', action: 'owner_asked', usedBy: null },
+      ],
+    }));
     // Two disposals wait for a second person: one proposed by another manager, one by the persona.
     if (evs.length > 2) {
       add(review(`${p}-7`, {
         recordClass: 'evidence_file', itemCode: `${ev(2)!.code} ${previousFile(ev(2)!.ver)}`, itemTitle: ev(2)!.title, retentionEndsOn: days(-21), status: 'awaiting_approval',
         decision: 'dispose', decidedBy: person(other()), decidedAt: at(-2), reason: 'Superseded by later logs; period over',
+        files: [{ name: `${ev(2)!.code.toLowerCase()}-${previousFile(ev(2)!.ver)}.pdf`, repository: 'Managed Vault', action: 'kept_in_use', usedBy: 'CMP-7B21E04A' }],
       }));
     }
     add(review(`${p}-8`, {
@@ -248,7 +258,12 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       r.approvedBy = person(getMe());
       r.approvedAt = nowIso();
       r.disposedAt = r.approvedAt;
-      r.fileAction = r.recordClass === 'document_version' || r.recordClass === 'evidence_file' || r.recordClass === 'evidence_pack' ? 'vault_content_deleted' : 'none';
+      const deletes = r.files.some((f) => f.action === 'delete');
+      const asks = r.files.some((f) => f.action === 'owner_asked');
+      r.fileAction = asks ? 'owner_asked' : deletes || (r.files.length === 0 && ['document_version', 'evidence_file', 'evidence_pack'].includes(r.recordClass)) ? 'vault_content_deleted' : 'none';
+      r.files = [];
+      // A disposed record loses its text (decision 18): only its line in the register stays.
+      if (!['document_version', 'evidence_file', 'evidence_pack'].includes(r.recordClass)) r.itemTitle = null;
       return done();
     },
     async reject(ms, target, note) {
@@ -270,7 +285,7 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
         .filter((x) => ['kept', 'extended', 'disposed'].includes(x.review.status))
         .sort((a, b) => (b.review.disposedAt ?? b.review.decidedAt ?? '').localeCompare(a.review.disposedAt ?? a.review.decidedAt ?? ''))
         .map((x): RegisterModel => {
-          const { onHold: _onHold, ...rest } = x.review;
+          const { onHold: _onHold, files: _files, ...rest } = x.review;
           return { ...rest, retainMonths: x.retainMonths };
         });
       return { ok: true, data: { items: all.slice((page - 1) * pageSize, page * pageSize), total: all.length } };

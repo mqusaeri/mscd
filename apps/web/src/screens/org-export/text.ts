@@ -4,8 +4,8 @@
 export const TEXT = {
   title: ['Organisation export', 'Ekspor organisasi'],
   teraWhat: [
-    'Download everything your organisation keeps in MSCD as open files, with a SHA-256 fingerprint for each file that proves nothing is missing or changed.',
-    'Unduh semua yang disimpan organisasi Anda di MSCD sebagai berkas terbuka, dengan sidik jari SHA-256 untuk setiap berkas yang membuktikan tidak ada yang hilang atau berubah.',
+    'Download everything your organisation keeps in MSCD in open file formats, with a SHA-256 fingerprint for each file that proves nothing is missing or changed.',
+    'Unduh semua yang disimpan organisasi Anda di MSCD dalam format berkas terbuka, dengan sidik jari SHA-256 untuk setiap berkas yang membuktikan tidak ada yang hilang atau berubah.',
   ],
   teraHow1: [
     'Choose "Export all data". When the organisation has another Tenant Admin, that person approves the export first.',
@@ -34,7 +34,7 @@ export const TEXT = {
   empty: ['No export yet', 'Belum ada ekspor'],
   emptyText: [
     'An export holds every register, record, audit entry and stored file of the organisation, ready to keep outside MSCD.',
-    'Ekspor berisi setiap register, catatan, entri audit dan berkas tersimpan organisasi, siap disimpan di luar MSCD.',
+    'Ekspor berisi setiap register, rekaman, entri audit dan berkas tersimpan organisasi, siap disimpan di luar MSCD.',
   ],
   colRequested: ['Requested', 'Diminta'],
   colStatus: ['Status', 'Status'],
@@ -76,12 +76,12 @@ export const TEXT = {
   requestSub: ['A full copy of the organisation in open formats', 'Salinan lengkap organisasi dalam format terbuka'],
   whatTitle: ['What the export holds', 'Isi ekspor'],
   what1: [
-    'Every register and record of every management system as spreadsheet files (CSV) and data files (JSON Lines), records marked deleted included.',
-    'Setiap register dan catatan dari setiap sistem manajemen sebagai berkas lembar kerja (CSV) dan berkas data (JSON Lines), termasuk catatan yang ditandai dihapus.',
+    'Every register and record of every management system as spreadsheet files (CSV) and data files (JSON Lines), records marked deleted included. Records disposed of under a retention rule are left out; the disposal register lists them.',
+    'Setiap register dan rekaman dari setiap sistem manajemen sebagai berkas lembar kerja (CSV) dan berkas data (JSON Lines), termasuk rekaman yang ditandai dihapus. Rekaman yang dimusnahkan menurut aturan retensi tidak disertakan; register pemusnahan mencantumkannya.',
   ],
   what2: [
-    'The audit trail with its hashes and signed anchors, so your IT team or your auditor can check its integrity outside MSCD.',
-    'Jejak audit beserta hash dan jangkar bertanda tangan, sehingga tim TI atau auditor Anda dapat memeriksa integritasnya di luar MSCD.',
+    'The audit trail with its hashes and digital signatures, so your IT team or auditor can check that no entry was changed.',
+    'Jejak audit beserta hash dan tanda tangan digital, sehingga tim TI atau auditor Anda dapat memeriksa bahwa tidak ada entri yang diubah.',
   ],
   what3: [
     'Every document and evidence file stored in the Managed Vault. Files kept in your own Microsoft 365 or Google Drive stay there and are listed with their links.',
@@ -116,7 +116,7 @@ export const TEXT = {
   noteSingle: ['Note', 'Catatan'],
   noteHint: ['Optional, up to 500 characters. Say why the organisation needs the export.', 'Opsional, paling banyak 500 karakter. Jelaskan mengapa organisasi memerlukan ekspor.'],
   noteLong: ['Keep the note to 500 characters or fewer.', 'Batasi catatan sampai 500 karakter.'],
-  requestedToast: ['Export requested. Another Tenant Admin approves it next.', 'Ekspor diminta. Tenant Admin lain menyetujuinya berikutnya.'],
+  requestedToast: ['Export requested. Another Tenant Admin approves it next.', 'Ekspor diminta. Selanjutnya Tenant Admin lain perlu menyetujuinya.'],
   queuedToast: ['Export queued. MSCD builds it now.', 'Ekspor diantrekan. MSCD membuatnya sekarang.'],
   // Decision
   approveTitle: ['Approve this export?', 'Setujui ekspor ini?'],

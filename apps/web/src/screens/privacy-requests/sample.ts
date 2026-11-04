@@ -17,9 +17,9 @@ const refuse = <T,>(status: number, message: TextPair, messageKey?: string, rule
 const R = {
   notFound: ['No such personal data request.', 'Permintaan data pribadi tidak ditemukan.'] as TextPair,
   transition: ['This move is not allowed for the request now.', 'Perpindahan ini tidak diizinkan untuk permintaan saat ini.'] as TextPair,
-  startFirst: ['Start work on the request first: record how you checked who is asking.', 'Mulai tangani permintaan terlebih dahulu: catat cara Anda memeriksa siapa yang meminta.'] as TextPair,
+  startFirst: ['Start work on the request first: record how you checked who is asking.', 'Mulai menangani permintaan terlebih dahulu: catat cara Anda memeriksa siapa yang meminta.'] as TextPair,
   wrongType: ['This action does not answer a request of this type.', 'Tindakan ini tidak menjawab permintaan dengan jenis ini.'] as TextPair,
-  checksOpen: ['Every system check must be done first. The Management System Managers mark them done in Personal data checks.', 'Setiap pemeriksaan sistem harus selesai terlebih dahulu. Manajer Sistem Manajemen menandainya selesai di Pemeriksaan data pribadi.'] as TextPair,
+  checksOpen: ['Every system check must be done first. The Management System Managers mark them done in Personal data checks.', 'Setiap pemeriksaan sistem harus selesai terlebih dahulu. Management System Manager menandainya selesai di Pemeriksaan data pribadi.'] as TextPair,
   actionFirst: ['Take the action this request asks for before you close it.', 'Lakukan tindakan yang diminta permintaan ini sebelum menutupnya.'] as TextPair,
   lastAdmin: ['The person is the last active Tenant Admin. Give another member the Tenant Admin role first.', 'Orang tersebut adalah Tenant Admin aktif terakhir. Berikan peran Tenant Admin kepada anggota lain terlebih dahulu.'] as TextPair,
 };
@@ -34,7 +34,16 @@ function rowOf(r: SampleRequest): RequestRow {
 }
 
 function detailOf(r: SampleRequest): RequestDetail {
-  return { ...rowOf(r), note: r.note, identityCheckNote: r.identityCheckNote, identityCheckedBy: r.identityCheckedBy, outcome: r.outcome, result: r.result ? { ...r.result } : null, checks: r.checks.map((c) => ({ ...c })), actions: r.actions.map((a) => ({ ...a })), exportTaskId: r.exportTaskId };
+  // The sample's impact of an erasure in progress: a fixed count per kind of person (the server counts the entries).
+  const erasing = r.type === 'erasure' && r.status === 'in_progress' && !(r.result?.erased);
+  const erasureImpact = erasing
+    ? r.subject.kind === 'member' ? { tenantEntries: 12, platformEntries: 3, legalHolds: 0 } : { tenantEntries: 2, platformEntries: 0, legalHolds: 0 }
+    : null;
+  return {
+    ...rowOf(r), note: r.note, identityCheckNote: r.identityCheckNote, identityCheckedBy: r.identityCheckedBy, outcome: r.outcome,
+    result: r.result ? { ...r.result } : null, checks: r.checks.map((c) => ({ ...c })), actions: r.actions.map((a) => ({ ...a })), exportTaskId: r.exportTaskId,
+    erasureImpact,
+  };
 }
 
 export function createSampleAdapter(getD: () => ControllerData | null, getOrg: () => string | null): PrivacyRequestsAdapter {
@@ -131,7 +140,7 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       return act(id, 'erasure', (r) => {
         if (r.checks.some((c) => c.status === 'open')) return refuse(409, R.checksOpen, 'privacy.checks_open');
         if (r.subjectHandle === 'rina') return refuse(409, R.lastAdmin, 'last_tenant_admin');
-        r.result = { ...(r.result ?? {}), erased: 1, systemsChecked: r.checks.length, ...(r.subject.kind === 'member' ? { rolesRevoked: 1, auditEntriesRedacted: 4 } : {}) };
+        r.result = { ...(r.result ?? {}), erased: 1, systemsChecked: r.checks.length, ...(r.subject.kind === 'member' ? { rolesRevoked: 1, auditEntriesRedacted: 12, platformEntriesRedacted: 3 } : { auditEntriesRedacted: 2 }) };
         touch(r, 'privacy_request.erased');
         return ok({ message: null });
       });

@@ -30,7 +30,12 @@ export interface RequestRow {
   handled_by: string | null;
   closed_at: Date | null;
   outcome: string | null;
+  /** The counts of what was done; after an erasure also `pseudonym`, which `result_pseudonym` reads as text. */
   result: Record<string, number> | null;
+  /** `result.pseudonym`: the pseudonym an erasure gave the person (M3-13). */
+  result_pseudonym: string | null;
+  /** The erasure receipt written by the erasure (names no person; tenant/0011, M3-13). */
+  erasure_receipt: Record<string, unknown> | null;
   updated_at: Date;
   created_at: Date;
   handled_handle: string | null;
@@ -143,7 +148,8 @@ export async function requestRows(trx: Trx, filter: { id?: string; subjectUserId
   const { rows } = await sql<RequestRow>`
     select r.id, r.request_no, r.request_type, r.status, r.subject_kind, r.subject_user_id, r.subject_name, r.subject_email,
            ${shownHandle('su', 'se')} as subject_handle, r.channel, r.received_at, r.due_at, r.identity_check_note,
-           r.identity_checked_by, r.handled_by, r.closed_at, r.outcome, r.result, r.updated_at, r.created_at,
+           r.identity_checked_by, r.handled_by, r.closed_at, r.outcome, r.result, r.result->>'pseudonym' as result_pseudonym,
+           r.erasure_receipt, r.updated_at, r.created_at,
            ${shownHandle('hu', 'he')} as handled_handle, ${shownName('hu', 'he')} as handled_name,
            ${shownHandle('cu', 'ce')} as checked_handle, ${shownName('cu', 'ce')} as checked_name,
            null::text as note
@@ -208,12 +214,24 @@ export function newPseudonym(hexLength: 4 | 6 | 8 = 4): string {
   return `Former user ${randomBytes(4).toString('hex').slice(0, hexLength).toUpperCase()}`;
 }
 
-/** A pseudonym no erased person of the organisation holds yet (the unique index of `erased_person` holds the rule). */
+/** True when an erased person, or the erasure of a person without an account (`privacy_request.result`), holds it. */
+export async function pseudonymTaken(trx: Trx, candidate: string): Promise<boolean> {
+  const { rows } = await sql<{ one: number }>`
+    select 1 as one from erased_person where pseudonym = ${candidate}
+    union all
+    select 1 from privacy_request where result->>'pseudonym' = ${candidate}
+    limit 1`.execute(trx);
+  return rows.length > 0;
+}
+
+/**
+ * A pseudonym no erased person of the organisation holds yet, and no erasure of a person without an account kept in its
+ * request (`result.pseudonym`, M3-13); the unique index of `erased_person` holds the rule for members.
+ */
 export async function freePseudonym(trx: Trx): Promise<string> {
   for (const length of PSEUDONYM_LENGTHS) {
     const candidate = newPseudonym(length);
-    const taken = await trx.selectFrom('erased_person').select('erased_user_id').where('pseudonym', '=', candidate).executeTakeFirst();
-    if (!taken) return candidate;
+    if (!(await pseudonymTaken(trx, candidate))) return candidate;
   }
   throw new ConflictError('No free pseudonym; try again');
 }

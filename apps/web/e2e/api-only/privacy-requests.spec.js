@@ -163,10 +163,10 @@ test.describe('Personal data requests against the api @api-only', () => {
     await apiWrite(page, baseURL, 'PATCH', `/api/v1/admin/privacy-requests/${erasure.id}`, { action: 'start', identityCheckNote: 'Signed letter' }, { 'if-match': detail.etag });
     await checkEverySystem(page, baseURL, erasure.id);
     await openRequest(page, erasure.requestNo);
-    await button(drawer(page), 'Erase the person').click();
+    await button(drawer(page), 'Erase personal data').click();
     await expect(dialog(page)).toContainText('This cannot be undone.');
     await expect(dialog(page)).toContainText('What stays');
-    const confirm = button(dialog(page), 'Erase the person');
+    const confirm = button(dialog(page), 'Erase personal data');
     await expect(confirm).toBeDisabled();
     await dialog(page).locator('input').fill('ERASE');
     await inBothThemes(page, () => expectOverlayReadable(page));

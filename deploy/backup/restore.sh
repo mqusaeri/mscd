@@ -4,7 +4,7 @@
 #
 #   sudo bash /opt/mscd/deploy/backup/restore.sh [--install-dir DIR] [--snapshot ID]
 #        [--host-files-snapshot ID] [--vault-at TIME] [--keep-secrets] [--no-timer]
-#        [--reapply-deletions FOLDER] [--yes]
+#        [--reapply-deletions FOLDER] [--reapply-erasures FOLDER] [--yes]
 #
 # Before it runs, the server is bootstrapped (bootstrap-prod.yml, M2-S03) and deploy-prod.yml has
 # deployed a release at least as new as the backup, with the same PLATFORM_KEY, STORAGE_KEY and
@@ -35,6 +35,14 @@
 #      checks its signature and that it names that organisation, moves the organisation back to
 #      archived and its deletion to running, and the worker deletes it again (a new certificate is
 #      issued). A certificate of an organisation the restored database does not hold is skipped.
+#      --reapply-erasures FOLDER (Milestone 3 D.6.5, M3-13): a backup older than the erasure of a
+#      person brings the person's data back. For every erasure receipt (*.json) in FOLDER, from the
+#      erasure receipt emails, "mscd-server tenant erasure --reapply" checks its signature and that
+#      it names that organisation, and erases the person again with the pseudonym of the receipt. A
+#      person already erased is skipped; a person who holds open items in the restored copy is
+#      reported (hand the items over, then run the command again); for a person without an account
+#      whose request the copy does not hold, the request number is reported, and the Tenant Admins
+#      record the request and erase the personal data again.
 #   8. Checks: /readyz of api, worker and storage-gateway, /healthz through Caddy, "mscd-server
 #      backup verify" (tenant data keys, vault objects, sealed values, audit chains against their
 #      signed anchors) and the organisation count of the dump.
@@ -67,7 +75,7 @@ usage() {
 }
 
 OPT_INSTALL_DIR=${MSCD_INSTALL_DIR:-/opt/mscd} SNAPSHOT=latest HOST_SNAPSHOT=latest VAULT_AT='' KEEP_SECRETS=false INSTALL_TIMER=true
-REAPPLY_DIR=''
+REAPPLY_DIR='' ERASURE_DIR=''
 RESTORE_DIR='' PHASE=checks STARTED=$SECONDS
 
 parse_args() {
@@ -100,6 +108,12 @@ parse_args() {
                 shift
                 ;;
             --reapply-deletions=*) REAPPLY_DIR=${1#*=} ;;
+            --reapply-erasures)
+                [[ $# -ge 2 && -n $2 ]] || die "--reapply-erasures needs the folder of the erasure receipts"
+                ERASURE_DIR=$2
+                shift
+                ;;
+            --reapply-erasures=*) ERASURE_DIR=${1#*=} ;;
             --keep-secrets) KEEP_SECRETS=true ;;
             --no-timer) INSTALL_TIMER=false ;;
             -y | --yes) ASSUME_YES=true ;;
@@ -205,6 +219,13 @@ checks() {
         mapfile -t CERTIFICATES < <(find "$REAPPLY_DIR" -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort)
         ((${#CERTIFICATES[@]} > 0)) || die "--reapply-deletions: $REAPPLY_DIR holds no deletion certificate (*.json)"
         pass "${#CERTIFICATES[@]} deletion certificate(s) to re-apply after the restore"
+    fi
+    if [[ -n $ERASURE_DIR ]]; then
+        [[ -d $ERASURE_DIR ]] || die "--reapply-erasures: $ERASURE_DIR is not a folder"
+        RECEIPTS=()
+        mapfile -t RECEIPTS < <(find "$ERASURE_DIR" -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort)
+        ((${#RECEIPTS[@]} > 0)) || die "--reapply-erasures: $ERASURE_DIR holds no erasure receipt (*.json)"
+        pass "${#RECEIPTS[@]} erasure receipt(s) to re-apply after the restore"
     fi
     services=$(bk_compose config --services 2>/dev/null || true)
     for svc in postgres objectstore; do
@@ -464,6 +485,68 @@ reapply_deletions() {
     info "$reapplied deletion(s) re-applied, $skipped certificate(s) skipped"
 }
 
+# receipt_value FILE NAME: the member NAME (id or slug) of the organisation object of an erasure
+# receipt. The receipt of the email is canonical JSON on one line; spaces after the separators are
+# allowed, and only the organisation object holds these member names.
+receipt_value() {
+    sed -n "s/.*\"organization\": *{[^}]*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
+}
+
+# reapply_erasures: "tenant erasure --reapply" for every receipt of --reapply-erasures (D.6.5).
+RECEIPTS=()
+reapply_erasures() {
+    local file name slug id status work log rc reapplied=0 skipped=0 followups=0 pub=()
+    [[ -n $ERASURE_DIR ]] || return 0
+    PHASE=reapply
+    step "7c. Re-applying erasures of people"
+    # The cli container reads the receipts from a folder of its own (they name no person and hold no
+    # secret), and the public anchor key of the installation beside its anchor key file, so an
+    # on-premise key that no release compiles in is trusted too.
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mscd-erasures.XXXXXX")
+    chmod 0755 "$work"
+    install -d -m 0755 "$work/receipts"
+    if [[ -f $SECRETS_DIR/audit-anchor.pub ]]; then
+        install -m 0644 -- "$SECRETS_DIR/audit-anchor.pub" "$work/audit-anchor.pub"
+        pub=(-v "$work/audit-anchor.pub:/run/secrets/audit-anchor.pub:ro")
+    fi
+    for file in "${RECEIPTS[@]}"; do
+        name=$(basename -- "$file")
+        slug=$(receipt_value "$file" slug)
+        id=$(receipt_value "$file" id)
+        if [[ ! $slug =~ ^[a-z][a-z0-9_]{1,39}$ || ! $id =~ ^[0-9a-f-]{36}$ ]] || ! grep -q '"mscd.erasure-receipt"' "$file"; then
+            fail "$name is not an erasure receipt (no organisation slug and id)"
+            continue
+        fi
+        status=$(bk_db_value "select status from platform.organization where id = '$id'")
+        if [[ -z $status || $status == deleted ]]; then
+            info "$name: the restored database holds no organisation $id that is not deleted; nothing to re-apply"
+            skipped=$((skipped + 1))
+            continue
+        fi
+        install -m 0644 -- "$file" "$work/receipts/$name"
+        log=$LOG_DIR/restore-erasure-$(bk_stamp)-$id.log
+        rc=0
+        bk_compose run --rm --no-deps -T -v "$work/receipts:/run/mscd-receipts:ro" "${pub[@]}" cli tenant erasure \
+            --reapply "/run/mscd-receipts/$name" --confirm "$slug" >"$log" 2>&1 || rc=$?
+        if ((rc == 0)) && grep -q 'is erased again' "$log"; then
+            pass "$name: the person is erased again in organisation $id, under the pseudonym of the receipt"
+            reapplied=$((reapplied + 1))
+        elif ((rc == 0)) && grep -q 'is erased in .* already' "$log"; then
+            info "$name: the person is erased in organisation $id already"
+            skipped=$((skipped + 1))
+        elif ((rc == 2)); then
+            warn "$name: the restored copy of organisation $id is older than the request; the Tenant Admins record it again and erase the personal data again (log: $log)"
+            bk_redact <"$log" | grep -o 'request PR-[0-9-]*' | head -n 1 | sed 's/^/          /'
+            followups=$((followups + 1))
+        else
+            fail "The erasure of $name could not be re-applied in organisation $id (log: $log)"
+            bk_redact <"$log" | tail -n 8 | sed 's/^/          /'
+        fi
+    done
+    rm -rf -- "$work"
+    info "$reapplied erasure(s) re-applied, $skipped receipt(s) skipped, $followups request(s) to record again"
+}
+
 check_restore() {
     local entry svc port domain https_port code verify=$RESTORE_DIR/verify.json newest
     PHASE=check
@@ -542,6 +625,7 @@ main() {
     restore_vault
     start_services
     reapply_deletions
+    reapply_erasures
     check_restore
     finish
 }

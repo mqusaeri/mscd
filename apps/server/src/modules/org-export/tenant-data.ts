@@ -1,8 +1,9 @@
 // The tables of the organisation's schema in the export (Milestone 3 D.4): `data/tenant/<table>.csv` and `.jsonl` with
 // every row, rows marked deleted included, and every column as stored minus the excluded ones (`exclusions.ts`).
+// Records disposed of under a retention rule and their child rows are left out (decision 18, M3-13; `DISPOSED_ROWS`).
 // Rows are read through a server-side cursor inside the organisation's tenant transaction (`datasets.ts`); PostgreSQL
 // renders each row as JSON (`row_to_json`), with times in ISO 8601 UTC because the transaction uses the time zone UTC.
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import type { Trx } from '../../common/tokens';
 import { writeDataset } from './datasets';
 import { excludedTenantColumns, TENANT_TABLES } from './exclusions';
@@ -60,6 +61,28 @@ export function exportedColumns(table: TenantTable): string[] {
   return table.columns.filter((c) => !excluded.has(c));
 }
 
+/**
+ * The rows a table leaves out because a disposal deleted their content (decision 18): the five record tables by their
+ * own `disposed_at`, the child rows by their record's. The disposal register (`retention_review`) keeps the line.
+ */
+export function disposedRowsFilter(table: string): RawBuilder<boolean> | null {
+  switch (table) {
+    case 'audit_event':
+    case 'finding':
+    case 'corrective_action':
+    case 'management_review':
+    case 'competence_record':
+      return sql<boolean>`disposed_at is null`;
+    case 'audit_activity':
+    case 'audit_prep_task':
+      return sql<boolean>`not exists (select 1 from audit_event p where p.id = ${sql.table(table)}.audit_event_id and p.disposed_at is not null)`;
+    case 'management_review_input':
+      return sql<boolean>`not exists (select 1 from management_review p where p.id = management_review_input.management_review_id and p.disposed_at is not null)`;
+    default:
+      return null;
+  }
+}
+
 export interface DumpOptions {
   /** Ids of storage objects left out (the parts and manifests of organisation exports). */
   skipStorageObjects?: readonly string[];
@@ -75,10 +98,13 @@ export async function dumpTenantTable(trx: Trx, table: TenantTable, csv: Spool, 
   const order = table.primaryKey.length > 0 ? sql`order by ${sql.join(table.primaryKey.map((c) => sql.ref(c)))}` : sql``;
   const skip = options.skipStorageObjects ?? [];
   // The parts of this build are uploaded while it runs, so their rows are left out by their folder as well.
+  const disposed = disposedRowsFilter(table.name);
   const filter =
     table.name === 'storage_object'
       ? sql`where not (id = any(${[...skip]}::uuid[])) and coalesce(folder_path, '') not like ${`${EXPORT_FOLDER_PREFIX}%`}`
-      : sql``;
+      : disposed
+        ? sql`where ${disposed}`
+        : sql``;
   const query = sql`select row_to_json(x)::text as j from (select ${select} from ${sql.table(table.name)} ${filter} ${order}) x`;
   return writeDataset(trx, query, columns, csv, jsonl);
 }

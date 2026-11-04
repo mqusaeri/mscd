@@ -30,6 +30,10 @@
 //    such row, so the report never says the anchors prove a row whose content only an unsigned attestation explains
 //    (someone who rewrites an anchored row, keeps its hash, marks it redacted and appends an attestation after the
 //    newest anchor gets every hash to match, and the report then says no anchor proves that row).
+// 7. Without a proven row (M3-13, security review 4): when the audit trail has rows and no trusted anchor proves any of
+//    them, the hashes only show that the rows match each other, and anyone who rewrites rows, recomputes every hash and
+//    empties the anchors file gets them to match. That is a problem, unless the caller allows it (`allowUnanchored`,
+//    `export verify --allow-unanchored`): the line is then a warning.
 import { createHash, createPublicKey, type Hash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -80,7 +84,12 @@ export interface VerifyReport {
   lastAnchoredSeq: number | null;
   /** Audit rows after `lastAnchoredSeq` (every row when it is null): the anchors do not prove them. */
   rowsAfterLastAnchor: number;
+  /** Lines that do not fail the check: the missing anchors when the caller allowed them. */
+  warnings: string[];
 }
+
+/** The problem (or, with `allowUnanchored`, the warning) of an audit trail with rows and no proven row. */
+export const NO_ANCHOR_PROBLEM = 'No trusted anchor proves any audit row. Export again after the next nightly anchor, or check with --allow-unanchored.';
 
 export interface VerifyOptions {
   /**
@@ -88,6 +97,8 @@ export interface VerifyOptions {
    * `--anchor-key`. Never the keys of the export.
    */
   trustedKeys?: AnchorKeys;
+  /** A trail with rows and no proven row passes with a warning (`--allow-unanchored`); by default it is a problem. */
+  allowUnanchored?: boolean;
 }
 
 /**
@@ -298,7 +309,7 @@ export async function verifyExportFolder(dir: string, options: VerifyOptions = {
   const report: VerifyReport = {
     ok: false, problems, manifestSource: 'download', parts: parts.size, entries: 0, files: 0, auditRows: 0, redactedRows: 0, redactedUnanchored: 0,
     redactedUnanchoredSeqs: [], anchors: 0, anchorKeysTrusted: null, anchorKeyIds: [], untrustedKeyIds: [], newestAnchoredSeq: null, lastAnchoredSeq: null,
-    rowsAfterLastAnchor: 0,
+    rowsAfterLastAnchor: 0, warnings: [],
   };
   if (parts.size === 0) {
     problems.push(`No part (*-part-<n>.tar.gz) in ${dir}`);
@@ -491,6 +502,11 @@ export async function verifyExportFolder(dir: string, options: VerifyOptions = {
   report.lastAnchoredSeq = proven > 0 ? proven : null;
   report.rowsAfterLastAnchor = Math.max(0, audit.rows - proven);
   if (manifest.audit && report.anchors !== manifest.audit.anchors) problems.push(`audit/anchors.jsonl has ${report.anchors} anchors, the manifest names ${manifest.audit.anchors}`);
+  // 7. A trail with rows that no trusted anchor proves.
+  if (audit.rows > 0 && report.lastAnchoredSeq === null) {
+    if (options.allowUnanchored) report.warnings.push(NO_ANCHOR_PROBLEM);
+    else problems.push(NO_ANCHOR_PROBLEM);
+  }
   report.anchorKeysTrusted = report.anchors === 0 ? null : unverified === 0;
   report.anchorKeyIds = [...checkedKeys];
   report.untrustedKeyIds = [...untrusted];

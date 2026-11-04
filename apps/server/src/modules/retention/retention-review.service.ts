@@ -143,11 +143,11 @@ export class RetentionReviewService {
         digest: true,
         createdBy: SYSTEM_USER_ID,
         title: n === 1
-          ? { en: `1 record of ${system.code} is due for a retention review`, id: `1 catatan ${system.code} jatuh tempo untuk tinjauan retensi` }
-          : { en: `${n} records of ${system.code} are due for a retention review`, id: `${n} catatan ${system.code} jatuh tempo untuk tinjauan retensi` },
+          ? { en: `1 record of ${system.code} is due for a retention review`, id: `1 rekaman ${system.code} jatuh tempo untuk tinjauan retensi` }
+          : { en: `${n} records of ${system.code} are due for a retention review`, id: `${n} rekaman ${system.code} jatuh tempo untuk tinjauan retensi` },
         body: {
           en: 'Their retention period ended. Decide to keep, extend or dispose of each in Retention and disposal, Due for review.',
-          id: 'Masa retensinya telah berakhir. Putuskan untuk menyimpan, memperpanjang, atau memusnahkan masing-masing di Retensi dan pemusnahan, Jatuh tempo tinjauan.',
+          id: 'Masa retensinya telah berakhir. Putuskan untuk menyimpan, memperpanjang, atau memusnahkan masing-masing di Retensi dan pemusnahan, Perlu ditinjau.',
         },
       });
     }

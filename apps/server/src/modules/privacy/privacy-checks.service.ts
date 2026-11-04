@@ -1,6 +1,7 @@
 // The personal data checks of a system (Milestone 3 D.1, D.6.4), for its Management System Managers
-// (`privacy_request.assist`): the checks of the system with the request type, the person, the due time and the status
-// (open requests first; checks of a request closed before they were done are left out); the records of the system that
+// (`privacy_request.assist`): the checks of the system with the request type, the person (while the request is open;
+// a closed request shows its number only, M3-13), the due time and the status (open requests first; checks of a request
+// closed before they were done are left out); the records of the system that
 // name the person (mention search, at most 500); and the check marked done with a note, which completes the manager's
 // stored task (audited `privacy_check.done`).
 import { Inject, Injectable } from '@nestjs/common';
@@ -51,11 +52,15 @@ export class PrivacyChecksService {
         if (a.status === 'open') return new Date(a.due_at).getTime() - new Date(b.due_at).getTime() || a.request_no.localeCompare(b.request_no);
         return new Date(b.done_at ?? 0).getTime() - new Date(a.done_at ?? 0).getTime() || b.request_no.localeCompare(a.request_no);
       });
+      // Once the request is closed the list names only the request (M3-13, ISO m8): the managers no longer need the person.
       return rows.map((r) => ({
         id: r.id,
         requestNo: r.request_no,
         type: r.request_type,
-        subject: { name: r.subject_name ?? r.subject_handle ?? '', handle: r.subject_kind === 'member' ? r.subject_handle : null },
+        subject: isOpen(r.request_status)
+          ? { name: r.subject_name ?? r.subject_handle ?? '', handle: r.subject_kind === 'member' ? r.subject_handle : null }
+          : null,
+        requestClosed: !isOpen(r.request_status),
         dueAt: new Date(r.due_at).toISOString(),
         status: r.status,
         doneAt: r.done_at ? new Date(r.done_at).toISOString() : null,
@@ -69,6 +74,8 @@ export class PrivacyChecksService {
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const system = await this.records.resolveMs(trx, ms);
       const row = await this.checkIn(trx, system.id, id);
+      // A closed request no longer names the person to the managers (M3-13, ISO m8), so nothing is searched.
+      if (!isOpen(row.request_status)) return { items: [], truncated: false };
       // The person's name and email as the request keeps them, and the handle of their account (not a pseudonym).
       return searchMentions(trx, system.id, [row.subject_name, row.subject_email, row.account_handle]);
     });

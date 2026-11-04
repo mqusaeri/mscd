@@ -17,7 +17,7 @@ import type { DecideBody, DecisionForm, RecordClass, ReviewModel } from './model
 import {
   CLASS_TEXT, RECORD_CLASSES, asApiResult, decisionBody, decisionErrors, emptyDecision, formatDay, itemLabel, mayApprove, mayManage, noteError, proposedByMe,
 } from './model';
-import { ItemCell, LoadState, PersonAt, useLoad } from './parts';
+import { FilesList, ItemCell, LoadState, PersonAt, useLoad } from './parts';
 import { noteRetentionChanged } from './store';
 import { TEXT } from './text';
 
@@ -98,6 +98,12 @@ export function DecisionDialog({ ctx, ms, reviews, onClose, onDecided }: {
         </Field>
       ) : null}
       {form.decision === 'dispose' ? <Alert tone="warn">{ctx.li(TEXT.disposeWarning)}</Alert> : null}
+      {form.decision === 'dispose' ? reviews.slice(0, 6).filter((r) => r.files.length > 0).map((r) => (
+        <div key={r.id} style={{ marginTop: 8 }}>
+          <strong className="mx-mono mx-small">{itemLabel(r)}</strong>
+          <FilesList ctx={ctx} files={r.files} />
+        </div>
+      )) : null}
       <Field label={TEXT.fReason} error={errors.reason ?? f.reason ?? null} required>
         <Textarea name="reason" rows={3} maxLength={1000} value={form.reason} onChange={(v) => set({ reason: v })} />
       </Field>
@@ -265,6 +271,7 @@ export function ApprovalTab({ ctx, ms }: { ctx: HostContext; ms: MsId }) {
         <span style={{ display: 'block' }}>
           <ItemCell row={r} />
           {r.onHold ? <Badge tone="warn">{ctx.li(TEXT.heldNow)}</Badge> : null}
+          <FilesList ctx={ctx} files={r.files} />
         </span>
       ),
     },
@@ -298,7 +305,12 @@ export function ApprovalTab({ ctx, ms }: { ctx: HostContext; ms: MsId }) {
       <ConfirmDialog
         open={Boolean(approving)}
         title={approving ? ctx.fill(TEXT.approveTitle, { code: itemLabel(approving) }) : TEXT.approveConfirm}
-        body={<p style={{ margin: 0 }}>{ctx.li(TEXT.approveBody)}</p>}
+        body={(
+          <div className="mx-stack">
+            <p style={{ margin: 0 }}>{ctx.li(TEXT.approveBody)}</p>
+            {approving ? <FilesList ctx={ctx} files={approving.files} /> : null}
+          </div>
+        )}
         confirmLabel={TEXT.approveConfirm}
         tone="bad"
         busy={approval.busy}

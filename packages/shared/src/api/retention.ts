@@ -100,13 +100,37 @@ const reviewShape = {
   fileRemovedAt: Instant.nullable(),
 };
 
+export const RetentionReviewFile = named(
+  'RetentionReviewFile',
+  z.object({
+    name: z.string().nullable(),
+    repository: z.string(),
+    /** `delete`: the Managed Vault content is deleted; `owner_asked`: the owner deletes it in the customer repository; `kept_in_use`: another live record uses it. */
+    action: z.enum(['delete', 'owner_asked', 'kept_in_use']),
+    /** The code of the record that still uses the file (`kept_in_use` only). */
+    usedBy: z.string().nullable(),
+  }),
+  'A file of a disposal review item and what the disposal does with it (M3-13, security review 2)',
+  {
+    valid: [
+      { name: 'backup-log-2023q1.pdf', repository: 'Managed Vault', action: 'delete', usedBy: null },
+      { name: 'training-certificate.pdf', repository: 'Managed Vault', action: 'kept_in_use', usedBy: 'EV-0402' },
+    ],
+    invalid: [{ name: null, repository: 'Managed Vault', action: 'archive', usedBy: null }],
+  },
+);
+export type RetentionReviewFile = z.infer<typeof RetentionReviewFile>;
+
 export const RetentionReviewItem = named(
   'RetentionReviewItem',
-  z.object({ ...reviewShape, onHold: z.boolean() }),
-  'A disposal review: the item, its retention end, the decision, the approval and the file action (Milestone 3 D.8)',
+  z.object({ ...reviewShape, onHold: z.boolean(), files: z.array(RetentionReviewFile) }),
+  'A disposal review: the item, its retention end, the decision, the approval, the file action and the files of the item (Milestone 3 D.8)',
   {
-    valid: [EXAMPLE_REVIEW, { ...EXAMPLE_REVIEW, status: 'open', decision: null, decidedBy: null, decidedAt: null, reason: null }],
-    invalid: [{ ...EXAMPLE_REVIEW, status: 'deleted' }, { ...EXAMPLE_REVIEW, decision: 'archive' }],
+    valid: [
+      { ...EXAMPLE_REVIEW, files: [] },
+      { ...EXAMPLE_REVIEW, status: 'open', decision: null, decidedBy: null, decidedAt: null, reason: null, files: [{ name: 'backup-log.pdf', repository: 'Managed Vault', action: 'delete', usedBy: null }] },
+    ],
+    invalid: [{ ...EXAMPLE_REVIEW, status: 'deleted', files: [] }, { ...EXAMPLE_REVIEW, decision: 'archive', files: [] }, EXAMPLE_REVIEW],
   },
 );
 export type RetentionReviewItem = z.infer<typeof RetentionReviewItem>;

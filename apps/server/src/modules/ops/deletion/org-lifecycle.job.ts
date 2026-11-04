@@ -13,7 +13,10 @@
 //      `org.purge` queued again; every purge step is idempotent and a done step never runs twice.
 // Each reminder is sent once per stage and date: the in-app notification it writes in the organisation (`entity_ref`
 // with the stage and the date) is the record, so a moved date gets its own reminders and a run every hour sends nothing
-// twice. In single tenancy the job does nothing (D.5.1): one organisation, no end of contract and no deletion.
+// twice. In single tenancy the job does no lifecycle work (D.5.1): one organisation, no end of contract and no deletion.
+// In both modes each run first signs and emails the erasure receipts of the organisations (erasure-receipts.ts, M3-13).
+// An erasure queues a run when it commits (privacy-erasure.service.ts): single tenancy has no hourly schedule of this
+// job (worker-runtime.ts), so that run, and the daily `privacy.deadlines` run, send the receipts there.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { Clock } from '../../../common/clock';
@@ -25,6 +28,7 @@ import { MscdConfig } from '../../../config/mscd-config';
 import { AccountMailer } from '../../identity/account-mailer';
 import { renderTemplate, type AccountTemplate } from '../../identity/mail-templates';
 import { TENANT_SCHEMA, TenantScope } from '../../tenancy/tenant-scope';
+import { ErasureReceiptSender } from './erasure-receipts';
 import { DAY_MS, REOPEN_DAYS, addDaysTo, lifecyclePeriods, offboardingStartedAt, tenantAdminsOf } from './deletion-records';
 import { OrganizationTransitions } from './organization-transitions';
 
@@ -61,13 +65,20 @@ export class OrgLifecycleJob implements JobHandlerInstance<'org.lifecycle'> {
     private readonly clock: Clock,
     private readonly transitions: OrganizationTransitions,
     private readonly mailer: AccountMailer,
+    private readonly receipts: ErasureReceiptSender,
     @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
   async handle(job: JobRun<'org.lifecycle'>): Promise<void> {
-    // Single tenancy: one organisation, no end of contract and no deletion (D.5.1). Nothing to do.
+    // Erasure receipts (M3-13): signed and emailed in both tenancy modes, before the lifecycle work.
+    const receipts = await this.receipts.run(job.env.requestId).catch((error: unknown) => {
+      this.logger.error({ jobId: job.id }, `The erasure receipts could not be sent: ${(error as Error).message}`);
+      return null;
+    });
+    if (receipts && receipts.signed + receipts.sent + receipts.failed > 0) this.logger.log({ jobId: job.id, ...receipts }, 'erasure receipts');
+    // Single tenancy: one organisation, no end of contract and no deletion (D.5.1). Nothing else to do.
     if (this.config.profile.tenancy.mode !== 'multi') {
-      this.logger.debug({ jobId: job.id }, 'org.lifecycle does nothing in single tenancy');
+      this.logger.debug({ jobId: job.id }, 'org.lifecycle has no lifecycle work in single tenancy');
       return;
     }
     const result = await this.run(job.env.requestId);

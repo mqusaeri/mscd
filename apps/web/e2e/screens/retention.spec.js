@@ -93,9 +93,14 @@ test.describe('Retention and disposal @sample-only', () => {
     const theirs = row(page, 'Sari Wulandari');
     await expect(theirs.locator('button', { hasText: /^Approve$/ })).toBeEnabled();
     const theirCode = (await theirs.locator('strong').innerText()).trim();
+    // M3-13: the file of this item is still the proof of a competence record, so the disposal keeps it.
+    await expect(theirs.locator('[data-files="retention"]')).toContainText('Files of this item');
+    await expect(theirs.locator('[data-file-action="kept_in_use"]')).toContainText(/Kept: used by CMP-/);
     await button(theirs, 'Approve').click();
     await expect(dialog(page)).toContainText(`Approve the disposal of ${theirCode}`);
     await expect(dialog(page)).toContainText('cannot be undone');
+    await expect(dialog(page)).toContainText('unless another record still uses the file');
+    await expect(dialog(page).locator('[data-file-action="kept_in_use"]')).toContainText(/Kept: used by CMP-/);
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Approve and dispose').click();
     await expectToast(page, `${theirCode} disposed of`);
@@ -114,7 +119,7 @@ test.describe('Retention and disposal @sample-only', () => {
     await expect(row(page, code)).toContainText('Disposal rejected: Keep it until the surveillance audit');
     await openTab(page, 'Disposal register');
     await expect(row(page, theirCode)).toContainText('Disposed of');
-    await expect(row(page, theirCode)).toContainText('Content deleted from the Managed Vault');
+    await expect(page.locator('main table tbody')).toContainText('Content deleted from the Managed Vault');
   });
 
   test('places a record on hold from the list and from New hold, and releases a hold', async ({ page }) => {
@@ -227,7 +232,7 @@ test.describe('Retention and disposal @sample-only', () => {
 
   test('speaks Indonesian', async ({ page }) => {
     await openScreen(page, meta, 'lang=id');
-    await expect(tab(page, 'Jatuh tempo tinjauan')).toHaveAttribute('aria-selected', 'true');
+    await expect(tab(page, 'Perlu ditinjau')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('main thead')).toContainText('Retensi berakhir');
     await openTab(page, 'Aturan');
     await expect(page.locator('main')).toContainText('Masa retensi');

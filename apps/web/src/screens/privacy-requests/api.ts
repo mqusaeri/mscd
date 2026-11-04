@@ -22,6 +22,7 @@ export const fromItem = (r: PrivacyRequestItem): RequestRow => ({
 export const fromDetail = (d: PrivacyRequestDetail): RequestDetail => ({
   ...fromItem(d), note: d.note, identityCheckNote: d.identityCheckNote, identityCheckedBy: d.identityCheckedBy, outcome: d.outcome, result: d.result,
   checks: d.checks.map((c) => ({ ...c })), actions: d.actions.map((a) => ({ ...a })), exportTaskId: d.exportTaskId,
+  erasureImpact: d.erasureImpact ? { ...d.erasureImpact } : null,
 });
 
 /** The message pair of a command result. */

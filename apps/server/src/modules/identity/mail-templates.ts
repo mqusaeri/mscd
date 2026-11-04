@@ -10,7 +10,8 @@
 // a contract. The status email names the end of the read-only period (offboarding) or the deletion date (archived);
 // `organization_lifecycle` reminds the Tenant Admins 7 days and 1 day before the read-only period ends and before the
 // deletion; `organization_deletion_certificate` carries the signed deletion certificate (attached) to the Tenant Admins
-// captured when the deletion was scheduled and to the platform operators; `organization_deletion_failed` alerts the
+// captured when the deletion was scheduled and to the platform operators; `erasure_receipt` carries the signed receipt of
+// an erasure of one person (attached) to the platform operators and the Tenant Admins; `organization_deletion_failed` alerts the
 // platform operators when a purge stops. Deletion emails go to people who can no longer sign in, so they are not
 // in-app notifications (J.4). None of them names a person.
 // Every message has a title (the subject is `[MSCD] <title>`) and paragraphs; links are absolute URLs under
@@ -70,6 +71,12 @@ export type AccountTemplate =
    * deletion was scheduled and to every platform operator. `completedOn` and `backupsEndBy` are dates `YYYY-MM-DD`.
    */
   | { name: 'organization_deletion_certificate'; organisation: string; slug: string; certificateId: string; completedOn: string; backupsEndBy: string; fileName: string }
+  /**
+   * Milestone 3 D.6.5 (M3-13, ISO M4): the signed erasure receipt of request `requestNo`, attached as `fileName`, to
+   * every platform operator and every active Tenant Admin of the organisation. `erasedOn` is a local date
+   * `YYYY-MM-DD`. The message and the receipt name no person.
+   */
+  | { name: 'erasure_receipt'; organisation: string; requestNo: string; erasedOn: string; fileName: string }
   /** Milestone 3 D.5.3: a purge stopped at `step`; to every platform operator. */
   | { name: 'organization_deletion_failed'; link: string; organisation: string; slug: string; step: string }
   /**
@@ -103,7 +110,7 @@ export function organisationStatusTexts(status: OrganisationStatusName, organisa
         label: en ? 'suspended' : 'ditangguhkan',
         meaning: en
           ? 'Members cannot open the data of the organisation or change anything until it is active again, and everyone was signed out of it. Nothing is deleted.'
-          : 'Anggota tidak dapat membuka data organisasi atau mengubah apa pun sampai organisasi aktif kembali, dan semua orang telah dikeluarkan dari organisasi ini. Tidak ada data yang dihapus.',
+          : 'Anggota tidak dapat membuka data organisasi atau mengubah apa pun sampai organisasi aktif kembali, dan sesi semua orang di organisasi ini telah diakhiri. Tidak ada data yang dihapus.',
       };
     case 'offboarding':
       return {
@@ -119,7 +126,7 @@ export function organisationStatusTexts(status: OrganisationStatusName, organisa
         label: en ? 'archived (closed)' : 'diarsipkan (ditutup)',
         meaning: en
           ? 'Members can no longer open the organisation, and everyone was signed out of it. Its data is kept only as long as your contract says.'
-          : 'Anggota tidak dapat membuka organisasi ini lagi, dan semua orang telah dikeluarkan dari organisasi ini. Datanya hanya disimpan selama yang ditetapkan dalam kontrak Anda.',
+          : 'Anggota tidak dapat membuka organisasi ini lagi, dan sesi semua orang di organisasi ini telah diakhiri. Datanya hanya disimpan selama yang ditetapkan dalam kontrak Anda.',
       };
   }
 }
@@ -355,12 +362,12 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
             ? [
                 `${template.organisation} is read-only on MSCD because its contract ended. The read-only period ends on ${day}.`,
                 'After that day the organisation closes: nobody can sign in to it any more, and MSCD deletes its data after a further grace period.',
-                'If you have not downloaded the export of the organisation yet, a Tenant Admin does it now under Export all data.',
+                'If you have not downloaded the final export yet, download it now in Organisation export.',
               ]
             : [
                 `${template.organisation} hanya dapat dibaca di MSCD karena kontraknya telah berakhir. Masa hanya-baca berakhir pada ${day}.`,
                 'Setelah tanggal itu organisasi ditutup: tidak ada lagi yang dapat masuk ke organisasi ini, dan MSCD menghapus datanya setelah masa tenggang berikutnya.',
-                'Jika Anda belum mengunduh ekspor organisasi, Tenant Admin dapat melakukannya sekarang di Ekspor semua data.',
+                'Jika Anda belum mengunduh ekspor akhir, unduh sekarang di Ekspor organisasi.',
               ],
           link: { href: template.link, label: OPEN_APP[language] },
         };
@@ -399,6 +406,23 @@ export function renderTemplate(template: MailTemplate, language: MailLanguage): 
               `Berkas terlampir ${template.fileName} adalah sertifikat penghapusan ${template.certificateId} yang ditandatangani. Sertifikat ini mencantumkan setiap langkah, setiap pemeriksaan, dan apa yang tersisa, dan dapat diperiksa dengan "mscd-server tenant verify-certificate".`,
               `Cadangan terenkripsi layanan masih menyimpan salinan lama sampai kedaluwarsa, paling lambat ${fmtDay(template.backupsEndBy, language)}, seperti dijelaskan sertifikat.`,
               'Simpan email dan sertifikat ini sebagai bukti penghapusan.',
+            ],
+      };
+    case 'erasure_receipt':
+      return {
+        title: en
+          ? `${template.organisation}: erasure receipt for request ${template.requestNo}`
+          : `${template.organisation}: tanda terima penghapusan untuk permintaan ${template.requestNo}`,
+        paragraphs: en
+          ? [
+              `A person's personal data was erased in ${template.organisation} on ${fmtDay(template.erasedOn, language)} (request ${template.requestNo}).`,
+              'The attached receipt names no person.',
+              'Keep it with the deletion certificates: after a restore from an older backup, the operator applies it again.',
+            ]
+          : [
+              `Data pribadi seseorang dihapus di ${template.organisation} pada ${fmtDay(template.erasedOn, language)} (permintaan ${template.requestNo}).`,
+              'Tanda terima terlampir tidak menyebut nama orang.',
+              'Simpan bersama sertifikat penghapusan: setelah pemulihan dari cadangan lama, operator menerapkannya lagi.',
             ],
       };
     case 'organization_deletion_failed':

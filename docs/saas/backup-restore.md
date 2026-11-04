@@ -190,6 +190,7 @@ Options of `restore.sh`:
 | `--vault-at <time>` | Copy the vault back as it was at that time (for example `2026-10-01T02:00:00Z`), from the old versions the bucket keeps. Use it with an older `--snapshot`, when files were deleted since |
 | `--keep-secrets` | Keep the secret files of this server. For a restore on the same server, whose secrets are intact |
 | `--reapply-deletions <folder>` | Delete again every organisation that a deletion certificate in the folder names and the restored copy brings back (see [Deleted organisations and the backups](#deleted-organisations-and-the-backups)) |
+| `--reapply-erasures <folder>` | Erase again every person that an erasure receipt in the folder names and the restored copy brings back (see [Erased people and the backups](#erased-people-and-the-backups)) |
 | `--no-timer` | Do not install the timer |
 | `--yes` | No question (for scripts) |
 
@@ -238,6 +239,42 @@ So with the recommended bucket settings the last copy is gone at the latest abou
    ```
 
 `mscd-server tenant verify-certificate <file>` checks one certificate offline, for example before you hand it to a customer.
+
+## Erased people and the backups
+
+When a person asks an organisation to erase their personal data, a Tenant Admin erases it on the Personal data requests screen (Milestone 3 D.6.5): the person's roles and membership in that organisation end, the records show a pseudonym such as "Former user 7F3A", and the person's email, handle and name leave the audit entries. Older backup copies still hold the person's data until they age out, as for a deleted organisation (see [How long copies stay](#deleted-organisations-and-the-backups)).
+
+**The erasure receipt.** Each erasure writes a receipt: a small JSON file (`mscd.erasure-receipt`, version 1) with the organisation id and slug, the request id and number, whether the person had an account, the account id of an erased member, the pseudonym, the time and the ids of the audit redactions. It names no person. Within minutes of the erasure the worker signs it with the audit anchor key, as it signs a deletion certificate, and emails it to every platform operator and every active Tenant Admin of the organisation (the email "erasure receipt for request PR-..." carries it as `erasure-receipt-<slug>-<request>.json`). When no email could be sent, the worker tries again every hour on SaaS and once a day on-premise. Keep the receipts with the deletion certificates. On-premise there is no platform operator: the Tenant Admins receive it, and the installation's own `secrets/audit-anchor.pub` checks it.
+
+**A restore from a copy older than an erasure** brings the person's data back. Before every restore:
+
+1. Collect the erasure receipts from the operators' mailbox into one folder on the server, for example `/opt/mscd/backup/receipts/`. Take every receipt issued after the time of the copy you restore; more do no harm. When a receipt email is missing, or email did not work, print the signed receipts of an organisation from the database of the copy you replace (before the restore) and split them into files, one receipt file per line:
+
+   ```bash
+   cd /opt/mscd/deploy/compose && sudo docker compose run --rm -T cli tenant erasure --print-receipts <slug> \
+     | sudo tee /opt/mscd/backup/receipts-<slug>.jsonl > /dev/null
+   sudo split -l 1 -d -a 4 --additional-suffix=.json /opt/mscd/backup/receipts-<slug>.jsonl /opt/mscd/backup/receipts/erasure-receipt-<slug>-
+   ```
+
+   The command lists the receipts on the screen and names any receipt the worker has not signed yet (run it again a few minutes later). When the database itself is lost, it cannot print its receipts, so keep the printed files with the backups as well.
+2. Restore with the folder (it can go together with `--reapply-deletions`):
+
+   ```bash
+   sudo bash /opt/mscd/deploy/backup/restore.sh --reapply-erasures /opt/mscd/backup/receipts
+   ```
+
+   After the services start, for each receipt it runs `mscd-server tenant erasure --reapply <receipt> --confirm <slug>`. The command checks the signature against the trusted anchor keys (those of the release and the installation's `audit-anchor.pub`) and that the receipt names this organisation id. A person already erased in the restored copy is skipped. A person who holds open items in the restored copy is reported with the count per system: hand the items over to someone else in the app, then run the command by hand. Otherwise the person is erased again as the system, with the pseudonym of the receipt, and the request records it. For a person without an account the redaction runs again from the restored request; when the copy is older than the request, the run reports the request number, and the Tenant Admins record the request again and erase the personal data again.
+3. After a restore without the folder, run the same command by hand for each receipt:
+
+   ```bash
+   cd /opt/mscd/deploy/compose && sudo docker compose run --rm -T -v /opt/mscd/backup/receipts:/run/receipts:ro \
+     -v /opt/mscd/secrets/audit-anchor.pub:/run/secrets/audit-anchor.pub:ro cli \
+     tenant erasure --reapply /run/receipts/<file>.json --confirm <slug>
+   ```
+
+Edits the managers made to record text after the copy was taken are lost with the restore, as every other change of that time. When the restored copy is older than such an edit, ask the Management System Managers to check the records that named the person again.
+
+**Disposed records.** A disposal after a retention review deletes a record's content (its text, personal details and the values of its audit entries). This release writes no receipt for a disposal: a restore from a copy older than a disposal brings that record's content back. Approve the disposal again after such a restore; the disposal register of the restored copy shows which disposals are missing. Disposal receipts and their re-apply follow before the production go-live.
 
 ## Keys
 
@@ -301,4 +338,4 @@ npm run test:int -w @mscd/server -- test/int/backup          # backup verify aga
 flock /tmp/mscd-stack.lock bash deploy/backup/restore-test.sh --local
 ```
 
-`restore-test.sh --local` runs the whole cycle on the SaaS test stack of [stack.md](stack.md) (ports 18080 and 18443, hence the host lock): two organisations with signed audit anchors and probe files, a second SeaweedFS as the off-site bucket (reached only through the network `egress`), the nightly backup, the pre-deploy copy, both guards (the vault guard also with an empty vault and the default limits), the loss of the server, `restore.sh`, the checks after it, and the weekly restore test with the read-only key, run as a user that is not root and reaches Docker through the docker group, as on a GitHub runner. Then the verified deletion: with an overlay of its own (`compose.lifecycle.yml` in its state folder) that sets the lifecycle periods to 0 days and `MSCD_SAAS_TEST=1` on the api, the worker and the cli, it sends a pre-deploy copy off-site, purges one organisation and checks its certificate, backs up (the vault guard lets the purge's drop pass), restores the copy from before the purge with `--reapply-deletions`, and checks that the organisation is deleted again and the other intact. It removes everything it made, and keeps its logs in `/var/tmp/<project>-logs`. `--down` removes what a stopped run left. The edge network of its stack takes an IPv6 range of its own that no Docker network on the host uses (`MSCD_EDGE_SUBNET6` sets another), because Docker refuses two networks with the same range even when IPv6 is off, and a stopped stack on the same host keeps its network.
+`restore-test.sh --local` runs the whole cycle on the SaaS test stack of [stack.md](stack.md) (ports 18080 and 18443, hence the host lock): two organisations with signed audit anchors and probe files, a second SeaweedFS as the off-site bucket (reached only through the network `egress`), the nightly backup, the pre-deploy copy, both guards (the vault guard also with an empty vault and the default limits), the loss of the server, `restore.sh`, the checks after it, and the weekly restore test with the read-only key, run as a user that is not root and reaches Docker through the docker group, as on a GitHub runner. Then the verified deletion: with an overlay of its own (`compose.lifecycle.yml` in its state folder) that sets the lifecycle periods to 0 days and `MSCD_SAAS_TEST=1` on the api, the worker and the cli, it sends a pre-deploy copy off-site, purges one organisation and checks its certificate, backs up (the vault guard lets the purge's drop pass), restores the copy from before the purge with `--reapply-deletions`, and checks that the organisation is deleted again and the other intact. Then the erasure of a person: in the remaining organisation it makes an invented member with an audit entry and an erasure request, sends a pre-deploy copy off-site, erases the member through the erasure service of the cli image, waits for the worker to sign the receipt (the `org.lifecycle` run the erasure queues), restores the copy from before the erasure with `--reapply-erasures`, and checks that the member is erased again under the same pseudonym and that no audit entry holds the member's email. It removes everything it made, and keeps its logs in `/var/tmp/<project>-logs`. `--down` removes what a stopped run left. The edge network of its stack takes an IPv6 range of its own that no Docker network on the host uses (`MSCD_EDGE_SUBNET6` sets another), because Docker refuses two networks with the same range even when IPv6 is off, and a stopped stack on the same host keeps its network.

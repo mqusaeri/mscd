@@ -12,7 +12,9 @@
 //   hash, and every signed anchor with the anchor keys compiled into this build plus the public keys named with
 //   `--anchor-key` (an on-premise installation signs with its own key) (`org-export/verify.ts`); a key the export brings
 //   is never trusted. Exit 0 only when nothing is wrong, an anchor signed by a key that is not trusted included. The
-//   output names the newest anchored row and the rows after it, which no signature covers.
+//   output names the newest anchored row and the rows after it, which no signature covers. An audit trail with rows of
+//   which no trusted anchor proves any fails (M3-13, security review 4), unless `--allow-unanchored` is given: the line
+//   is then a warning and the exit code 0.
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -218,6 +220,8 @@ async function organisationOf(scope: TenantScope, tenants: TenantResolver, slug:
 export interface ExportVerifyOptions {
   /** Public anchor key files to trust next to the compiled keys (`--anchor-key`, repeatable). */
   anchorKeys?: string[];
+  /** `--allow-unanchored`: a trail no trusted anchor proves passes with a warning. */
+  allowUnanchored?: boolean;
 }
 
 /** The result of `export verify` with the key ids that came from `--anchor-key`. */
@@ -234,7 +238,7 @@ export async function exportVerify(dir: string, options: ExportVerifyOptions = {
   const operatorKeys: { file: string; keyId: string; publicKeyPem: string }[] = [];
   for (const file of options.anchorKeys ?? []) operatorKeys.push({ file, ...(await readAnchorKeyFile(file)) });
   const trustedKeys = [...compiledAnchorKeys(), ...operatorKeys.map((k) => ({ keyId: k.keyId, publicKeyPem: k.publicKeyPem }))];
-  const report = await verifyExportFolder(path.resolve(dir), { trustedKeys });
+  const report = await verifyExportFolder(path.resolve(dir), { trustedKeys, allowUnanchored: options.allowUnanchored === true });
   return { ...report, operatorKeys: operatorKeys.map((k) => ({ file: k.file, keyId: k.keyId })) };
 }
 
@@ -285,7 +289,13 @@ export function verifyLines(report: ExportVerifyResult): { out: string[]; err: s
         ];
   if (report.ok) {
     return {
-      out: [head, 'OK: every part, entry and audit hash matches the manifest, and every anchor is signed by a trusted key.', `${coverage} ${compare}`, ...unanchored],
+      out: [
+        head,
+        'OK: every part, entry and audit hash matches the manifest, and every anchor is signed by a trusted key.',
+        `${coverage} ${compare}`,
+        ...unanchored,
+        ...report.warnings.map((w) => `WARNING: ${w}`),
+      ],
       err: [],
     };
   }
@@ -346,13 +356,14 @@ export function register(program: Command): void {
       (file: string, files: string[]) => [...files, file],
       [] as string[],
     )
-    .action(async (options: { dir?: string; anchorKey: string[] }) => {
+    .option('--allow-unanchored', 'pass an audit trail that no trusted anchor proves, with a warning (for example an export taken before the first nightly anchor)')
+    .action(async (options: { dir?: string; anchorKey: string[]; allowUnanchored?: boolean }) => {
       if (!options.dir) {
         process.stderr.write('export verify: give the folder with --dir <dir>\n');
         process.exit(1);
       }
       try {
-        const report = await exportVerify(options.dir, { anchorKeys: options.anchorKey });
+        const report = await exportVerify(options.dir, { anchorKeys: options.anchorKey, allowUnanchored: options.allowUnanchored === true });
         const lines = verifyLines(report);
         process.stdout.write(`${lines.out.join('\n')}\n`);
         if (!report.ok) {

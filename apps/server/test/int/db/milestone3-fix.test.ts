@@ -45,7 +45,7 @@ describe('Milestone 3 correction migrations (platform 0009, tenant 0010)', () =>
       sql<{ name: string }>`select name from kysely_migration order by name`.execute(trx).then((r) => r.rows.map((row) => row.name)),
     );
     expect(names).toContain('0009_milestone3');
-    expect(names.at(-1)).toBe('0010_milestone3_fix');
+    expect(names).toContain('0010_milestone3_fix');
     await expectPgError(
       rolledBack(db.app, { orgId: tenant.id, schema: tenant.schemaName, userId: member }, (trx) => sql`delete from kysely_migration`.execute(trx)),
       '42501',

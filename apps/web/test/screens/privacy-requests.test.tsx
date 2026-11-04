@@ -190,6 +190,14 @@ describe('personal data request API adapter', () => {
     expect(post.headers['idempotency-key']).toMatch(/.{8,}/);
     expect(post.body).toEqual({ type: 'access', subject: { userId: 'u1' }, receivedAt: '2026-10-30T09:00:00Z', channel: 'email' });
     expect(await adapter.get(ID)).toEqual({ ok: true, status: 200, data: D0 });
+    expect(D0.erasureImpact).toBeNull();
+  });
+
+  it('reads what an erasure in progress will change (M3-13)', async () => {
+    const impact = { tenantEntries: 42, platformEntries: 3, legalHolds: 1 };
+    const f = client({ [`GET /api/v1/admin/privacy-requests/${ID}`]: json({ ...DETAIL, type: 'erasure', status: 'in_progress', erasureImpact: impact }) });
+    const read = await createApiAdapter(f.client).get(ID);
+    expect(read.ok && read.data.erasureImpact).toEqual(impact);
   });
 
   it('reads every page of the member list for the subject picker, and stops at the first refusal', async () => {
@@ -266,9 +274,16 @@ describe('personal data request sample adapter', () => {
     expect(await a.erase(erasure!.id)).toMatchObject({ ok: false, error: { messageKey: 'privacy.start_first' } });
     expect(await a.update(erasure!.id, { action: 'start', identityCheckNote: 'Letter signed' }, erasure!.etag)).toMatchObject({ ok: true });
     expect(await a.erase(erasure!.id)).toMatchObject({ ok: false, error: { messageKey: 'privacy.checks_open' } });
+    // M3-13: an erasure in progress shows what it will change; once run, it shows nothing.
+    const before = await a.get(erasure!.id);
+    // The sample's erasure is about a person without an account: no platform entries.
+    expect(before.ok && before.data.erasureImpact).toEqual({ tenantEntries: 2, platformEntries: 0, legalHolds: 0 });
     for (const c of erasure!.checks) c.status = 'done';
     expect(await a.close(erasure!.id, 'Done')).toMatchObject({ ok: false, error: { messageKey: 'privacy.action_first' } });
-    expect(await a.erase(erasure!.id)).toMatchObject({ ok: true });
+    const erased = await a.erase(erasure!.id);
+    expect(erased).toMatchObject({ ok: true });
+    const after = await a.get(erasure!.id);
+    expect(after.ok && after.data.erasureImpact).toBeNull();
     expect(await a.close(erasure!.id, 'Erased and answered by letter')).toMatchObject({ ok: true });
     expect(await a.close(erasure!.id, 'Again')).toMatchObject({ ok: false, error: { messageKey: 'privacy.request_closed' } });
     expect(await a.rectify(access!.id, { displayName: 'X' })).toMatchObject({ ok: false, error: { messageKey: 'privacy.wrong_type' } });
@@ -306,17 +321,41 @@ describe('personal data request views', () => {
         const form = render(<RecordDialog ctx={ctx} adapter={sample} open onClose={() => undefined} onDone={() => undefined} />, ctx, theme);
         for (const p of [TEXT.recordTitle, TEXT.recordSub, TEXT.type, TEXT.subjectMember, TEXT.subjectOther, TEXT.member, TEXT.receivedAt, TEXT.channel, TEXT.save]) expect(form, p[0]).toContain(tr(p));
         expect(form).toContain('data-form="privacy-record"');
+        expect(form).toContain(tr(TEXT.receivedProviderHint));
+        // The hint for a forwarded request sits under the received date and time and describes their group.
+        const hintAt = form.indexOf(tr(TEXT.receivedProviderHint));
+        expect(form.indexOf(`>${tr(TEXT.receivedTime)}<span class="mx-req"`)).toBeGreaterThan(-1);
+        expect(form.indexOf(`>${tr(TEXT.receivedTime)}<span class="mx-req"`)).toBeLessThan(hintAt);
+        expect(hintAt).toBeLessThan(form.indexOf(`>${tr(TEXT.channel)}</label>`));
+        const describedBy = /role="group" aria-describedby="([^"]+)"/.exec(form)?.[1];
+        expect(describedBy).toBeTruthy();
+        expect(form).toContain(`<span id="${describedBy}" class="mx-hint">${tr(TEXT.receivedProviderHint)}</span>`);
         const view = render(<RequestView ctx={ctx} adapter={sample} detail={D0} />, ctx, theme);
         for (const p of [TEXT.facts, TEXT.checks, TEXT.steps, TEXT.actions, TEXT.start, TEXT.exportData, TEXT.close, TEXT.refuse, TEXT.withdraw, TEXT.addNote, TEXT.startFirst, ACTION_TEXT['privacy_request.created']!]) expect(view, p[0]).toContain(tr(p));
         expect(view).toContain('data-request="PR-2026-004"');
         expect(view).toContain('Bagus Prasetyo');
         const erasing = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, type: 'erasure', status: 'in_progress', checks: [] }} initialDialog="erase" />, ctx, theme);
-        for (const p of [TEXT.eraseBody, TEXT.eraseStays]) expect(erasing, p[0]).toContain(tr(p));
+        for (const p of [TEXT.eraseBody, TEXT.eraseStays, TEXT.erase]) expect(erasing, p[0]).toContain(tr(p));
+        expect(erasing).toContain(esc(t(TEXT.eraseTitle, lang).replace('{no}', 'PR-2026-004')));
         expect(erasing).toContain('data-erase="member"');
         expect(erasing).toContain('ERASE');
+        expect(erasing).not.toContain('data-erase-impact');
+        // M3-13: what the erasure changes and the legal holds, shown before erasing.
+        const impact = { tenantEntries: 42, platformEntries: 3, legalHolds: 2 };
+        const counted = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, type: 'erasure', status: 'in_progress', checks: [], erasureImpact: impact }} initialDialog="erase" />, ctx, theme);
+        expect(counted).toContain(esc(t(TEXT.eraseImpact, lang).replace('{n}', '42').replace('{p}', '3')));
+        expect(counted).toContain(esc(t(TEXT.eraseHolds, lang).replace('{n}', '2')));
+        expect(counted).toContain(tr(TEXT.eraseStays));
+        const noHold = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, type: 'erasure', status: 'in_progress', checks: [], erasureImpact: { ...impact, legalHolds: 0 } }} initialDialog="erase" />, ctx, theme);
+        expect(noHold).toContain('data-erase-impact="entries"');
+        expect(noHold).not.toContain('data-erase-impact="holds"');
         const other = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, type: 'erasure', status: 'in_progress', checks: [], subject: { kind: 'other', userId: null, handle: null, name: 'Bima Haryanto', email: null } }} initialDialog="erase" />, ctx, theme);
         expect(other).toContain('data-erase="other"');
         expect(other).toContain(tr(TEXT.eraseOther));
+        expect(other).not.toContain(tr(TEXT.eraseStays));
+        // The copy of an access request tells the Tenant Admin to add file contents (ISO m9).
+        const copying = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, status: 'in_progress', exportTaskId: '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e' }} />, ctx, theme);
+        expect(copying).toContain(tr(TEXT.accessHint));
         const restrict = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, type: 'restriction', status: 'in_progress', checks: [] }} initialDialog="restrict" />, ctx, theme);
         expect(restrict).toContain(tr(TEXT.restrictBody));
         const done = render(<RequestView ctx={ctx} adapter={sample} detail={{ ...D0, status: 'completed', closedAt: '2026-10-31T02:00:00Z', outcome: 'Copy sent', result: { exportsQueued: 1, systemsChecked: 4 }, checks: [{ ...D0.checks[0]!, status: 'done', doneBy: { handle: 'rina', displayName: 'Rina Kusuma' }, doneAt: '2026-10-31T01:00:00Z', note: 'Nothing found' }] }} />, ctx, theme);

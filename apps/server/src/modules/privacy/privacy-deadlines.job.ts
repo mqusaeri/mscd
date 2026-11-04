@@ -2,6 +2,9 @@
 // `scheduler.tick` (`pd:<org>:<local date>`). Each run notifies the active Tenant Admins (`privacy_request_due`) of every
 // open request (received or in progress) that is due within 24 hours, and of every open request that is past its due
 // time (each run again, until it is answered). The screens show the time left between runs.
+// Each run then signs and emails the organisation's erasure receipts that are not sent yet (M3-13,
+// ops/deletion/erasure-receipts.ts): in single tenancy, which has no hourly `org.lifecycle` schedule, this is the
+// daily retry of a receipt whose first send (the run the erasure queues) failed. A failed send never fails the job.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { Clock } from '../../common/clock';
@@ -9,6 +12,7 @@ import { JobHandler, type JobHandlerInstance } from '../../common/jobs/job-handl
 import type { JobRun } from '../../common/jobs/job-queue';
 import { NOTIFICATION_WRITER, SYSTEM_USER_ID, type NotificationWriter, type TenantInfo, type Trx } from '../../common/tokens';
 import { TenantJobRunner } from '../jobs/tenant-job';
+import { ErasureReceiptSender, type ReceiptRunResult } from '../ops/deletion/erasure-receipts';
 import { activeTenantAdmins, requestRef } from './privacy-model';
 import { dueNotice } from './privacy-text';
 
@@ -67,6 +71,7 @@ export class PrivacyDeadlinesJob implements JobHandlerInstance<'privacy.deadline
     private readonly runner: TenantJobRunner,
     private readonly clock: Clock,
     private readonly deadlines: PrivacyDeadlinesService,
+    private readonly receipts: ErasureReceiptSender,
   ) {}
 
   async handle(job: JobRun<'privacy.deadlines'>): Promise<void> {
@@ -75,9 +80,15 @@ export class PrivacyDeadlinesJob implements JobHandlerInstance<'privacy.deadline
   }
 
   /** One run for an organisation; null when the organisation is gone or not active. */
-  async run(orgId: string | null, requestId?: string): Promise<DeadlinesResult | null> {
+  async run(orgId: string | null, requestId?: string): Promise<(DeadlinesResult & { receipts: ReceiptRunResult | null }) | null> {
     const org = await this.runner.organisation(orgId, 'privacy.deadlines');
     if (!org) return null;
-    return this.runner.run(org, (trx) => this.deadlines.run(trx, org, this.clock.now()), requestId);
+    const result = await this.runner.run(org, (trx) => this.deadlines.run(trx, org, this.clock.now()), requestId);
+    // The erasure receipts of the organisation, after the notices and outside their transaction.
+    const receipts = await this.receipts.run(requestId, org.id).catch((error: unknown) => {
+      this.logger.error({ orgId: org.id }, `The erasure receipts could not be sent: ${(error as Error).message}`);
+      return null;
+    });
+    return { ...result, receipts };
   }
 }

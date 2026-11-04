@@ -23,6 +23,7 @@ import { MscdConfig } from '../../config/mscd-config';
 import { MembershipDirectory } from '../authz/membership-directory';
 import { SessionService } from '../identity/session.service';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
+import { erasureImpact } from './erasure-scope';
 import { erasedJoin, shownHandle, shownName } from './pseudonym';
 import {
   activeTenantAdmins, conflict, isOpen, nextRequestNo, orgOf, personOf, refusal, requestItem, requestRef, requestRow, requestRows, systemsWithManager,
@@ -254,16 +255,20 @@ export class PrivacyRequestsService {
   // -------------------------------------------------------------------------------------------------------------
 
   async get(principal: Principal, id: string): Promise<PrivacyRequestDetail> {
-    orgOf(principal);
+    const org = orgOf(principal);
     const now = this.clock.now();
     return this.tenancy.withTenant(tenantContextOf(principal), async (trx) => {
       const row = await requestRow(trx, id);
-      return this.detailOf(trx, row, now);
+      const detail = await this.detailOf(trx, row, now);
+      // What an erasure in progress will change, shown before erasing (M3-13, security review 1 and ISO o9).
+      const erasing = row.request_type === 'erasure' && row.status === 'in_progress' && (row.result?.erased ?? 0) === 0;
+      const impact = erasing ? await erasureImpact(trx, { id: org.id, timeZone: org.timeZone }, row, this.clock.todayIn(org.timeZone)) : null;
+      return { ...detail, erasureImpact: impact };
     });
   }
 
   /** The detail of a request row: its checks, the steps of its audit entries, its latest note and its export task. */
-  async detailOf(trx: Trx, row: RequestRow, now: Date): Promise<PrivacyRequestDetail> {
+  async detailOf(trx: Trx, row: RequestRow, now: Date): Promise<Omit<PrivacyRequestDetail, 'erasureImpact'>> {
     const { rows: checks } = await sql<{ id: string; ms: string; status: 'open' | 'done'; done_handle: string | null; done_name: string | null; done_at: Date | null; note: string | null }>`
       select c.id, m.slug as ms, c.status, ${shownHandle('u', 'e')} as done_handle,
              ${shownName('u', 'e')} as done_name,

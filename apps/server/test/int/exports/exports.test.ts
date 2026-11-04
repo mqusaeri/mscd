@@ -7,12 +7,15 @@
 //   as PDF pages with pdf-lib), the SoA and the audit trail; the task, its download through FileResponder, the audit
 //   entries and the `export_ready` notification;
 // - the D.3 permission rules, the creator-only task routes, the permission re-check at download and in the job, the
-//   format rules and the expiry of export files.
+//   format rules and the expiry of export files;
+// - the personal data copy in format v2 (Milestone 3 D.6.3, M3-13 after ISO m9): the records of every system whose text
+//   names the person and the entries about the account, without values.
 import ExcelJS from 'exceljs';
 import type { BackgroundTask, CommandResult, Page } from '@mscd/shared';
 import { sql } from 'kysely';
 import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PERSONAL_DATA_FORMAT, personalDataOf } from '../../../src/modules/exports/personal-data';
 import { useTestDatabase } from '../../setup/test-db';
 import { inOrg, signIn, startStorageStack, userId, type FilesClient, type StorageStack } from '../files/helpers';
 import { createWp24App, ORG_IDS, type DemoOrg, type Wp24App } from '../notifications/helpers';
@@ -299,5 +302,27 @@ describe('exports (D.3, E.2, F.13, F.15)', () => {
     await inOrg(db, 'ndt', (trx) => trx.updateTable('export_file').set({ expires_at: new Date(ctx.clock.now().getTime() - 1000) }).where('background_task_id', '=', done.id).execute());
     expect((await sari.get(done.downloadUrl!)).status).toBe(404);
     expect((await sari.get(`/api/v1/exports/${pending.body.taskId}/download`)).status).toBe(409);
+  });
+
+  it('builds the personal data copy in format v2 with the mentions of every system and the entries about the account, without values', async () => {
+    const person = await userId(db, 'hendra');
+    const riskCode = await inOrg(db, 'tst', async (trx) => {
+      const { rows: [risk] } = await sql<{ code: string }>`
+        update risk set description = coalesce(description, '') || ' Escalations go to hendra.'
+         where id = (select r.id from risk r where r.deleted_at is null order by r.code limit 1) returning code`.execute(trx);
+      await sql`
+        insert into audit_trail (organization_id, actor_kind, action, entity_type, entity_id, entity_code, after_data)
+        values (${ORG_IDS.tst}::uuid, 'system', 'membership.updated', 'org_membership', ${person}::uuid, 'hendra', ${JSON.stringify({ adminRoles: ['storage_admin'] })}::jsonb)`.execute(trx);
+      return risk!.code;
+    });
+    const copy = await inOrg(db, 'tst', (trx) => personalDataOf(trx, { id: ORG_IDS.tst, name: 'Test organisation', slug: 'tst' }, person, ctx.clock.now()));
+    expect(PERSONAL_DATA_FORMAT).toBe('mscd-personal-data-v2');
+    expect(copy.format).toBe(PERSONAL_DATA_FORMAT);
+    expect(copy.mentions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ recordType: 'risk', code: riskCode, field: 'description', excerpt: expect.stringContaining('hendra') }),
+    ]));
+    expect(copy.auditEntriesAbout).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'membership.updated', recordType: 'org_membership' })]));
+    for (const e of copy.auditEntriesAbout) expect(Object.keys(e).sort()).toEqual(['action', 'at', 'ms', 'recordType', 'seq']);
+    expect(JSON.stringify(copy.auditEntriesAbout)).not.toContain('storage_admin');
   });
 });

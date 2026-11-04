@@ -102,9 +102,10 @@ export function CheckDrawer({ ctx, adapter, ms, row, onClose }: { ctx: HostConte
   useEffect(() => {
     let live = true;
     setMentions(null);
+    if (row.requestClosed) return () => { live = false; };
     void adapter.mentions(ms, row.id).then((res) => { if (live) setMentions(res); });
     return () => { live = false; };
-  }, [adapter, ms, row.id, version]);
+  }, [adapter, ms, row.id, row.requestClosed, version]);
   const run = useCallback((note: string) => adapter.done(ms, row.id, note), [adapter, ms, row.id]);
   const mutation = useMutation(run);
   const submit = (note: string) => {
@@ -116,11 +117,13 @@ export function CheckDrawer({ ctx, adapter, ms, row, onClose }: { ctx: HostConte
     }, () => undefined);
   };
   let found;
-  if (!mentions) found = <div className="mx-small" role="status">{ctx.li(TEXT.mentionsLoading)}</div>;
+  if (row.requestClosed) found = <span className="mx-muted">{ctx.fill(TEXT.closedRequest, { no: row.requestNo })}</span>;
+  else if (!mentions) found = <div className="mx-small" role="status">{ctx.li(TEXT.mentionsLoading)}</div>;
   else if (!mentions.ok) found = <Alert tone="bad">{ctx.li(mentions.error.message)}</Alert>;
   else if (!mentions.data.items.length) found = <span className="mx-muted">{ctx.li(TEXT.noMentions)}</span>;
   else found = <MentionsTable ctx={ctx} ms={ms} mentions={mentions.data} />;
-  const handle = row.subject.handle;
+  const subject = row.subject;
+  const handle = subject?.handle ?? null;
   return (
     <Drawer open title={ctx.fill(TEXT.checkTitle, { no: row.requestNo })} crumb={TEXT.crumb} onClose={onClose}>
       <div className="mx-stack" data-check={row.requestNo}>
@@ -129,7 +132,7 @@ export function CheckDrawer({ ctx, adapter, ms, row, onClose }: { ctx: HostConte
             items={[
               { label: TEXT.colRequest, value: row.requestNo, mono: true },
               { label: TEXT.colType, value: ctx.li(TYPE_TEXT[row.type]) },
-              { label: TEXT.colPerson, value: handle ? row.subject.name : `${row.subject.name} (${ctx.li(TEXT.noAccount)})` },
+              { label: TEXT.colPerson, value: personOf(ctx, row) },
               { label: TEXT.colDue, value: formatInstant(row.dueAt, ctx.lang) },
               { label: TEXT.colStatus, value: <CheckStatus ctx={ctx} row={row} /> },
             ]}
@@ -141,16 +144,22 @@ export function CheckDrawer({ ctx, adapter, ms, row, onClose }: { ctx: HostConte
         <Card title={TEXT.mentions} sub={TEXT.mentionsSub}>
           {found}
         </Card>
-        {handle ? (
+        {handle && subject ? (
           <Card title={TEXT.handover}>
-            <p style={{ margin: '0 0 12px' }}>{ctx.fill(TEXT.handoverText, { name: row.subject.name })}</p>
-            <Button onClick={() => ctx.go('handover', { ms, params: { handle, name: row.subject.name } })}>{ctx.li(TEXT.handoverOpen)}</Button>
+            <p style={{ margin: '0 0 12px' }}>{ctx.fill(TEXT.handoverText, { name: subject.name })}</p>
+            <Button onClick={() => ctx.go('handover', { ms, params: { handle, name: subject.name } })}>{ctx.li(TEXT.handoverOpen)}</Button>
           </Card>
         ) : null}
       </div>
       <MarkDialog ctx={ctx} open={marking} row={row} busy={mutation.busy} error={mutation.error?.message ?? null} onSubmit={submit} onClose={() => setMarking(false)} />
     </Drawer>
   );
+}
+
+/** The person of a check, or the request number alone once the request is closed (M3-13). */
+function personOf(ctx: ScreenProps['ctx'], row: CheckRow): string {
+  if (!row.subject) return ctx.fill(TEXT.closedRequest, { no: row.requestNo });
+  return row.subject.handle ? row.subject.name : `${row.subject.name} (${ctx.li(TEXT.noAccount)})`;
 }
 
 export default function PrivacyChecksScreen({ ctx }: ScreenProps) {
@@ -171,7 +180,13 @@ export default function PrivacyChecksScreen({ ctx }: ScreenProps) {
   const columns: Column<CheckRow>[] = [
     { key: 'no', label: TEXT.colRequest, render: (r) => <span className="mx-mono" style={{ fontWeight: 600 }}>{r.requestNo}</span> },
     { key: 'type', label: TEXT.colType, render: (r) => ctx.li(TYPE_TEXT[r.type]) },
-    { key: 'person', label: TEXT.colPerson, render: (r) => <span>{r.subject.name}{r.subject.handle ? null : <span className="mx-small"> ({ctx.li(TEXT.noAccount)})</span>}</span> },
+    {
+      key: 'person',
+      label: TEXT.colPerson,
+      render: (r) => (r.subject
+        ? <span>{r.subject.name}{r.subject.handle ? null : <span className="mx-small"> ({ctx.li(TEXT.noAccount)})</span>}</span>
+        : <span className="mx-muted">{ctx.fill(TEXT.closedRequest, { no: r.requestNo })}</span>),
+    },
     { key: 'due', label: TEXT.colDue, render: (r) => formatInstant(r.dueAt, ctx.lang) },
     { key: 'status', label: TEXT.colStatus, render: (r) => <CheckStatus ctx={ctx} row={r} /> },
   ];

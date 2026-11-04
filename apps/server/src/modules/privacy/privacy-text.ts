@@ -15,8 +15,16 @@ export const CHECKS_SCREEN: Messages = { en: 'Personal data checks', id: 'Pemeri
 export const TYPE_NAMES: Readonly<Record<PrivacyRequestType, Messages>> = {
   access: { en: 'copy of personal data', id: 'salinan data pribadi' },
   rectification: { en: 'correction of personal data', id: 'koreksi data pribadi' },
-  restriction: { en: 'restriction of processing', id: 'pembatasan pemrosesan' },
+  restriction: { en: 'stop to the use of personal data', id: 'penghentian penggunaan data pribadi' },
   erasure: { en: 'erasure of personal data', id: 'penghapusan data pribadi' },
+};
+
+/** The request types with their article, for "A person asked for ..." (English only; Indonesian has no article). */
+export const TYPE_WITH_ARTICLE: Readonly<Record<PrivacyRequestType, string>> = {
+  access: 'a copy of personal data',
+  rectification: 'a correction of personal data',
+  restriction: 'a stop to the use of personal data',
+  erasure: 'an erasure of personal data',
 };
 
 /** The title of a manager's stored task (C.3: it names the screen that completes it). */
@@ -32,7 +40,7 @@ export function checkRequestedNotice(requestNo: string, type: PrivacyRequestType
   return {
     title: { en: `Check your system for request ${requestNo}`, id: `Periksa sistem Anda untuk permintaan ${requestNo}` },
     body: {
-      en: `A person asked for a ${TYPE_NAMES[type].en}. Open ${CHECKS_SCREEN.en}, look at the records that name the person, edit what must change, hand over their open items and mark the check done. The answer is due by ${fmtDayTime(dueAt, timeZone, 'en')}.`,
+      en: `A person asked for ${TYPE_WITH_ARTICLE[type]}. Open ${CHECKS_SCREEN.en}, look at the records that name the person, edit what must change, hand over their open items and mark the check done. The answer is due by ${fmtDayTime(dueAt, timeZone, 'en')}.`,
       id: `Seseorang meminta ${TYPE_NAMES[type].id}. Buka ${CHECKS_SCREEN.id}, lihat rekaman yang menyebut orang tersebut, ubah yang perlu diubah, serahkan item terbukanya, lalu tandai pemeriksaan selesai. Jawaban jatuh tempo paling lambat ${fmtDayTime(dueAt, timeZone, 'id')}.`,
     },
   };
@@ -43,7 +51,7 @@ export function receivedNotice(requestNo: string, type: PrivacyRequestType, dueA
   return {
     title: { en: `New personal data request ${requestNo}`, id: `Permintaan data pribadi baru ${requestNo}` },
     body: {
-      en: `A member asked for a ${TYPE_NAMES[type].en} from My account. Check who is asking, then answer it in ${REQUESTS_SCREEN.en} by ${fmtDayTime(dueAt, timeZone, 'en')}.`,
+      en: `A member asked for ${TYPE_WITH_ARTICLE[type]} from My account. Check who is asking, then answer it in ${REQUESTS_SCREEN.en} by ${fmtDayTime(dueAt, timeZone, 'en')}.`,
       id: `Seorang anggota meminta ${TYPE_NAMES[type].id} dari Akun saya. Periksa siapa yang meminta, lalu jawab di ${REQUESTS_SCREEN.id} paling lambat ${fmtDayTime(dueAt, timeZone, 'id')}.`,
     },
   };
@@ -56,14 +64,14 @@ export function dueNotice(requestNo: string, type: PrivacyRequestType, dueAt: Da
       title: { en: `Personal data request ${requestNo} is overdue`, id: `Permintaan data pribadi ${requestNo} terlambat` },
       body: {
         en: `The ${TYPE_NAMES[type].en} ${requestNo} was due at ${fmtDayTime(dueAt, timeZone, 'en')}. Answer the person as soon as possible in ${REQUESTS_SCREEN.en}.`,
-        id: `${TYPE_NAMES[type].id} ${requestNo} jatuh tempo pada ${fmtDayTime(dueAt, timeZone, 'id')}. Jawab orang tersebut secepatnya di ${REQUESTS_SCREEN.id}.`,
+        id: `Permintaan ${TYPE_NAMES[type].id} ${requestNo} jatuh tempo pada ${fmtDayTime(dueAt, timeZone, 'id')}. Jawab orang tersebut secepatnya di ${REQUESTS_SCREEN.id}.`,
       },
     }
     : {
       title: { en: `Personal data request ${requestNo} is due soon`, id: `Permintaan data pribadi ${requestNo} segera jatuh tempo` },
       body: {
         en: `The ${TYPE_NAMES[type].en} ${requestNo} is due at ${fmtDayTime(dueAt, timeZone, 'en')}. Answer it in ${REQUESTS_SCREEN.en}.`,
-        id: `${TYPE_NAMES[type].id} ${requestNo} jatuh tempo pada ${fmtDayTime(dueAt, timeZone, 'id')}. Jawab di ${REQUESTS_SCREEN.id}.`,
+        id: `Permintaan ${TYPE_NAMES[type].id} ${requestNo} jatuh tempo pada ${fmtDayTime(dueAt, timeZone, 'id')}. Jawab di ${REQUESTS_SCREEN.id}.`,
       },
     };
 }
@@ -80,13 +88,13 @@ export const REFUSALS = {
   },
   receivedLater: {
     key: 'privacy.received_in_future',
-    en: 'The request cannot be received in the future.',
-    id: 'Permintaan tidak dapat diterima di masa depan.',
+    en: 'The date received cannot be in the future.',
+    id: 'Tanggal diterima tidak boleh di masa depan.',
   },
   startFirst: {
     key: 'privacy.start_first',
     en: 'Start work on the request first: record how you checked who is asking.',
-    id: 'Mulai tangani permintaan terlebih dahulu: catat cara Anda memeriksa siapa yang meminta.',
+    id: 'Mulai menangani permintaan terlebih dahulu: catat cara Anda memeriksa siapa yang meminta.',
   },
   closed: {
     key: 'privacy.request_closed',
@@ -131,7 +139,7 @@ export const REFUSALS = {
   checksOpen: {
     key: 'privacy.checks_open',
     en: 'Every system check must be done first. The Management System Managers mark them done in Personal data checks.',
-    id: 'Setiap pemeriksaan sistem harus selesai terlebih dahulu. Manajer Sistem Manajemen menandainya selesai di Pemeriksaan data pribadi.',
+    id: 'Setiap pemeriksaan sistem harus selesai terlebih dahulu. Management System Manager menandainya selesai di Pemeriksaan data pribadi.',
   },
   actionFirst: {
     key: 'privacy.action_first',
@@ -156,12 +164,22 @@ export const REFUSALS = {
   notMemberSelf: {
     key: 'privacy.not_member_self',
     en: 'Only a member of this organisation can ask it about their own data.',
-    id: 'Hanya anggota organisasi ini yang dapat meminta tentang data dirinya sendiri.',
+    id: 'Hanya anggota organisasi ini yang dapat mengajukan permintaan tentang datanya sendiri.',
   },
   openRequest: {
     key: 'privacy.open_request',
-    en: 'You already have an open request of this type. The organisation answers it first.',
-    id: 'Anda sudah memiliki permintaan terbuka dengan jenis ini. Organisasi akan menjawabnya terlebih dahulu.',
+    en: 'You already have an open request of this type. Wait for the answer before you send another request of this type.',
+    id: 'Anda sudah memiliki permintaan terbuka dengan jenis ini. Tunggu jawabannya sebelum mengirim permintaan lain dengan jenis yang sama.',
+  },
+  nameChanged: {
+    key: 'privacy.name_changed',
+    en: 'The person\'s name changed after the request was recorded. Check the request with the person, then record a new one.',
+    id: 'Nama orang tersebut berubah setelah permintaan dicatat. Periksa permintaan bersama orang tersebut, lalu catat permintaan baru.',
+  },
+  erasurePending: {
+    key: 'privacy.erasure_pending',
+    en: 'Your name cannot change while your erasure request is open.',
+    id: 'Nama Anda tidak dapat diubah selama permintaan penghapusan Anda masih terbuka.',
   },
 } as const;
 

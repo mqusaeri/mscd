@@ -4,12 +4,13 @@
 // - `me.privacy-requests.create`: ask for a correction, a restriction or an erasure (channel `self_service`); the Tenant
 //   Admins get `privacy_request_received`, and an erasure opens the system checks as any erasure does (D.6.4);
 // - `me.profile`: correct one's own display name and job title, also on an account shared with other organisations
-//   (audited `user.updated`);
+//   (audited `user.updated`); a new display name is refused with 409 `privacy.erasure_pending` while the caller has an
+//   erasure request open here, because the erasure removes the name the request recorded (M3-13, security review 1);
 // - `exports.me.create` and `exports.person.create`: queue a personal data export (see person-export.service.ts).
 import { Inject, Injectable } from '@nestjs/common';
 import type { CommandResult, MyPrivacyRequestCreate, MyPrivacyRequestItem, MyProfilePatch } from '@mscd/shared';
 import { Clock } from '../../common/clock';
-import { AUDIT_WRITER, type AuditWriter, type Principal } from '../../common/tokens';
+import { AUDIT_WRITER, type AuditWriter, type Principal, type Trx } from '../../common/tokens';
 import { TenantScope, tenantContextOf } from '../tenancy/tenant-scope';
 import { conflict, isOpen, myRequestItem, orgOf, refusal, requestRef, requestRows } from './privacy-model';
 import { memberFacts, PrivacyRequestsService } from './privacy-requests.service';
@@ -70,6 +71,7 @@ export class MePrivacyService {
       if (body.displayName !== undefined && body.displayName !== user.display_name) changes.display_name = body.displayName;
       if (body.jobTitle !== undefined && (body.jobTitle || null) !== user.job_title) changes.job_title = body.jobTitle || null;
       if (Object.keys(changes).length === 0) return;
+      if (changes.display_name !== undefined && (await openErasureOf(trx, userId))) throw conflict(REFUSALS.erasurePending);
       await trx.updateTable('platform.app_user').set({ ...changes, updated_by: userId }).where('id', '=', userId).execute();
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
@@ -86,4 +88,17 @@ export class MePrivacyService {
       });
     });
   }
+}
+
+/** True while the person has an erasure request about themselves that is received or in progress in this organisation. */
+export async function openErasureOf(trx: Trx, userId: string): Promise<boolean> {
+  const row = await trx
+    .selectFrom('privacy_request')
+    .select('id')
+    .where('subject_user_id', '=', userId)
+    .where('request_type', '=', 'erasure')
+    .where('status', 'in', ['received', 'in_progress'])
+    .where('deleted_at', 'is', null)
+    .executeTakeFirst();
+  return Boolean(row);
 }
