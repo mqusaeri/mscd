@@ -153,6 +153,7 @@ jobs:
             '''(?:^|/)packages/[^/]+/test/''',
             '''(?:^|/)tools/[^/]+/test/''',
             '''(?:^|/)tools/smoke/''',
+            '''(?:^|/)deploy/scripts/test/''',
           ]
 
           [[allowlists]]

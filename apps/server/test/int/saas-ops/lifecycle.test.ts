@@ -169,9 +169,9 @@ describe('organisation lifecycle of the platform operator (Milestone 2 J.8, M2-S
       }
       // The message names the moves that are allowed, or says that archived is final.
       const fromSuspended = await setStatus(op, 'r_suspended', { status: 'archived', reason: 'Refused move', confirmSlug: 'r_suspended' });
-      expect(fromSuspended.body.messages.en).toContain('From suspended it can move to active or offboarding.');
+      expect(fromSuspended.body.messages.en).toContain('From Suspended it can move to Active or Offboarding.');
       const fromArchived = await setStatus(op, 'r_archived', { status: 'active', reason: 'Refused move' });
-      expect(fromArchived.body.messages.en).toContain('archived is final.');
+      expect(fromArchived.body.messages.en).toContain('Archived is final.');
     });
 
     it('needs confirmSlug equal to the slug for offboarding and archived (422 confirmation_mismatch)', async () => {
