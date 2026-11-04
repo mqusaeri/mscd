@@ -675,7 +675,10 @@ test.describe('The data lifecycle of a customer organisation', () => {
     const apply = card(ayu.page, '^Revocations and changes to apply');
     const waiting = personRows(apply, ALPHA.leaver.name);
     await expect(waiting).toContainText('Leaves the company at the end of the month');
-    await button(waiting, 'Apply').click();
+    await button(waiting, 'Revoke now').click();
+    await expect(dialog(ayu.page)).toContainText(`Revoke Domain Owner of ${ALPHA.leaver.name}?`);
+    await expect(dialog(ayu.page)).toContainText('The role ends now. To give it back, grant it again on People and roles.');
+    await button(dialog(ayu.page), 'Revoke now').click();
     await run.expectToast(ayu.page, 'Role revoked');
     await expect(personRows(apply, ALPHA.leaver.name)).toHaveCount(0);
 
@@ -690,7 +693,9 @@ test.describe('The data lifecycle of a customer organisation', () => {
     await openReview(ayu);
     const reviewHead = ayu.page.locator('main [data-review] section.mx-card').first();
     await button(reviewHead, 'Complete').click();
-    await run.expectToast(ayu.page, `Access review ${reviewNo} completed; the rows of 1 system(s) were filed as evidence`);
+    await expect(dialog(ayu.page)).toContainText('Evidence item for the organisation part');
+    await button(dialog(ayu.page), 'Complete').click();
+    await run.expectToast(ayu.page, `Access review ${reviewNo} completed; the organisation part was filed to ${found.accessEvidence}, and the rows of 1 system(s) were filed as evidence`);
     await expect(reviewHead).toContainText('Completed');
     await expect(card(ayu.page, '^Systems')).toContainText(found.accessEvidence);
     await run.firstVisit(ayu, 'a completed access review');
@@ -794,17 +799,17 @@ test.describe('The data lifecycle of a customer organisation', () => {
     await run.closeLayers(ayu.page);
     await check(erasure, 'Searched the ISMS records; none names him apart from his confirmation');
     await open(erasure);
-    await button(drawer, 'Erase the person').click();
+    await button(drawer, 'Erase personal data').click();
     await expect(dialog).toContainText('This cannot be undone.');
     await expect(dialog).toContainText('What stays');
-    const confirm = button(dialog, 'Erase the person');
+    const confirm = button(dialog, 'Erase personal data');
     await expect(confirm).toBeDisabled();
     await dialog.locator('input').fill('ERASE');
     await expectOverlayReadable(ayu.page, 'the erasure of a person');
     // The leaver's own session ends with the erasure: his open page is signed out at its next read.
     run.expectedNow.push({ who: ALPHA.leaver.key, status: 401, method: 'GET', path: /^\/api\/v1\// });
     await confirm.click();
-    await run.expectToast(ayu.page, `The person of ${erasure} is erased in this organisation`);
+    await run.expectToast(ayu.page, `The personal data of the person in ${erasure} is erased in this organisation`);
     await closeWith(erasure, 'Erased in MSCD; the records keep the pseudonym as audit evidence');
     // The organisation now shows the leaver under the pseudonym only.
     const users = await apiJson(ayu, '/api/v1/admin/users?pageSize=200');
