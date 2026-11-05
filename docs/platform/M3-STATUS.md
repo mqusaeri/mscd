@@ -10,6 +10,10 @@ The live progress of `docs/platform/MILESTONE-3.md`. The orchestrator updates th
 4. Browser suites run with targeted spec files in packages; the orchestrator runs both full suites once per wave, and CI runs them on every push to `main`.
 5. When a package ends with `acceptancePassed: true`, apply cheap minor findings and the patches it leaves, record decisions in its handoff under "Orchestrator decisions", commit, push to `main`, and update this file.
 
+## Release
+
+Every package below is done. Milestone 3 is released as 1.2.0 (tag `v1.2.0-rc.1` on `f015ffc`, then `v1.2.0-rc.2` on `46f5945` with the deploy fix of `saas_write_previous`), and staging runs 1.2.0-rc.2 since 2026-11-05: the lifecycle run passed 13 of 13 steps, CI and the security scan were green on `c58fb67`, and the restore test passed 49 checks with the new rclone pin. The monitoring overlay of staging still has no values (`secrets/ops` is empty), so its services do not start; the app runs without it.
+
 ## Packages
 
 | Package | Wave | Status | Notes for the next session |
