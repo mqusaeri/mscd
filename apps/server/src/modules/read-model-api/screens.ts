@@ -550,9 +550,10 @@ export interface PendingFilter {
   overdueOnly?: boolean;
 }
 
-function pendingItems(d: ScreenData, filter: PendingFilter): ChainItem[] {
+/** The open chain items of the caller's view (or of `snapshot`), filtered by stage and by overdue. */
+function pendingItems(d: ScreenData, filter: PendingFilter, snapshot: UiMsSnapshot = d.view): ChainItem[] {
   if (filter.stage && !stageByKey(d, filter.stage)) throw new NotFoundError('Unknown chain stage');
-  return d.view.bundle.chain.items.filter((i) => (!filter.stage || i.stage === filter.stage) && (!filter.overdueOnly || i.st !== 'pending'));
+  return snapshot.bundle.chain.items.filter((i) => (!filter.stage || i.stage === filter.stage) && (!filter.overdueOnly || i.st !== 'pending'));
 }
 
 /** One person's open items (TS 9.3 records). */
@@ -589,38 +590,111 @@ export function pendingPerPerson(d: ScreenData, filter: PendingFilter): PendingP
 }
 
 /**
+ * Business roles whose holders hold no chain work, so they never count as people behind a row of the pending aggregate
+ * (product owner decision 21, M3-15): an external auditor (the only role a guest holds) reads evidence packs and owns no
+ * record of the chain. Counted as a person, a guest auditor would let "Other roles" stand for one manager's work.
+ */
+export const NO_CHAIN_WORK_ROLES: readonly BusinessRole[] = ['external_auditor'];
+
+/**
  * `aggregate=unit`: open and overdue counts per stage and business role, without names (Top Management). A holder
  * counts under the first of their roles in `BUSINESS_ROLES` order; unassigned items and holders without a role in
- * the system count under `null`. Each row of a role also gives `holders`, how many people of the system count under
- * that role (whether they hold open work or not), so the screen can join a role with one holder (or none left) into
- * "Other roles", which names no role (M3-14, product decision 2). Only the handles in `active` (an active membership
- * and an active account) count as holders; without it every holder in `rolesByHandle` does.
+ * the system count under `null`. `holders` of a row is how many people of the system count under it (whether they hold
+ * open work or not). Only the handles in `active` (an active membership and an active account) count as people;
+ * without it every holder in `rolesByHandle` does. Holders of a role in `NO_CHAIN_WORK_ROLES` never count.
+ *
+ * No row carries a number that belongs to one person (product owner decision 21, H.16, M3-15). The reader knows their
+ * own open items (`?owner=` of their own handle), so a row that stands for the reader and one other person would give
+ * that person's numbers after a subtraction; the rule therefore counts the people besides the `reader`. Before the
+ * answer leaves the server every role with fewer than two people besides the reader loses its own row: its counts join
+ * one row per stage with `role: null` and `group: 'other_roles'` ("Other roles" on the screen), whose `holders` is the
+ * number of people of all the roles it merges (the reader included when they hold one of them). When those roles have
+ * fewer than two people besides the reader together, their counts join the row of unassigned items of the stage
+ * instead (`role: null` without `group`). A role with open work whose holders all left (0) merges the same way, so a
+ * leaver's open work never shows as a role.
+ *
+ * The counts come from the system's full chain (`d.full`): the projection of Top Management hides the holder of every
+ * item but their own, which put all other open work under the unassigned row and left Top Management's own items as
+ * the only role row (M3-15). They include the open items of restricted documents and evidence the reader cannot open,
+ * as D-04 computes counts on the full data; the answer names nobody and shows no record.
  */
 export function pendingAggregate(
-  d: ScreenData, filter: PendingFilter, rolesByHandle: ReadonlyMap<string, readonly BusinessRole[]>, active?: ReadonlySet<string>,
+  d: ScreenData, filter: PendingFilter, rolesByHandle: ReadonlyMap<string, readonly BusinessRole[]>, active?: ReadonlySet<string>, reader?: string,
 ): PendingAggregate[] {
   const roleOf = (handle: string): BusinessRole | null => {
     const roles = rolesByHandle.get(handle) ?? [];
     return BUSINESS_ROLES.find((r) => roles.includes(r)) ?? null;
   };
   const holders = new Map<BusinessRole, number>();
+  const others = new Map<BusinessRole, number>();
   for (const handle of rolesByHandle.keys()) {
     if (active && !active.has(handle)) continue;
     const role = roleOf(handle);
-    if (role !== null) holders.set(role, (holders.get(role) ?? 0) + 1);
+    if (role === null || NO_CHAIN_WORK_ROLES.includes(role)) continue;
+    holders.set(role, (holders.get(role) ?? 0) + 1);
+    if (handle !== reader) others.set(role, (others.get(role) ?? 0) + 1);
   }
+  const rows: PendingAggregate[] = [];
   const counts = new Map<string, PendingAggregate>();
-  for (const i of pendingItems(d, filter)) {
+  for (const i of pendingItems(d, filter, d.full)) {
     const role = i.h === NONE ? null : roleOf(i.h);
     const key = `${i.stage}|${role ?? ''}`;
-    const row = counts.get(key) ?? (role === null ? { stage: i.stage, role, open: 0, overdue: 0 } : { stage: i.stage, role, open: 0, overdue: 0, holders: holders.get(role) ?? 0 });
+    let row = counts.get(key);
+    if (!row) {
+      row = role === null ? { stage: i.stage, role, open: 0, overdue: 0 } : { stage: i.stage, role, open: 0, overdue: 0, holders: holders.get(role) ?? 0 };
+      counts.set(key, row);
+      rows.push(row);
+    }
     row.open += 1;
     if (i.st !== 'pending') row.overdue += 1;
-    counts.set(key, row);
   }
-  const stageOrder = new Map(d.system.stages.map((s, n) => [s.key, n]));
-  const roleOrder = (role: BusinessRole | null) => (role === null ? BUSINESS_ROLES.length : BUSINESS_ROLES.indexOf(role));
-  return [...counts.values()].sort((a, b) => (stageOrder.get(a.stage) ?? 0) - (stageOrder.get(b.stage) ?? 0) || roleOrder(a.role) - roleOrder(b.role));
+  return withoutOnePersonRows(rows, d.system.stages.map((s) => s.key), holders, others);
+}
+
+/** The fewest people besides the reader a row of the pending aggregate may stand for (product owner decision 21). */
+export const MIN_ROW_HOLDERS = 2;
+
+/**
+ * The rule of decision 21 on the rows of `pendingAggregate` (one per stage and role, `holders` on each role row): every
+ * role with fewer than `MIN_ROW_HOLDERS` people besides the reader in the system (`othersByRole`, every role of the
+ * system, also those without open work; `holdersByRole` when the reader is not known or holds no role) merges into one
+ * `other_roles` row per stage, which stands for the people of all those roles (`holders` from `holdersByRole`); with
+ * fewer than `MIN_ROW_HOLDERS` of them besides the reader together, the merged counts join the unassigned row of the
+ * stage. Rows come back in stage order (`stageOrder`, unknown stages after it), then roles in `BUSINESS_ROLES` order,
+ * the group row, and the unassigned row last.
+ */
+export function withoutOnePersonRows(
+  rows: readonly PendingAggregate[], stageOrder: readonly string[], holdersByRole: ReadonlyMap<BusinessRole, number>,
+  othersByRole: ReadonlyMap<BusinessRole, number> = holdersByRole,
+): PendingAggregate[] {
+  const small = (role: BusinessRole) => (othersByRole.get(role) ?? 0) < MIN_ROW_HOLDERS;
+  let groupHolders = 0;
+  let groupOthers = 0;
+  for (const role of new Set([...holdersByRole.keys(), ...othersByRole.keys()])) {
+    if (!small(role)) continue;
+    groupHolders += holdersByRole.get(role) ?? 0;
+    groupOthers += othersByRole.get(role) ?? 0;
+  }
+  const asGroup = groupOthers >= MIN_ROW_HOLDERS;
+  const out = new Map<string, PendingAggregate>();
+  const add = (key: string, base: PendingAggregate, from: PendingAggregate) => {
+    const row = out.get(key) ?? { ...base, open: 0, overdue: 0 };
+    row.open += from.open;
+    row.overdue += from.overdue;
+    out.set(key, row);
+  };
+  for (const r of rows) {
+    if (r.role === null) add(`${r.stage}|none`, { stage: r.stage, role: null, open: 0, overdue: 0 }, r);
+    else if (!small(r.role)) add(`${r.stage}|${r.role}`, { stage: r.stage, role: r.role, open: 0, overdue: 0, holders: holdersByRole.get(r.role) ?? 0 }, r);
+    else if (asGroup) add(`${r.stage}|other`, { stage: r.stage, role: null, open: 0, overdue: 0, holders: groupHolders, group: 'other_roles' }, r);
+    else add(`${r.stage}|none`, { stage: r.stage, role: null, open: 0, overdue: 0 }, r);
+  }
+  const stageAt = (stage: string) => {
+    const n = stageOrder.indexOf(stage);
+    return n < 0 ? stageOrder.length : n;
+  };
+  const rank = (r: PendingAggregate) => (r.role !== null ? BUSINESS_ROLES.indexOf(r.role) : r.group ? BUSINESS_ROLES.length : BUSINESS_ROLES.length + 1);
+  return [...out.values()].sort((a, b) => stageAt(a.stage) - stageAt(b.stage) || rank(a) - rank(b) || a.stage.localeCompare(b.stage));
 }
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -4,9 +4,10 @@
 // holds with an Idempotency-Key), the sample adapter per organisation and system (due list, the persona's own proposal,
 // holds that hide a review, RET-HOLD and SOD-SELF-APPROVE refusals, the register and its CSV), the detail extensions,
 // and the dialogs in both languages and themes.
+import { resolveObjectURL } from 'node:buffer';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { routeById } from '@mscd/shared';
+import { DISPOSAL_FILE_ACTIONS, routeById } from '@mscd/shared';
 import type { RetentionHoldItem, RetentionRegisterItem, RetentionReviewItem, RetentionRuleItem } from '@mscd/shared';
 import { ApiClient } from '../../src/data/api/ApiClient';
 import type { ControllerData } from '../../src/data/types';
@@ -19,13 +20,13 @@ import { HoldDialog, ReleaseDialog } from '../../src/screens/retention/holds';
 import screen from '../../src/screens/retention/index';
 import meta from '../../src/screens/retention/meta.json';
 import {
-  CLASS_TEXT, RECORD_CLASSES, addMonths, decisionBody, decisionErrors, emptyDecision, formatDay, holdErrors, mayApprove, mayManage, mayRead, myHandle, noteError,
-  proposedByMe, ruleBody, ruleErrors, ruleFor,
+  CLASS_TEXT, FILE_ACTION_TEXT, RECORD_CLASSES, addMonths, decisionBody, decisionErrors, emptyDecision, fileActionOfFiles, formatDay, holdErrors, mayApprove, mayManage,
+  mayRead, myHandle, noteError, proposedByMe, ruleBody, ruleErrors, ruleFor,
 } from '../../src/screens/retention/model';
 import type { HoldModel, ReviewModel, RuleModel } from '../../src/screens/retention/model';
 import { DecisionDialog, RejectDialog } from '../../src/screens/retention/reviews';
 import { RuleDialog } from '../../src/screens/retention/rules';
-import { FilesList } from '../../src/screens/retention/parts';
+import { FilesList, RegisterFileAction } from '../../src/screens/retention/parts';
 import { ROUTES, ROUTE_IDS } from '../../src/screens/retention/routes';
 import { createSampleAdapter, resetSampleRetention } from '../../src/screens/retention/sample';
 import { TABS } from '../../src/screens/retention/Screen';
@@ -281,6 +282,29 @@ describe('sample adapter', () => {
     expect(back.ok && back.data.items.find((r) => r.id === theirs.id)).toMatchObject({ rejectedNote: 'Keep until the audit' });
   });
 
+  it('records the file action of an approved disposal as the server does: a file kept because another record uses it (M3-15)', async () => {
+    const sari = sampleOf('ndt', 'sari');
+    const awaiting = await sari.reviews('isms', { status: 'awaiting_approval', page: 1, pageSize: 50 });
+    // The disposal rina proposed of an evidence file whose only file is still the proof of a competence record.
+    const kept = awaiting.ok ? awaiting.data.items.find((r) => r.files.length > 0 && r.files.every((f) => f.action === 'kept_in_use'))! : (null as never);
+    expect(kept).toBeDefined();
+    const approved = await sampleOf('ndt', 'rina').approve('isms', kept);
+    expect(approved.ok).toBe(true);
+    const label = kept.itemCode!;
+    expect(approved.ok && approved.data.message).toEqual([
+      `${label} disposed of. Its file is kept because another record uses it.`,
+      `${label} dimusnahkan. Berkasnya tetap disimpan karena dipakai oleh rekaman lain.`,
+    ]);
+    const register = await sari.register('isms', 1, 50);
+    expect(register.ok && register.data.items.find((r) => r.id === kept.id)).toMatchObject({ status: 'disposed', fileAction: 'kept_in_use' });
+    const csv = await sari.exportCsv('isms');
+    expect(csv.ok).toBe(true);
+    const href = csv.ok ? csv.data.href : '';
+    const text = href.startsWith('data:') ? decodeURIComponent(href.slice(href.indexOf(',') + 1)) : ((await resolveObjectURL(href)?.text()) ?? '');
+    const line = text.split(/\r?\n/).find((l) => l.startsWith(`${label},`) || l.startsWith(`"${label}",`));
+    expect(line).toContain(',kept_in_use,');
+  });
+
   it('keeps and extends, hides a held record from the list and refuses its disposal with RET-HOLD', async () => {
     const a = sampleOf();
     const due = await a.reviews('isms', { status: 'open', page: 1, pageSize: 50 });
@@ -309,6 +333,38 @@ describe('sample adapter', () => {
     expect((await a.fileRemoved('isms', asked)).ok).toBe(false);
     const csv = await a.exportCsv('isms');
     expect(csv.ok && csv.data.fileName).toMatch(/^disposal-register-isms-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+});
+
+describe('file actions of the disposal register (M3-15)', () => {
+  it('has a text for every file action of the contract, kept_in_use as "File kept: used by another record"', () => {
+    expect(Object.keys(FILE_ACTION_TEXT).sort()).toEqual([...DISPOSAL_FILE_ACTIONS].sort());
+    expect(FILE_ACTION_TEXT.kept_in_use).toEqual(['File kept: used by another record', 'Berkas tetap disimpan: dipakai oleh rekaman lain']);
+    expect(FILE_ACTION_TEXT.none).toEqual(['No file', 'Tanpa berkas']);
+  });
+
+  it('decides the file action from the files as the server does', () => {
+    const f = (action: 'delete' | 'owner_asked' | 'kept_in_use') => ({ action });
+    expect(fileActionOfFiles([f('kept_in_use')])).toBe('kept_in_use');
+    expect(fileActionOfFiles([f('kept_in_use'), f('delete')])).toBe('vault_content_deleted');
+    expect(fileActionOfFiles([f('delete'), f('owner_asked'), f('kept_in_use')])).toBe('owner_asked');
+    expect(fileActionOfFiles([])).toBe('none');
+  });
+
+  it('shows in the approve dialog what the register will record, in both languages', () => {
+    for (const lang of ['en', 'id'] as const) {
+      const ctx = ctxOf(lang);
+      const i = lang === 'id' ? 1 : 0;
+      const kept = render(<RegisterFileAction ctx={ctx} files={[{ name: 'a.pdf', repository: 'Managed Vault', action: 'kept_in_use', usedBy: 'CMP-1' }]} />, ctx);
+      expect(kept).toContain('data-register-file-action="kept_in_use"');
+      expect(kept).toContain(TEXT.approveFileAction[i]);
+      expect(kept).toContain(FILE_ACTION_TEXT.kept_in_use[i]);
+      expect(kept).not.toContain(FILE_ACTION_TEXT.none[i]);
+      expect(kept).not.toMatch(FORBIDDEN);
+      const owner = render(<RegisterFileAction ctx={ctx} files={[{ name: 'b.pdf', repository: 'SharePoint', action: 'owner_asked', usedBy: null }]} />, ctx);
+      expect(owner).toContain(FILE_ACTION_TEXT.owner_asked[i]);
+      expect(render(<RegisterFileAction ctx={ctx} files={[]} />, ctx)).toBe(render(<></>, ctx));
+    }
   });
 });
 

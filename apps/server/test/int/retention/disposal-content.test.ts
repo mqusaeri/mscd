@@ -15,7 +15,7 @@ import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { CommandResult, Page, RetentionReviewItem, UploadIntent, UploadResult } from '@mscd/shared';
+import type { CommandResult, Page, RetentionRegisterItem, RetentionReviewItem, UploadIntent, UploadResult } from '@mscd/shared';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { exportOrganization, exportVerify } from '../../../src/cli/export';
@@ -180,6 +180,16 @@ describe('a disposal deletes the content of a record (decision 18, M3-13)', () =
       const approved = await sari.post<CommandResult>(url(`/reviews/${review.id}/approve`), {});
       expect(approved.status, `${recordClass} ${JSON.stringify(approved.body)}`).toBe(200);
       expect(approved.body.data, recordClass).toMatchObject({ recordDeleted: true });
+      // The competence record's only file is the current file of an evidence item: kept, and said so (M3-15).
+      if (recordClass === 'competence_record') {
+        expect(approved.body.data).toMatchObject({ fileAction: 'kept_in_use', vaultObjects: 0 });
+        expect(approved.body.message).toEqual([
+          `${review.item_code} disposed of. Its file is kept because another record uses it.`,
+          `${review.item_code} dimusnahkan. Berkasnya tetap disimpan karena dipakai oleh rekaman lain.`,
+        ]);
+      } else {
+        expect(approved.body.data, recordClass).toMatchObject({ fileAction: 'none' });
+      }
 
       // The record: cleared columns, kept codes and statuses, marked deleted and disposed.
       const table = recordClass as DisposalTable;
@@ -228,12 +238,32 @@ describe('a disposal deletes the content of a record (decision 18, M3-13)', () =
   it('keeps the proof file of the disposed competence record that the evidence item still uses, and it still opens', async () => {
     const [disposed] = await rowsOf<{ after: Record<string, unknown> }>(db, 'ndt', sql`
       select after_data as after from audit_trail where action = 'record.disposed' and entity_id = ${items.competence_record}::uuid`);
-    expect(disposed!.after).toMatchObject({ keptInUse: [{ objectId: proofObject, usedBy: evidenceCode }], fileAction: 'none' });
+    expect(disposed!.after).toMatchObject({ keptInUse: [{ objectId: proofObject, usedBy: evidenceCode }], fileAction: 'kept_in_use' });
     const [object] = await rowsOf<{ disposed: boolean }>(db, 'ndt', sql`select content_disposed_at is not null as disposed from storage_object where id = ${proofObject}::uuid`);
     expect(object).toEqual({ disposed: false });
     expect(await vaultStat(ctx, db, 'ndt', proofObject)).toBe('found');
     const opened = await rina.get(`/api/v1/storage/objects/${proofObject}/open?ms=qms`);
     expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+  });
+
+  it('shows the kept file of the disposed competence record in the disposal register and its CSV, in place of "No file" (M3-15)', async () => {
+    const [review] = (await reviewsOf(db, 'ndt', items.competence_record)).filter((r) => r.status === 'disposed');
+    expect(review).toMatchObject({ file_action: 'kept_in_use' });
+    // Records without a file keep "none".
+    for (const recordClass of CLASSES.filter((c) => c !== 'competence_record')) {
+      expect((await reviewsOf(db, 'ndt', items[recordClass])).find((r) => r.status === 'disposed'), recordClass).toMatchObject({ file_action: 'none' });
+    }
+    const register = await rina.get<Page<RetentionRegisterItem>>(url('/register?pageSize=200'));
+    expect(register.status).toBe(200);
+    expect(register.body.items.find((r) => r.id === review!.id)).toMatchObject({ status: 'disposed', recordClass: 'competence_record', fileAction: 'kept_in_use' });
+    const csv = await rina.get(url('/register?format=csv'));
+    expect(csv.status).toBe(200);
+    const lines = csv.raw.toString('utf8').trim().split(/\r\n/);
+    const header = lines[0]!.split(',');
+    const fileAction = header.indexOf('file_action');
+    const competence = lines.slice(1).filter((l) => l.split(',')[2] === 'competence_record');
+    expect(competence).toHaveLength(1);
+    expect(competence[0]!.split(',')[fileAction]).toBe('kept_in_use');
   });
 
   it('verifies the tenant chain, and breaks it when a cleared row changes without an attestation', async () => {

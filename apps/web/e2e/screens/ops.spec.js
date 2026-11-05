@@ -34,6 +34,11 @@ test.describe('Operator console @sample-only', () => {
     await main.locator('input').first().fill('ndt');
     await main.locator('button', { hasText: 'Run job' }).click();
     await expectToast(page, 'Job cleanup.expired queued as');
+    // The daily retention review of one organisation runs again after an outage (M3-15).
+    await expect(main.locator('select option[value="retention.review"]')).toHaveCount(1);
+    await main.locator('select').selectOption('retention.review');
+    await main.locator('button', { hasText: 'Run job' }).click();
+    await expectToast(page, 'Job retention.review queued as');
   });
 
   test('Create organisation warns that the slug is permanent, checks the form and adds the organisation', async ({ page }) => {

@@ -2,9 +2,10 @@ import { test, expect, ui, go, openApp, expectReadableText, expectNoHorizontalOv
 
 // Open work totals against the api (MILESTONE-3 M3-08, D.10). hendra is Top Management in every system of PT Nusantara
 // Digital Teknologi (`audit.pending.aggregate`, F.6): he opens the screen from Chain stages and the Overview, and the
-// totals, the stage by role table and "All my systems" equal the answers of `GET /ms/{ms}/audit/pending?aggregate=unit`;
-// a role held by one person in the system (`holders` 1, or 0 when its only holder left) joins "Other roles" (M3-14).
-// No member's name appears on the screen (product decision 2). bagus, a Domain Owner, holds no such right: neither page
+// totals, the stage by role table and "All my systems" equal the answers of `GET /ms/{ms}/audit/pending?aggregate=unit`.
+// No row of the answer stands for one person (product owner decision 21, M3-15): a role row has two or more holders
+// besides the reader, the roles with fewer are one row without a role name (`group: 'other_roles'`, "Other roles")
+// that stands for two or more people besides the reader, and the screen notes it. No member's name appears on the screen (product decision 2). bagus, a Domain Owner, holds no such right: neither page
 // action shows, the address does not open the screen and the api refuses the counts.
 const body = (page) => page.locator('main [data-screen="pending-totals"]');
 const stats = (page) => body(page).locator('ul[data-total-open]');
@@ -20,8 +21,14 @@ async function aggregate(page, ms) {
   expect(res.status(), `aggregate=unit of ${ms}`).toBe(200);
   const rows = await res.json();
   expect(Array.isArray(rows)).toBe(true);
-  // No holder, name or due date; a row of a role gives the number of its holders (M3-14).
-  for (const row of rows) expect(Object.keys(row).sort()).toEqual(row.role === null ? ['open', 'overdue', 'role', 'stage'] : ['holders', 'open', 'overdue', 'role', 'stage']);
+  // No holder, name or due date; a row of a role gives the number of its holders (M3-14), and so does the merged row
+  // of the roles with fewer than two holders (M3-15); neither stands for fewer than two people.
+  for (const row of rows) {
+    if (row.role !== null) expect(Object.keys(row).sort()).toEqual(['holders', 'open', 'overdue', 'role', 'stage']);
+    else if (row.group !== undefined) expect(row).toMatchObject({ group: 'other_roles', holders: expect.any(Number) });
+    else expect(Object.keys(row).sort()).toEqual(['open', 'overdue', 'role', 'stage']);
+    if (row.role !== null || row.group !== undefined) expect(row.holders, JSON.stringify(row)).toBeGreaterThanOrEqual(2);
+  }
   return rows;
 }
 const sum = (rows) => rows.reduce((s, r) => ({ open: s.open + r.open, overdue: s.overdue + r.overdue }), { open: 0, overdue: 0 });
@@ -48,8 +55,8 @@ async function expectTotalsOf(page, rows) {
   const total = sum(rows);
   await expect(stats(page)).toHaveAttribute('data-total-open', String(total.open));
   await expect(stats(page)).toHaveAttribute('data-total-overdue', String(total.overdue));
-  // The column of a row: "Other roles" for a role with at most one holder (M3-14), "No role or unassigned" without a role.
-  const column = (r) => (r.role === null ? 'none' : r.holders <= 1 ? 'other' : r.role);
+  // The column of a row: its role, "Other roles" for the merged row (M3-15), "No role or unassigned" for the rest.
+  const column = (r) => (r.role !== null ? r.role : r.group === 'other_roles' ? 'other' : 'none');
   const roles = [...new Set(rows.map(column))];
   // A column per role that holds open work, then "All roles".
   await expect(matrix(page).locator('thead th')).toHaveCount(roles.length + 2);
@@ -62,7 +69,8 @@ async function expectTotalsOf(page, rows) {
       await expect(where).toContainText(String(of.open));
     }
   }
-  for (const r of rows.filter((x) => x.role !== null && x.holders <= 1)) await expect(matrix(page).locator(`thead th[data-role="${r.role}"]`)).toHaveCount(0);
+  // The note under the table says no number belongs to one person.
+  await expect(body(page).locator('[data-other-note]')).toContainText('No number on this screen belongs to one person.');
   for (const stage of new Set(rows.map((r) => r.stage))) {
     const of = sum(rows.filter((r) => r.stage === stage));
     await expect(cell(page, stage, 'all'), stage).toHaveAttribute('data-open', String(of.open));
@@ -95,6 +103,17 @@ test.describe('Open work totals against the api @api-only', () => {
     const rows = await aggregate(page, ms);
     expect(sum(rows).open).toBeGreaterThan(0);
     await expectTotalsOf(page, rows);
+    // In the demo ISMS the one-holder roles (Management System Manager, Programme Owner, Risk Owner, Internal Auditor,
+    // Top Management) are one "Other roles" column; none of them has a column of its own.
+    if (ms === 'isms') {
+      expect(rows.some((r) => r.group === 'other_roles')).toBe(true);
+      // hendra is one of the people of the group, which stands for two or more people besides him.
+      expect(rows.filter((r) => r.group === 'other_roles').every((r) => r.holders >= 3)).toBe(true);
+      await expect(matrix(page).locator('thead th[data-role="other"]')).toHaveText('Other roles');
+      for (const role of ['ms_manager', 'programme_owner', 'risk_owner', 'internal_auditor', 'top_management']) {
+        await expect(matrix(page).locator(`thead th[data-role="${role}"]`), role).toHaveCount(0);
+      }
+    }
     await expectNoNames(page, await memberNames(page));
     await expectNoHorizontalOverflow(page);
     await inBothThemes(page, () => expectReadableText(page, 4.5));

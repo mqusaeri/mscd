@@ -1,8 +1,11 @@
 // Open work totals (MILESTONE-3 M3-08, D.10): the route against the shared table, the model (rows of `aggregate=unit`,
 // role columns, stage lines and sums), the API adapter over a fake fetch, the sample adapter over the sample snapshot,
 // the page actions of Chain stages and the Overview (API builds only), and the views in both languages and themes,
-// which show counts only and never a person's name (product decision 2). M3-14: a role held by one person in the
-// system joins "Other roles", so no total points to one person (ISO review o11, product owner 2026-11-02).
+// which show counts only and never a person's name (product decision 2). M3-14: each row of a role gives its holders.
+// M3-15 (product owner decision 21): the roles with fewer than two holders are one row per stage without a role name
+// ("Other roles"), and when they have fewer than two holders together their counts join "No role or unassigned", so
+// no number on the screen belongs to one person; the reader is left out of the count (they know their own items) and
+// external auditors never count (they hold no chain work); the sample build follows the same rule.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { BUSINESS_ROLES, routeById } from '@mscd/shared';
@@ -15,8 +18,8 @@ import { createSampleAdapter, sampleTotals } from '../../src/screens/pending-tot
 import { adapterFor, deferredAdapter } from '../../src/screens/pending-totals/adapter';
 import { extraPageActions, mayOpenTotals } from '../../src/screens/pending-totals/actions';
 import {
-  ROLE_ORDER, SCREEN_ID, TABS, TOTALS_PERM, aggregateItems, keyOf, keyOfRow, onTime, overdueShare, roleColumns, roleLabel, roleTotals, stageLines,
-  stagesOf, stagesWithWork, sumOf, systemName, systemTitle, systemsWithTotals, toRows,
+  MIN_ROW_HOLDERS, NO_CHAIN_WORK_ROLES, OTHER_ROLES_GROUP, ROLE_ORDER, SCREEN_ID, TABS, TOTALS_PERM, aggregateItems, keyOf, keyOfRow, onTime, overdueShare, roleColumns, roleLabel,
+  roleTotals, stageLines, stagesOf, stagesWithWork, sumOf, systemName, systemTitle, systemsWithTotals, toRows, withoutOnePersonRows,
 } from '../../src/screens/pending-totals/model';
 import { sampleMembers } from '../../src/screens/users/sample';
 import type { PendingTotalsAdapter, TotalsRow } from '../../src/screens/pending-totals/model';
@@ -120,25 +123,25 @@ describe('pending-totals model', () => {
     // The number of holders of a role (M3-14) is kept; a value that is not a count makes the answer unreadable.
     expect(toRows([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 3 }])).toEqual([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 3 }]);
     for (const holders of [-1, 1.5, '2', null]) expect(toRows([{ stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders }]), String(holders)).toBeNull();
+    // The merged row of the roles with fewer than two holders (M3-15) keeps its flag; a flag on a role row, or any other
+    // flag, makes the answer unreadable.
+    const merged = { stage: 'risk', role: null, open: 3, overdue: 1, holders: 2, group: 'other_roles' };
+    expect(toRows([merged])).toEqual([merged]);
+    expect(OTHER_ROLES_GROUP).toBe('other_roles');
+    for (const bad of [{ ...merged, group: 'risk_owner' }, { ...merged, role: 'risk_owner' }, { ...merged, group: true }]) expect(toRows([bad]), JSON.stringify(bad)).toBeNull();
   });
 
-  it('joins a role with one holder into "Other roles", so no total points to one person (M3-14)', () => {
+  it('shows the merged row of the server as "Other roles", and no number on the screen belongs to one person (M3-15)', () => {
     const rows: TotalsRow[] = [
       { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
       { stage: 'risk', role: null, open: 2, overdue: 2 },
-      { stage: 'control', role: 'ms_manager', open: 3, overdue: 0, holders: 1 },
       { stage: 'control', role: 'domain_owner', open: 5, overdue: 2, holders: 3 },
-      { stage: 'evidence', role: 'top_management', open: 1, overdue: 1, holders: 1 },
-      { stage: 'control', role: 'risk_owner', open: 2, overdue: 1, holders: 1 },
+      { stage: 'control', role: null, open: 5, overdue: 1, holders: 2, group: 'other_roles' },
+      { stage: 'evidence', role: null, open: 1, overdue: 1, holders: 2, group: 'other_roles' },
     ];
     expect(keyOfRow(rows[0]!)).toBe('domain_owner');
     expect(keyOfRow(rows[1]!)).toBe('none');
-    expect(keyOfRow(rows[2]!)).toBe('other');
-    // A role whose only holder left the organisation (no active holder) shows that leaver's work: it joins too.
-    expect(keyOfRow({ role: 'risk_owner', holders: 0 })).toBe('other');
-    expect(keyOfRow({ role: 'risk_owner', holders: 2 })).toBe('risk_owner');
-    // Without the number of holders (a server before M3-14) the role keeps its column.
-    expect(keyOfRow({ role: 'top_management' })).toBe('top_management');
+    expect(keyOfRow(rows[3]!)).toBe('other');
     expect(roleColumns(rows)).toEqual(['domain_owner', 'other', 'none']);
     expect(roleLabel('other')).toEqual(['Other roles', 'Peran lainnya']);
     expect(roleTotals(rows)).toEqual({ domain_owner: { open: 9, overdue: 3 }, other: { open: 6, overdue: 2 }, none: { open: 2, overdue: 2 } });
@@ -146,14 +149,102 @@ describe('pending-totals model', () => {
     expect(control.cells).toEqual({ other: { open: 5, overdue: 1 }, domain_owner: { open: 5, overdue: 2 } });
     for (const lang of ['en', 'id'] as const) {
       const ctx = ctxOf(lang);
+      const i = lang === 'id' ? 1 : 0;
       const html = render(<SystemView ctx={ctx} ms="isms" rows={rows} />, ctx);
-      expect(html).toContain(`data-role="other">${TEXT.otherRoles[lang === 'id' ? 1 : 0]}</th>`);
-      expect(html).not.toContain('data-role="ms_manager"');
-      expect(html).not.toContain('data-role="top_management"');
+      expect(html).toContain(`data-role="other">${TEXT.otherRoles[i]}</th>`);
       expect(html).toContain('data-other-note=""');
-      expect(html).toContain(TEXT.otherRolesNote[lang === 'id' ? 1 : 0].replace(/"/g, '&quot;'));
-      expect(render(<SystemView ctx={ctx} ms="isms" rows={ROWS} />, ctx)).not.toContain('data-other-note');
+      expect(html).toContain(TEXT.otherRolesNote[i].replace(/"/g, '&quot;'));
+      // The note stands under every table: a merge into "No role or unassigned" leaves no column to point to it.
+      const plain = render(<SystemView ctx={ctx} ms="isms" rows={ROWS} />, ctx);
+      expect(plain).toContain('data-other-note=""');
+      expect(plain).not.toContain('data-role="other"');
     }
+    expect(TEXT.otherRolesNote[0]).toContain('No number on this screen belongs to one person.');
+    expect(TEXT.otherRolesNote[1]).toContain('Tidak ada angka di layar ini yang milik satu orang.');
+  });
+
+  it('merges the roles with fewer than two holders as the server does (decision 21, M3-15)', () => {
+    const stageOrder = ['risk', 'control', 'evidence'];
+    const raw: TotalsRow[] = [
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 2, overdue: 2 },
+      { stage: 'control', role: 'ms_manager', open: 3, overdue: 0, holders: 1 },
+      { stage: 'control', role: 'domain_owner', open: 5, overdue: 2, holders: 3 },
+      { stage: 'control', role: 'risk_owner', open: 2, overdue: 1, holders: 1 },
+      { stage: 'evidence', role: 'top_management', open: 1, overdue: 1, holders: 1 },
+    ];
+    expect(MIN_ROW_HOLDERS).toBe(2);
+    // Two one-holder roles (and a third without open work): one row per stage that stands for all three people.
+    const three = new Map([['domain_owner', 3], ['ms_manager', 1], ['risk_owner', 1], ['top_management', 1]] as const);
+    expect(withoutOnePersonRows(raw, stageOrder, three)).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 2, overdue: 2 },
+      { stage: 'control', role: 'domain_owner', open: 5, overdue: 2, holders: 3 },
+      { stage: 'control', role: null, open: 5, overdue: 1, holders: 3, group: 'other_roles' },
+      { stage: 'evidence', role: null, open: 1, overdue: 1, holders: 3, group: 'other_roles' },
+    ]);
+    // A lone one-holder role: the group would stand for one person, so its counts join the unassigned row.
+    const lone: TotalsRow[] = [
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: 'top_management', open: 2, overdue: 1, holders: 1 },
+      { stage: 'risk', role: null, open: 2, overdue: 2 },
+      { stage: 'evidence', role: 'top_management', open: 1, overdue: 0, holders: 1 },
+    ];
+    const loneOut = withoutOnePersonRows(lone, stageOrder, new Map([['domain_owner', 3], ['top_management', 1]] as const));
+    expect(loneOut).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 4, overdue: 3 },
+      { stage: 'evidence', role: null, open: 1, overdue: 0 },
+    ]);
+    expect(roleColumns(loneOut)).toEqual(['domain_owner', 'none']);
+    // A role whose only holder left (0) is merged too; with one other one-holder role the group stands for one person.
+    expect(withoutOnePersonRows([{ stage: 'risk', role: 'risk_owner', open: 2, overdue: 0, holders: 0 }], stageOrder, new Map([['domain_owner', 2], ['ms_manager', 1]] as const)))
+      .toEqual([{ stage: 'risk', role: null, open: 2, overdue: 0 }]);
+    // Only roles with two or more holders: nothing merges.
+    const many = new Map([['domain_owner', 3], ['ms_manager', 2], ['risk_owner', 2], ['top_management', 2]] as const);
+    expect(withoutOnePersonRows(raw, stageOrder, many).some((r) => r.group)).toBe(false);
+    expect(withoutOnePersonRows(raw, stageOrder, many).filter((r) => r.role !== null).every((r) => (r.holders ?? 0) >= 2)).toBe(true);
+    // The totals never change, only their rows.
+    for (const holders of [three, many, new Map([['domain_owner', 3], ['top_management', 1]] as const)]) expect(sumOf(withoutOnePersonRows(raw, stageOrder, holders))).toEqual(sumOf(raw));
+  });
+
+  it('counts the people besides the reader, so a row never gives one other person\'s numbers after the reader takes away their own (decision 21, M3-15)', () => {
+    const stageOrder = ['risk', 'control'];
+    const raw: TotalsRow[] = [
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: 'ms_manager', open: 2, overdue: 1, holders: 1 },
+      { stage: 'control', role: 'top_management', open: 3, overdue: 0, holders: 1 },
+      { stage: 'control', role: null, open: 1, overdue: 1 },
+    ];
+    // Top Management (the reader) and one Management System Manager: two holders, but only one besides the reader, so
+    // the group would be the manager's work once the reader takes away their own. Both join the unassigned row.
+    const holders = new Map([['domain_owner', 3], ['ms_manager', 1], ['top_management', 1]] as const);
+    const others = new Map([['domain_owner', 3], ['ms_manager', 1]] as const);
+    expect(withoutOnePersonRows(raw, stageOrder, holders)).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 2, overdue: 1, holders: 2, group: 'other_roles' },
+      { stage: 'control', role: null, open: 3, overdue: 0, holders: 2, group: 'other_roles' },
+      { stage: 'control', role: null, open: 1, overdue: 1 },
+    ]);
+    expect(withoutOnePersonRows(raw, stageOrder, holders, others)).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 2, overdue: 1 },
+      { stage: 'control', role: null, open: 4, overdue: 1 },
+    ]);
+    // With a third one-holder role the group stands for two people besides the reader: it shows, and its holders count
+    // the reader too (three people behind the row).
+    const three = new Map([...holders, ['internal_auditor', 1]] as const);
+    const threeOthers = new Map([...others, ['internal_auditor', 1]] as const);
+    expect(withoutOnePersonRows(raw, stageOrder, three, threeOthers).filter((r) => r.group)).toEqual([
+      { stage: 'risk', role: null, open: 2, overdue: 1, holders: 3, group: 'other_roles' },
+      { stage: 'control', role: null, open: 3, overdue: 0, holders: 3, group: 'other_roles' },
+    ]);
+    // A role the reader shares with one other person is small for the reader: its row would be that person's numbers.
+    const shared: TotalsRow[] = [{ stage: 'risk', role: 'top_management', open: 5, overdue: 2, holders: 2 }];
+    const sharedHolders = new Map([['top_management', 2], ['domain_owner', 3]] as const);
+    expect(withoutOnePersonRows(shared, stageOrder, sharedHolders)).toEqual([{ stage: 'risk', role: 'top_management', open: 5, overdue: 2, holders: 2 }]);
+    expect(withoutOnePersonRows(shared, stageOrder, sharedHolders, new Map([['top_management', 1], ['domain_owner', 3]] as const))).toEqual([{ stage: 'risk', role: null, open: 5, overdue: 2 }]);
+    for (const o of [holders, others]) expect(sumOf(withoutOnePersonRows(raw, stageOrder, holders, o))).toEqual(sumOf(raw));
   });
 
   it('adds counts, the items on time and the overdue share', () => {
@@ -204,12 +295,43 @@ describe('pending-totals model', () => {
       { stage: 'risk', role: null, open: 2, overdue: 1 },
       { stage: 'control', role: 'domain_owner', open: 2, overdue: 1 },
     ]);
-    // With the people of the system, each row of a role gives its holders, as the server does (M3-14).
-    const people = aggregateItems([{ stage: 'risk', h: 'bagus', st: 'pending' }, { stage: 'risk', h: 'rina', st: 'pending' }, { stage: 'risk', h: 'none', st: 'pending' }], (h) => ({ ...roles, dewi: ['domain_owner'] })[h] ?? [], ['risk'], ['rina', 'bagus', 'dewi', 'maya']);
+    // With the people of the system, each row of a role gives its holders, as the server does (M3-14), and the roles
+    // with fewer than two holders merge (M3-15): rina is the only Management System Manager, alone in the group, so
+    // her item joins the unassigned row.
+    const items = [{ stage: 'risk', h: 'bagus', st: 'pending' }, { stage: 'risk', h: 'rina', st: 'pending' }, { stage: 'risk', h: 'none', st: 'pending' }];
+    const people = aggregateItems(items, (h) => ({ ...roles, dewi: ['domain_owner'] })[h] ?? [], ['risk'], ['rina', 'bagus', 'dewi', 'maya']);
     expect(people).toEqual([
-      { stage: 'risk', role: 'ms_manager', open: 1, overdue: 0, holders: 1 },
       { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 2, overdue: 0 },
+    ]);
+    // With a Top Management holder too, the two one-holder roles are one "Other roles" row for two people.
+    const two = aggregateItems(items, (h) => ({ ...roles, dewi: ['domain_owner'], hendra: ['top_management'] })[h] ?? [], ['risk'], ['rina', 'bagus', 'dewi', 'maya', 'hendra']);
+    expect(two).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 1, overdue: 0, holders: 2, group: 'other_roles' },
       { stage: 'risk', role: null, open: 1, overdue: 0 },
+    ]);
+    // Read by Top Management (hendra), the same two one-holder roles stand for one person besides the reader, so rina's
+    // item joins the unassigned row (the group would be her work once hendra takes away his own).
+    const rolesTwo = (h: string) => ({ ...roles, dewi: ['domain_owner'], hendra: ['top_management'] })[h] ?? [];
+    expect(aggregateItems(items, rolesTwo, ['risk'], ['rina', 'bagus', 'dewi', 'maya', 'hendra'], 'hendra')).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 2, overdue: 0 },
+    ]);
+    // An external auditor holds no chain work and is never a person of a row: with rina and a guest auditor alone in
+    // the small roles, the group would be rina's work, so it joins the unassigned row; holders never count the auditor.
+    expect(NO_CHAIN_WORK_ROLES).toEqual(['external_auditor']);
+    const rolesAuditor = (h: string) => ({ ...roles, dewi: ['domain_owner'], eko: ['external_auditor'] })[h] ?? [];
+    expect(aggregateItems(items, rolesAuditor, ['risk'], ['rina', 'bagus', 'dewi', 'eko'])).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 2, overdue: 0 },
+    ]);
+    const auditors = (h: string) => ({ ...roles, dewi: ['domain_owner'], eko: ['external_auditor'], ext2: ['external_auditor'] })[h] ?? [];
+    const withAuditors = aggregateItems([...items, { stage: 'risk', h: 'eko', st: 'pending' }], auditors, ['risk'], ['rina', 'bagus', 'dewi', 'eko', 'ext2']);
+    expect(withAuditors.some((r) => r.role === 'external_auditor' || r.group)).toBe(false);
+    expect(withAuditors).toEqual([
+      { stage: 'risk', role: 'domain_owner', open: 1, overdue: 0, holders: 2 },
+      { stage: 'risk', role: null, open: 3, overdue: 0 },
     ]);
   });
 
@@ -253,22 +375,43 @@ describe('pending-totals sample adapter', () => {
     // Per stage as the tabs of Chain stages count them.
     const byStage = Object.fromEntries(stageLines(rows, stagesOf(ctxOf('en'), 'isms')).map((l) => [l.key, l.total.open]));
     expect(byStage).toEqual({ context: 1, risk: 5, treatment: 4, control: 28, soa: 3, document: 8, evidence: 10, metric: 4 });
-    // The sample roles: rina manages every system and hendra is Top Management, each the only holder of the role in the
-    // ISMS, so both join "Other roles" (M3-14); unassigned items count under no role.
+    // The sample roles: rina manages every system, hendra is Top Management and maya the Internal Auditor, each the only
+    // holder of the role in the ISMS, so the three roles are one "Other roles" row per stage that stands for the three of
+    // them (M3-15); unassigned items count under no role.
     const isOnly = (role: string) => sampleMembers(D).members.filter((m) => m.membershipStatus === 'active' && m.roles.some((r) => r.ms === 'isms' && r.role === role && r.approvalStatus === 'active')).length;
-    expect([isOnly('ms_manager'), isOnly('top_management')]).toEqual([1, 1]);
-    expect(rows.filter((r) => r.role !== null).every((r) => typeof r.holders === 'number' && r.holders > 0)).toBe(true);
+    expect([isOnly('ms_manager'), isOnly('top_management'), isOnly('internal_auditor')]).toEqual([1, 1, 1]);
+    expect(rows.filter((r) => r.role !== null).every((r) => typeof r.holders === 'number' && r.holders >= 2)).toBe(true);
+    expect(rows.filter((r) => r.group === 'other_roles').every((r) => r.role === null && r.holders === 3)).toBe(true);
+    expect(rows.some((r) => r.role === 'ms_manager' || r.role === 'top_management' || r.role === 'internal_auditor')).toBe(false);
     expect(roleColumns(rows)).toEqual(['domain_owner', 'other', 'none']);
     const items = D.bundles.isms.chain.items;
     const count = (pred: (h: string) => boolean) => items.filter((i) => pred(i.h)).length;
     const totals = roleTotals(rows);
-    expect(totals.other!.open).toBe(count((h) => h === 'rina' || h === 'hendra'));
+    expect(totals.other!.open).toBe(count((h) => h === 'rina' || h === 'hendra' || h === 'maya'));
     expect(totals.none!.open).toBe(count((h) => h === 'none'));
-    expect(totals.domain_owner!.open).toBe(count((h) => !['rina', 'hendra', 'none'].includes(h)));
+    expect(totals.domain_owner!.open).toBe(count((h) => !['rina', 'hendra', 'maya', 'none'].includes(h)));
     for (const ms of ['qms', 'bcms', 'abms']) {
       const all = D.bundles[ms].chain.items;
       expect(sumOf(sampleTotals(D, ms)!), ms).toEqual({ open: all.length, overdue: all.filter((i) => i.st !== 'pending').length });
     }
+    // As Top Management (hendra) or the Management System Manager (rina) read it, the group of the ISMS still stands
+    // for two people besides the reader, so it shows the same.
+    expect(sampleTotals(D, 'isms', 'hendra')).toEqual(rows);
+    expect(sampleTotals(D, 'isms', 'rina')).toEqual(rows);
+    // Without the Internal Auditor (a snapshot without maya, whose open work then counts under no role), rina and
+    // hendra are the only one-holder roles of the ISMS. Read by anyone else they are one "Other roles" row for two
+    // people; read by hendra (Top Management) they stand for one person besides him, so no "Other roles" row shows and
+    // their items count under "No role or unassigned".
+    const people = Object.fromEntries(Object.entries(D.PEOPLE).filter(([h]) => h !== 'maya'));
+    const noAuditor = { ...D, PEOPLE: people } as unknown as ControllerData;
+    const anyone = sampleTotals(noAuditor, 'isms')!;
+    expect(anyone.filter((r) => r.group).every((r) => r.holders === 2)).toBe(true);
+    expect(roleTotals(anyone).other?.open).toBe(count((h) => h === 'rina' || h === 'hendra'));
+    const asHendra = sampleTotals(noAuditor, 'isms', 'hendra')!;
+    expect(asHendra.some((r) => r.group || r.role === 'ms_manager' || r.role === 'top_management')).toBe(false);
+    expect(roleTotals(asHendra).none?.open).toBe((roleTotals(anyone).none?.open ?? 0) + roleTotals(anyone).other!.open);
+    expect(sumOf(asHendra)).toEqual(sumOf(anyone));
+    expect(await createSampleAdapter(() => noAuditor, () => 'hendra').totals('isms')).toEqual({ ok: true, data: asHendra });
     const adapter = createSampleAdapter(() => D);
     expect(adapter.sample).toBe(true);
     expect(await adapter.totals('isms')).toEqual({ ok: true, data: rows });
@@ -288,6 +431,13 @@ describe('pending-totals sample adapter', () => {
     expect(adapterFor(ctx)).toBe(adapterFor(ctx));
     expect(adapterFor(ctx).sample).toBe(true);
     expect(sumOf((await adapterFor(ctx).totals('isms') as { ok: true; data: TotalsRow[] }).data)).toEqual({ open: 63, overdue: 24 });
+    // The reader of the sample totals is the persona of the host context (the rule of decision 21 leaves them out).
+    const noAuditor = { ...D, PEOPLE: Object.fromEntries(Object.entries(D.PEOPLE).filter(([h]) => h !== 'maya')) } as unknown as ControllerData;
+    const top = ctxOf('en', { ds: {} as never, D: noAuditor });
+    expect((await adapterFor(top).totals('isms') as { ok: true; data: TotalsRow[] }).data).toEqual(sampleTotals(noAuditor, 'isms', 'hendra'));
+    expect((await adapterFor(top).totals('isms') as { ok: true; data: TotalsRow[] }).data.some((r) => r.group)).toBe(false);
+    const other = ctxOf('en', { ds: {} as never, D: noAuditor, person: { handle: 'bagus', name: 'Bagus Prasetyo', jobTitle: '-' } });
+    expect((await adapterFor(other).totals('isms') as { ok: true; data: TotalsRow[] }).data.some((r) => r.group)).toBe(true);
   });
 });
 
@@ -321,7 +471,8 @@ describe('pending-totals views', () => {
         expect(html).toContain(ctx.fill(TEXT.stagesValue, { n: 8, total: 8 }));
         expect(html).toContain(ctx.fill(TEXT.shareValue, { n: 38 }));
         expect(html).toMatch(/data-stat="ontime".*?data-value="">39</);
-        // The Management System Manager and Top Management are each held by one person in the sample ISMS: "Other roles" (M3-14).
+        // The Management System Manager, Top Management and the Internal Auditor are each held by one person in the sample
+        // ISMS: "Other roles" (M3-15).
         expect(html).toContain(BUSINESS_ROLE_LABELS.domain_owner[i]);
         expect(html).toContain(`data-role="other">${TEXT.otherRoles[i]}</th>`);
         for (const role of ['ms_manager', 'top_management'] as const) expect(html).not.toContain(`data-role="${role}"`);

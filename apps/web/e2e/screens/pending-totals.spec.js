@@ -5,9 +5,9 @@ import * as D from '../../src/data/mscd-data.js';
 
 // Open work totals of the sample build (MILESTONE-3 M3-08, D.10): the sample build opens the screen by its address
 // (`?screen=pending-totals&persona=top`, C.1), the totals of the ISMS equal those of Chain stages (63 open, 24 overdue
-// or missing), the stage by role table names roles and never a person (a role with one holder joins "Other roles"), "All my systems" lists the four systems, and
-// Chain stages and the Overview keep the page actions of the generated views (the action that opens the screen shows in
-// API builds only). @sample-only: the API project covers the screen in e2e/api-only/pending-totals.spec.js.
+// or missing), the stage by role table names roles and never a person (roles with fewer than two holders are one
+// "Other roles" column, M3-15), "All my systems" lists the four systems, and Chain stages and the Overview keep the page
+// actions of the generated views (the action that opens the screen shows in API builds only). @sample-only: the API project covers the screen in e2e/api-only/pending-totals.spec.js.
 const meta = metaById('pending-totals');
 const body = (page) => page.locator('main [data-screen="pending-totals"]');
 const stats = (page) => body(page).locator('ul[data-total-open]');
@@ -49,10 +49,13 @@ test.describe('Open work totals @sample-only', () => {
     await expect(stat(page, 'ontime')).toHaveText('39');
     await expect(stat(page, 'stages')).toHaveText('8 of 8');
 
-    // The Management System Manager and Top Management are each held by one person in the ISMS: their counts join
-    // "Other roles", so no total points to one person (M3-14).
+    // The Management System Manager, Top Management and the Internal Auditor are each held by one person in the ISMS:
+    // the three roles are one "Other roles" column that stands for the three people, two of them besides the reader
+    // (Top Management), so no number points to one person (decision 21, M3-15).
     await expect(matrix(page).locator('thead th')).toHaveText(['Stage', 'Domain Owner', 'Other roles', 'No role or unassigned', 'All roles']);
-    await expect(body(page).locator('[data-other-note]')).toHaveText('Roles held by only one person in this system are counted together under "Other roles" and are not named.');
+    await expect(body(page).locator('[data-other-note]')).toHaveText(
+      'No number on this screen belongs to one person. A role is named only when two or more people besides you hold it in this system. The other roles are counted together under "Other roles"; when they stand for fewer than two people besides you, their items count under "No role or unassigned". External auditors are not counted as people, because they hold no chain work.',
+    );
     await expect(cell(page, 'all', 'other')).toHaveAttribute('data-open', '6');
     await expect(matrix(page).locator('tbody th')).toHaveText(['Context issue', 'Risk', 'Risk treatment', 'Control', 'SoA', 'Document', 'Evidence', 'Metric']);
     for (const [stage, open] of Object.entries(ISMS_STAGES)) {

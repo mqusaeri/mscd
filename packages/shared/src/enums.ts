@@ -388,8 +388,11 @@ export const RETENTION_DECISIONS = ['keep', 'extend', 'dispose'] as const;
 export const RetentionDecision = enumSchema('RetentionDecision', RETENTION_DECISIONS, 'retention_review.decision (Milestone 3 J.7)');
 export type RetentionDecision = z.infer<typeof RetentionDecision>;
 
-/** What a disposal did to the file: vault content deleted, the owner asked to delete it in the customer repository, or nothing. */
-export const DISPOSAL_FILE_ACTIONS = ['vault_content_deleted', 'owner_asked', 'none'] as const;
+/**
+ * What a disposal did to the file: vault content deleted, the owner asked to delete it in the customer repository, the
+ * file kept because another record still uses it (`kept_in_use`, tenant/0012, M3-15), or nothing (no file).
+ */
+export const DISPOSAL_FILE_ACTIONS = ['vault_content_deleted', 'owner_asked', 'kept_in_use', 'none'] as const;
 export const DisposalFileAction = enumSchema('DisposalFileAction', DISPOSAL_FILE_ACTIONS, 'retention_review.file_action (Milestone 3 J.7)');
 export type DisposalFileAction = z.infer<typeof DisposalFileAction>;
 
@@ -834,11 +837,14 @@ export const JOB_NAMES = [
 export const JobName = enumSchema('JobName', JOB_NAMES, 'Worker job name (E.2, Milestone 2 J.3, Milestone 3 J.3)');
 export type JobName = z.infer<typeof JobName>;
 
-/** Jobs an operator may start with `POST /ops/jobs/{name}/run` (D.3 Operations); `org.lifecycle` joins in Milestone 3 (D.2). */
+/**
+ * Jobs an operator may start with `POST /ops/jobs/{name}/run` (D.3 Operations); `org.lifecycle` joins in Milestone 3
+ * (D.2), and `retention.review` for one organisation, so the daily review can run again after an outage (M3-15).
+ */
 export const OPS_RUNNABLE_JOBS = [
   'freshness.sweep', 'link-health.plan', 'link-health.repository', 'audit.verify-chain', 'cleanup.expired',
   'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive',
-  'org.lifecycle',
+  'org.lifecycle', 'retention.review',
 ] as const satisfies readonly JobName[];
 export const OpsRunnableJob = enumSchema('OpsRunnableJob', OPS_RUNNABLE_JOBS, 'Job name accepted by POST /ops/jobs/{name}/run');
 export type OpsRunnableJob = z.infer<typeof OpsRunnableJob>;

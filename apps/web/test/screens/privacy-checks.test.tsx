@@ -1,6 +1,8 @@
 // Personal data checks (MILESTONE-3 M3-04, D.6.4): routes against the shared table, the definition in My Tasks, the
 // model (record kinds, the screen that edits a mentioned record, the order), the API adapter over a fake fetch, the
-// sample adapter on the store shared with Personal data requests, and the views in both languages and themes.
+// sample adapter on the store shared with Personal data requests, the views in both languages and themes, and (M3-15)
+// the open drawer that stays open while the list reloads after "Mark checked", driven through the hooks without a DOM.
+import * as React from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routeById } from '@mscd/shared';
 import { ApiClient } from '../../src/data/api/ApiClient';
@@ -16,8 +18,10 @@ import PrivacyChecksScreen, { CheckDrawer, CheckStatus, MarkDialog, MentionsTabl
 import { KIND_TEXT, TEXT } from '../../src/screens/privacy-checks/text';
 import { createSampleAdapter as createRequestsAdapter } from '../../src/screens/privacy-requests/sample';
 import { requestsOf, resetSamplePrivacy } from '../../src/screens/privacy-requests/sample-store';
-import type { Lang } from '../../src/screens/types';
+import { notePrivacyChanged } from '../../src/screens/privacy-requests/store';
+import type { HostContext, Lang } from '../../src/screens/types';
 import { fakeFetch, json, problem } from '../auth/helpers';
+import { elementsOf, hooked, one, type Found } from './hook-harness';
 import { ctxOf, esc, loadSampleD, render, sampleD, t, textProblems } from './ctx-m2-16';
 
 const ID = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
@@ -185,4 +189,39 @@ describe('personal data check views', () => {
       });
     }
   }
+});
+
+describe('personal data check screen while its list reloads (M3-15)', () => {
+  it('keeps the open drawer after "Mark checked" and shows the check done when the list is back', async () => {
+    const ctx = ctxOf();
+    const ms = ctx.msObj!.id;
+    const screenOf = hooked(PrivacyChecksScreen as (props: { ctx: HostContext }) => React.ReactNode);
+    let tree: React.ReactNode = screenOf.render({ ctx });
+    const list = (e: Found) => typeof e.props.onRow === 'function';
+    const drawers = () => elementsOf(tree).filter((e) => e.type === CheckDrawer);
+    await vi.waitFor(() => {
+      tree = screenOf.render({ ctx });
+      expect(elementsOf(tree).filter(list)).toHaveLength(1);
+    });
+    const rows = one(tree, list, 'the list of checks').props.rows as CheckRow[];
+    const open = rows.find((r) => r.status === 'open')!;
+    expect(open).toBeDefined();
+    (one(tree, list, 'the list of checks').props.onRow as (row: CheckRow) => void)(open);
+    tree = screenOf.render({ ctx });
+    expect(drawers().map((d) => (d.props.row as CheckRow).id)).toEqual([open.id]);
+
+    // "Mark checked" as the drawer's form runs it: the command, then the change counter every list listens to.
+    expect((await adapterFor(ctx).done(ms, open.id, 'Risk R-031 edited')).ok).toBe(true);
+    notePrivacyChanged();
+    tree = screenOf.render({ ctx });
+    // The list reads again; the drawer stays open on the row it shows until the new list arrives.
+    expect(drawers()).toHaveLength(1);
+    expect(drawers()[0]!.props.row).toMatchObject({ id: open.id, status: 'open' });
+    expect(elementsOf(tree).filter(list)).toHaveLength(1);
+    await vi.waitFor(() => {
+      tree = screenOf.render({ ctx });
+      expect(drawers()[0]?.props.row).toMatchObject({ id: open.id, status: 'done' });
+    });
+    expect(drawers()).toHaveLength(1);
+  });
 });

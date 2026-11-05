@@ -225,6 +225,10 @@ test.describe('Retention review of RS Medika Nusantara against the api @api-only
     await button(theirs, 'Approve').click();
     await expect(dialog(page)).toContainText(`Approve the disposal of ${DUE.code}`);
     await expect(dialog(page)).toContainText('cannot be undone');
+    // The dialog names the file action the disposal register will record (M3-15): the file is in SharePoint.
+    const registerLine = dialog(page).locator('[data-register-file-action="owner_asked"]');
+    await expect(registerLine).toContainText('File action in the disposal register');
+    await expect(registerLine).toContainText('Owner asked to delete the file in your repository');
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Approve and dispose').click();
     await expectToast(page, `${DUE.code} disposed of`);

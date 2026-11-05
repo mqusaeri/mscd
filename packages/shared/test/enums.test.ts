@@ -144,7 +144,10 @@ describe('jobs, notifications and audit actions', () => {
     // Milestone 3 D.2: `org.lifecycle` joins OPS_RUNNABLE_JOBS.
     const m3 = tableRow(m3Section('### D.2 Changed behaviour of existing routes', '### D.3'), '`ops.jobs.run`');
     expect(codes(m3).slice(1, 3)).toEqual(['org.lifecycle', 'OPS_RUNNABLE_JOBS']);
-    expect([...OPS_RUNNABLE_JOBS]).toEqual([...codes(list), 'org.lifecycle']);
+    // Milestone 3 M3-15: `retention.review` joins it, so an operator can run the daily review of one organisation.
+    const m315 = m3Section('#### M3-15 Small follow-ups', '## H. Questions for the product owner');
+    expect(m315).toContain('`retention.review` joins `OPS_RUNNABLE_JOBS`');
+    expect([...OPS_RUNNABLE_JOBS]).toEqual([...codes(list), 'org.lifecycle', 'retention.review']);
     for (const job of OPS_RUNNABLE_JOBS) expect(JOB_NAMES).toContain(job);
   });
 

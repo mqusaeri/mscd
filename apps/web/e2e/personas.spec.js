@@ -202,6 +202,25 @@ test.describe('The new personas against the api @api-only', () => {
       await expectPlace(page, 'my-confirmations', { ms: 'isms', org: 'rmn' });
     });
   });
+
+  test.describe('The persona menu of PT Bank Sentosa Digital', () => {
+    test.use({ apiSession: null });
+
+    test('offers only the personas who hold a role there: no Compliance Investigator (M3-15)', async ({ page, baseURL }) => {
+      await page.context().clearCookies();
+      const res = await page.request.post(`${baseURL}/api/v1/test/session`, { data: { handle: 'rina', org: 'bsd' }, headers: { origin: baseURL } });
+      expect(res.ok(), await res.text()).toBe(true);
+      await openApp(page);
+      await ui.roleButton(page).click();
+      // The persona buttons of the menu (the API build adds "Sign out" under them).
+      const menu = page.locator('header div[style*="width: 300px"] button').filter({ hasNotText: 'Sign out' });
+      await expect(menu).toHaveCount(PERSONAS.length - 1);
+      await expect(menu.filter({ hasText: 'Compliance Investigator' })).toHaveCount(0);
+      for (const persona of PERSONAS.filter((p) => p.role !== 'investigator')) await expect(menu.filter({ hasText: persona.label }), persona.label).toHaveCount(1);
+      const me = await (await page.request.get(`${baseURL}/api/v1/me`)).json();
+      expect(Object.keys(me.personas).sort()).toEqual(PERSONAS.filter((p) => p.role !== 'investigator').map((p) => p.role).sort());
+    });
+  });
 });
 
 test.describe('Persona switching keeps the address', () => {

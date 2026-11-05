@@ -2,9 +2,12 @@
 // (api.ts in API builds, sample.ts in the sample build, chosen by the build in adapter.ts): the open and overdue counts
 // of a management system per chain stage and per business role, as `GET /ms/{ms}/audit/pending?aggregate=unit`
 // (`readmodel.audit.pending`, permission `audit.pending.aggregate`) answers them. The rows carry no holder, name or due
-// date (product decision 2), and nothing in this model adds one. A business role held by only one person in the system
-// (`holders` 1, or 0 when its only holder has left) is not shown as its own column: its counts join "Other roles", so no total points to one person (M3-14,
-// ISO review o11, product owner 2026-11-02).
+// date (product decision 2), and nothing in this model adds one. No number on the screen belongs to one person (product
+// owner decision 21, M3-15): the server merges every business role with fewer than two holders besides the reader in
+// the system into one row per stage without a role name (`group: 'other_roles'`, shown as "Other roles"), and when
+// those roles have fewer than two such holders together their counts join "No role or unassigned". The reader is left
+// out of the count because they know their own open items; external auditors never count, since they hold no chain
+// work. The sample adapter follows the same rule (`withoutOnePersonRows`), so both builds show the same columns.
 import type { BusinessRole } from '@mscd/shared';
 import type { ApiError } from '../../data/api/ApiClient';
 import type { ManagementSystem, MsId } from '../../data/types';
@@ -35,14 +38,23 @@ export const ROLE_ORDER: readonly BusinessRole[] = [
   'internal_auditor', 'top_management', 'external_auditor', 'compliance_investigator',
 ];
 
-/** One row of the answer: the open and overdue counts of a stage held by a role (null: unassigned or no role). */
+/** The flag of the row that merges the roles with fewer than two holders (`PendingAggregate.group`, M3-15). */
+export const OTHER_ROLES_GROUP = 'other_roles';
+
+/**
+ * One row of the answer: the open and overdue counts of a stage held by a role; `role` null with `group` for the roles
+ * with fewer than two holders together ("Other roles"), `role` null without it for unassigned items and holders
+ * without a role.
+ */
 export interface TotalsRow {
   stage: string;
   role: BusinessRole | null;
   open: number;
   overdue: number;
-  /** How many people of the system count under the role (absent for `role` null, and from a server before M3-14). */
+  /** How many people of the system count under the row (absent on the unassigned row, and from a server before M3-14). */
   holders?: number;
+  /** `other_roles` on the row that merges the roles with fewer than two holders (M3-15). */
+  group?: typeof OTHER_ROLES_GROUP;
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: ApiError };
@@ -62,20 +74,68 @@ export interface Count {
 export const ZERO: Count = Object.freeze({ open: 0, overdue: 0 });
 
 /**
- * The key of a role column: the role, `other` for the roles held by only one person in the system ("Other roles"), or
- * `none` for unassigned items and holders without a role.
+ * The key of a role column: the role, `other` for the roles with fewer than two holders in the system ("Other roles"),
+ * or `none` for unassigned items and holders without a role.
  */
 export type RoleKey = BusinessRole | 'other' | 'none';
 
 export const keyOf = (role: BusinessRole | null): RoleKey => role ?? 'none';
 
+/** The column of a row: its role, `other` for the merged row of `group: 'other_roles'`, `none` for the unassigned row. */
+export function keyOfRow(row: Pick<TotalsRow, 'role' | 'group'>): RoleKey {
+  if (row.role !== null) return row.role;
+  return row.group === OTHER_ROLES_GROUP ? 'other' : 'none';
+}
+
+/** The fewest people besides the reader a row may stand for (product owner decision 21). */
+export const MIN_ROW_HOLDERS = 2;
+
 /**
- * The column of a row: its role, `other` when at most one person holds the role in the system (M3-14; 0 when its only
- * holder has left the organisation but still holds open work), `none` without a role.
+ * Business roles whose holders hold no chain work and never count as people behind a row (decision 21, M3-15), as on
+ * the server (`NO_CHAIN_WORK_ROLES`): an external auditor, the only role of a guest, owns no record of the chain.
  */
-export function keyOfRow(row: Pick<TotalsRow, 'role' | 'holders'>): RoleKey {
-  if (row.role === null) return 'none';
-  return row.holders !== undefined && row.holders <= 1 ? 'other' : row.role;
+export const NO_CHAIN_WORK_ROLES: readonly BusinessRole[] = ['external_auditor'];
+
+/**
+ * The rule of decision 21, as the server's `withoutOnePersonRows` applies it before it answers: every role with fewer
+ * than two people besides the reader in the system (`othersByRole`, every role of the system, also those without open
+ * work; `holdersByRole` when no reader is given) merges into one `other_roles` row per stage, which stands for the
+ * people of all those roles (`holders` from `holdersByRole`); with fewer than two of them besides the reader together,
+ * the merged counts join the unassigned row of the stage. Rows come back in stage order, then roles in ROLE_ORDER, the
+ * group row and the unassigned row last.
+ */
+export function withoutOnePersonRows(
+  rows: readonly TotalsRow[], stageOrder: readonly string[], holdersByRole: ReadonlyMap<BusinessRole, number>,
+  othersByRole: ReadonlyMap<BusinessRole, number> = holdersByRole,
+): TotalsRow[] {
+  const small = (role: BusinessRole) => (othersByRole.get(role) ?? 0) < MIN_ROW_HOLDERS;
+  let groupHolders = 0;
+  let groupOthers = 0;
+  for (const role of new Set([...holdersByRole.keys(), ...othersByRole.keys()])) {
+    if (!small(role)) continue;
+    groupHolders += holdersByRole.get(role) ?? 0;
+    groupOthers += othersByRole.get(role) ?? 0;
+  }
+  const asGroup = groupOthers >= MIN_ROW_HOLDERS;
+  const out = new Map<string, TotalsRow>();
+  const add = (key: string, base: TotalsRow, from: TotalsRow) => {
+    const row = out.get(key) ?? { ...base, open: 0, overdue: 0 };
+    row.open += from.open;
+    row.overdue += from.overdue;
+    out.set(key, row);
+  };
+  for (const r of rows) {
+    if (r.role === null) add(`${r.stage}|none`, { stage: r.stage, role: null, open: 0, overdue: 0 }, r);
+    else if (!small(r.role)) add(`${r.stage}|${r.role}`, { stage: r.stage, role: r.role, open: 0, overdue: 0, holders: holdersByRole.get(r.role) ?? 0 }, r);
+    else if (asGroup) add(`${r.stage}|other`, { stage: r.stage, role: null, open: 0, overdue: 0, holders: groupHolders, group: OTHER_ROLES_GROUP }, r);
+    else add(`${r.stage}|none`, { stage: r.stage, role: null, open: 0, overdue: 0 }, r);
+  }
+  const at = (stage: string) => {
+    const n = stageOrder.indexOf(stage);
+    return n < 0 ? stageOrder.length : n;
+  };
+  const rank = (r: TotalsRow) => (r.role !== null ? roleRank(r.role) : r.group ? ROLE_ORDER.length + 1 : ROLE_ORDER.length + 2);
+  return [...out.values()].sort((a, b) => at(a.stage) - at(b.stage) || rank(a) - rank(b) || a.stage.localeCompare(b.stage));
 }
 
 const plus = (a: Count, b: Count): Count => ({ open: a.open + b.open, overdue: a.overdue + b.overdue });
@@ -111,7 +171,7 @@ function columnRank(key: RoleKey): number {
 
 /**
  * The role columns of the rows: the roles that hold open work in ROLE_ORDER, unknown roles after them, then "Other
- * roles" (the roles with one holder), `none` last.
+ * roles" (the roles with fewer than two holders), `none` last.
  */
 export function roleColumns(rows: readonly TotalsRow[]): RoleKey[] {
   const keys = [...new Set(rows.filter((r) => r.open > 0).map(keyOfRow))];
@@ -201,8 +261,8 @@ const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isI
 
 /**
  * The rows of an answer of `aggregate=unit`, or null when the answer is not a list of such rows. Only the fields of
- * `PendingAggregate` are kept (the four counts and the optional `holders`), so nothing else the server might add can
- * reach the page.
+ * `PendingAggregate` are kept (the four counts, the optional `holders` and the optional `group` of the merged row with
+ * no role), so nothing else the server might add can reach the page.
  */
 export function toRows(data: unknown): TotalsRow[] | null {
   if (!Array.isArray(data)) return null;
@@ -212,7 +272,12 @@ export function toRows(data: unknown): TotalsRow[] | null {
     const r = item as Record<string, unknown>;
     if (typeof r.stage !== 'string' || !(r.role === null || typeof r.role === 'string') || !isCount(r.open) || !isCount(r.overdue)) return null;
     if (r.holders !== undefined && !isCount(r.holders)) return null;
-    rows.push({ stage: r.stage, role: r.role as BusinessRole | null, open: r.open, overdue: r.overdue, ...(isCount(r.holders) ? { holders: r.holders } : {}) });
+    if (r.group !== undefined && (r.group !== OTHER_ROLES_GROUP || r.role !== null)) return null;
+    rows.push({
+      stage: r.stage, role: r.role as BusinessRole | null, open: r.open, overdue: r.overdue,
+      ...(isCount(r.holders) ? { holders: r.holders } : {}),
+      ...(r.group === OTHER_ROLES_GROUP ? { group: OTHER_ROLES_GROUP } : {}),
+    });
   }
   return rows;
 }
@@ -229,10 +294,12 @@ export interface ItemFacts {
  * and role, a holder counted under the first of their roles in ROLE_ORDER (null without a role or when unassigned),
  * overdue for every item that is not `pending` (overdue or missing), sorted by stage order and then by role order.
  * With `people` (the handles of the system's role holders), each row of a role gives `holders`, how many of them count
- * under it (M3-14). The sample adapter uses it with the sample chain items.
+ * under it (M3-14; holders of `NO_CHAIN_WORK_ROLES` never), and the roles with fewer than two holders besides `reader`
+ * (the person who reads the screen) merge as decision 21 asks (`withoutOnePersonRows`, M3-15). The sample adapter uses
+ * it with the sample chain items and the sample persona as the reader.
  */
 export function aggregateItems(
-  items: readonly ItemFacts[], rolesOf: (handle: string) => readonly string[], stageOrder: readonly string[], people?: readonly string[],
+  items: readonly ItemFacts[], rolesOf: (handle: string) => readonly string[], stageOrder: readonly string[], people?: readonly string[], reader?: string | null,
 ): TotalsRow[] {
   const roleOf = (handle: string): BusinessRole | null => {
     if (!handle || handle === 'none') return null;
@@ -240,9 +307,12 @@ export function aggregateItems(
     return ROLE_ORDER.find((r) => held.includes(r)) ?? null;
   };
   const holders = new Map<BusinessRole, number>();
+  const others = new Map<BusinessRole, number>();
   for (const handle of people ?? []) {
     const role = roleOf(handle);
-    if (role) holders.set(role, (holders.get(role) ?? 0) + 1);
+    if (!role || NO_CHAIN_WORK_ROLES.includes(role)) continue;
+    holders.set(role, (holders.get(role) ?? 0) + 1);
+    if (handle !== reader) others.set(role, (others.get(role) ?? 0) + 1);
   }
   const counts = new Map<string, TotalsRow>();
   for (const i of items) {
@@ -253,6 +323,7 @@ export function aggregateItems(
     if (i.st !== 'pending') row.overdue += 1;
     counts.set(key, row);
   }
+  if (people) return withoutOnePersonRows([...counts.values()], stageOrder, holders, others);
   const at = (stage: string) => {
     const n = stageOrder.indexOf(stage);
     return n < 0 ? stageOrder.length : n;

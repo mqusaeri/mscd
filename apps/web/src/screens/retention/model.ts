@@ -41,15 +41,27 @@ export const CLASS_START_TEXT: Readonly<Record<RecordClass, TextPair>> = {
 
 export type ReviewStatus = 'open' | 'kept' | 'extended' | 'awaiting_approval' | 'disposed';
 export type Decision = 'keep' | 'extend' | 'dispose';
-export type FileAction = 'vault_content_deleted' | 'owner_asked' | 'none';
+export type FileAction = 'vault_content_deleted' | 'owner_asked' | 'kept_in_use' | 'none';
 
 export const STATUS_TEXT: Readonly<Record<ReviewStatus, TextPair>> = {
   open: TEXT.stOpen, kept: TEXT.stKept, extended: TEXT.stExtended, awaiting_approval: TEXT.stAwaiting, disposed: TEXT.stDisposed,
 };
 export const STATUS_TONE: Readonly<Record<ReviewStatus, Tone>> = { open: 'warn', kept: 'info', extended: 'info', awaiting_approval: 'acc', disposed: 'mute' };
 export const FILE_ACTION_TEXT: Readonly<Record<FileAction, TextPair>> = {
-  vault_content_deleted: TEXT.faVault, owner_asked: TEXT.faOwner, none: TEXT.faNone,
+  vault_content_deleted: TEXT.faVault, owner_asked: TEXT.faOwner, kept_in_use: TEXT.faKept, none: TEXT.faNone,
 };
+
+/**
+ * The file action an approved disposal records for an item with these files, as the server decides it (`fileActionOf`
+ * of retention-disposal.ts): the owner asked when a file is in a customer repository, else the vault content deleted,
+ * else the file kept because another record uses it (M3-15), else no file.
+ */
+export function fileActionOfFiles(files: readonly Pick<ReviewFile, 'action'>[]): FileAction {
+  if (files.some((f) => f.action === 'owner_asked')) return 'owner_asked';
+  if (files.some((f) => f.action === 'delete')) return 'vault_content_deleted';
+  if (files.some((f) => f.action === 'kept_in_use')) return 'kept_in_use';
+  return 'none';
+}
 
 /** The document types the sample build knows (the `doc_type` lookup of every pack). */
 export const SAMPLE_DOC_TYPES: readonly { code: string; label: TextPair }[] = [

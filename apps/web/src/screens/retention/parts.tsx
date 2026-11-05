@@ -6,7 +6,7 @@ import type { HostContext } from '../types';
 import { Alert, Button } from '../ui';
 import { formatInstant } from '../auditor-access/shared';
 import type { PersonRef, ReviewFile, ReviewModel, Result } from './model';
-import { itemLabel, settled } from './model';
+import { FILE_ACTION_TEXT, fileActionOfFiles, itemLabel, settled } from './model';
 import { retentionVersion, subscribeRetention } from './store';
 import { TEXT } from './text';
 
@@ -74,6 +74,22 @@ export function FilesList({ ctx, files }: { ctx: HostContext; files: readonly Re
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * What the disposal register will record for the files of an item once its disposal is approved (`fileActionOfFiles`,
+ * the rule of the server): shown in the approve dialog, so a file kept because another record uses it reads "File kept:
+ * used by another record" before the approval, as in the register (M3-15). Nothing for an item without files.
+ */
+export function RegisterFileAction({ ctx, files }: { ctx: HostContext; files: readonly ReviewFile[] }) {
+  if (files.length === 0) return null;
+  const action = fileActionOfFiles(files);
+  return (
+    <p className="mx-small" style={{ margin: 0 }} data-register-file-action={action}>
+      <span style={{ display: 'block', fontWeight: 600 }}>{ctx.li(TEXT.approveFileAction)}</span>
+      {ctx.li(FILE_ACTION_TEXT[action])}
+    </p>
   );
 }
 

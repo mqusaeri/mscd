@@ -24,6 +24,11 @@
 // session advisory lock of `build-lock.ts`. A job that finds it held changes nothing and sends itself again
 // `BUILD_BUSY_RETRY_SECONDS` later (outcome `busy`).
 //
+// A build holds `MIN_BUILD_CONNECTIONS` (3) database connections at once: the session of the build lock, the holder of
+// the snapshot and one short read (M3-12). With a smaller `database.pool_max` the build would wait for a connection it
+// never gets, so the job fails the export at once, before it takes the build lock, with the reason in English and
+// Indonesian (`poolTooSmall`), and the worker logs a warning at start (`OrgExportModule`, M3-15).
+//
 // The working folder is in the worker's temporary folder (`TMPDIR`): the scratch volume of Compose (`worker-tmp`) and
 // the `emptyDir` of the Helm worker, which keep their content across a restart of the worker. A build that died leaves
 // its folder there, so each build first removes the folders of earlier builds that nobody touched for
@@ -108,6 +113,26 @@ class FinalExportError extends Error {}
 /** Prefix of the working folders of builds in the worker's temporary folder. */
 export const WORK_DIR_PREFIX = 'mscd-org-export-';
 
+/** Database connections a build holds at once: the session of the build lock, the snapshot holder and one read (M3-12). */
+export const MIN_BUILD_CONNECTIONS = 3;
+
+/**
+ * The reason an export fails when `database.pool_max` is below `MIN_BUILD_CONNECTIONS` (M3-15), in English and
+ * Indonesian. The export row keeps one text, which the Organisation export screen and the operator console show as it
+ * is in either language, so `text` holds the English sentences followed by the Indonesian ones.
+ */
+export function poolTooSmall(poolMax: number): { en: string; id: string; text: string } {
+  const en =
+    `The export was not built: the database pool of the worker allows ${poolMax} ${poolMax === 1 ? 'connection' : 'connections'} ` +
+    `(database.pool_max) and an export build needs ${MIN_BUILD_CONNECTIONS} at once. ` +
+    `Ask your MSCD service provider to set database.pool_max to ${MIN_BUILD_CONNECTIONS} or more, then request the export again.`;
+  const id =
+    `Ekspor tidak dibuat: kumpulan koneksi basis data worker mengizinkan ${poolMax} koneksi (database.pool_max), ` +
+    `sedangkan pembuatan ekspor memerlukan ${MIN_BUILD_CONNECTIONS} koneksi sekaligus. ` +
+    `Minta penyedia layanan MSCD Anda mengatur database.pool_max menjadi ${MIN_BUILD_CONNECTIONS} atau lebih, lalu ajukan ekspor lagi.`;
+  return { en, id, text: `${en} ${id}` };
+}
+
 /**
  * Removes the working folders of earlier builds that nobody touched for `STALE_BUILD_HOURS` (a build adds a file to
  * its folder for every table and part). Runs while the build holds the installation's lock; best effort.
@@ -173,6 +198,8 @@ export class OrgExportBuildJob implements JobHandlerInstance<'org-export.build'>
    */
   async build(orgId: string | null, exportId: string, options: OrgExportBuildOptions = {}): Promise<OrgExportBuildOutcome> {
     if (!orgId) throw new Error('org-export.build needs the organisation of the job envelope');
+    const poolMax = this.config.profile.database.pool_max;
+    if (poolMax < MIN_BUILD_CONNECTIONS) return this.refuseSmallPool(orgId, exportId, poolMax, options.requestId);
     // eslint-disable-next-line no-restricted-syntax -- the pool only pins the connection of the session lock (build-lock.ts)
     const run = await withBuildLock(this.db, () => this.buildLocked(orgId, exportId, options));
     if (run.locked) return run.value;
@@ -183,6 +210,23 @@ export class OrgExportBuildJob implements JobHandlerInstance<'org-export.build'>
     );
     this.logger.log({ orgId, exportId, retryInSeconds: BUILD_BUSY_RETRY_SECONDS }, 'org-export.build: another export is being built; queued again');
     return { exportId, status: 'busy' };
+  }
+
+  /**
+   * `database.pool_max` is below `MIN_BUILD_CONNECTIONS`: the export of this organisation fails at once with the reason
+   * in both languages, without the build lock (it would pin one of the few connections) and without a retry, which
+   * could not succeed before the profile changes. Only a row that waits for a build (`queued` or `building`) fails.
+   */
+  private async refuseSmallPool(orgId: string, exportId: string, poolMax: number, requestId?: string): Promise<OrgExportBuildOutcome> {
+    const org = await this.tenants.resolveById(orgId);
+    if (!org) return { exportId, status: 'skipped' };
+    const error = poolTooSmall(poolMax).text;
+    this.logger.error(
+      { orgId, exportId, poolMax, needed: MIN_BUILD_CONNECTIONS },
+      `org-export.build refused: database.pool_max is ${poolMax}, an export build needs ${MIN_BUILD_CONNECTIONS} connections`,
+    );
+    const failed = await this.scope.withTenant(systemContextOf(org, requestId), (trx) => this.fail(trx, exportId, error, org.id));
+    return failed ? { exportId, status: 'failed', error } : { exportId, status: 'skipped' };
   }
 
   private async buildLocked(orgId: string, exportId: string, options: OrgExportBuildOptions): Promise<OrgExportBuildOutcome> {
@@ -455,17 +499,18 @@ export class OrgExportBuildJob implements JobHandlerInstance<'org-export.build'>
     });
   }
 
-  private async fail(trx: Trx, exportId: string, error: string): Promise<void> {
-    const updated = await inPlatformScope(trx, () =>
-      trx
+  /** Marks a row that waits for a build `failed` with the reason; false when no such row (of `orgId`, when given) exists. */
+  private async fail(trx: Trx, exportId: string, error: string, orgId?: string): Promise<boolean> {
+    const updated = await inPlatformScope(trx, () => {
+      let update = trx
         .updateTable('platform.organization_export')
         .set({ status: 'failed', error })
         .where('id', '=', exportId)
-        .where('status', 'in', ['queued', 'building'])
-        .returning(['requested_at'])
-        .executeTakeFirst(),
-    );
-    if (!updated) return;
+        .where('status', 'in', ['queued', 'building']);
+      if (orgId) update = update.where('organization_id', '=', orgId);
+      return update.returning(['requested_at']).executeTakeFirst();
+    });
+    if (!updated) return false;
     await this.audit.record(trx, {
       action: 'organization_export.failed',
       actor: SYSTEM_ACTOR,
@@ -474,6 +519,7 @@ export class OrgExportBuildJob implements JobHandlerInstance<'org-export.build'>
       entityCode: exportCode(updated.requested_at),
       after: { status: 'failed', error },
     });
+    return true;
   }
 }
 

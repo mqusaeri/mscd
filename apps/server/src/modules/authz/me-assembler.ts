@@ -5,6 +5,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { DEMO_PERSONAS, UI_ROLE_LABELS, uiRoleFor, type Me, type Organisation, type PendingMembership, type UiRole } from '@mscd/shared';
+import { sql } from 'kysely';
 import { PERMISSION_EVALUATOR, type MeAssembler, type PermissionEvaluator, type Principal, type TenantInfo } from '../../common/tokens';
 import { InvitationService } from '../identity/invitation.service';
 import { PreferencesService } from '../identity/preferences.service';
@@ -162,12 +163,17 @@ export class MeAssemblerService implements MeAssembler {
 
   /**
    * Demo personas (D-20, G.3 `ROLES`): in demo mode with personas enabled, for a demo user, the persona users that
-   * are active demo members of the current organisation, with the sample labels.
+   * are active demo members of the current organisation and hold a role there, with the sample labels. A role is an
+   * active business role in a system of the organisation (approved and not ended, the grants the role resolver counts)
+   * or an organisation role of the membership. A persona who is a member without any role (the Compliance
+   * Investigator in an organisation without an ABMS) is left out, so the menu offers only people who work there
+   * (M3-15, M3-10 deviation 6).
    */
   private async personas(principal: Principal): Promise<Me['personas']> {
     const demo = this.infra.config.profile.demo;
     if (!this.infra.config.demoEnabled || !demo.personas || !principal.org) return undefined;
     const handles = Object.values(DEMO_PERSONAS);
+    const now = this.infra.now();
     const rows = await this.infra.scope.withTenant(tenantContextOf(principal), async (trx) => {
       const self = await trx.selectFrom('platform.app_user').select('is_demo').where('id', '=', principal.user.id).executeTakeFirst();
       if (!self?.is_demo) return null;
@@ -181,6 +187,22 @@ export class MeAssemblerService implements MeAssembler {
         .where('u.is_demo', '=', true)
         .where('u.status', '=', 'active')
         .where('u.deleted_at', 'is', null)
+        .where((eb) =>
+          eb.or([
+            eb(sql<number>`cardinality(m.admin_roles)`, '>', 0),
+            eb.exists(
+              eb
+                .selectFrom('user_ms_role as r')
+                .innerJoin('management_system as ms', 'ms.id', 'r.management_system_id')
+                .select(sql<number>`1`.as('one'))
+                .whereRef('r.user_id', '=', 'u.id')
+                .where('r.deleted_at', 'is', null)
+                .where('r.approval_status', '=', 'active')
+                .where((w) => w.or([w('r.valid_until', 'is', null), w('r.valid_until', '>', now)]))
+                .where('ms.deleted_at', 'is', null),
+            ),
+          ]),
+        )
         .execute();
     });
     if (!rows) return undefined;

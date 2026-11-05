@@ -3,6 +3,7 @@
 // Management gets pending data only as aggregates; an external auditor gets no holder names, no pending data and
 // evidence only through ready packs; unknown systems are 404 and a missing session 401.
 import {
+  BUSINESS_ROLES, type BusinessRole,
   ActivityItem, ApplicabilityItem, ChainResponse, CycleItem, DocumentItem, DriftPattern, EvidenceItem, GateItemView, ImplementationSummary,
   PendingAggregate, PendingRecord, StageReadiness, SurveillanceEvent, pageOf,
   type UiMsSnapshot, type UiOrgSnapshot,
@@ -176,67 +177,320 @@ describe('Per-screen read endpoints: scoping (D-04, F.7, D-34)', () => {
     expect((await hendra.get('/api/v1/ms/isms/audit/pending?owner=bagus')).status).toBe(403);
     const aggregate = await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit');
     expect(aggregate.status).toBe(200);
-    expect(z.array(z.object({ stage: z.string(), role: z.string().nullable(), open: z.number(), overdue: z.number(), holders: z.number().optional() }).strict()).parse(aggregate.body)).toBeTruthy();
+    expect(z.array(z.object({
+      stage: z.string(), role: z.string().nullable(), open: z.number(), overdue: z.number(), holders: z.number().optional(), group: z.literal('other_roles').optional(),
+    }).strict()).parse(aggregate.body)).toBeTruthy();
     expect(aggregate.body.reduce((n, r) => n + r.open, 0)).toBe(full.bundle.chain.items.length);
     expect(aggregate.body.reduce((n, r) => n + r.overdue, 0)).toBe(full.bundle.chain.items.filter((i) => i.st !== 'pending').length);
     expect(JSON.stringify(aggregate.body)).not.toContain('bagus');
+    // No row stands for one person (decision 21, M3-15): a named role has two or more holders besides the reader, and
+    // the merged row of the other roles ("Other roles") stands for two or more people besides the reader too, so
+    // hendra cannot get one person's numbers by taking away his own open items (he is one of the people of the group).
+    for (const row of aggregate.body) {
+      if (row.role !== null) expect(row.holders, JSON.stringify(row)).toBeGreaterThanOrEqual(row.role === 'top_management' ? 3 : 2);
+      else if (row.group) expect(row.holders, JSON.stringify(row)).toBeGreaterThanOrEqual(3);
+      else expect(row.holders).toBeUndefined();
+    }
+    // In the demo ISMS only the Domain Owners are more than one; the Management System Manager, the Programme Owner,
+    // the Risk Owner, the Internal Auditor and Top Management are one each, so they are counted together.
+    expect([...new Set(aggregate.body.filter((r) => r.role !== null).map((r) => r.role))]).toEqual(['domain_owner']);
+    const groups = aggregate.body.filter((r) => r.group === 'other_roles');
+    expect(groups.length).toBeGreaterThan(0);
+    expect(groups.every((r) => r.role === null && r.holders === 5)).toBe(true);
     const own = await hendra.all<PendingRecord>('/api/v1/ms/isms/audit/pending?owner=hendra');
     expect(own.total).toBe(full.bundle.chain.items.filter((i) => i.h === 'hendra').length);
   });
 
   /**
-   * The people of the ISMS under the first of their active business roles (BUSINESS_ROLES order), as the builder counts
-   * them: only people with an active membership in the organisation and an active account (M3-14).
+   * The people of the ISMS of `ndt` under the first of their active business roles (BUSINESS_ROLES order), as the
+   * aggregate counts them: every grant holder (`firstRole`, which places the open work of a person; a guest keeps only
+   * `external_auditor`), and the holders with an active membership in the organisation and an active account
+   * (`active`, the people a row may count, M3-14). `counts` leaves out the external auditors, who hold no chain work.
    */
-  const expectedHolders = async (): Promise<{ counts: Map<string, number>; firstRole: Map<string, string> }> => {
-    const { rows } = await inScope(db.migrator, { orgId: ORG_IDS.ndt, schema: 'org_ndt', platformScope: true }, (trx) => sql<{ user_id: string; handle: string; roles: string[] }>`
-      select r.user_id, u.handle, array_agg(distinct r.role) as roles
+  const ismsRoles = async (): Promise<{ firstRole: Map<string, BusinessRole>; active: Set<string>; counts: Map<BusinessRole, number> }> => {
+    const { rows } = await inScope(db.migrator, { orgId: ORG_IDS.ndt, schema: 'org_ndt', platformScope: true }, (trx) => sql<{ handle: string; roles: BusinessRole[]; active: boolean }>`
+      select u.handle, array_agg(distinct r.role) as roles,
+             bool_or(u.status = 'active' and om.user_id is not null) as active
         from user_ms_role r join management_system m on m.id = r.management_system_id
-        join platform.app_user u on u.id = r.user_id and u.deleted_at is null and u.status = 'active'
-        join platform.org_membership om on om.user_id = r.user_id and om.organization_id = ${ORG_IDS.ndt}::uuid
+        join platform.app_user u on u.id = r.user_id and u.deleted_at is null
+        left join platform.org_membership om on om.user_id = r.user_id and om.organization_id = ${ORG_IDS.ndt}::uuid
          and om.status = 'active' and om.deleted_at is null
        where m.slug = 'isms' and r.deleted_at is null and r.approval_status = 'active' and (r.valid_until is null or r.valid_until > now())
-       group by r.user_id, u.handle`.execute(trx));
-    const order = ['ms_manager', 'programme_owner', 'domain_owner', 'risk_owner', 'internal_auditor', 'top_management', 'external_auditor', 'compliance_investigator'];
-    const counts = new Map<string, number>();
-    const firstRole = new Map<string, string>();
+         and (u.kind <> 'guest' or r.role = 'external_auditor')
+       group by u.handle`.execute(trx));
+    const firstRole = new Map<string, BusinessRole>();
+    const active = new Set<string>();
+    const counts = new Map<BusinessRole, number>();
     for (const row of rows) {
-      const first = [...row.roles].sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]!;
-      counts.set(first, (counts.get(first) ?? 0) + 1);
+      const first = BUSINESS_ROLES.find((r) => row.roles.includes(r))!;
       firstRole.set(row.handle, first);
+      if (!row.active) continue;
+      active.add(row.handle);
+      if (first !== 'external_auditor') counts.set(first, (counts.get(first) ?? 0) + 1);
     }
-    return { counts, firstRole };
+    return { firstRole, active, counts };
   };
 
-  it('gives with each role of the pending aggregate how many people count under it, so the screen can hide a role with one holder (M3-14)', async () => {
+  type Row = PendingAggregate;
+  const keyOf = (r: Row) => `${r.stage}|${r.role ?? (r.group ? '~group' : '~none')}`;
+  const sorted = (rows: readonly Row[]) => [...rows].sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
+
+  /**
+   * The answer decision 21 asks for when `reader` reads it, computed here from the chain items of the snapshot and the
+   * grants in the database: a role with two or more holders besides the reader keeps its row; the other roles merge
+   * into one `other_roles` row per stage when they have two or more holders besides the reader together (`holders`
+   * counts the reader too), else their counts join the unassigned row of the stage.
+   */
+  const expectedAggregate = async (reader: string): Promise<Row[]> => {
+    const { firstRole, active, counts } = await ismsRoles();
+    const readerRole = active.has(reader) ? firstRole.get(reader) : undefined;
+    const others = (role: BusinessRole) => (counts.get(role) ?? 0) - (role === readerRole && counts.has(role) ? 1 : 0);
+    const small = (role: BusinessRole) => others(role) < 2;
+    const smallRoles = [...counts.keys()].filter(small);
+    const groupHolders = smallRoles.reduce((n, role) => n + counts.get(role)!, 0);
+    const groupOthers = smallRoles.reduce((n, role) => n + others(role), 0);
+    const out = new Map<string, Row>();
+    for (const item of full.bundle.chain.items) {
+      const role = item.h === 'none' ? null : (firstRole.get(item.h) ?? null);
+      let base: Row;
+      if (role !== null && !small(role)) base = { stage: item.stage, role, open: 0, overdue: 0, holders: counts.get(role)! };
+      else if (role !== null && groupOthers >= 2) base = { stage: item.stage, role: null, open: 0, overdue: 0, holders: groupHolders, group: 'other_roles' };
+      else base = { stage: item.stage, role: null, open: 0, overdue: 0 };
+      const row = out.get(keyOf(base)) ?? base;
+      row.open += 1;
+      if (item.st !== 'pending') row.overdue += 1;
+      out.set(keyOf(row), row);
+    }
+    return sorted([...out.values()]);
+  };
+
+  /** The open work of some holders per stage, counted from the chain items of the snapshot. */
+  const workOf = (handles: readonly string[]): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const item of full.bundle.chain.items) if (handles.includes(item.h)) out.set(item.stage, (out.get(item.stage) ?? 0) + 1);
+    return out;
+  };
+
+  /** Ends the ISMS grants of `ends` (soft delete) and adds `adds`, runs `fn`, then puts every grant back. */
+  const withIsmsGrants = async (change: { ends?: string[]; adds?: [string, BusinessRole][] }, fn: () => Promise<void>): Promise<void> => {
+    const scope = { orgId: ORG_IDS.ndt, schema: 'org_ndt', platformScope: true };
+    const ended = await inScope(db.migrator, scope, (trx) => sql<{ id: string }>`
+      update user_ms_role r set deleted_at = now()
+        from management_system m, platform.app_user u
+       where m.id = r.management_system_id and m.slug = 'isms' and u.id = r.user_id and u.handle = any(${change.ends ?? []}::text[])
+         and r.deleted_at is null
+      returning r.id`.execute(trx));
+    const added: string[] = [];
+    try {
+      for (const [handle, role] of change.adds ?? []) {
+        const id = await userId(db, handle);
+        const row = await inScope(db.migrator, scope, (trx) => sql<{ id: string }>`
+          insert into user_ms_role (user_id, management_system_id, role, approval_status, is_primary)
+          select ${id}::uuid, m.id, ${role}, 'active', false from management_system m where m.slug = 'isms'
+          returning id`.execute(trx));
+        added.push(row.rows[0]!.id);
+      }
+      await fn();
+    } finally {
+      await inScope(db.migrator, scope, (trx) => sql`update user_ms_role set deleted_at = null where id = any(${ended.rows.map((r) => r.id)}::uuid[])`.execute(trx));
+      await inScope(db.migrator, scope, (trx) => sql`update user_ms_role set deleted_at = now() where id = any(${added}::uuid[])`.execute(trx));
+    }
+  };
+
+  it('names only roles with two or more holders and merges the others into one row per stage (decision 21, M3-15)', async () => {
     const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
     const aggregate = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
-    const { counts } = await expectedHolders();
-    const withRole = aggregate.filter((r) => r.role !== null);
-    expect(withRole.length).toBeGreaterThan(0);
-    for (const row of withRole) expect({ role: row.role, holders: row.holders }).toEqual({ role: row.role, holders: counts.get(row.role!) });
-    for (const row of aggregate.filter((r) => r.role === null)) expect(row.holders).toBeUndefined();
+    expect(sorted(aggregate)).toEqual(await expectedAggregate('hendra'));
+    const { counts } = await ismsRoles();
+    for (const row of aggregate.filter((r) => r.role !== null)) expect({ role: row.role, holders: row.holders }).toEqual({ role: row.role, holders: counts.get(row.role!) });
+    // The rows come in stage blocks, each with its named roles in BUSINESS_ROLES order, then "Other roles", then the
+    // unassigned row.
+    const rank = (r: Row) => (r.role !== null ? BUSINESS_ROLES.indexOf(r.role) : r.group ? BUSINESS_ROLES.length : BUSINESS_ROLES.length + 1);
+    const stages = aggregate.map((r) => r.stage).filter((stage, n, all) => n === 0 || all[n - 1] !== stage);
+    expect(new Set(stages).size).toBe(stages.length);
+    for (const stage of stages) {
+      const ranks = aggregate.filter((r) => r.stage === stage).map(rank);
+      expect(ranks, stage).toEqual([...ranks].sort((a, b) => a - b));
+    }
+    // A Management System Manager reads the same answer here (audit.pending.aggregate): the five one-holder roles stand
+    // for four people besides either reader.
+    const forRina = (await rina.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+    expect(sorted(forRina)).toEqual(await expectedAggregate('rina'));
+    expect(sorted(forRina)).toEqual(sorted(aggregate));
+  });
+
+  it('a lone one-holder role: its counts join the unassigned row, and no row names it (decision 21)', async () => {
+    // Only Top Management (hendra, the reader) is left with one holder: the group would stand for one person.
+    await withIsmsGrants({ ends: ['rina', 'wulan', 'ratna', 'maya'] }, async () => {
+      const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+      const aggregate = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+      expect(sorted(aggregate)).toEqual(await expectedAggregate('hendra'));
+      expect(aggregate.some((r) => r.group)).toBe(false);
+      expect(aggregate.some((r) => r.role === 'top_management')).toBe(false);
+      expect([...new Set(aggregate.filter((r) => r.role !== null).map((r) => r.role))]).toEqual(['domain_owner']);
+      // Hendra's open work is in the unassigned row of its stage, with unassigned items and the work of the people
+      // without a role (the Domain Owners keep theirs).
+      const { firstRole } = await ismsRoles();
+      expect(firstRole.get('hendra')).toBe('top_management');
+      const elsewhere = [...new Set(full.bundle.chain.items.map((i) => i.h))].filter((h) => firstRole.get(h) !== 'domain_owner');
+      expect(elsewhere).toContain('hendra');
+      const unassigned = workOf(elsewhere);
+      for (const stage of new Set(full.bundle.chain.items.map((i) => i.stage))) {
+        expect(aggregate.find((r) => r.stage === stage && r.role === null)?.open ?? 0, stage).toBe(unassigned.get(stage) ?? 0);
+      }
+    });
+  });
+
+  it('Top Management and one other one-holder role: no group, since it would be the other person\'s work once the reader takes away their own (decision 21)', async () => {
+    // The Management System Manager (rina) and Top Management (hendra) are left with one holder each. A group of the two
+    // minus hendra's own open items (which he reads with ?owner=hendra) would be rina's numbers per stage, so for either
+    // of them the two roles stand for one person besides the reader and their counts join the unassigned row.
+    await withIsmsGrants({ ends: ['wulan', 'ratna', 'maya'] }, async () => {
+      const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+      const elsewhere = async () => {
+        const { firstRole } = await ismsRoles();
+        return workOf([...new Set(full.bundle.chain.items.map((i) => i.h))].filter((h) => firstRole.get(h) !== 'domain_owner'));
+      };
+      for (const [reader, client] of [['hendra', hendra], ['rina', rina]] as const) {
+        const aggregate = (await client.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+        expect(sorted(aggregate), reader).toEqual(await expectedAggregate(reader));
+        expect(aggregate.some((r) => r.group || r.role === 'ms_manager' || r.role === 'top_management'), reader).toBe(false);
+        expect([...new Set(aggregate.filter((r) => r.role !== null).map((r) => r.role))], reader).toEqual(['domain_owner']);
+        // Both people's open work is in the unassigned row, with the unassigned items.
+        const both = workOf(['rina', 'hendra']);
+        expect([...both.values()].reduce((n, v) => n + v, 0)).toBeGreaterThan(0);
+        for (const [stage, open] of await elsewhere()) expect(aggregate.find((r) => r.stage === stage && r.role === null && !r.group)?.open, `${reader} ${stage}`).toBe(open);
+      }
+      // The rows of hendra's own work, which he may read.
+      const own = await hendra.all<PendingRecord>('/api/v1/ms/isms/audit/pending?owner=hendra');
+      expect(own.total).toBe(full.bundle.chain.items.filter((i) => i.h === 'hendra').length);
+    });
+  });
+
+  it('three one-holder roles with the reader among them: one "Other roles" row per stage for three people, two besides the reader (decision 21)', async () => {
+    // The Management System Manager (rina), the Internal Auditor (maya) and Top Management (hendra) are left with one
+    // holder each.
+    await withIsmsGrants({ ends: ['wulan', 'ratna'] }, async () => {
+      const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+      const aggregate = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+      expect(sorted(aggregate)).toEqual(await expectedAggregate('hendra'));
+      const groups = aggregate.filter((r) => r.group === 'other_roles');
+      expect(groups.length).toBeGreaterThan(0);
+      for (const row of groups) expect(row).toMatchObject({ role: null, holders: 3 });
+      expect(aggregate.some((r) => r.role === 'ms_manager' || r.role === 'internal_auditor' || r.role === 'top_management')).toBe(false);
+      const three = workOf(['rina', 'maya', 'hendra']);
+      for (const [stage, open] of three) expect(groups.find((r) => r.stage === stage)?.open, stage).toBe(open);
+      expect(groups.reduce((n, r) => n + r.open, 0)).toBe([...three.values()].reduce((n, v) => n + v, 0));
+    });
+  });
+
+  it('a role the reader shares with one other person is merged for that reader and named for another reader (decision 21)', async () => {
+    // Top Management gets a second holder (staff01, a member without another ISMS role); the Programme Owner, the Risk
+    // Owner and the Internal Auditor end, so the Management System Manager (rina) is the only one-holder role.
+    await withIsmsGrants({ ends: ['wulan', 'ratna', 'maya'], adds: [['staff01', 'top_management']] }, async () => {
+      // rina: Top Management stands for two people besides her and keeps its row; her own role stands for nobody
+      // besides her, so her open work joins the unassigned row.
+      const forRina = (await rina.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+      expect(sorted(forRina)).toEqual(await expectedAggregate('rina'));
+      expect(forRina.some((r) => r.group || r.role === 'ms_manager')).toBe(false);
+      const top = workOf(['hendra', 'staff01']);
+      for (const [stage, open] of top) expect(forRina.find((r) => r.stage === stage && r.role === 'top_management'), stage).toMatchObject({ open, holders: 2 });
+      // hendra: Top Management stands for one person besides him (staff01), so it merges with the Management System
+      // Manager into "Other roles", which stands for rina and staff01 besides him (three people with hendra).
+      const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+      const forHendra = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+      expect(sorted(forHendra)).toEqual(await expectedAggregate('hendra'));
+      expect(forHendra.some((r) => r.role === 'top_management' || r.role === 'ms_manager')).toBe(false);
+      const groups = forHendra.filter((r) => r.group === 'other_roles');
+      for (const row of groups) expect(row.holders).toBe(3);
+      const merged = workOf(['rina', 'hendra', 'staff01']);
+      for (const [stage, open] of merged) expect(groups.find((r) => r.stage === stage)?.open, stage).toBe(open);
+      // The totals are the same for both readers; only their rows differ.
+      const total = (rows: PendingAggregate[]) => rows.reduce((n, r) => ({ open: n.open + r.open, overdue: n.overdue + r.overdue }), { open: 0, overdue: 0 });
+      expect(total(forHendra)).toEqual(total(forRina));
+    });
+  });
+
+  it('a system with only multi-holder roles besides the reader: every role keeps its row and no row merges (decision 21)', async () => {
+    // Top Management gets two more holders (staff members without another ISMS role); the other one-holder roles end.
+    await withIsmsGrants({ ends: ['rina', 'wulan', 'ratna', 'maya'], adds: [['staff01', 'top_management'], ['staff02', 'top_management']] }, async () => {
+      const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+      const aggregate = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+      expect(sorted(aggregate)).toEqual(await expectedAggregate('hendra'));
+      expect(aggregate.some((r) => r.group)).toBe(false);
+      const { counts } = await ismsRoles();
+      expect([...counts.values()].every((n) => n >= 2)).toBe(true);
+      expect(counts.get('top_management')).toBe(3);
+      for (const row of aggregate.filter((r) => r.role !== null)) expect(row.holders).toBe(counts.get(row.role!));
+      const top = workOf(['hendra']);
+      for (const [stage, open] of top) expect(aggregate.find((r) => r.stage === stage && r.role === 'top_management')).toMatchObject({ open, holders: 3 });
+    });
+  });
+
+  it('a guest external auditor counts as nobody: one manager and one guest auditor are no group (decision 21)', async () => {
+    // Top Management has three holders (hendra and two staff members), so it keeps its row for hendra; the Management
+    // System Manager (rina) is the only other one-holder role. A guest external auditor (an active member of the
+    // organisation with an active account) holds no chain work: counted as a person, the group would be exactly rina's
+    // work. The auditor counts as nobody, so rina's open work joins the unassigned row.
+    const scope = { platformScope: true };
+    const guestId = await userId(db, 'ext.auditor');
+    const kind = await inScope(db.migrator, scope, (trx) => trx.selectFrom('platform.app_user').select(['kind', 'status']).where('id', '=', guestId).executeTakeFirstOrThrow());
+    expect(kind).toEqual({ kind: 'guest', status: 'active' });
+    const tenant = { orgId: ORG_IDS.ndt, schema: 'org_ndt', platformScope: true };
+    await inScope(db.migrator, scope, (trx) =>
+      sql`insert into platform.org_membership (organization_id, user_id, status) values (${ORG_IDS.ndt}::uuid, ${guestId}::uuid, 'active')`.execute(trx));
+    // An external auditor's grant always ends (valid_until), as an auditor access grant gives it.
+    const grant = await inScope(db.migrator, tenant, (trx) => sql<{ id: string }>`
+      insert into user_ms_role (user_id, management_system_id, role, approval_status, is_primary, valid_until)
+      select ${guestId}::uuid, m.id, 'external_auditor', 'active', false, now() + interval '30 days' from management_system m where m.slug = 'isms'
+      returning id`.execute(trx));
+    try {
+      await withIsmsGrants({
+        ends: ['wulan', 'ratna', 'maya'],
+        adds: [['staff01', 'top_management'], ['staff02', 'top_management'], ['ext.auditor', 'domain_owner']],
+      }, async () => {
+        const { firstRole, active, counts } = await ismsRoles();
+        // The guest is an active holder of the system, under the external auditor role only (a guest's other grants
+        // give nothing, as the role resolver decides).
+        expect(active.has('ext.auditor')).toBe(true);
+        expect(firstRole.get('ext.auditor')).toBe('external_auditor');
+        expect(counts.has('external_auditor')).toBe(false);
+        expect(counts.get('domain_owner')).toBeGreaterThanOrEqual(2);
+        const hendra = await screenClient(ctx, db, 'hendra', 'ndt');
+        const aggregate = (await hendra.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+        expect(sorted(aggregate)).toEqual(await expectedAggregate('hendra'));
+        expect(aggregate.some((r) => r.group || r.role === 'ms_manager' || r.role === 'external_auditor')).toBe(false);
+        const top = workOf(['hendra']);
+        for (const [stage, open] of top) expect(aggregate.find((r) => r.stage === stage && r.role === 'top_management'), stage).toMatchObject({ open, holders: 3 });
+        // The Domain Owners' holders do not count the guest either.
+        for (const row of aggregate.filter((r) => r.role === 'domain_owner')) expect(row.holders).toBe(counts.get('domain_owner'));
+        const rinaWork = workOf(['rina']);
+        expect([...rinaWork.values()].reduce((n, v) => n + v, 0)).toBeGreaterThan(0);
+        const unassigned = workOf([...new Set(full.bundle.chain.items.map((i) => i.h))].filter((h) => !['domain_owner', 'top_management'].includes(firstRole.get(h) ?? '')));
+        for (const [stage, open] of unassigned) expect(aggregate.find((r) => r.stage === stage && r.role === null)?.open, stage).toBe(open);
+      });
+    } finally {
+      await inScope(db.migrator, tenant, (trx) => sql`update user_ms_role set deleted_at = now() where id = ${grant.rows[0]!.id}::uuid`.execute(trx));
+      await inScope(db.migrator, scope, (trx) =>
+        sql`delete from platform.org_membership where organization_id = ${ORG_IDS.ndt}::uuid and user_id = ${guestId}::uuid`.execute(trx));
+    }
   });
 
   it('counts no holder whose membership is disabled, although the business roles stay (M3-14)', async () => {
-    // The Management System Manager reads the totals (audit.pending.aggregate), so the leaver may be anyone else.
+    // The Management System Manager reads the totals (audit.pending.aggregate). A Domain Owner leaves: the role keeps
+    // its row with one holder less, and the leaver's open work stays under the role.
     const before = (await rina.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
-    const { firstRole } = await expectedHolders();
-    // A holder whose role has a row of open work (in the demo data, the Top Management of the ISMS).
-    const roles = new Set<string>(before.filter((r) => r.role !== null).map((r) => r.role!));
-    const leaver = [...firstRole].find(([handle, role]) => handle !== 'rina' && roles.has(role));
-    expect(leaver, JSON.stringify({ roles: [...roles], firstRole: [...firstRole], before })).toBeDefined();
-    const [handle, role] = leaver!;
-    const holdersOf = (rows: PendingAggregate[]) => rows.find((r) => r.role === role)!.holders;
-    const leaverId = await userId(db, handle);
+    const holdersOf = (rows: PendingAggregate[]) => rows.find((r) => r.role === 'domain_owner')!.holders;
+    const leaverId = await userId(db, 'dewi');
     await inScope(db.migrator, { platformScope: true }, (trx) =>
       sql`update platform.org_membership set status = 'disabled' where user_id = ${leaverId}::uuid and organization_id = ${ORG_IDS.ndt}::uuid`.execute(trx));
     try {
       const after = (await rina.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
       expect(holdersOf(after)).toBe(holdersOf(before)! - 1);
-      expect(holdersOf(after)).toBe((await expectedHolders()).counts.get(role) ?? 0);
+      expect(sorted(after)).toEqual(await expectedAggregate('rina'));
       // The open work stays where it was: the same rows and counts, only the holder count changes.
-      expect(after.map((r) => ({ ...r, holders: undefined }))).toEqual(before.map((r) => ({ ...r, holders: undefined })));
+      const counted = (rows: PendingAggregate[]) => sorted(rows).map((r) => ({ ...r, holders: undefined }));
+      expect(counted(after)).toEqual(counted(before));
       const roleRow = await inScope(db.migrator, { orgId: ORG_IDS.ndt, schema: 'org_ndt', platformScope: true }, (trx) => sql<{ n: number }>`
         select count(*)::int as n from user_ms_role where user_id = ${leaverId}::uuid and deleted_at is null`.execute(trx));
       expect(roleRow.rows[0]!.n).toBeGreaterThan(0);
@@ -244,6 +498,24 @@ describe('Per-screen read endpoints: scoping (D-04, F.7, D-34)', () => {
       await inScope(db.migrator, { platformScope: true }, (trx) =>
         sql`update platform.org_membership set status = 'active' where user_id = ${leaverId}::uuid and organization_id = ${ORG_IDS.ndt}::uuid`.execute(trx));
     }
+  });
+
+  it('a leaver who was the only holder of a role: the role merges, and a group of fewer than two people joins the unassigned row (M3-14, decision 21)', async () => {
+    // With Top Management alone in "Other roles" (the other one-holder roles ended), hendra leaving makes the group
+    // empty: his open work joins the unassigned row, and no row names his role.
+    await withIsmsGrants({ ends: ['wulan', 'ratna', 'maya'] }, async () => {
+      const leaverId = await userId(db, 'hendra');
+      await inScope(db.migrator, { platformScope: true }, (trx) =>
+        sql`update platform.org_membership set status = 'disabled' where user_id = ${leaverId}::uuid and organization_id = ${ORG_IDS.ndt}::uuid`.execute(trx));
+      try {
+        const aggregate = (await rina.get<PendingAggregate[]>('/api/v1/ms/isms/audit/pending?aggregate=unit')).body;
+        expect(sorted(aggregate)).toEqual(await expectedAggregate('rina'));
+        expect(aggregate.some((r) => r.group || r.role === 'top_management' || r.role === 'ms_manager')).toBe(false);
+      } finally {
+        await inScope(db.migrator, { platformScope: true }, (trx) =>
+          sql`update platform.org_membership set status = 'active' where user_id = ${leaverId}::uuid and organization_id = ${ORG_IDS.ndt}::uuid`.execute(trx));
+      }
+    });
   });
 
   it('gives Top Management no holder names or due dates of other people on stage records, gates, chain and drift (F.7, Q-8)', async () => {

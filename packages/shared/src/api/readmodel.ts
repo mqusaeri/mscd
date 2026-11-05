@@ -323,15 +323,36 @@ export const PendingAggregate = named(
     open: Count,
     overdue: Count,
     /**
-     * How many people of the system count under `role` (each person with an active membership and an active account,
-     * under the first of their roles in `BUSINESS_ROLES` order), whether they hold open work or not; absent for
-     * `role: null`. The screen joins a role with one holder (or none left) into "Other roles", which names no role
-     * (M3-14, product decision 2).
+     * How many people of the system count under the row (each person with an active membership and an active account,
+     * under the first of their roles in `BUSINESS_ROLES` order, external auditors never), whether they hold open work
+     * or not: on a row of a role, its holders; on the row of `group: 'other_roles'`, the people of every role it merges.
+     * The reader is one of them when they hold such a role. Absent on the row of unassigned items and holders without a
+     * role. A role row always stands for two or more people besides the reader (M3-15, product owner decision 21).
      */
     holders: Count.optional(),
+    /**
+     * `other_roles`: the row of a stage that merges every role with fewer than two holders besides the reader in the
+     * system, with `role` null, so no answer names such a role or carries one person's numbers, also after the reader
+     * takes away their own open items. It stands for two or more people besides the reader; when the merged roles have
+     * fewer than two of them together, their counts join the row of unassigned items instead (`role` null without
+     * `group`). Added by M3-15 (R-14), product owner decision 21 (H.16).
+     */
+    group: z.literal('other_roles').optional(),
   }),
-  'Pending counts per stage and business role without names (audit.pending.aggregate); role is null for unassigned items and holders without a role in the system; holders counts the people behind a role',
-  { valid: [{ stage: 'risk', role: 'domain_owner', open: 4, overdue: 1 }, { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 }, { stage: 'risk', role: null, open: 2, overdue: 2 }], invalid: [{ stage: 'risk', role: 'owner', open: 4, overdue: 1 }, { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: -1 }] },
+  'Pending counts per stage and business role without names (audit.pending.aggregate); role is null for unassigned items and holders without a role in the system, and for the row of roles with fewer than two holders besides the reader (group other_roles); holders counts the people behind a row',
+  {
+    valid: [
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1 },
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: 3 },
+      { stage: 'risk', role: null, open: 3, overdue: 0, holders: 2, group: 'other_roles' },
+      { stage: 'risk', role: null, open: 2, overdue: 2 },
+    ],
+    invalid: [
+      { stage: 'risk', role: 'owner', open: 4, overdue: 1 },
+      { stage: 'risk', role: 'domain_owner', open: 4, overdue: 1, holders: -1 },
+      { stage: 'risk', role: null, open: 3, overdue: 0, holders: 2, group: 'risk_owner' },
+    ],
+  },
 );
 export type PendingAggregate = z.infer<typeof PendingAggregate>;
 

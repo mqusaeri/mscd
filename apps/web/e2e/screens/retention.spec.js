@@ -101,9 +101,13 @@ test.describe('Retention and disposal @sample-only', () => {
     await expect(dialog(page)).toContainText('cannot be undone');
     await expect(dialog(page)).toContainText('unless another record still uses the file');
     await expect(dialog(page).locator('[data-file-action="kept_in_use"]')).toContainText(/Kept: used by CMP-/);
+    // M3-15: the dialog says what the disposal register will record for the file, in place of "No file".
+    const registerLine = dialog(page).locator('[data-register-file-action="kept_in_use"]');
+    await expect(registerLine).toContainText('File action in the disposal register');
+    await expect(registerLine).toContainText('File kept: used by another record');
     await inBothThemes(page, () => expectOverlayReadable(page));
     await button(dialog(page), 'Approve and dispose').click();
-    await expectToast(page, `${theirCode} disposed of`);
+    await expectToast(page, `${theirCode} disposed of. Its file is kept because another record uses it.`);
     await expect(row(page, theirCode)).toHaveCount(0);
 
     await button(mine, 'Reject').click();
@@ -119,6 +123,9 @@ test.describe('Retention and disposal @sample-only', () => {
     await expect(row(page, code)).toContainText('Disposal rejected: Keep it until the surveillance audit');
     await openTab(page, 'Disposal register');
     await expect(row(page, theirCode)).toContainText('Disposed of');
+    // The disposed item's own line says its file was kept because another record uses it (M3-15); "No file" does not show.
+    await expect(row(page, theirCode)).toContainText('File kept: used by another record');
+    await expect(row(page, theirCode)).not.toContainText('No file');
     await expect(page.locator('main table tbody')).toContainText('Content deleted from the Managed Vault');
   });
 

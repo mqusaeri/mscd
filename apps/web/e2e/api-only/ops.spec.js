@@ -42,6 +42,14 @@ test.describe('Operator console against the api @api-only', () => {
     await main.locator('select').selectOption('cleanup.expired');
     await main.locator('button', { hasText: 'Run job' }).click();
     await expectToast(page, 'Job cleanup.expired queued as');
+    // The daily retention review of one organisation, run again after an outage (M3-15): it needs the organisation.
+    await main.locator('select').selectOption('retention.review');
+    await main.locator('input').first().fill('');
+    await main.locator('button', { hasText: 'Run job' }).click();
+    await expect(main).toContainText('The job retention.review runs for one organisation: name it in org');
+    await main.locator('input').first().fill('tst');
+    await main.locator('button', { hasText: 'Run job' }).click();
+    await expectToast(page, 'Job retention.review queued as');
   });
 
   test('organisations and packs say that one organisation runs here; the account drawer opens', async ({ page }) => {

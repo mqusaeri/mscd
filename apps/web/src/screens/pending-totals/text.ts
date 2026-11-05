@@ -11,8 +11,8 @@ export const TEXT = {
     'Baca total sistem yang dipilih di bagian atas: item terbuka, item yang terlambat atau hilang, dan item yang masih tepat waktu.',
   ],
   teraHow2: [
-    'The table splits the open items by chain stage and by the business role of the person who holds them. Roles held by only one person in the system are counted together under "Other roles" and are not named. Unassigned items, and holders without a role in the system, count under "No role or unassigned".',
-    'Tabel membagi item terbuka per tahap rantai dan per peran bisnis orang yang memegangnya. Peran yang hanya dipegang satu orang di sistem ini dihitung bersama pada "Peran lainnya", tanpa nama perannya. Item yang belum ditugaskan, dan pemegang tanpa peran di sistem ini, dihitung pada "Tanpa peran atau belum ditugaskan".',
+    'The table splits the open items by chain stage and by the business role of the person who holds them. A role is named only when two or more people besides you hold it in the system. The other roles are counted together under "Other roles"; when they stand for fewer than two people besides you, their items count under "No role or unassigned". External auditors hold no chain work and are not counted as people here. Unassigned items, and holders without a role in the system, count under "No role or unassigned" too.',
+    'Tabel membagi item terbuka per tahap rantai dan per peran bisnis orang yang memegangnya. Sebuah peran hanya ditampilkan namanya bila dipegang oleh dua orang atau lebih selain Anda di sistem ini. Peran lainnya dihitung bersama pada "Peran lainnya"; bila peran-peran itu mewakili kurang dari dua orang selain Anda, itemnya dihitung pada "Tanpa peran atau belum ditugaskan". Auditor eksternal tidak memegang pekerjaan rantai dan tidak dihitung sebagai orang di sini. Item yang belum ditugaskan, dan pemegang tanpa peran di sistem ini, juga dihitung pada "Tanpa peran atau belum ditugaskan".',
   ],
   teraHow3: [
     'Open "All my systems" to compare every system where you see these totals, then choose "Show table" to read the table of one system.',
@@ -50,8 +50,8 @@ export const TEXT = {
   noRole: ['No role or unassigned', 'Tanpa peran atau belum ditugaskan'],
   otherRoles: ['Other roles', 'Peran lainnya'],
   otherRolesNote: [
-    'Roles held by only one person in this system are counted together under "Other roles" and are not named.',
-    'Peran yang hanya dipegang satu orang di sistem ini dihitung bersama pada "Peran lainnya", tanpa nama perannya.',
+    'No number on this screen belongs to one person. A role is named only when two or more people besides you hold it in this system. The other roles are counted together under "Other roles"; when they stand for fewer than two people besides you, their items count under "No role or unassigned". External auditors are not counted as people, because they hold no chain work.',
+    'Tidak ada angka di layar ini yang milik satu orang. Sebuah peran hanya ditampilkan namanya bila dipegang oleh dua orang atau lebih selain Anda di sistem ini. Peran lainnya dihitung bersama pada "Peran lainnya"; bila peran-peran itu mewakili kurang dari dua orang selain Anda, itemnya dihitung pada "Tanpa peran atau belum ditugaskan". Auditor eksternal tidak dihitung sebagai orang, karena mereka tidak memegang pekerjaan rantai.',
   ],
   overdueCount: ['{n} overdue', '{n} terlambat'],
 

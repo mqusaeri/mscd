@@ -5,6 +5,7 @@ import type { CommandResult as WireResult } from '@mscd/shared';
 import type { ApiError, ApiResult } from '../../data/api/ApiClient';
 import { CONNECTION_LOST } from '../../data/api/ApiClient';
 import type { ControllerData, MsId } from '../../data/types';
+import { baseRole } from '../roles';
 import type { HostContext, TextPair } from '../types';
 import type { PersonOption } from '../ui';
 
@@ -135,7 +136,11 @@ export const OWN_SCOPED = {
   'corrective_action.update': ['ms_manager'],
 } as const;
 
-/** True when the session may act on a record with an owner: a full grant, or an own grant on a record it owns. */
+/**
+ * True when the session may act on a record with an owner: a full grant, or an own grant on a record it owns. The
+ * sample build compares the base persona (MILESTONE-3 E, M3-15), so a Programme Owner acts as the manager does and a
+ * Risk Owner or Compliance Investigator as the Domain Owner does.
+ */
 export function mayActOn(
   ctx: Pick<HostContext, 'can' | 'me' | 'mode' | 'role' | 'person'>,
   ms: MsId,
@@ -143,7 +148,7 @@ export function mayActOn(
   owner: string | null | undefined,
 ): boolean {
   if (!ctx.can(ms, perm)) return false;
-  if (ctx.mode !== 'api') return ctx.role === 'manager' || (Boolean(owner) && owner === meOf(ctx));
+  if (ctx.mode !== 'api') return baseRole(ctx.role) === 'manager' || (Boolean(owner) && owner === meOf(ctx));
   const roles = ctx.me?.rolesByMs?.[ms] ?? [];
   const full = roles.some((r) => (OWN_SCOPED[perm] as readonly string[]).includes(r));
   return full || (Boolean(owner) && owner === meOf(ctx));

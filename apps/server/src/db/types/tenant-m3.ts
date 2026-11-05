@@ -130,7 +130,8 @@ export interface RetentionReviewTable extends TenantColumns {
   approved_at: Date | null;
   rejected_note: string | null;
   disposed_at: Date | null;
-  file_action: 'vault_content_deleted' | 'owner_asked' | 'none' | null;
+  /** `kept_in_use` since tenant/0012 (M3-15): the item's files were kept because another live record uses them. */
+  file_action: 'vault_content_deleted' | 'owner_asked' | 'kept_in_use' | 'none' | null;
   file_removed_by: string | null;
   file_removed_at: Date | null;
   /** Months of the retention period in force at the decision (and at the approval of a disposal); null before tenant/0010 (M3-12). */

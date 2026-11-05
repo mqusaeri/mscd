@@ -12,7 +12,8 @@
 //   record and of its child rows is redacted (`AuditRedactor`, mode `clear_disposed`) under one `privacy.audit_redacted`
 //   attestation whose entity is the review; only then is it audited `record.disposed`, so that entry keeps its values;
 // - a file that another live record still uses is kept (`keptInUse` of retention-items.ts, M3-13) and listed in
-//   `record.disposed`.
+//   `record.disposed`; when no file of the item was deleted or handed to its owner, the review records the file action
+//   `kept_in_use` instead of `none`, so the disposal register says the file stays (M3-15, `fileActionOf`).
 // The vault delete is idempotent, so a disposal whose transaction fails after the delete can be approved again. An item
 // can hold several vault objects (an evidence pack: archive, manifests and item copies), deleted one after the other:
 // when a later delete fails (a bucket retention rule, the gateway down) the approval rolls back, but the content of the
@@ -91,6 +92,19 @@ export interface DisposalResult {
   ownerTaskId: string | null;
 }
 
+/**
+ * The file action a disposal records in the disposal register (J.7 `retention_review.file_action`): `owner_asked` when
+ * a file in a customer repository is left to its owner, else `vault_content_deleted` when Managed Vault content was
+ * deleted (by this approval or an earlier refused one), else `kept_in_use` when the item's files are all kept because
+ * another live record uses them (M3-15), else `none` (the item has no file).
+ */
+export function fileActionOf(counts: { ownerAsked: number; vaultDeleted: number; keptInUse: number }): DisposalFileAction {
+  if (counts.ownerAsked > 0) return 'owner_asked';
+  if (counts.vaultDeleted > 0) return 'vault_content_deleted';
+  if (counts.keptInUse > 0) return 'kept_in_use';
+  return 'none';
+}
+
 @Injectable()
 export class RetentionDisposal {
   constructor(
@@ -132,8 +146,7 @@ export class RetentionDisposal {
     const ownerTaskId = ownerAsked.length > 0 ? await this.askOwner(trx, input, ownerAsked) : null;
     // Vault objects of this review whose content an earlier, refused approval already deleted (markContentDeleted).
     const earlier = await this.earlierVaultObjects(trx, input);
-    const fileAction: DisposalFileAction =
-      ownerAsked.length > 0 ? 'owner_asked' : vaultDeleted.length > 0 || earlier.length > 0 ? 'vault_content_deleted' : 'none';
+    const fileAction = fileActionOf({ ownerAsked: ownerAsked.length, vaultDeleted: vaultDeleted.length + earlier.length, keptInUse: item.keptInUse.length });
 
     await this.audit.record(trx, {
       action: 'record.disposed',

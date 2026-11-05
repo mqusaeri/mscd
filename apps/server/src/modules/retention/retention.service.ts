@@ -388,7 +388,9 @@ export class RetentionService {
       const message: Pair =
         result.fileAction === 'owner_asked'
           ? [`${label ?? 'The item'} disposed of. Its owner is asked to delete the file in the customer repository.`, `${label ?? 'Item'} dimusnahkan. Pemiliknya diminta menghapus berkas di repositori pelanggan.`]
-          : [`${label ?? 'The item'} disposed of`, `${label ?? 'Item'} dimusnahkan`];
+          : result.fileAction === 'kept_in_use'
+            ? [`${label ?? 'The item'} disposed of. Its file is kept because another record uses it.`, `${label ?? 'Item'} dimusnahkan. Berkasnya tetap disimpan karena dipakai oleh rekaman lain.`]
+            : [`${label ?? 'The item'} disposed of`, `${label ?? 'Item'} dimusnahkan`];
       return commandResult([system.slug], { message, data: { fileAction: result.fileAction, recordDeleted: result.recordDeleted, vaultObjects: result.vaultDeleted.length } });
     });
   }

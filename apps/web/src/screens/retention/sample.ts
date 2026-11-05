@@ -10,7 +10,7 @@ import { textFile } from '../auditor-access/shared';
 import type {
   DecideBody, HoldModel, Outcome, PageOf, RecordClass, RegisterModel, Result, RetentionAdapter, ReviewModel, RuleModel,
 } from './model';
-import { DEFAULT_MONTHS, RECORD_CLASSES, SAMPLE_DOC_TYPES, addMonths, itemLabel } from './model';
+import { DEFAULT_MONTHS, RECORD_CLASSES, SAMPLE_DOC_TYPES, addMonths, fileActionOfFiles, itemLabel } from './model';
 import { TEXT } from './text';
 
 interface Stored {
@@ -258,12 +258,17 @@ export function createSampleAdapter(getD: () => ControllerData | null, getOrg: (
       r.approvedBy = person(getMe());
       r.approvedAt = nowIso();
       r.disposedAt = r.approvedAt;
-      const deletes = r.files.some((f) => f.action === 'delete');
-      const asks = r.files.some((f) => f.action === 'owner_asked');
-      r.fileAction = asks ? 'owner_asked' : deletes || (r.files.length === 0 && ['document_version', 'evidence_file', 'evidence_pack'].includes(r.recordClass)) ? 'vault_content_deleted' : 'none';
+      // The rule of the server (a file kept because another record uses it shows as such, M3-15); a sample item of a
+      // file class that lists no file stands for vault content the sample does not list.
+      const fileClass = ['document_version', 'evidence_file', 'evidence_pack'].includes(r.recordClass);
+      r.fileAction = r.files.length > 0 ? fileActionOfFiles(r.files) : fileClass ? 'vault_content_deleted' : 'none';
       r.files = [];
+      const label = itemLabel(r);
       // A disposed record loses its text (decision 18): only its line in the register stays.
       if (!['document_version', 'evidence_file', 'evidence_pack'].includes(r.recordClass)) r.itemTitle = null;
+      // The api's message when the file stays with someone: the owner of a customer repository, or another record.
+      if (r.fileAction === 'owner_asked') return done(fill(TEXT.smpDisposedOwner, { item: label }));
+      if (r.fileAction === 'kept_in_use') return done(fill(TEXT.smpDisposedKept, { item: label }));
       return done();
     },
     async reject(ms, target, note) {

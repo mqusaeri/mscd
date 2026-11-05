@@ -266,6 +266,12 @@ function knownOrgDifferences(org: DemoOrg, api: Record<string, unknown>, expecte
   const apiPeople = api.PEOPLE as Record<string, unknown>;
   checks.push(() => expect(apiPeople.gilang).toBeUndefined());
   expected.PEOPLE = Object.fromEntries(Object.entries(expected.PEOPLE as Record<string, unknown>).filter(([handle]) => handle !== 'gilang'));
+  // M3-15: for the same reason the persona menu (`ROLES`, the demo personas of `Me.personas`) leaves him out there, as it
+  // lists only the personas who hold a role in the organisation. The sample has one `ROLES` list for every organisation.
+  const apiRoles = api.ROLES as Record<string, unknown>;
+  checks.push(() => expect(apiRoles.investigator).toBeUndefined());
+  checks.push(() => expect(Object.keys(apiRoles).sort()).toEqual(['auditor', 'manager', 'owner', 'riskowner', 'sponsor', 'top']));
+  expected.ROLES = Object.fromEntries(Object.entries(expected.ROLES as Record<string, unknown>).filter(([role]) => role !== 'investigator'));
   const systems = (api.MS as { id: string; code: string }[]).length;
   const licence = api.LICENCE as Record<string, unknown>;
   const name = org === 'bsd' ? 'PT Bank Sentosa Digital' : 'RS Medika Nusantara';

@@ -17,7 +17,7 @@ import type { DecideBody, DecisionForm, RecordClass, ReviewModel } from './model
 import {
   CLASS_TEXT, RECORD_CLASSES, asApiResult, decisionBody, decisionErrors, emptyDecision, formatDay, itemLabel, mayApprove, mayManage, noteError, proposedByMe,
 } from './model';
-import { FilesList, ItemCell, LoadState, PersonAt, useLoad } from './parts';
+import { FilesList, ItemCell, LoadState, PersonAt, RegisterFileAction, useLoad } from './parts';
 import { noteRetentionChanged } from './store';
 import { TEXT } from './text';
 
@@ -309,6 +309,7 @@ export function ApprovalTab({ ctx, ms }: { ctx: HostContext; ms: MsId }) {
           <div className="mx-stack">
             <p style={{ margin: 0 }}>{ctx.li(TEXT.approveBody)}</p>
             {approving ? <FilesList ctx={ctx} files={approving.files} /> : null}
+            {approving ? <RegisterFileAction ctx={ctx} files={approving.files} /> : null}
           </div>
         )}
         confirmLabel={TEXT.approveConfirm}

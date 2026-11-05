@@ -1,7 +1,9 @@
 // Personal data checks (MILESTONE-3 M3-04, D.6.4, `/ms/:ms/privacy-checks`): the checks of the selected system, open
 // ones first by due time. A check opens a drawer with the records of the system whose text names the person (record
 // kind, code, field and the text found, each with a link to the screen that edits it), a link to Handover for the
-// person's open items, and "Mark checked" with a note of what was checked and changed.
+// person's open items, and "Mark checked" with a note of what was checked and changed. After "Mark checked" (or any
+// other change of personal data requests) the list and the drawer's records are read again while the page keeps
+// showing what it had, so the open drawer stays open and shows the new status when the list is back (M3-15).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ApiResult } from '../../data/api/ApiClient';
 import { useMutation } from '../api';
@@ -96,16 +98,18 @@ export function MentionsTable({ ctx, ms, mentions }: { ctx: HostContext; ms: str
 }
 
 export function CheckDrawer({ ctx, adapter, ms, row, onClose }: { ctx: HostContext; adapter: PrivacyChecksAdapter; ms: string; row: CheckRow; onClose(): void }) {
-  const [mentions, setMentions] = useState<ApiResult<Mentions> | null>(null);
+  // The records found for this check; a reload after a change keeps the ones shown until the new answer arrives.
+  const [loaded, setLoaded] = useState<{ key: string; result: ApiResult<Mentions> } | null>(null);
   const [marking, setMarking] = useState(false);
   const version = usePrivacyVersion();
+  const key = `${ms}|${row.id}`;
   useEffect(() => {
     let live = true;
-    setMentions(null);
     if (row.requestClosed) return () => { live = false; };
-    void adapter.mentions(ms, row.id).then((res) => { if (live) setMentions(res); });
+    void adapter.mentions(ms, row.id).then((res) => { if (live) setLoaded({ key: `${ms}|${row.id}`, result: res }); });
     return () => { live = false; };
   }, [adapter, ms, row.id, row.requestClosed, version]);
+  const mentions = loaded && loaded.key === key ? loaded.result : null;
   const run = useCallback((note: string) => adapter.done(ms, row.id, note), [adapter, ms, row.id]);
   const mutation = useMutation(run);
   const submit = (note: string) => {
@@ -166,16 +170,18 @@ export default function PrivacyChecksScreen({ ctx }: ScreenProps) {
   const adapter = useMemo(() => adapterFor(ctx), [ctx.client, ctx.ds]);
   const ms = ctx.msObj?.id ?? null;
   const version = usePrivacyVersion();
-  const [rows, setRows] = useState<ApiResult<CheckRow[]> | null>(null);
+  // The list of a system and attempt. A reload after a change (`version`) keeps the rows shown, and with them the open
+  // drawer, until the new list arrives; another system or "Try again" shows the loading state.
+  const [loaded, setLoaded] = useState<{ ms: string; attempt: number; result: ApiResult<CheckRow[]> } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
   useEffect(() => {
     if (!ms) return undefined;
     let live = true;
-    setRows(null);
-    void adapter.list(ms).then((res) => { if (live) setRows(res); });
+    void adapter.list(ms).then((res) => { if (live) setLoaded({ ms, attempt, result: res }); });
     return () => { live = false; };
   }, [adapter, ms, version, attempt]);
+  const rows = loaded && loaded.ms === ms && loaded.attempt === attempt ? loaded.result : null;
   useEffect(() => { setOpenId(null); }, [ms]);
   const columns: Column<CheckRow>[] = [
     { key: 'no', label: TEXT.colRequest, render: (r) => <span className="mx-mono" style={{ fontWeight: 600 }}>{r.requestNo}</span> },

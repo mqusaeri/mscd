@@ -32,7 +32,7 @@ export function adapterFor(ctx: HostContext): PendingTotalsAdapter {
       key,
       adapter: api
         ? createApiAdapter(ctx.client)
-        : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(() => env.ctx?.D ?? null))),
+        : deferredAdapter(() => import('./sample').then((m) => m.createSampleAdapter(() => env.ctx?.D ?? null, () => env.ctx?.person.handle ?? null))),
     };
   }
   return cached.adapter;

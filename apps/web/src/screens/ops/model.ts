@@ -176,11 +176,12 @@ export interface OpsAdapter {
 
 /**
  * The jobs `POST /ops/jobs/{name}/run` accepts (`OPS_RUNNABLE_JOBS` of @mscd/shared; the unit test compares them).
- * Milestone 3 J.3: `org.lifecycle` (M3-03).
+ * Milestone 3 J.3: `org.lifecycle` (M3-03); `retention.review` for one organisation, the daily retention review run
+ * again after an outage (M3-15).
  */
 export const OPS_JOBS = [
   'freshness.sweep', 'link-health.plan', 'link-health.repository', 'audit.verify-chain', 'cleanup.expired',
-  'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive', 'org.lifecycle',
+  'notifications.dispatch', 'packs.lifecycle', 'drift.evaluate', 'cycle.derive', 'org.lifecycle', 'retention.review',
 ] as const;
 
 /** Rows per page of the organisation list. */

@@ -116,7 +116,8 @@ export class ScreenReadService {
       const org = this.orgOf(principal);
       return this.screen(principal, ms, lang, async (trx, d) => {
         const roles = await this.rolesByHandle(trx, d.system.id);
-        return pendingAggregate(d, filter, roles, await this.activeHolders(trx, org.id, [...roles.keys()]));
+        // The reader's own open items are no secret to them, so the rule of decision 21 counts the people besides them.
+        return pendingAggregate(d, filter, roles, await this.activeHolders(trx, org.id, [...roles.keys()]), principal.user.handle);
       });
     }
     if (query.owner) {
@@ -234,7 +235,10 @@ export class ScreenReadService {
     return people;
   }
 
-  /** Active business roles in the system by holder handle (pending aggregates). */
+  /**
+   * Active business roles in the system by holder handle (pending aggregates). A guest keeps only `external_auditor`,
+   * the one role the role resolver gives a guest, so a guest never counts as a holder of a role with chain work.
+   */
   private async rolesByHandle(trx: Trx, msId: string): Promise<Map<string, BusinessRole[]>> {
     const { rows } = await sql<{ handle: string; roles: BusinessRole[] }>`
       select u.handle, array_agg(distinct r.role) as roles
@@ -242,6 +246,7 @@ export class ScreenReadService {
       join platform.app_user u on u.id = r.user_id and u.deleted_at is null
       where r.management_system_id = ${msId}::uuid and r.deleted_at is null and r.approval_status = 'active'
         and (r.valid_until is null or r.valid_until > ${this.clock.now()})
+        and (u.kind <> 'guest' or r.role = 'external_auditor')
       group by u.handle`.execute(trx);
     return new Map(rows.map((r) => [r.handle, r.roles]));
   }

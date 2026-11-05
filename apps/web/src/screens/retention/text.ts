@@ -145,6 +145,7 @@ export const TEXT = {
     'The disposal runs at once and cannot be undone. File content in the Managed Vault is deleted, unless another record still uses the file. A record such as a finding or an audit event loses its text and personal details, its audit entries keep only the action, who did it and when, and only its line in the disposal register stays. For a file in your own repository, MSCD stops opening it and asks its owner to delete it.',
     'Pemusnahan langsung berjalan dan tidak dapat dibatalkan. Isi berkas di Managed Vault dihapus, kecuali berkas itu masih dipakai rekaman lain. Rekaman seperti temuan atau event audit kehilangan teks dan data pribadinya, entri auditnya hanya menyimpan tindakan, pelaku, dan waktunya, dan hanya barisnya di register pemusnahan yang tetap ada. Untuk berkas di repositori Anda sendiri, MSCD berhenti membukanya dan meminta pemiliknya menghapusnya.',
   ],
+  approveFileAction: ['File action in the disposal register', 'Tindakan berkas di register pemusnahan'],
   approveConfirm: ['Approve and dispose', 'Setujui dan musnahkan'],
   approved: ['{code} disposed of', '{code} dimusnahkan'],
   rejectTitle: ['Reject the disposal of {code}', 'Tolak pemusnahan {code}'],
@@ -205,6 +206,7 @@ export const TEXT = {
   stDisposed: ['Disposed of', 'Dimusnahkan'],
   faVault: ['Content deleted from the Managed Vault', 'Isi dihapus dari Managed Vault'],
   faOwner: ['Owner asked to delete the file in your repository', 'Pemilik diminta menghapus berkas di repositori Anda'],
+  faKept: ['File kept: used by another record', 'Berkas tetap disimpan: dipakai oleh rekaman lain'],
   faNone: ['No file', 'Tanpa berkas'],
   filesTitle: ['Files of this item', 'Berkas item ini'],
   fileDelete: ['Deleted', 'Dihapus'],
@@ -230,6 +232,8 @@ export const TEXT = {
   smpNotOpen: ['{item} is not open for a decision.', '{item} tidak terbuka untuk diputuskan.'],
   smpHeldAlready: ['{item} is already on hold.', '{item} sudah ditahan.'],
   smpNotFound: ['No record with this code in this system.', 'Tidak ada rekaman dengan kode ini di sistem ini.'],
+  smpDisposedOwner: ['{item} disposed of. Its owner is asked to delete the file in the customer repository.', '{item} dimusnahkan. Pemiliknya diminta menghapus berkas di repositori pelanggan.'],
+  smpDisposedKept: ['{item} disposed of. Its file is kept because another record uses it.', '{item} dimusnahkan. Berkasnya tetap disimpan karena dipakai oleh rekaman lain.'],
 
   // Detail extensions of documents and evidence
   extTitle: ['Retention', 'Retensi'],
