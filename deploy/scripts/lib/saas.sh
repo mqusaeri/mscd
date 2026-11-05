@@ -1089,7 +1089,9 @@ saas_saved_dirs() {
 # target), or no file when there is none.
 saas_write_previous() {
     local newest
-    newest=$(saas_saved_dirs | head -n 1)
+    # sed reads every line: head would stop the listing early, and under pipefail its SIGPIPE
+    # (exit 141) would end the deploy once two or more saved releases exist.
+    newest=$(saas_saved_dirs | sed -n 1p)
     if [[ -n $newest ]]; then
         cp -p -- "$newest/release.env" "$INSTALL_DIR/state/previous.env"
     else
