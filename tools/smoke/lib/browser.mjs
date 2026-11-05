@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect } from '@playwright/test';
 import { linkFor } from './mailpit.mjs';
 import { expectOverlayReadable, expectReadableText } from './readable.mjs';
+import { uatShot } from './uat-shots.mjs';
 import { codeOf, secondsLeftInStep } from './totp.mjs';
 
 // ---- locators of the app (the structure the web E2E suites use, apps/web/e2e/helpers.js) ----
@@ -269,6 +270,7 @@ export function createBrowserRun({ state, personOf, password, memoryFile = null 
 
   async function expectToast(page, text) {
     await expect(ui.toast(page)).toContainText(text);
+    await uatShot(page, text, 'toast');
   }
 
   /** Every cookie of a person's browser is one of the essential cookies, HttpOnly and Secure (GL-56). */

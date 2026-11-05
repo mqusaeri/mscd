@@ -11,6 +11,7 @@ import { smokeSettings } from '../lib/settings.mjs';
 import { signLicence } from '../lib/licence.mjs';
 import { linkFor } from '../lib/mailpit.mjs';
 import { PANEL_SCOPE, expectOverlayReadable, expectReadableText } from '../lib/readable.mjs';
+import { uatShot } from '../lib/uat-shots.mjs';
 import { codeOf, secondsLeftInStep } from '../lib/totp.mjs';
 
 if (!process.env.JOURNEY_STATE) throw new Error('JOURNEY_STATE is not set: run the journey with npm run journey -w @mscd/smoke (run-journey.mjs starts the stack first)');
@@ -384,6 +385,7 @@ async function filledValue(input) {
 
 async function expectToast(page, text) {
   await expect(ui.toast(page)).toContainText(text);
+  await uatShot(page, text, 'toast');
 }
 
 test.describe.configure({ mode: 'serial' });

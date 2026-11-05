@@ -8,6 +8,7 @@
 // scope finds no visible text fails, so a screen outside the scope is never passed unmeasured.
 /* global document, getComputedStyle */
 import { expect } from '@playwright/test';
+import { uatShot } from './uat-shots.mjs';
 
 /** The app shell (main column, sidebar, top bar, drawer and dialog); the sign-in pages keep their card in main. */
 export const SCOPE = 'main *, aside *, header *, div[style*="z-index: 41"] *, div[style*="z-index: 51"] *';
@@ -64,6 +65,7 @@ async function expectReadable(page, label, scope) {
   const { problems, measured } = await readabilityProblems(page, scope);
   expect(measured, `visible texts of ${label} to measure (scope ${scope})`).toBeGreaterThan(0);
   expect(problems, `texts of ${label} below WCAG AA contrast or under 12px`).toEqual([]);
+  await uatShot(page, label, scope === OVERLAY_SCOPE ? 'dialog' : 'screen');
 }
 
 /** Every text of the page meets WCAG AA contrast and is at least 12px (the app shell, or the scope given). */
