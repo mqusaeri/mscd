@@ -122,7 +122,7 @@ Decided by the product owner on 2026-10-31 and 2026-11-01 (Milestone 3, `docs/pl
 18. A disposal after a keeping period really deletes the record's content: its text and personal details are cleared, its audit entries are redacted under an attestation (the trail stays verifiable), and it is left out of exports; only its line in the disposal register stays (owner, 2026-11-02, after the ISO review of Milestone 3).
 19. Staging gets Milestone 3 in one release after the review fix packages (owner, 2026-11-02).
 20. After the security review (owner, 2026-11-02): an export still needs a second Tenant Admin only when one exists at the moment of the request (H.2 unchanged); staging may go without disposal receipts, which are built before the production go-live; on Open work totals a business role held by one person joins "Other roles" so no total points to one person; the provider forwards a person's data request to the customer on the day it arrives.
-21. On Open work totals, the server merges the roles with fewer than two holders into one "Other roles" row before it answers Top Management; when that row stands for fewer than two people, its counts join "No role or unassigned", so no number Top Management receives belongs to one person (owner, 2026-11-05, M3-14 follow-up 1).
+21. On Open work totals, no number Top Management receives belongs to one person: the server names a role only when two or more people besides the reader hold it, and the other roles merge into one "Other roles" row, whose counts join "No role or unassigned" when those roles stand for fewer than two people besides the reader. External auditors never count as people (owner, 2026-11-05, M3-14 follow-up 1, refined in M3-15).
 
 ## Open follow-ups
 

@@ -155,6 +155,12 @@ The deletion does not reach into the backups at once. The certificate says so an
 
 Requests from people about their own data (to see, correct or delete it) are answered by the customer's Tenant Admins in the app; when such a request reaches you, forward it as [records-of-processing.md](records-of-processing.md#requests-from-data-subjects) describes. If the end of a contract comes with a security incident or a data breach, follow [incident-response.md](incident-response.md) first.
 
+## Jobs
+
+The Jobs tab of the operator console shows the queue statistics and "Run a job now" for the jobs of the allow-list. A job of one organisation needs the organisation's slug and runs only for an active organisation; a job of the whole installation takes no slug. Every run is recorded in the platform audit trail.
+
+After an outage, run `retention.review` for one organisation (Run job, with the organisation's slug) to open the disposal reviews the missed daily run would have opened. It runs on the organisation's own date; a second run on the same day opens nothing more. The run is audited `ops.job_run`.
+
 ## Accounts and platform operators
 
 The Accounts tab of the operator console lists every account of the service and the platform operators. It works on SaaS and on an on-premise installation with one organisation. Reading needs the operator right `ops.read`; every action needs `ops.users.manage`. Both belong to the platform operator role only.

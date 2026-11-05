@@ -612,6 +612,8 @@ The chart `helm/mscd-<version>.tgz` runs web, api, worker and storage-gateway as
    | `networkPolicy.database.cidrs`, `.objectStore.cidrs`, `.smtp.cidrs` | Addresses of your PostgreSQL, S3 storage and SMTP relay |
    | `certManager.enabled` | `true` when cert-manager issues the internal certificates; otherwise set `certs.generate: true` |
 
+   Keep the profile's `database.pool_max` (`profile.database.pool_max` in the values) at 3 or more; the profiles ship 10. An organisation export build holds three database connections at once: the build lock, a snapshot and one read. With a smaller pool every export request fails at once with a reason that names the setting, and the worker logs a warning when it starts (section 19).
+
 6. Install and check:
 
    ```bash
@@ -940,6 +942,8 @@ A Tenant Admin can download everything the organisation keeps in MSCD at any tim
 An export can be downloaded for 7 days. A new request is refused while another export waits for approval or is being built, and for an organisation whose stored files are larger than the export limit (100 GiB by default, `lifecycle.export_max_bytes`).
 
 The worker builds one part at a time in its scratch folder, uploads it to the Managed Vault and deletes it before it starts the next one. The folder needs free space for one part, 2 GiB by default (`lifecycle.export_part_bytes`), plus room for the largest table: at most twice the part size and 16 MiB, and much less for a small organisation. The worker checks this before it starts, and the export fails with a message that names the space it needs. As a guide, 1 GiB of files in three parts took about 40 seconds and 385 MiB of scratch space on a test server. One export is built at a time in the installation; another one waits and is tried again every two minutes until the first has finished.
+
+An export build also holds three database connections at once: the build lock, a snapshot and one read. Keep `database.pool_max` at 3 or more (the profiles ship 10). With a smaller pool every export request fails at once with a reason that names the setting, and the worker logs a warning when it starts.
 
 In the Compose stack, the scratch folder is the Docker volume `worker-tmp`, mounted in the worker at `/var/lib/mscd/tmp` (its `TMPDIR`). The volume has no fixed size: it uses the free space of the disk that holds Docker's data, so that disk needs at least 5 GiB free for an export with the default part size. Check it with:
 
