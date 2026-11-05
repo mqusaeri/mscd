@@ -19,8 +19,10 @@
 #     (PostgreSQL 16.15 on Alpine 3.24.2). The tag postgres:16.15-alpine has moved to newer builds
 #     since; the database service of the stack runs the same PostgreSQL version, so pg_dump and
 #     pg_restore match it;
-#   - restic 0.18.1-r9 and rclone 1.74.1-r3 of the Alpine 3.24 community repository, both built on
-#     14 October 2026.
+#   - restic 0.18.1-r9 of the Alpine 3.24 community repository, built on 14 October 2026, and
+#     rclone 1.75.2-r0 of the same repository, built on 2 November 2026. The rclone pin breaks the
+#     two-week rule (S-5): Alpine removed the 1.74.1-r3 build on that day, so no older build was
+#     left. The product owner accepted it on 5 November 2026; it is two weeks old on 16 November.
 # Alpine keeps only the newest build of a package in its mirror, so a package pin stops working
 # when Alpine rebuilds the package; the weekly restore test (restore-test.yml) builds this file
 # and fails then. The fix is a pin update here (docs/saas/backup-restore.md, "Updating the backup
@@ -34,7 +36,7 @@ FROM ${BASE_IMAGE}
 
 # Alpine 3.24 community packages.
 ARG RESTIC_PKG_VERSION=0.18.1-r9
-ARG RCLONE_PKG_VERSION=1.74.1-r3
+ARG RCLONE_PKG_VERSION=1.75.2-r0
 
 RUN --mount=type=secret,id=build_ca \
     set -eu; \
